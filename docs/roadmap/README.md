@@ -12,9 +12,9 @@ This repo starts as a **data product** with a thin CLI. The iOS app (v1.0) is th
 ## Repo outcomes
 ### MVP (local-only)
 - SQLite DB with migrations
-- Import old workouts (text/markdown/csv)
 - Store “planned workouts” on a schedule for you + your wife
-- Generate weekly plan from your library (rule-based first; optional LLM assist)
+- Generate 28-day plan from your library (manual-first; optional rules)
+- Seed a reference library manually (bulk import deferred)
 - Optional: equipment capture is **not required** to log workouts
 
 ### v1.0 (iOS)
@@ -35,7 +35,7 @@ Goal: prove the full data loop and lock the core model so we can build APIs late
 
 Includes (updated phases):
 - Phase 0: Repo + DB foundation
-- Phase 1: Reference ingestion + parsing (past workouts + reference plans)
+- Phase 1: Reference library (manual-first)
 - Phase 2: External sources ingestion (license-safe, optional)
 - Phase 3: Plan generation + scheduling (28-day, reference-aware)
 - Phase 4: Output + feedback loop (PDF + scan-friendly logging + manual adjustments)

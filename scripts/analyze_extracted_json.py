@@ -28,6 +28,8 @@ class Summary:
     structure_types: dict[str, int]
     prescription_keys: dict[str, int]
     reps_formats: dict[str, int]
+    time_formats: dict[str, int]
+    distance_formats: dict[str, int]
     missing_fields: dict[str, int]
 
 
@@ -93,6 +95,8 @@ def run(input_dir: Path, run_dir: Path) -> None:
     structure_types: Counter[str] = Counter()
     prescription_keys: Counter[str] = Counter()
     reps_formats: Counter[str] = Counter()
+    time_formats: Counter[str] = Counter()
+    distance_formats: Counter[str] = Counter()
     missing_fields: Counter[str] = Counter()
 
     file_report: dict[str, Any] = {}
@@ -164,6 +168,10 @@ def run(input_dir: Path, run_dir: Path) -> None:
                             prescription_keys[key] += 1
                             if key in {"reps", "reps_per_side"}:
                                 reps_formats[_rep_format(value)] += 1
+                            if key == "time_sec":
+                                time_formats[_rep_format(value)] += 1
+                            if key == "distance":
+                                distance_formats[_rep_format(value)] += 1
 
     summary = Summary(
         files_seen=files_seen,
@@ -181,6 +189,8 @@ def run(input_dir: Path, run_dir: Path) -> None:
         structure_types=dict(structure_types.most_common()),
         prescription_keys=dict(prescription_keys.most_common()),
         reps_formats=dict(reps_formats.most_common()),
+        time_formats=dict(time_formats.most_common()),
+        distance_formats=dict(distance_formats.most_common()),
         missing_fields=dict(missing_fields.most_common()),
     )
 

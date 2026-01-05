@@ -474,11 +474,18 @@ Key columns
 	•	block_id (FK)
 	•	item_index (1..N)
 	•	exercise_id (FK)
+	•	prescription_type (reps|time|distance|mixed|freeform)
 	•	sets (nullable)
 	•	reps_target (nullable, exact)
 	•	reps_min (nullable)
 	•	reps_max (nullable)
 	•	reps_is_per_side (0/1)
+	•	time_sec_target (nullable)
+	•	time_sec_min (nullable)
+	•	time_sec_max (nullable)
+	•	distance_m_target (nullable)
+	•	distance_m_min (nullable)
+	•	distance_m_max (nullable)
 	•	prescription_json (non-rep details: load hints, intervals, etc.)
 	•	notes
 
@@ -489,10 +496,17 @@ Optional per-set prescriptions for complex schemes.
 Key columns
 	•	item_id (FK)
 	•	set_index (1..N)
+	•	prescription_type (reps|time|distance|mixed|freeform)
 	•	reps_target (nullable)
 	•	reps_min (nullable)
 	•	reps_max (nullable)
 	•	reps_is_per_side (0/1)
+	•	time_sec_target (nullable)
+	•	time_sec_min (nullable)
+	•	time_sec_max (nullable)
+	•	distance_m_target (nullable)
+	•	distance_m_min (nullable)
+	•	distance_m_max (nullable)
 
 ⸻
 

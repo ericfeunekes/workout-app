@@ -55,6 +55,7 @@ Output:
 - `plan generate --user wife --reference-plan "hypertrophy-4wk-v1"`
 - `plan show --user wife --from 2026-01-06 --to 2026-02-02` (defaults to next 7 days)
 - `plan import-yaml path/to/plan.yaml`
+- `plan push-calendar --user wife --from 2026-01-06 --to 2026-02-02` (stub: prints intended events)
 
 ## Plan-as-file (primary UX)
 Use YAML as the canonical authoring surface for plans.

@@ -463,6 +463,11 @@ Key columns
 	•	intent_json (time cap, rest rules, target stimulus)
 	•	unique(template_id, block_index)
 
+Common intent_json keys
+	•	time_cap_sec (hard time limit for completion-based blocks)
+	•	rest_sec
+	•	rounds
+
 ⸻
 
 workout_item
@@ -482,14 +487,13 @@ Key columns
 	•	reps_is_per_side (0/1)
 	•	time_sec_target (nullable)
 	•	time_sec_min (nullable)
-	•	time_sec_max (nullable)
+	•	time_sec_max (nullable; upper bound for time-based items OR time cap for task-based items)
 	•	distance_m_target (nullable)
 	•	distance_m_min (nullable)
 	•	distance_m_max (nullable)
 	•	pace_sec_per_m_target (nullable)
 	•	pace_sec_per_m_min (nullable)
 	•	pace_sec_per_m_max (nullable)
-	•	prescription_json (non-rep details: load hints, intervals, etc.)
 	•	notes
 
 workout_item_set_prescription
@@ -506,7 +510,7 @@ Key columns
 	•	reps_is_per_side (0/1)
 	•	time_sec_target (nullable)
 	•	time_sec_min (nullable)
-	•	time_sec_max (nullable)
+	•	time_sec_max (nullable; upper bound for time-based items OR time cap for task-based items)
 	•	distance_m_target (nullable)
 	•	distance_m_min (nullable)
 	•	distance_m_max (nullable)

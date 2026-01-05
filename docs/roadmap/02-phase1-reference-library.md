@@ -12,8 +12,9 @@ Also define “reference plans” that are not tied to an athlete.
 - Bulk import/parsing is **out of scope** for this phase
 - We will build the app flow first; a separate loader will handle the specific extracted JSON later
 
-## Core idea: store raw first, parse second
-Many workouts are messy. You want zero data loss.
+## Core idea: YAML-first authoring
+Use a single YAML file to define templates (and optional plans).
+Validation should be strict with clear errors.
 
 ### Add these tables (if not already)
 **Workout sources (provenance)**
@@ -43,9 +44,46 @@ Store these as templates + plan metadata (see Phase 3 for scheduling usage).
 Use tags/labels to indicate goal, cycle length, and audience.
 
 ## Minimum capabilities (MVP)
-- Manually create templates and reference plans
-- Tag templates with program/phase/week for grouping
-- Keep raw text when available (manual paste is fine)
+- Author templates + tags in YAML
+- Validate YAML with clear errors
+- Import YAML into the DB (manual-first reference library)
+- Plans can be included, but bulk import stays deferred
+
+## Example YAML (minimal)
+```yaml
+version: 1
+users:
+  - name: "Eric"
+
+templates:
+  - name: "Upper A"
+    tags: ["program:stc", "phase:1", "week:4"]
+    blocks:
+      - name: "A"
+        block_type: "strength"
+        structure_type: "straight_sets"
+        intent:
+          time_cap_sec: 900
+        items:
+          - exercise: "Split squat"
+            prescription:
+              sets: 4
+              reps_target: 8
+              reps_is_per_side: true
+          - exercise: "DB clean & alt press"
+            prescription:
+              sets: 4
+              reps_target: 8
+
+plans:
+  - name: "Week 1"
+    user: "Eric"
+    days:
+      - date: 2026-01-06
+        template: "Upper A"
+      - date: 2026-01-07
+        rest: true
+```
 
 ### Minimum workout structures to support
 - Straight sets (e.g., 5x5)

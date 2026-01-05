@@ -53,7 +53,7 @@ Output:
 - `plan generate --user wife --weeks 4`
 - `plan generate --user wife --reference-plan "hypertrophy-4wk-v1"`
 - `plan show --user wife --from 2026-01-06 --to 2026-02-02`
-- `plan import-file path/to/plan.yaml`
+- `plan import-yaml path/to/plan.yaml`
 - `plan edit` (swap a day’s template)
 - `plan export-ics` (optional but handy)
 

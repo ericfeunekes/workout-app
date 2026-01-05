@@ -24,7 +24,6 @@
 - [ ] CLI:
   - [ ] `init-db`
   - [ ] `list-library` (filter by tags)
-  - [ ] `add-template` (manual entry; minimal fields)
   - [ ] `schedule` (assign template to a date/user)
   - [ ] `generate-plan` (create or instantiate a 28-day plan)
   - [ ] `plan import-yaml` (primary authoring path)

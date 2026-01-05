@@ -6,6 +6,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
   "typer>=0.12",
+  "pydantic>=2.6",
+  "PyYAML>=6.0",
 ]
 
 [project.scripts]

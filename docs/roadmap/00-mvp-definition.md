@@ -24,8 +24,10 @@
 - [ ] CLI:
   - [ ] `init-db`
   - [ ] `list-library` (filter by tags)
-  - [ ] `schedule` (assign template to a date/user)
-  - [ ] `generate-plan` (create or instantiate a 28-day plan)
+  - [ ] `plan generate` (produce a proposal JSON)
+  - [ ] `plan propose` (stage actions)
+  - [ ] `plan approve` (mark pending)
+  - [ ] `plan apply` (apply to schedule)
   - [ ] `plan import-yaml` (primary authoring path)
   - [ ] `plan validate-yaml`
   - [ ] `export-pdf` (printable plan + workout sheets)

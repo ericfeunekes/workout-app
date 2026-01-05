@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .db import connect, query, transaction
 from .yaml_io import validate_yaml
-from .yaml_models import Plan, PlanDay, Prescription, SetPrescription, Template
+from .yaml_models import Prescription, SetPrescription, Template
 
 
 @dataclass
@@ -17,8 +17,6 @@ class ImportResult:
     blocks_created: int = 0
     items_created: int = 0
     exercises_created: int = 0
-    plans_created: int = 0
-    planned_workouts_created: int = 0
 
 
 def _new_id() -> str:
@@ -134,11 +132,6 @@ def import_yaml(db_path: str | Path, yaml_path: Path) -> ImportResult:
                 result.blocks_created += stats[1]
                 result.items_created += stats[2]
                 result.exercises_created += stats[3]
-
-            for plan in library.plans:
-                stats = _import_plan(conn, plan, template_name_to_id)
-                result.plans_created += stats[0]
-                result.planned_workouts_created += stats[1]
 
     return result
 
@@ -290,54 +283,3 @@ def _import_template(conn, template: Template, name_to_id: dict[str, str]) -> tu
                     )
 
     return created_templates, created_blocks, created_items, created_exercises
-
-
-def _import_plan(conn, plan: Plan, template_map: dict[str, str]) -> tuple[int, int]:
-    """Returns (created_plans, created_planned_workouts)"""
-    user_id = _ensure_user(conn, plan.user)
-    # Plans in DB are implicitly defined by planned_workouts.
-    
-    created_workouts = 0
-    for day in plan.days:
-        _insert_plan_day(conn, day, user_id, template_map)
-        created_workouts += 1
-    
-    return 1, created_workouts
-
-
-def _insert_plan_day(conn, day: PlanDay, user_id: str, template_map: dict[str, str]) -> None:
-    if day.rest:
-        template_id = None
-    else:
-        if day.template not in template_map:
-            raise ValueError(f"Unknown template referenced in plan: {day.template}")
-        template_id = template_map[day.template]
-    
-    planned_id = _new_id()
-    # status handling:
-    # - insert: use day.status or default 'planned'
-    # - update: use day.status if provided, else keep existing
-    status_arg = day.status
-
-    conn.execute(
-        """
-        INSERT INTO planned_workout (
-            planned_id, user_id, date, template_id, status, notes, generated_by
-        ) VALUES (?, ?, ?, ?, COALESCE(?, 'planned'), ?, ?)
-        ON CONFLICT(user_id, date) DO UPDATE SET
-            template_id = excluded.template_id,
-            status = COALESCE(?, planned_workout.status),
-            notes = excluded.notes,
-            generated_by = excluded.generated_by
-        """,
-        (
-            planned_id,
-            user_id,
-            day.date.isoformat(),
-            template_id,
-            status_arg,
-            day.notes,
-            "manual_yaml",
-            status_arg,
-        ),
-    )

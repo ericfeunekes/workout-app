@@ -47,7 +47,12 @@ Use tags/labels to indicate goal, cycle length, and audience.
 - Author templates + tags in YAML
 - Validate YAML with clear errors
 - Import YAML into the DB (manual-first reference library)
-- Plans can be included, but bulk import stays deferred
+- Plans can be included and converted to proposals (no direct scheduling here)
+
+CLI:
+- `plan validate-yaml`
+- `plan import-yaml` (templates only)
+- `plan propose-yaml` (plans → proposal JSON)
 
 ## Example YAML (minimal)
 ```yaml

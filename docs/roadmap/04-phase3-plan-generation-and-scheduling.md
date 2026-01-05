@@ -51,11 +51,8 @@ Output:
 
 ## Scheduling UX (CLI)
 - `plan set-goal --user wife --goal hypertrophy --sessions-per-week 4 --minutes-per-session 45`
-- `plan generate --user wife --weeks 4 --out plan.json`
-- `plan generate --user wife --reference-plan "hypertrophy-4wk-v1" --out plan.json`
-- `plan propose plan.json`
-- `plan approve --batch-id plan-xxxx`
-- `plan apply --batch-id plan-xxxx`
+- `plan generate --user wife --weeks 4`
+- `plan generate --user wife --reference-plan "hypertrophy-4wk-v1"`
 - `plan show --user wife --from 2026-01-06 --to 2026-02-02` (defaults to next 7 days)
 - `plan import-yaml path/to/plan.yaml`
 

@@ -17,6 +17,8 @@ class ImportResult:
     blocks_created: int = 0
     items_created: int = 0
     exercises_created: int = 0
+    plans_created: int = 0
+    planned_workouts_created: int = 0
 
 
 def _new_id() -> str:
@@ -133,7 +135,54 @@ def import_yaml(db_path: str | Path, yaml_path: Path) -> ImportResult:
                 result.items_created += stats[2]
                 result.exercises_created += stats[3]
 
+            for plan in library.plans:
+                stats = _import_plan(conn, plan, template_name_to_id)
+                result.plans_created += stats[0]
+                result.planned_workouts_created += stats[1]
+
     return result
+
+
+def _import_plan(conn, plan, template_map: dict[str, str]) -> tuple[int, int]:
+    user_id = _ensure_user(conn, plan.user)
+    created_workouts = 0
+    for day in plan.days:
+        _insert_plan_day(conn, day, user_id, template_map)
+        created_workouts += 1
+    return 1, created_workouts
+
+
+def _insert_plan_day(conn, day, user_id: str, template_map: dict[str, str]) -> None:
+    if day.rest:
+        template_id = None
+    else:
+        if day.template not in template_map:
+            raise ValueError(f"Unknown template referenced in plan: {day.template}")
+        template_id = template_map[day.template]
+
+    status_arg = day.status
+    conn.execute(
+        """
+        INSERT INTO planned_workout (
+            planned_id, user_id, date, template_id, status, notes, generated_by
+        ) VALUES (?, ?, ?, ?, COALESCE(?, 'planned'), ?, ?)
+        ON CONFLICT(user_id, date) DO UPDATE SET
+            template_id = excluded.template_id,
+            status = COALESCE(?, planned_workout.status),
+            notes = excluded.notes,
+            generated_by = excluded.generated_by
+        """,
+        (
+            _new_id(),
+            user_id,
+            day.date.isoformat(),
+            template_id,
+            status_arg,
+            day.notes,
+            "manual_yaml",
+            status_arg,
+        ),
+    )
 
 
 def _import_template(conn, template: Template, name_to_id: dict[str, str]) -> tuple[int, int, int, int]:

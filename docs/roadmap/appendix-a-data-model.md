@@ -474,8 +474,25 @@ Key columns
 	•	block_id (FK)
 	•	item_index (1..N)
 	•	exercise_id (FK)
-	•	prescription_json (sets/reps/load hints, or interval plan, etc.)
+	•	sets (nullable)
+	•	reps_target (nullable, exact)
+	•	reps_min (nullable)
+	•	reps_max (nullable)
+	•	reps_is_per_side (0/1)
+	•	prescription_json (non-rep details: load hints, intervals, etc.)
 	•	notes
+
+workout_item_set_prescription
+
+Optional per-set prescriptions for complex schemes.
+
+Key columns
+	•	item_id (FK)
+	•	set_index (1..N)
+	•	reps_target (nullable)
+	•	reps_min (nullable)
+	•	reps_max (nullable)
+	•	reps_is_per_side (0/1)
 
 ⸻
 

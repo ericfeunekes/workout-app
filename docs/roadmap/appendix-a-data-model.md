@@ -486,6 +486,9 @@ Key columns
 	•	distance_m_target (nullable)
 	•	distance_m_min (nullable)
 	•	distance_m_max (nullable)
+	•	pace_sec_per_m_target (nullable)
+	•	pace_sec_per_m_min (nullable)
+	•	pace_sec_per_m_max (nullable)
 	•	prescription_json (non-rep details: load hints, intervals, etc.)
 	•	notes
 
@@ -507,6 +510,9 @@ Key columns
 	•	distance_m_target (nullable)
 	•	distance_m_min (nullable)
 	•	distance_m_max (nullable)
+	•	pace_sec_per_m_target (nullable)
+	•	pace_sec_per_m_min (nullable)
+	•	pace_sec_per_m_max (nullable)
 
 ⸻
 

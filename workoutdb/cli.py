@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 import json
 import uuid
@@ -58,6 +58,42 @@ def _select_template_names(conn, tags: list[str]) -> list[str]:
     return [row["name"] for row in rows]
 
 
+def _get_user_id(conn, user: str) -> str:
+    rows = query(conn, "SELECT user_id FROM app_user WHERE name = ?", (user,))
+    if not rows:
+        raise typer.Exit(f"User not found: {user}")
+    return rows[0]["user_id"]
+
+
+def _fetch_planned_workouts(conn, user_id: str, start_date: date, end_date: date):
+    return query(
+        conn,
+        """
+        SELECT pw.date, pw.status, pw.notes, t.name AS template_name
+        FROM planned_workout pw
+        LEFT JOIN workout_template t ON t.template_id = pw.template_id
+        WHERE pw.user_id = ? AND pw.date >= ? AND pw.date <= ?
+        ORDER BY pw.date
+        """,
+        (user_id, start_date.isoformat(), end_date.isoformat()),
+    )
+
+def _format_plan_rows(rows):
+    formatted = []
+    for row in rows:
+        template = row["template_name"] or "Rest"
+        status = row["status"] or "planned"
+        notes = row["notes"] or ""
+        formatted.append(
+            {
+                "date": row["date"],
+                "title": template,
+                "status": status,
+                "notes": notes,
+            }
+        )
+    return formatted
+
 def _upsert_planned_workout(conn, user_id: str, day: date, template_id: str | None, gen: str) -> None:
     conn.execute(
         """
@@ -70,6 +106,7 @@ def _upsert_planned_workout(conn, user_id: str, day: date, template_id: str | No
         """,
         (_new_id(), user_id, day.isoformat(), template_id, gen),
     )
+
 
 
 @app.command("init-db")
@@ -222,10 +259,7 @@ def set_goal(
     focus_list = [s.strip() for s in focus_muscles.split(",") if s.strip()] if focus_muscles else []
 
     with connect(db) as conn:
-        rows = query(conn, "SELECT user_id FROM app_user WHERE name = ?", (user,))
-        if not rows:
-            raise typer.Exit(f"User not found: {user}")
-        user_id = rows[0]["user_id"]
+        user_id = _get_user_id(conn, user)
         existing = query(conn, "SELECT user_goal_id FROM user_goal WHERE user_id = ?", (user_id,))
         if existing:
             conn.execute(
@@ -268,57 +302,66 @@ def set_goal(
 @plan_app.command("show")
 def plan_show(
     db: Path = typer.Option(..., "--db", help="Path to SQLite DB"),
-    user: str = typer.Option(..., "--user"),
-    date_from: date | None = typer.Option(None, "--from"),
-    date_to: date | None = typer.Option(None, "--to"),
+    user: str = typer.Option(..., "--user", help="User name"),
+    date_from: datetime | None = typer.Option(None, "--from"),
+    date_to: datetime | None = typer.Option(None, "--to"),
 ) -> None:
-    start_date = date_from or date.today()
-    end_date = date_to or (start_date + timedelta(days=7))
+    start_date = date_from.date() if date_from else date.today()
+    end_date = date_to.date() if date_to else (start_date + timedelta(days=7))
 
     with connect(db) as conn:
-        rows = query(conn, "SELECT user_id FROM app_user WHERE name = ?", (user,))
-        if not rows:
-            raise typer.Exit(f"User not found: {user}")
-        user_id = rows[0]["user_id"]
-        plan_rows = query(
-            conn,
-            """
-            SELECT pw.date, pw.status, pw.notes, t.name AS template_name
-            FROM planned_workout pw
-            LEFT JOIN workout_template t ON t.template_id = pw.template_id
-            WHERE pw.user_id = ? AND pw.date >= ? AND pw.date <= ?
-            ORDER BY pw.date
-            """,
-            (user_id, start_date.isoformat(), end_date.isoformat()),
-        )
+        user_id = _get_user_id(conn, user)
+        plan_rows = _fetch_planned_workouts(conn, user_id, start_date, end_date)
+
     if not plan_rows:
         typer.echo("No planned workouts found")
         return
-    for row in plan_rows:
-        template = row["template_name"] or "Rest"
-        status = row["status"] or "planned"
-        notes = row["notes"] or ""
-        typer.echo(f"{row['date']}: {template} [{status}]")
-        if notes:
-            typer.echo(f"  {notes}")
+    for row in _format_plan_rows(plan_rows):
+        typer.echo(f"{row['date']}: {row['title']} [{row['status']}]")
+        if row["notes"]:
+            typer.echo(f"  {row['notes']}")
 
+
+@plan_app.command("push-calendar")
+def push_calendar(
+    db: Path = typer.Option(..., "--db", help="Path to SQLite DB"),
+    user: str = typer.Option(..., "--user", help="User name"),
+    date_from: datetime | None = typer.Option(None, "--from"),
+    date_to: datetime | None = typer.Option(None, "--to"),
+    dry_run: bool = typer.Option(True, "--dry-run"),
+) -> None:
+    start_date = date_from.date() if date_from else date.today()
+    end_date = date_to.date() if date_to else (start_date + timedelta(days=7))
+
+    with connect(db) as conn:
+        user_id = _get_user_id(conn, user)
+        plan_rows = _fetch_planned_workouts(conn, user_id, start_date, end_date)
+
+    if not plan_rows:
+        typer.echo("No planned workouts found")
+        return
+
+    events = _format_plan_rows(plan_rows)
+    if dry_run:
+        typer.echo("Calendar events preview (stub):")
+        typer.echo(json.dumps(events, indent=2, ensure_ascii=True))
+        return
+    typer.echo("Calendar push not implemented yet. Use --dry-run for preview.")
 
 @plan_app.command("generate")
 def plan_generate(
     db: Path = typer.Option(..., "--db", help="Path to SQLite DB"),
-    user: str = typer.Option(..., "--user"),
+    user: str = typer.Option(..., "--user", help="User name"),
     weeks: int = typer.Option(4, "--weeks"),
-    start: date = typer.Option(date.today(), "--start"),
+    start: datetime = typer.Option(datetime.now(), "--start"),
     reference_plan: str | None = typer.Option(None, "--reference-plan"),
     tag: list[str] = typer.Option(None, "--tag", help="Filter templates by tag (repeatable)"),
     sessions_per_week: int | None = typer.Option(None, "--sessions-per-week"),
 ) -> None:
     tag = tag or []
+    start_date = start.date()
     with connect(db) as conn:
-        user_rows = query(conn, "SELECT user_id FROM app_user WHERE name = ?", (user,))
-        if not user_rows:
-            raise typer.Exit(f"User not found: {user}")
-        user_id = user_rows[0]["user_id"]
+        user_id = _get_user_id(conn, user)
 
         if sessions_per_week is None:
             goal_rows = query(conn, "SELECT sessions_per_week FROM user_goal WHERE user_id = ?", (user_id,))
@@ -345,7 +388,11 @@ def plan_generate(
                 continue
             template_name = templates[idx % len(templates)]
             idx += 1
-            template_id = query(conn, "SELECT template_id FROM workout_template WHERE name = ?", (template_name,))[0]["template_id"]
+            template_id = query(
+                conn,
+                "SELECT template_id FROM workout_template WHERE name = ?",
+                (template_name,),
+            )[0]["template_id"]
             _upsert_planned_workout(conn, user_id, current, template_id, "generator_v1")
 
     typer.echo("Plan generated")

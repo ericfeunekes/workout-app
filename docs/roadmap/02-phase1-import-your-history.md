@@ -8,6 +8,11 @@ Populate a workout library from your old plans and notes so you have examples to
 
 Also ingest “reference plans” that are not tied to an athlete.
 
+## Preflight (before schema changes or import tooling)
+- Run the extracted JSON analysis to understand real field shapes
+- Use findings to finalize the minimal schema and parser expectations
+ - Defer bulk import of extracted JSON until the MVP loop is stable
+
 ## Core idea: store raw first, parse second
 Many workouts are messy. You want zero data loss.
 
@@ -73,7 +78,7 @@ Reference plans:
 - At least:
   - 70% stored successfully as raw
   - 30% parsed into structured templates (your real number will vary; the key is *no data loss*)
- - Reference plans can be tagged and reused as plan inputs
+- Reference plans can be tagged and reused as plan inputs
 
 ## Nice-to-have (optional, still MVP-safe)
 - “review queue” CLI:

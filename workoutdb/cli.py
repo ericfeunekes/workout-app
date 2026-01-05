@@ -56,6 +56,54 @@ def doctor(db: Path = typer.Option(..., "--db", help="Path to SQLite DB")) -> No
             typer.echo(f"- {name}: {count}")
 
 
+@app.command("list-library")
+def list_library(
+    db: Path = typer.Option(..., "--db", help="Path to SQLite DB"),
+    tag: list[str] = typer.Option(None, "--tag", help="Filter by tag (repeatable)"),
+) -> None:
+    tag = tag or []
+    where_clause = ""
+    params = []
+
+    if tag:
+        placeholders = ",".join(["?"] * len(tag))
+        where_clause = f"""
+        WHERE t.template_id IN (
+            SELECT et2.entity_id
+            FROM entity_tag et2
+            JOIN tag t2 ON t2.tag_id = et2.tag_id
+            WHERE et2.entity_kind = 'template' AND t2.name IN ({placeholders})
+        )
+        """
+        params = tag
+
+    with connect(db) as conn:
+        rows = query(
+            conn,
+            f"""
+            SELECT t.template_id, t.name, t.description,
+                   GROUP_CONCAT(tag.name, ', ') AS tags
+            FROM workout_template t
+            LEFT JOIN entity_tag et ON et.entity_kind = 'template' AND et.entity_id = t.template_id
+            LEFT JOIN tag ON tag.tag_id = et.tag_id
+            {where_clause}
+            GROUP BY t.template_id
+            ORDER BY t.name
+            """,
+            params,
+        )
+
+    if not rows:
+        typer.echo("No templates found")
+        return
+    for row in rows:
+        tags = row["tags"] or ""
+        desc = row["description"] or ""
+        typer.echo(f"- {row['name']}  [{tags}]")
+        if desc:
+            typer.echo(f"  {desc}")
+
+
 @app.command("pending")
 def pending(db: Path = typer.Option(..., "--db", help="Path to SQLite DB")) -> None:
     names = pending_migrations(db)

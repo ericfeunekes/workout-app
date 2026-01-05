@@ -1,150 +1,175 @@
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta
 from pathlib import Path
+from typing import Optional
+import json
 
 import typer
 
 from .db import connect, query
-from .migrations import apply_migrations, pending_migrations
-from .yaml_import import import_yaml
-from .yaml_io import validate_yaml
+# ... (rest of imports)
 
-app = typer.Typer(add_completion=False)
-plan_app = typer.Typer(add_completion=False)
+# ... (id and template functions)
 
+# ... (upsert function)
 
-@app.command("init-db")
-def init_db(db: Path = typer.Option(..., "--db", help="Path to SQLite DB")) -> None:
-    db.parent.mkdir(parents=True, exist_ok=True)
-    applied = apply_migrations(db)
-    typer.echo(f"Initialized {db}")
-    if applied:
-        typer.echo("Applied migrations:")
-        for name in applied:
-            typer.echo(f"- {name}")
-    else:
-        typer.echo("No migrations to apply")
+# ... (app setup)
 
+# ... (db commands)
 
-@app.command("migrate")
-def migrate(db: Path = typer.Option(..., "--db", help="Path to SQLite DB")) -> None:
-    applied = apply_migrations(db)
-    if applied:
-        typer.echo("Applied migrations:")
-        for name in applied:
-            typer.echo(f"- {name}")
-    else:
-        typer.echo("No migrations to apply")
+# ... (list-library and pending)
 
+# ... (yaml commands)
 
-@app.command("doctor")
-def doctor(db: Path = typer.Option(..., "--db", help="Path to SQLite DB")) -> None:
+@plan_app.command("set-goal")
+def set_goal(
+    db: Path = typer.Option(..., "--db", help="Path to SQLite DB"),
+    user: str = typer.Option(..., "--user", help="User name"),
+    goal: str = typer.Option(..., "--goal", help="Goal kind"),
+    sessions_per_week: int = typer.Option(..., "--sessions-per-week"),
+    minutes_per_session: int = typer.Option(..., "--minutes-per-session"),
+    focus_muscles: str | None = typer.Option(None, "--focus-muscles", help="Comma list"),
+    notes: str | None = typer.Option(None, "--notes"),
+) -> None:
+    if not (1 <= sessions_per_week <= 7):
+        raise typer.Exit("sessions_per_week must be between 1 and 7")
+
+    focus_list = [s.strip() for s in focus_muscles.split(",")] if focus_muscles else []
+    focus_list = [s for s in focus_list if s]
+
     with connect(db) as conn:
-        rows = query(
+        rows = query(conn, "SELECT user_id FROM app_user WHERE name = ?", (user,))
+        if not rows:
+            raise typer.Exit(f"User not found: {user}")
+        user_id = rows[0]["user_id"]
+        existing = query(conn, "SELECT user_goal_id FROM user_goal WHERE user_id = ?", (user_id,))
+        if existing:
+            conn.execute(
+                """
+                UPDATE user_goal
+                SET goal_kind = ?, focus_muscles_json = ?, sessions_per_week = ?,
+                    minutes_per_session = ?, notes = ?
+                WHERE user_id = ?
+                """,
+                (
+                    goal,
+                    json.dumps(focus_list) if focus_list else None,
+                    sessions_per_week,
+                    minutes_per_session,
+                    notes,
+                    user_id,
+                ),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO user_goal (
+                    user_goal_id, user_id, goal_kind, focus_muscles_json,
+                    sessions_per_week, minutes_per_session, notes
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    _new_id(),
+                    user_id,
+                    goal,
+                    json.dumps(focus_list) if focus_list else None,
+                    sessions_per_week,
+                    minutes_per_session,
+                    notes,
+                ),
+            )
+    typer.echo("Goal saved")
+
+
+@plan_app.command("show")
+def plan_show(
+    db: Path = typer.Option(..., "--db", help="Path to SQLite DB"),
+    user: str = typer.Option(..., "--user"),
+    date_from: Optional[datetime] = typer.Option(None, "--from"),
+    date_to: Optional[datetime] = typer.Option(None, "--to"),
+) -> None:
+    start_date = date_from.date() if date_from else date.today()
+    end_date = date_to.date() if date_to else (start_date + timedelta(days=7))
+
+    with connect(db) as conn:
+        rows = query(conn, "SELECT user_id FROM app_user WHERE name = ?", (user,))
+        if not rows:
+            raise typer.Exit(f"User not found: {user}")
+        user_id = rows[0]["user_id"]
+        plan_rows = query(
             conn,
             """
-            SELECT name
-            FROM sqlite_master
-            WHERE type='table'
-            ORDER BY name
+            SELECT pw.date, pw.status, pw.notes, t.name AS template_name
+            FROM planned_workout pw
+            LEFT JOIN workout_template t ON t.template_id = pw.template_id
+            WHERE pw.user_id = ? AND pw.date >= ? AND pw.date <= ?
+            ORDER BY pw.date
             """,
+            (user_id, start_date.isoformat(), end_date.isoformat()),
         )
-        table_names = [row["name"] for row in rows if row["name"] != "schema_migrations"]
-        typer.echo(f"Tables: {len(table_names)}")
-        for name in table_names:
-            count = query(conn, f"SELECT COUNT(1) AS c FROM {name}")[0]["c"]
-            typer.echo(f"- {name}: {count}")
+    if not plan_rows:
+        typer.echo("No planned workouts found")
+        return
+    for row in plan_rows:
+        template = row["template_name"] or "Rest"
+        status = row["status"] or "planned"
+        notes = row["notes"] or ""
+        typer.echo(f"{row['date']}: {template} [{status}]")
+        if notes:
+            typer.echo(f"  {notes}")
 
 
-@app.command("list-library")
-def list_library(
+@plan_app.command("generate")
+def plan_generate(
     db: Path = typer.Option(..., "--db", help="Path to SQLite DB"),
-    tag: list[str] = typer.Option(None, "--tag", help="Filter by tag (repeatable)"),
+    user: str = typer.Option(..., "--user"),
+    weeks: int = typer.Option(4, "--weeks"),
+    start: datetime = typer.Option(datetime.now(), "--start"),
+    reference_plan: str | None = typer.Option(None, "--reference-plan"),
+    tag: list[str] = typer.Option(None, "--tag", help="Filter templates by tag (repeatable)"),
+    sessions_per_week: int | None = typer.Option(None, "--sessions-per-week"),
 ) -> None:
     tag = tag or []
-    where_clause = ""
-    params = []
-
-    if tag:
-        placeholders = ",".join(["?"] * len(tag))
-        where_clause = f"""
-        WHERE t.template_id IN (
-            SELECT et2.entity_id
-            FROM entity_tag et2
-            JOIN tag t2 ON t2.tag_id = et2.tag_id
-            WHERE et2.entity_kind = 'template' AND t2.name IN ({placeholders})
-        )
-        """
-        params = tag
-
+    start_date = start.date()
     with connect(db) as conn:
-        rows = query(
-            conn,
-            f"""
-            SELECT t.template_id, t.name, t.description,
-                   GROUP_CONCAT(tag.name, ', ') AS tags
-            FROM workout_template t
-            LEFT JOIN entity_tag et ON et.entity_kind = 'template' AND et.entity_id = t.template_id
-            LEFT JOIN tag ON tag.tag_id = et.tag_id
-            {where_clause}
-            GROUP BY t.template_id
-            ORDER BY t.name
-            """,
-            params,
-        )
+        user_rows = query(conn, "SELECT user_id FROM app_user WHERE name = ?", (user,))
+        if not user_rows:
+            raise typer.Exit(f"User not found: {user}")
+        user_id = user_rows[0]["user_id"]
 
-    if not rows:
-        typer.echo("No templates found")
-        return
-    for row in rows:
-        tags = row["tags"] or ""
-        desc = row["description"] or ""
-        typer.echo(f"- {row['name']}  [{tags}]")
-        if desc:
-            typer.echo(f"  {desc}")
+        if sessions_per_week is None:
+            goal_rows = query(
+                conn, "SELECT sessions_per_week FROM user_goal WHERE user_id = ?", (user_id,)
+            )
+            if goal_rows:
+                sessions_per_week = goal_rows[0]["sessions_per_week"]
 
+        if not sessions_per_week:
+            raise typer.Exit("sessions_per_week required (set goal or pass --sessions-per-week)")
 
-@app.command("pending")
-def pending(db: Path = typer.Option(..., "--db", help="Path to SQLite DB")) -> None:
-    names = pending_migrations(db)
-    if not names:
-        typer.echo("No pending migrations")
-        return
-    typer.echo("Pending migrations:")
-    for name in names:
-        typer.echo(f"- {name}")
+        if reference_plan:
+            tag.append(f"plan:{reference_plan}")
 
+        templates = _select_templates(conn, tag)
+        if not templates:
+            raise typer.Exit("No templates found for selection")
 
-@plan_app.command("validate-yaml")
-def validate_yaml_cmd(path: Path = typer.Argument(..., help="Path to YAML file")) -> None:
-    try:
-        library = validate_yaml(path)
-    except ValueError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(1) from exc
-    typer.echo("YAML valid")
-    typer.echo(f"Templates: {len(library.templates)}")
-    typer.echo(f"Plans: {len(library.plans)}")
+        target_days = _session_days_map(int(sessions_per_week))
+        total_days = weeks * 7
 
+        idx = 0
+        for day_offset in range(total_days):
+            current = start_date + timedelta(days=day_offset)
+            weekday = current.weekday()
+            if weekday not in target_days:
+                continue
+            template_id, _ = templates[idx % len(templates)]
+            idx += 1
+            _upsert_planned_workout(conn, user_id, current, template_id, "generator_v1")
 
-@plan_app.command("import-yaml")
-def import_yaml_cmd(
-    db: Path = typer.Option(..., "--db", help="Path to SQLite DB"),
-    path: Path = typer.Argument(..., help="Path to YAML file"),
-) -> None:
-    try:
-        result = import_yaml(db, path)
-    except ValueError as exc:
-        typer.echo(str(exc), err=True)
-        raise typer.Exit(1) from exc
-    typer.echo("Import complete")
-    typer.echo(f"Users created: {result.users_created}")
-    typer.echo(f"Templates created: {result.templates_created}")
-    typer.echo(f"Blocks created: {result.blocks_created}")
-    typer.echo(f"Items created: {result.items_created}")
-    typer.echo(f"Exercises created: {result.exercises_created}")
-    typer.echo(f"Plans created: {result.plans_created}")
-    typer.echo(f"Planned workouts created: {result.planned_workouts_created}")
+    typer.echo("Plan generated")
+
 
 
 app.add_typer(plan_app, name="plan")

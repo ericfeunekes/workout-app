@@ -200,6 +200,10 @@ class Plan(YamlModel):
     def _validate_days(self) -> "Plan":
         if not self.days:
             raise ValueError("plan.days must not be empty")
+        _validate_unique(
+            [day.date.isoformat() for day in self.days],
+            "plan.days contains duplicate dates",
+        )
         return self
 
 
@@ -210,6 +214,13 @@ class LibraryYaml(YamlModel):
     templates: list[Template] = Field(default_factory=list)
     plans: list[Plan] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def _validate_uniques(self) -> "LibraryYaml":
+        _validate_unique([user.name for user in self.users], "users contains duplicate names")
+        _validate_unique([intent.name for intent in self.intents], "intents contains duplicate names")
+        _validate_unique([template.name for template in self.templates], "templates contains duplicate names")
+        return self
+
 
 def _validate_target_or_range(target: Any, min_v: Any, max_v: Any, label: str) -> None:
     if target is not None and (min_v is not None or max_v is not None):
@@ -218,6 +229,17 @@ def _validate_target_or_range(target: Any, min_v: Any, max_v: Any, label: str) -
         raise ValueError(f"{label}: min and max must be provided together")
     if min_v is not None and max_v is not None and min_v > max_v:
         raise ValueError(f"{label}: min must be <= max")
+
+
+def _validate_unique(values: list[str], message: str) -> None:
+    seen: set[str] = set()
+    duplicates: set[str] = set()
+    for value in values:
+        if value in seen:
+            duplicates.add(value)
+        seen.add(value)
+    if duplicates:
+        raise ValueError(f"{message}: {', '.join(sorted(duplicates))}")
 class IntentDef(YamlModel):
     name: str
     parent: str | None = None

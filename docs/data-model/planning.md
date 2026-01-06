@@ -20,6 +20,8 @@
 - `name` and `meta_json` for plan-level notes and intent
 - link to `planned_workout` rows via `plan_id`
 
+YAML validation enforces unique plan day dates (one entry per date per plan).
+
 Goals → templates is intentionally rule-based and lightweight for now.
 
 Deep reference: `docs/roadmap/appendix-a-data-model.md`.

@@ -16,4 +16,6 @@ Templates are the structured, reusable workouts:
 Tags support discovery across the library:
 - `tag` + `entity_tag` link templates/exercises to searchable labels.
 
+YAML validation enforces unique names for users, intents, and templates.
+
 Deep reference: `docs/roadmap/appendix-a-data-model.md`.

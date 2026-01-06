@@ -623,6 +623,18 @@ Key columns
 
 ⸻
 
+Intent taxonomy
+
+Use a simple two-level taxonomy to label intent at template/block/item level without guessing.
+
+intent_taxonomy
+
+Key columns
+	•	intent_id (PK)
+	•	parent_intent_id (nullable FK to intent_taxonomy.intent_id)
+	•	name (unique, human label)
+	•	description (when/how to use)
+
 set_log
 
 The core log table. Works for strength, intervals, and simple cardio.

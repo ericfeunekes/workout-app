@@ -12,6 +12,13 @@
 - `date`, `start_time`, `duration_min` drive calendar export.
 - `status` tracks planned/skipped/done.
 - calendar linkage: `calendar_id`, `calendar_event_id`, `calendar_html_link`.
+- `plan_id` links to a plan container.
+- `meta_json` stores per-day metadata (e.g., week labels, deload flags).
+
+## Plans
+`plan` is a lightweight container for named plans:
+- `name` and `meta_json` for plan-level notes and intent
+- link to `planned_workout` rows via `plan_id`
 
 Goals → templates is intentionally rule-based and lightweight for now.
 

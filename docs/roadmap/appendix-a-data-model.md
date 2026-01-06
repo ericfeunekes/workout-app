@@ -441,6 +441,8 @@ Key columns
 	•	created_by_user_id (nullable)
 	•	description
 	•	intent_json (goal stimulus, target duration, etc.)
+	•	intent_primary_id (FK to intent_taxonomy)
+	•	intent_secondary_id (FK to intent_taxonomy)
 	•	created_at
 
 Connections
@@ -461,6 +463,8 @@ Key columns
 	•	block_type (warmup|strength|conditioning|accessory|mobility|skill|other)
 	•	structure_type (straight_sets|superset|circuit|amrap|emom|intervals|for_time|freeform)
 	•	intent_json (time cap, rest rules, target stimulus)
+	•	intent_primary_id (FK to intent_taxonomy)
+	•	intent_secondary_id (FK to intent_taxonomy)
 	•	unique(template_id, block_index)
 
 Common intent_json keys
@@ -495,6 +499,8 @@ Key columns
 	•	pace_sec_per_m_min (nullable)
 	•	pace_sec_per_m_max (nullable)
 	•	notes
+	•	intent_primary_id (FK to intent_taxonomy)
+	•	intent_secondary_id (FK to intent_taxonomy)
 
 workout_item_set_prescription
 
@@ -545,12 +551,25 @@ Key columns
 
 ⸻
 
+plan
+
+Optional container for a named plan and its metadata.
+
+Key columns
+	•	plan_id (PK)
+	•	user_id (FK)
+	•	name
+	•	meta_json (plan-level metadata)
+
+⸻
+
 planned_workout
 
 Represents planned training for a person on a date.
 
 Key columns
 	•	planned_id (PK)
+	•	plan_id (nullable FK to plan)
 	•	user_id (FK)
 	•	date (YYYY-MM-DD)
 	•	template_id (nullable)
@@ -562,6 +581,7 @@ Key columns
 	•	calendar_id
 	•	calendar_event_id
 	•	calendar_html_link
+	•	meta_json (per-day metadata)
 
 Connection to sessions
 When a planned workout is performed:

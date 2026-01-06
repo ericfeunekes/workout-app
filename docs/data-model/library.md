@@ -11,6 +11,7 @@ Templates are the structured, reusable workouts:
 - `workout_block` captures block-level structure and stimulus intent.
 - `workout_item` captures exercise prescriptions.
 - `workout_item_set_prescription` handles per-set variation.
+ - intent IDs on templates/blocks/items link into `intent_taxonomy`.
 
 Tags support discovery across the library:
 - `tag` + `entity_tag` link templates/exercises to searchable labels.

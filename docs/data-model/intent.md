@@ -12,7 +12,8 @@ Fields:
 - `intent_id`, `parent_intent_id`, `name`, `description`
 
 ## Usage
-Intents are designed to label templates, blocks, and items.
+Intents are designed to label templates, blocks, and items via
+`intent_primary_id` and `intent_secondary_id`.
 We keep the taxonomy stable and use descriptions to standardize meaning.
 
 Deep reference: `docs/roadmap/appendix-a-data-model.md`.

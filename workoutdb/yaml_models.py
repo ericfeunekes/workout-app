@@ -103,6 +103,8 @@ class SetPrescription(Prescription):
 
 class Item(YamlModel):
     exercise: str
+    intent_primary: str | None = None
+    intent_secondary: str | None = None
     prescription: Prescription | None = None
     set_prescriptions: list[SetPrescription] | None = None
     notes: str | None = None
@@ -131,6 +133,8 @@ class Block(YamlModel):
     name: str | None = None
     block_type: BlockType
     structure_type: StructureType
+    intent_primary: str | None = None
+    intent_secondary: str | None = None
     intent: dict[str, Any] = Field(default_factory=dict)
     items: list[Item]
 
@@ -144,6 +148,8 @@ class Block(YamlModel):
 class Template(YamlModel):
     name: str
     description: str | None = None
+    intent_primary: str | None = None
+    intent_secondary: str | None = None
     intent: dict[str, Any] = Field(default_factory=dict)
     tags: list[str] = Field(default_factory=list)
     blocks: list[Block]
@@ -167,6 +173,7 @@ class PlanDay(YamlModel):
     status: Literal["planned", "skipped", "done"] | None = None
     start_time: time | None = None
     duration_min: int | None = None
+    meta: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_rest(self) -> "PlanDay":
@@ -187,6 +194,7 @@ class Plan(YamlModel):
     name: str | None = None
     user: str
     days: list[PlanDay]
+    meta: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _validate_days(self) -> "Plan":
@@ -198,6 +206,7 @@ class Plan(YamlModel):
 class LibraryYaml(YamlModel):
     version: Literal[1]
     users: list[User] = Field(default_factory=list)
+    intents: list[IntentDef] = Field(default_factory=list)
     templates: list[Template] = Field(default_factory=list)
     plans: list[Plan] = Field(default_factory=list)
 
@@ -209,3 +218,7 @@ def _validate_target_or_range(target: Any, min_v: Any, max_v: Any, label: str) -
         raise ValueError(f"{label}: min and max must be provided together")
     if min_v is not None and max_v is not None and min_v > max_v:
         raise ValueError(f"{label}: min must be <= max")
+class IntentDef(YamlModel):
+    name: str
+    parent: str | None = None
+    description: str | None = None

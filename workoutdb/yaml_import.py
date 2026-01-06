@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .db import connect, query, transaction
 from .yaml_io import validate_yaml
-from .yaml_models import Prescription, SetPrescription, Template
+from .yaml_models import IntentDef, Prescription, SetPrescription, Template
 
 
 @dataclass
@@ -52,6 +52,44 @@ def _ensure_tag(conn, name: str) -> str:
     tag_id = _new_id()
     conn.execute("INSERT INTO tag (tag_id, name) VALUES (?, ?)", (tag_id, name))
     return tag_id
+
+
+def _ensure_intent(conn, intent: IntentDef, intent_ids: dict[str, str]) -> str:
+    if intent.name in intent_ids:
+        return intent_ids[intent.name]
+    rows = query(conn, "SELECT intent_id FROM intent_taxonomy WHERE name = ?", (intent.name,))
+    if rows:
+        intent_ids[intent.name] = rows[0]["intent_id"]
+        return intent_ids[intent.name]
+    intent_id = _new_id()
+    parent_id = None
+    if intent.parent:
+        parent_rows = query(
+            conn,
+            "SELECT intent_id FROM intent_taxonomy WHERE name = ?",
+            (intent.parent,),
+        )
+        if not parent_rows:
+            raise ValueError(f"Intent parent not found: {intent.parent}")
+        parent_id = parent_rows[0]["intent_id"]
+    conn.execute(
+        "INSERT INTO intent_taxonomy (intent_id, parent_intent_id, name, description) VALUES (?, ?, ?, ?)",
+        (intent_id, parent_id, intent.name, intent.description),
+    )
+    intent_ids[intent.name] = intent_id
+    return intent_id
+
+
+def _lookup_intent_id(conn, name: str | None, intent_ids: dict[str, str]) -> str | None:
+    if not name:
+        return None
+    if name in intent_ids:
+        return intent_ids[name]
+    rows = query(conn, "SELECT intent_id FROM intent_taxonomy WHERE name = ?", (name,))
+    if not rows:
+        raise ValueError(f"Unknown intent: {name}")
+    intent_ids[name] = rows[0]["intent_id"]
+    return intent_ids[name]
 
 
 def _tag_entity(conn, tag_id: str, entity_kind: str, entity_id: str) -> None:
@@ -117,6 +155,21 @@ def import_yaml(db_path: str | Path, yaml_path: Path) -> ImportResult:
 
     with connect(db_path) as conn:
         with transaction(conn):
+            intent_ids: dict[str, str] = {}
+            if library.intents:
+                pending = list(library.intents)
+                while pending:
+                    progressed = False
+                    for intent in list(pending):
+                        if intent.parent and intent.parent not in intent_ids:
+                            continue
+                        _ensure_intent(conn, intent, intent_ids)
+                        pending.remove(intent)
+                        progressed = True
+                    if not progressed:
+                        missing = ", ".join(sorted({i.parent for i in pending if i.parent}))
+                        raise ValueError(f"Intent parents not found: {missing}")
+
             for user in library.users:
                 rows = query(conn, "SELECT user_id FROM app_user WHERE name = ?", (user.name,))
                 if not rows:
@@ -129,7 +182,7 @@ def import_yaml(db_path: str | Path, yaml_path: Path) -> ImportResult:
                 template_name_to_id[row["name"]] = row["template_id"]
 
             for template in library.templates:
-                stats = _import_template(conn, template, template_name_to_id)
+                stats = _import_template(conn, template, template_name_to_id, intent_ids)
                 result.templates_created += stats[0]
                 result.blocks_created += stats[1]
                 result.items_created += stats[2]
@@ -145,14 +198,36 @@ def import_yaml(db_path: str | Path, yaml_path: Path) -> ImportResult:
 
 def _import_plan(conn, plan, template_map: dict[str, str]) -> tuple[int, int]:
     user_id = _ensure_user(conn, plan.user)
+    plan_id = None
+    if plan.name:
+        rows = query(
+            conn,
+            "SELECT plan_id FROM plan WHERE user_id = ? AND name = ? AND deleted = 0",
+            (user_id, plan.name),
+        )
+        if rows:
+            plan_id = rows[0]["plan_id"]
+            conn.execute(
+                "UPDATE plan SET meta_json = ? WHERE plan_id = ?",
+                (json.dumps(plan.meta) if plan.meta else None, plan_id),
+            )
+    if plan_id is None:
+        plan_id = _new_id()
+        conn.execute(
+            """
+            INSERT INTO plan (plan_id, user_id, name, meta_json)
+            VALUES (?, ?, ?, ?)
+            """,
+            (plan_id, user_id, plan.name, json.dumps(plan.meta) if plan.meta else None),
+        )
     created_workouts = 0
     for day in plan.days:
-        _insert_plan_day(conn, day, user_id, template_map)
+        _insert_plan_day(conn, day, user_id, template_map, plan_id)
         created_workouts += 1
     return 1, created_workouts
 
 
-def _insert_plan_day(conn, day, user_id: str, template_map: dict[str, str]) -> None:
+def _insert_plan_day(conn, day, user_id: str, template_map: dict[str, str], plan_id: str) -> None:
     if day.rest:
         template_id = None
     else:
@@ -166,15 +241,17 @@ def _insert_plan_day(conn, day, user_id: str, template_map: dict[str, str]) -> N
         """
         INSERT INTO planned_workout (
             planned_id, user_id, date, template_id, status, notes, generated_by,
-            start_time, duration_min
-        ) VALUES (?, ?, ?, ?, COALESCE(?, 'planned'), ?, ?, ?, ?)
+            start_time, duration_min, plan_id, meta_json
+        ) VALUES (?, ?, ?, ?, COALESCE(?, 'planned'), ?, ?, ?, ?, ?, ?)
         ON CONFLICT(user_id, date) DO UPDATE SET
             template_id = excluded.template_id,
             status = COALESCE(?, planned_workout.status),
             notes = excluded.notes,
             generated_by = excluded.generated_by,
             start_time = excluded.start_time,
-            duration_min = excluded.duration_min
+            duration_min = excluded.duration_min,
+            plan_id = excluded.plan_id,
+            meta_json = excluded.meta_json
         """,
         (
             _new_id(),
@@ -186,12 +263,19 @@ def _insert_plan_day(conn, day, user_id: str, template_map: dict[str, str]) -> N
             "manual_yaml",
             start_time,
             day.duration_min,
+            plan_id,
+            json.dumps(day.meta) if day.meta else None,
             status_arg,
         ),
     )
 
 
-def _import_template(conn, template: Template, name_to_id: dict[str, str]) -> tuple[int, int, int, int]:
+def _import_template(
+    conn,
+    template: Template,
+    name_to_id: dict[str, str],
+    intent_ids: dict[str, str],
+) -> tuple[int, int, int, int]:
     """Returns (created_templates, created_blocks, created_items, created_exercises)"""
     created_templates = 0
     created_blocks = 0
@@ -204,12 +288,14 @@ def _import_template(conn, template: Template, name_to_id: dict[str, str]) -> tu
         conn.execute(
             """
             UPDATE workout_template
-            SET description = ?, intent_json = ?
+            SET description = ?, intent_json = ?, intent_primary_id = ?, intent_secondary_id = ?
             WHERE template_id = ?
             """,
             (
                 template.description,
                 json.dumps(template.intent) if template.intent else None,
+                _lookup_intent_id(conn, template.intent_primary, intent_ids),
+                _lookup_intent_id(conn, template.intent_secondary, intent_ids),
                 template_id,
             ),
         )
@@ -218,14 +304,17 @@ def _import_template(conn, template: Template, name_to_id: dict[str, str]) -> tu
         template_id = _new_id()
         conn.execute(
             """
-            INSERT INTO workout_template (template_id, name, description, intent_json)
-            VALUES (?, ?, ?, ?)
+            INSERT INTO workout_template (
+                template_id, name, description, intent_json, intent_primary_id, intent_secondary_id
+            ) VALUES (?, ?, ?, ?, ?, ?)
             """,
             (
                 template_id,
                 template.name,
                 template.description,
                 json.dumps(template.intent) if template.intent else None,
+                _lookup_intent_id(conn, template.intent_primary, intent_ids),
+                _lookup_intent_id(conn, template.intent_secondary, intent_ids),
             ),
         )
         name_to_id[template.name] = template_id
@@ -243,8 +332,8 @@ def _import_template(conn, template: Template, name_to_id: dict[str, str]) -> tu
             """
             INSERT INTO workout_block (
                 block_id, template_id, block_index, name, block_type,
-                structure_type, intent_json
-            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                structure_type, intent_json, intent_primary_id, intent_secondary_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 block_id,
@@ -254,6 +343,8 @@ def _import_template(conn, template: Template, name_to_id: dict[str, str]) -> tu
                 block.block_type,
                 block.structure_type,
                 json.dumps(block.intent) if block.intent else None,
+                _lookup_intent_id(conn, block.intent_primary, intent_ids),
+                _lookup_intent_id(conn, block.intent_secondary, intent_ids),
             ),
         )
         created_blocks += 1
@@ -275,8 +366,8 @@ def _import_template(conn, template: Template, name_to_id: dict[str, str]) -> tu
                     reps_is_per_side, time_sec_target, time_sec_min, time_sec_max,
                     distance_m_target, distance_m_min, distance_m_max,
                     pace_sec_per_m_target, pace_sec_per_m_min, pace_sec_per_m_max,
-                    prescription_json, notes
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    prescription_json, notes, intent_primary_id, intent_secondary_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     item_id,
@@ -300,6 +391,8 @@ def _import_template(conn, template: Template, name_to_id: dict[str, str]) -> tu
                     prescription.pace_sec_per_m_max if prescription else None,
                     json.dumps(prescription.extra) if prescription and prescription.extra else None,
                     item.notes,
+                    _lookup_intent_id(conn, item.intent_primary, intent_ids),
+                    _lookup_intent_id(conn, item.intent_secondary, intent_ids),
                 ),
             )
             created_items += 1

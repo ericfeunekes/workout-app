@@ -37,3 +37,7 @@ Planned workouts must include `start_time` and `duration_min` to be pushed.
 ## Testing
 
 See `docs/testing-pyramid.md` for the full testing structure and how to run it.
+
+## Data model
+
+See `docs/data-model/README.md` for the current model overview.

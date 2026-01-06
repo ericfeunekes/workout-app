@@ -101,13 +101,11 @@ def apply_migrations(db_path: str | Path, migrations_dir: Path = MIGRATIONS_DIR)
             if migration.filename in already:
                 continue
             sql = migration.path.read_text()
-            with transaction(conn):
-                for statement in _iter_sql_statements(sql):
-                    conn.execute(statement)
-                conn.execute(
-                    "INSERT INTO schema_migrations (filename) VALUES (?)",
-                    (migration.filename,),
-                )
+            conn.executescript(sql)
+            conn.execute(
+                "INSERT INTO schema_migrations (filename) VALUES (?)",
+                (migration.filename,),
+            )
             applied.append(migration.filename)
     return applied
 

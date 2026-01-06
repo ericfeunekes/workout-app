@@ -28,6 +28,7 @@ def test_build_event_payload_duration() -> None:
 def test_upsert_events_retries_on_missing_event(monkeypatch) -> None:
     class FakeResp:
         status = 404
+        reason = "Not Found"
 
     class FakeRequest:
         def __init__(self, payload: dict):
@@ -76,6 +77,7 @@ def test_upsert_events_retries_on_missing_event(monkeypatch) -> None:
 def test_upsert_events_retries_on_gone_event(monkeypatch) -> None:
     class FakeResp:
         status = 410
+        reason = "Gone"
 
     class FakeRequest:
         def execute(self) -> dict:
@@ -157,6 +159,7 @@ def test_upsert_events_failure_result(monkeypatch) -> None:
 def test_upsert_events_batch_partial(monkeypatch) -> None:
     class FakeResp:
         status = 404
+        reason = "Not Found"
 
     class FakeRequest:
         def __init__(self, event_id: str):
@@ -217,8 +220,11 @@ def test_list_calendars_pagination(monkeypatch) -> None:
             return Mock(execute=execute)
 
     class FakeService:
+        def __init__(self) -> None:
+            self._list = FakeCalendarList()
+
         def calendarList(self):  # noqa: N802
-            return FakeCalendarList()
+            return self._list
 
     monkeypatch.setattr("workoutdb.calendar_api.get_credentials", Mock())
     monkeypatch.setattr("workoutdb.calendar_api.calendar_service", lambda _: FakeService())

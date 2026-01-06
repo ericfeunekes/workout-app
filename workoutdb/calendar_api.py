@@ -96,6 +96,8 @@ def upsert_events(
                     status: Literal["created", "updated"] = "updated"
                 except HttpError as exc:
                     status_code = getattr(getattr(exc, "resp", None), "status", None)
+                    if isinstance(status_code, str) and status_code.isdigit():
+                        status_code = int(status_code)
                     if status_code in (404, 410):
                         created = service.events().insert(
                             calendarId=calendar_id,

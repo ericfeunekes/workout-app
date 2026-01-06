@@ -11,7 +11,7 @@ def _load_cassette() -> list[dict]:
     if not cassette.exists():
         raise AssertionError(f"Missing VCR cassette: {cassette}")
     data = yaml.safe_load(cassette.read_text())
-    return data.get("http_interactions", [])
+    return data.get("http_interactions", data.get("interactions", []))
 
 
 def _responses_for_uri(interactions: list[dict], uri_substr: str) -> list[dict]:

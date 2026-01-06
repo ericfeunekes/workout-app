@@ -10,6 +10,7 @@ It is intentionally minimal and points to the deeper reference in `docs/roadmap/
 - `planning.md` — Goals, schedules, and calendar linkage.
 - `execution.md` — Sessions and logging.
 - `intent.md` — Intent taxonomy and stimulus labeling.
+- `examples.md` — YAML examples for intent + metadata.
 
 ## Deep reference
 For full schema detail and reasoning, see `docs/roadmap/appendix-a-data-model.md`.

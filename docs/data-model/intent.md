@@ -16,4 +16,8 @@ Intents are designed to label templates, blocks, and items via
 `intent_primary_id` and `intent_secondary_id`.
 We keep the taxonomy stable and use descriptions to standardize meaning.
 
+CLI helpers:
+- `workoutdb intent seed --db path/to.db` to load a minimal starter set.
+- `workoutdb intent list --db path/to.db` to view available intents.
+
 Deep reference: `docs/roadmap/appendix-a-data-model.md`.

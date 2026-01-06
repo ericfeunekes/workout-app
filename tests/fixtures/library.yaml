@@ -1,0 +1,20 @@
+version: 1
+users:
+  - name: "Alice"
+templates:
+  - name: "Day A"
+    blocks:
+      - block_type: "strength"
+        structure_type: "straight_sets"
+        items:
+          - exercise: "Back Squat"
+            prescription:
+              sets: 3
+              reps_target: 5
+plans:
+  - user: "Alice"
+    days:
+      - date: 2026-01-06
+        template: "Day A"
+        start_time: "07:30"
+        duration_min: 60

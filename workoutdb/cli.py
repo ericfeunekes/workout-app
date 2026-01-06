@@ -35,7 +35,7 @@ def _session_days_map(sessions_per_week: int) -> set[int]:
         7: {0, 1, 2, 3, 4, 5, 6},
     }
     if sessions_per_week not in patterns:
-        raise typer.Exit("sessions_per_week must be between 1 and 7")
+        _fail("sessions_per_week must be between 1 and 7")
     return patterns[sessions_per_week]
 
 
@@ -65,7 +65,7 @@ def _select_template_names(conn, tags: list[str]) -> list[str]:
 def _get_user_id(conn, user: str) -> str:
     rows = query(conn, "SELECT user_id FROM app_user WHERE name = ?", (user,))
     if not rows:
-        raise typer.Exit(f"User not found: {user}")
+        _fail(f"User not found: {user}")
     return rows[0]["user_id"]
 
 
@@ -143,7 +143,11 @@ def _parse_start_time(value: str | None) -> time | None:
     try:
         return time.fromisoformat(value)
     except ValueError as exc:
-        raise typer.Exit("start_time must be in HH:MM or HH:MM:SS format") from exc
+        _fail("start_time must be in HH:MM or HH:MM:SS format")
+
+def _validate_date_range(start_date: date, end_date: date) -> None:
+    if end_date < start_date:
+        _fail("date range invalid: --to must be on or after --from")
 
 def _local_tzinfo():
     return datetime.now().astimezone().tzinfo
@@ -152,7 +156,12 @@ def _load_config(path: Path | None):
     try:
         return load_config(path)
     except ConfigError as exc:
-        raise typer.Exit(str(exc)) from exc
+        _fail(str(exc))
+
+
+def _fail(message: str) -> None:
+    typer.echo(message, err=True)
+    raise typer.Exit(1)
 
 
 def _seed_intents(conn) -> int:
@@ -414,7 +423,7 @@ def set_goal(
     notes: str | None = typer.Option(None, "--notes"),
 ) -> None:
     if not (1 <= sessions_per_week <= 7):
-        raise typer.Exit("sessions_per_week must be between 1 and 7")
+        _fail("sessions_per_week must be between 1 and 7")
 
     focus_list = [s.strip() for s in focus_muscles.split(",") if s.strip()] if focus_muscles else []
 
@@ -468,6 +477,7 @@ def plan_show(
 ) -> None:
     start_date = date_from.date() if date_from else date.today()
     end_date = date_to.date() if date_to else (start_date + timedelta(days=7))
+    _validate_date_range(start_date, end_date)
 
     with connect(db) as conn:
         user_id = _get_user_id(conn, user)
@@ -517,6 +527,7 @@ def push_calendar(
 ) -> None:
     start_date = date_from.date() if date_from else date.today()
     end_date = date_to.date() if date_to else (start_date + timedelta(days=7))
+    _validate_date_range(start_date, end_date)
 
     with connect(db) as conn:
         user_id = _get_user_id(conn, user)
@@ -529,7 +540,7 @@ def push_calendar(
     cfg = _load_config(config)
     target_calendar_id = calendar_id or cfg.calendar.default_id
     if not target_calendar_id:
-        raise typer.Exit("calendar-id required (set calendar.default_id in config or pass --calendar-id)")
+        _fail("calendar-id required (set calendar.default_id in config or pass --calendar-id)")
 
     events = []
     missing_times = []
@@ -559,7 +570,7 @@ def push_calendar(
         typer.echo("Missing start_time/duration_min for:")
         for item in missing_times:
             typer.echo(f"- {item}")
-        raise typer.Exit("Add times to planned workouts before pushing to calendar")
+        _fail("Add times to planned workouts before pushing to calendar")
 
     if dry_run:
         typer.echo("Calendar events preview:")
@@ -606,9 +617,9 @@ def plan_generate(
         user_id = _get_user_id(conn, user)
         start_time_value = _parse_start_time(start_time)
         if (start_time_value is None) ^ (duration_min is None):
-            raise typer.Exit("start_time and duration_min must be provided together")
+            _fail("start_time and duration_min must be provided together")
         if duration_min is not None and duration_min <= 0:
-            raise typer.Exit("duration_min must be > 0")
+            _fail("duration_min must be > 0")
 
         if sessions_per_week is None:
             goal_rows = query(conn, "SELECT sessions_per_week FROM user_goal WHERE user_id = ?", (user_id,))
@@ -616,14 +627,14 @@ def plan_generate(
                 sessions_per_week = goal_rows[0]["sessions_per_week"]
 
         if not sessions_per_week:
-            raise typer.Exit("sessions_per_week required (set goal or pass --sessions-per-week)")
+            _fail("sessions_per_week required (set goal or pass --sessions-per-week)")
 
         if reference_plan:
             tag.append(f"plan:{reference_plan}")
 
         templates = _select_template_names(conn, tag)
         if not templates:
-            raise typer.Exit("No templates found for selection")
+            _fail("No templates found for selection")
 
         target_days = _session_days_map(int(sessions_per_week))
         total_days = weeks * 7

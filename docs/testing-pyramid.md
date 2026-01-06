@@ -9,6 +9,7 @@ Goal: validate correctness with fast unit tests, validate DB + IO workflows with
   - YAML model validation (pairing start_time + duration).
   - SQL statement parser.
   - Calendar event payload construction.
+  - Contract checks against the Google Calendar VCR cassette.
 
 ## Integration (DB + IO)
 - Scope: SQLite migrations, YAML import, plan generation behavior.

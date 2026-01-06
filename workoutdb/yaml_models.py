@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -165,6 +165,8 @@ class PlanDay(YamlModel):
     rest: bool = False
     notes: str | None = None
     status: Literal["planned", "skipped", "done"] | None = None
+    start_time: time | None = None
+    duration_min: int | None = None
 
     @model_validator(mode="after")
     def _validate_rest(self) -> "PlanDay":
@@ -172,6 +174,12 @@ class PlanDay(YamlModel):
             raise ValueError("plan day cannot have both rest=true and template")
         if not self.rest and not self.template:
             raise ValueError("plan day must include template or rest=true")
+        if self.rest and (self.start_time or self.duration_min):
+            raise ValueError("rest days cannot include start_time or duration_min")
+        if (self.start_time is None) ^ (self.duration_min is None):
+            raise ValueError("start_time and duration_min must be provided together")
+        if self.duration_min is not None and self.duration_min <= 0:
+            raise ValueError("duration_min must be > 0")
         return self
 
 

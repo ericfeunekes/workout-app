@@ -161,16 +161,20 @@ def _insert_plan_day(conn, day, user_id: str, template_map: dict[str, str]) -> N
         template_id = template_map[day.template]
 
     status_arg = day.status
+    start_time = day.start_time.isoformat() if day.start_time else None
     conn.execute(
         """
         INSERT INTO planned_workout (
-            planned_id, user_id, date, template_id, status, notes, generated_by
-        ) VALUES (?, ?, ?, ?, COALESCE(?, 'planned'), ?, ?)
+            planned_id, user_id, date, template_id, status, notes, generated_by,
+            start_time, duration_min
+        ) VALUES (?, ?, ?, ?, COALESCE(?, 'planned'), ?, ?, ?, ?)
         ON CONFLICT(user_id, date) DO UPDATE SET
             template_id = excluded.template_id,
             status = COALESCE(?, planned_workout.status),
             notes = excluded.notes,
-            generated_by = excluded.generated_by
+            generated_by = excluded.generated_by,
+            start_time = excluded.start_time,
+            duration_min = excluded.duration_min
         """,
         (
             _new_id(),
@@ -180,6 +184,8 @@ def _insert_plan_day(conn, day, user_id: str, template_map: dict[str, str]) -> N
             status_arg,
             day.notes,
             "manual_yaml",
+            start_time,
+            day.duration_min,
             status_arg,
         ),
     )

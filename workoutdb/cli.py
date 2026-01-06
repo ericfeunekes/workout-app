@@ -1,12 +1,14 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
 import json
 import uuid
 
 import typer
 
+from .calendar_api import build_event_payload, list_calendars, upsert_events
+from .config import ConfigError, load_config
 from .db import connect, query
 from .migrations import apply_migrations, pending_migrations
 from .yaml_import import import_yaml
@@ -14,6 +16,7 @@ from .yaml_io import validate_yaml
 
 app = typer.Typer(add_completion=False)
 plan_app = typer.Typer(add_completion=False)
+calendar_app = typer.Typer(add_completion=False)
 
 
 def _new_id() -> str:
@@ -69,7 +72,9 @@ def _fetch_planned_workouts(conn, user_id: str, start_date: date, end_date: date
     return query(
         conn,
         """
-        SELECT pw.date, pw.status, pw.notes, t.name AS template_name
+        SELECT pw.planned_id, pw.date, pw.status, pw.notes, pw.start_time, pw.duration_min,
+               pw.calendar_id, pw.calendar_event_id, pw.calendar_html_link,
+               t.name AS template_name
         FROM planned_workout pw
         LEFT JOIN workout_template t ON t.template_id = pw.template_id
         WHERE pw.user_id = ? AND pw.date >= ? AND pw.date <= ?
@@ -86,26 +91,67 @@ def _format_plan_rows(rows):
         notes = row["notes"] or ""
         formatted.append(
             {
+                "planned_id": row["planned_id"],
                 "date": row["date"],
                 "title": template,
                 "status": status,
                 "notes": notes,
+                "start_time": row["start_time"],
+                "duration_min": row["duration_min"],
+                "calendar_id": row["calendar_id"],
+                "calendar_event_id": row["calendar_event_id"],
             }
         )
     return formatted
 
-def _upsert_planned_workout(conn, user_id: str, day: date, template_id: str | None, gen: str) -> None:
+def _upsert_planned_workout(
+    conn,
+    user_id: str,
+    day: date,
+    template_id: str | None,
+    gen: str,
+    start_time_value: time | None,
+    duration_min: int | None,
+) -> None:
     conn.execute(
         """
         INSERT INTO planned_workout (
-            planned_id, user_id, date, template_id, status, notes, generated_by
-        ) VALUES (?, ?, ?, ?, 'planned', NULL, ?)
+            planned_id, user_id, date, template_id, status, notes, generated_by,
+            start_time, duration_min
+        ) VALUES (?, ?, ?, ?, 'planned', NULL, ?, ?, ?)
         ON CONFLICT(user_id, date) DO UPDATE SET
             template_id = excluded.template_id,
-            generated_by = excluded.generated_by
+            generated_by = excluded.generated_by,
+            start_time = COALESCE(excluded.start_time, planned_workout.start_time),
+            duration_min = COALESCE(excluded.duration_min, planned_workout.duration_min)
         """,
-        (_new_id(), user_id, day.isoformat(), template_id, gen),
+        (
+            _new_id(),
+            user_id,
+            day.isoformat(),
+            template_id,
+            gen,
+            start_time_value.isoformat() if start_time_value else None,
+            duration_min,
+        ),
     )
+
+def _parse_start_time(value: str | None) -> time | None:
+    if value is None:
+        return None
+    try:
+        return time.fromisoformat(value)
+    except ValueError as exc:
+        raise typer.Exit("start_time must be in HH:MM or HH:MM:SS format") from exc
+
+def _local_tzinfo():
+    return datetime.now().astimezone().tzinfo
+
+def _load_config(path: Path | None):
+    try:
+        return load_config(path)
+    except ConfigError as exc:
+        raise typer.Exit(str(exc)) from exc
 
 
 
@@ -317,9 +363,32 @@ def plan_show(
         typer.echo("No planned workouts found")
         return
     for row in _format_plan_rows(plan_rows):
-        typer.echo(f"{row['date']}: {row['title']} [{row['status']}]")
+        time_suffix = ""
+        if row["start_time"] and row["duration_min"]:
+            time_suffix = f" @ {row['start_time']} ({row['duration_min']}m)"
+        typer.echo(f"{row['date']}: {row['title']} [{row['status']}] {time_suffix}".rstrip())
         if row["notes"]:
             typer.echo(f"  {row['notes']}")
+
+
+@calendar_app.command("list")
+def calendar_list(
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml"),
+) -> None:
+    cfg = _load_config(config)
+    calendars = list_calendars(cfg)
+    if not calendars:
+        typer.echo("No calendars found")
+        return
+    for item in calendars:
+        summary = item.get("summary") or ""
+        cal_id = item.get("id") or ""
+        access = item.get("accessRole") or ""
+        primary = " (primary)" if item.get("primary") else ""
+        typer.echo(f"- {summary}{primary}")
+        typer.echo(f"  id: {cal_id}")
+        if access:
+            typer.echo(f"  access: {access}")
 
 
 @plan_app.command("push-calendar")
@@ -328,7 +397,9 @@ def push_calendar(
     user: str = typer.Option(..., "--user", help="User name"),
     date_from: datetime | None = typer.Option(None, "--from"),
     date_to: datetime | None = typer.Option(None, "--to"),
-    dry_run: bool = typer.Option(True, "--dry-run"),
+    calendar_id: str | None = typer.Option(None, "--calendar-id"),
+    config: Path | None = typer.Option(None, "--config", help="Path to config.toml"),
+    dry_run: bool = typer.Option(True, "--dry-run/--no-dry-run"),
 ) -> None:
     start_date = date_from.date() if date_from else date.today()
     end_date = date_to.date() if date_to else (start_date + timedelta(days=7))
@@ -341,12 +412,67 @@ def push_calendar(
         typer.echo("No planned workouts found")
         return
 
-    events = _format_plan_rows(plan_rows)
+    cfg = _load_config(config)
+    target_calendar_id = calendar_id or cfg.calendar.default_id
+    if not target_calendar_id:
+        raise typer.Exit("calendar-id required (set calendar.default_id in config or pass --calendar-id)")
+
+    events = []
+    missing_times = []
+    for row in _format_plan_rows(plan_rows):
+        if row["title"] == "Rest":
+            continue
+        if not row["start_time"] or not row["duration_min"]:
+            missing_times.append(f"{row['date']} {row['title']}")
+            continue
+        start_time = _parse_start_time(row["start_time"])
+        events.append(
+            {
+                "planned_id": row["planned_id"],
+                "event_id": row["calendar_event_id"],
+                "payload": build_event_payload(
+                    summary=row["title"],
+                    workout_date=date.fromisoformat(row["date"]),
+                    start_time=start_time,
+                    duration_min=int(row["duration_min"]),
+                    description=row["notes"] or None,
+                    tzinfo=_local_tzinfo(),
+                ),
+            }
+        )
+
+    if missing_times:
+        typer.echo("Missing start_time/duration_min for:")
+        for item in missing_times:
+            typer.echo(f"- {item}")
+        raise typer.Exit("Add times to planned workouts before pushing to calendar")
+
     if dry_run:
-        typer.echo("Calendar events preview (stub):")
+        typer.echo("Calendar events preview:")
         typer.echo(json.dumps(events, indent=2, ensure_ascii=True))
         return
-    typer.echo("Calendar push not implemented yet. Use --dry-run for preview.")
+    with connect(db) as conn:
+        results = upsert_events(cfg, calendar_id=target_calendar_id, events=events)
+        for result in results:
+            if result["status"] == "failed":
+                typer.echo(f"Failed: {result['planned_id']} ({result['error']})")
+                continue
+            response = result["response"] or {}
+            conn.execute(
+                """
+                UPDATE planned_workout
+                SET calendar_id = ?, calendar_event_id = ?, calendar_html_link = ?
+                WHERE planned_id = ?
+                """,
+                (
+                    target_calendar_id,
+                    result["event_id"],
+                    response.get("htmlLink"),
+                    result["planned_id"],
+                ),
+            )
+        conn.commit()
+    typer.echo("Calendar push complete")
 
 @plan_app.command("generate")
 def plan_generate(
@@ -357,11 +483,18 @@ def plan_generate(
     reference_plan: str | None = typer.Option(None, "--reference-plan"),
     tag: list[str] = typer.Option(None, "--tag", help="Filter templates by tag (repeatable)"),
     sessions_per_week: int | None = typer.Option(None, "--sessions-per-week"),
+    start_time: str | None = typer.Option(None, "--start-time", help="HH:MM time for all workouts"),
+    duration_min: int | None = typer.Option(None, "--duration-min"),
 ) -> None:
     tag = tag or []
     start_date = start.date()
     with connect(db) as conn:
         user_id = _get_user_id(conn, user)
+        start_time_value = _parse_start_time(start_time)
+        if (start_time_value is None) ^ (duration_min is None):
+            raise typer.Exit("start_time and duration_min must be provided together")
+        if duration_min is not None and duration_min <= 0:
+            raise typer.Exit("duration_min must be > 0")
 
         if sessions_per_week is None:
             goal_rows = query(conn, "SELECT sessions_per_week FROM user_goal WHERE user_id = ?", (user_id,))
@@ -393,11 +526,20 @@ def plan_generate(
                 "SELECT template_id FROM workout_template WHERE name = ?",
                 (template_name,),
             )[0]["template_id"]
-            _upsert_planned_workout(conn, user_id, current, template_id, "generator_v1")
+            _upsert_planned_workout(
+                conn,
+                user_id,
+                current,
+                template_id,
+                "generator_v1",
+                start_time_value,
+                duration_min,
+            )
 
     typer.echo("Plan generated")
 
 
+plan_app.add_typer(calendar_app, name="calendar")
 app.add_typer(plan_app, name="plan")
 
 

@@ -557,6 +557,11 @@ Key columns
 	•	status (planned|skipped|done)
 	•	generated_by (manual|generator_v1|...)
 	•	notes
+	•	start_time (HH:MM)
+	•	duration_min
+	•	calendar_id
+	•	calendar_event_id
+	•	calendar_html_link
 
 Connection to sessions
 When a planned workout is performed:

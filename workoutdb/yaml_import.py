@@ -13,6 +13,7 @@ from .yaml_models import IntentDef, Prescription, SetPrescription, Template
 @dataclass
 class ImportResult:
     users_created: int = 0
+    intents_created: int = 0
     templates_created: int = 0
     blocks_created: int = 0
     items_created: int = 0
@@ -54,30 +55,92 @@ def _ensure_tag(conn, name: str) -> str:
     return tag_id
 
 
-def _ensure_intent(conn, intent: IntentDef, intent_ids: dict[str, str]) -> str:
+def _ensure_intent(conn, intent: IntentDef, intent_ids: dict[str, str]) -> tuple[str, bool]:
     if intent.name in intent_ids:
-        return intent_ids[intent.name]
+        return intent_ids[intent.name], False
     rows = query(conn, "SELECT intent_id FROM intent_taxonomy WHERE name = ?", (intent.name,))
     if rows:
         intent_ids[intent.name] = rows[0]["intent_id"]
-        return intent_ids[intent.name]
+        return intent_ids[intent.name], False
     intent_id = _new_id()
     parent_id = None
     if intent.parent:
-        parent_rows = query(
-            conn,
-            "SELECT intent_id FROM intent_taxonomy WHERE name = ?",
-            (intent.parent,),
-        )
-        if not parent_rows:
-            raise ValueError(f"Intent parent not found: {intent.parent}")
-        parent_id = parent_rows[0]["intent_id"]
+        if intent.parent in intent_ids:
+            parent_id = intent_ids[intent.parent]
+        else:
+            parent_rows = query(
+                conn,
+                "SELECT intent_id FROM intent_taxonomy WHERE name = ?",
+                (intent.parent,),
+            )
+            if not parent_rows:
+                raise ValueError(f"Intent parent not found: {intent.parent}")
+            parent_id = parent_rows[0]["intent_id"]
     conn.execute(
         "INSERT INTO intent_taxonomy (intent_id, parent_intent_id, name, description) VALUES (?, ?, ?, ?)",
         (intent_id, parent_id, intent.name, intent.description),
     )
     intent_ids[intent.name] = intent_id
-    return intent_id
+    return intent_id, True
+
+
+def _validate_intents(conn, intents: list[IntentDef]) -> list[IntentDef]:
+    if not intents:
+        return []
+
+    name_to_intent = {intent.name: intent for intent in intents}
+    external_parents = {
+        intent.parent
+        for intent in intents
+        if intent.parent and intent.parent not in name_to_intent
+    }
+    if external_parents:
+        placeholders = ", ".join(["?"] * len(external_parents))
+        rows = query(
+            conn,
+            f"SELECT name FROM intent_taxonomy WHERE name IN ({placeholders})",
+            tuple(sorted(external_parents)),
+        )
+        found = {row["name"] for row in rows}
+        missing = sorted(parent for parent in external_parents if parent not in found)
+        if missing:
+            raise ValueError(f"Intent parents not found: {', '.join(missing)}")
+
+    children: dict[str, list[str]] = {}
+    indegree: dict[str, int] = {name: 0 for name in name_to_intent}
+    for intent in intents:
+        if intent.parent and intent.parent in name_to_intent:
+            children.setdefault(intent.parent, []).append(intent.name)
+            indegree[intent.name] += 1
+
+    queue = sorted([name for name, degree in indegree.items() if degree == 0])
+    ordered: list[IntentDef] = []
+    while queue:
+        name = queue.pop(0)
+        ordered.append(name_to_intent[name])
+        for child in sorted(children.get(name, [])):
+            indegree[child] -= 1
+            if indegree[child] == 0:
+                queue.append(child)
+                queue.sort()
+
+    if len(ordered) != len(intents):
+        cycle = sorted([name for name, degree in indegree.items() if degree > 0])
+        raise ValueError(f"Intent parent cycle detected: {', '.join(cycle)}")
+
+    return ordered
+
+
+def _seed_intents_from_yaml(
+    conn, intents: list[IntentDef]
+) -> tuple[int, dict[str, str]]:
+    created = 0
+    intent_ids: dict[str, str] = {}
+    for intent in _validate_intents(conn, intents):
+        _, created_one = _ensure_intent(conn, intent, intent_ids)
+        if created_one:
+            created += 1
+    return created, intent_ids
 
 
 def _lookup_intent_id(conn, name: str | None, intent_ids: dict[str, str]) -> str | None:
@@ -155,20 +218,11 @@ def import_yaml(db_path: str | Path, yaml_path: Path) -> ImportResult:
 
     with connect(db_path) as conn:
         with transaction(conn):
-            intent_ids: dict[str, str] = {}
             if library.intents:
-                pending = list(library.intents)
-                while pending:
-                    progressed = False
-                    for intent in list(pending):
-                        if intent.parent and intent.parent not in intent_ids:
-                            continue
-                        _ensure_intent(conn, intent, intent_ids)
-                        pending.remove(intent)
-                        progressed = True
-                    if not progressed:
-                        missing = ", ".join(sorted({i.parent for i in pending if i.parent}))
-                        raise ValueError(f"Intent parents not found: {missing}")
+                created, intent_ids = _seed_intents_from_yaml(conn, library.intents)
+                result.intents_created += created
+            else:
+                intent_ids = {}
 
             for user in library.users:
                 rows = query(conn, "SELECT user_id FROM app_user WHERE name = ?", (user.name,))
@@ -194,6 +248,15 @@ def import_yaml(db_path: str | Path, yaml_path: Path) -> ImportResult:
                 result.planned_workouts_created += stats[1]
 
     return result
+
+
+def import_intents(db_path: str | Path, yaml_path: Path) -> int:
+    library = validate_yaml(yaml_path)
+
+    with connect(db_path) as conn:
+        with transaction(conn):
+            created, _ = _seed_intents_from_yaml(conn, library.intents)
+    return created
 
 
 def _import_plan(conn, plan, template_map: dict[str, str]) -> tuple[int, int]:

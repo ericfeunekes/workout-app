@@ -11,12 +11,13 @@ from .calendar_api import build_event_payload, list_calendars, upsert_events
 from .config import ConfigError, load_config
 from .db import connect, query
 from .migrations import apply_migrations, pending_migrations
-from .yaml_import import import_yaml
+from .yaml_import import import_intents, import_yaml
 from .yaml_io import validate_yaml
 
 app = typer.Typer(add_completion=False)
 plan_app = typer.Typer(add_completion=False)
 calendar_app = typer.Typer(add_completion=False)
+intent_app = typer.Typer(add_completion=False)
 
 
 def _new_id() -> str:
@@ -154,6 +155,118 @@ def _load_config(path: Path | None):
         raise typer.Exit(str(exc)) from exc
 
 
+def _seed_intents(conn) -> int:
+    intents = [
+        ("strength", None, "Primary strength intent"),
+        ("hypertrophy", None, "Muscle growth intent"),
+        ("conditioning", None, "Mixed intensity conditioning intent"),
+        ("endurance", None, "Sustained aerobic intent"),
+        ("skill", None, "Skill or technique focus"),
+        ("mobility", None, "Mobility or range of motion focus"),
+        ("recovery", None, "Low intensity recovery focus"),
+        ("max_strength", "strength", "High load, low reps"),
+        ("strength_endurance", "strength", "Moderate load, higher reps"),
+        ("pump", "hypertrophy", "High-rep metabolic focus"),
+        ("mechanical_tension", "hypertrophy", "Moderate reps, heavier loads"),
+        ("vo2max", "conditioning", "High-intensity interval focus"),
+        ("aerobic_base", "endurance", "Zone 2 / base aerobic"),
+        ("threshold", "endurance", "Lactate threshold focus"),
+    ]
+
+    created = 0
+    name_to_id: dict[str, str] = {}
+    rows = query(conn, "SELECT intent_id, name FROM intent_taxonomy WHERE deleted = 0")
+    for row in rows:
+        name_to_id[row["name"]] = row["intent_id"]
+
+    for name, parent, desc in intents:
+        if name in name_to_id:
+            continue
+        parent_id = None
+        if parent:
+            parent_id = name_to_id.get(parent)
+            if parent_id is None:
+                parent_id = _new_id()
+                conn.execute(
+                    "INSERT INTO intent_taxonomy (intent_id, parent_intent_id, name, description) VALUES (?, ?, ?, ?)",
+                    (parent_id, None, parent, None),
+                )
+                name_to_id[parent] = parent_id
+                created += 1
+        intent_id = _new_id()
+        conn.execute(
+            "INSERT INTO intent_taxonomy (intent_id, parent_intent_id, name, description) VALUES (?, ?, ?, ?)",
+            (intent_id, parent_id, name, desc),
+        )
+        name_to_id[name] = intent_id
+        created += 1
+    return created
+
+
+@intent_app.command("list")
+def intent_list(db: Path = typer.Option(..., "--db", help="Path to SQLite DB")) -> None:
+    with connect(db) as conn:
+        rows = query(
+            conn,
+            """
+            SELECT intent_id, parent_intent_id, name, description
+            FROM intent_taxonomy
+            WHERE deleted = 0
+            ORDER BY name
+            """,
+        )
+    if not rows:
+        typer.echo("No intents found")
+        return
+
+    intents: dict[str, dict[str, str | None]] = {}
+    children: dict[str, list[str]] = {}
+    roots: list[str] = []
+    for row in rows:
+        intent_id = row["intent_id"]
+        parent_id = row["parent_intent_id"]
+        intents[intent_id] = {
+            "name": row["name"],
+            "description": row["description"],
+            "parent_id": parent_id,
+        }
+        if parent_id:
+            children.setdefault(parent_id, []).append(intent_id)
+        else:
+            roots.append(intent_id)
+
+    def render_intent(intent_id: str, indent: str) -> None:
+        intent = intents[intent_id]
+        typer.echo(f"{indent}- {intent['name']}")
+        if intent["description"]:
+            typer.echo(f"{indent}  {intent['description']}")
+        for child_id in sorted(children.get(intent_id, []), key=lambda cid: intents[cid]["name"]):
+            render_intent(child_id, f"{indent}  ")
+
+    for root_id in sorted(roots, key=lambda rid: intents[rid]["name"]):
+        render_intent(root_id, "")
+
+
+@intent_app.command("seed")
+def intent_seed(
+    db: Path = typer.Option(..., "--db", help="Path to SQLite DB"),
+    path: Path | None = typer.Argument(None, help="Path to YAML file"),
+) -> None:
+    if path:
+        try:
+            created = import_intents(db, path)
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(1) from exc
+        typer.echo(f"Intents created: {created}")
+        return
+
+    with connect(db) as conn:
+        created = _seed_intents(conn)
+        conn.commit()
+    typer.echo(f"Intents created: {created}")
+
+
 
 @app.command("init-db")
 def init_db(db: Path = typer.Option(..., "--db", help="Path to SQLite DB")) -> None:
@@ -281,6 +394,7 @@ def import_yaml_cmd(
         raise typer.Exit(1) from exc
     typer.echo("Import complete")
     typer.echo(f"Users created: {result.users_created}")
+    typer.echo(f"Intents created: {result.intents_created}")
     typer.echo(f"Templates created: {result.templates_created}")
     typer.echo(f"Blocks created: {result.blocks_created}")
     typer.echo(f"Items created: {result.items_created}")
@@ -541,6 +655,7 @@ def plan_generate(
 
 plan_app.add_typer(calendar_app, name="calendar")
 app.add_typer(plan_app, name="plan")
+app.add_typer(intent_app, name="intent")
 
 
 if __name__ == "__main__":

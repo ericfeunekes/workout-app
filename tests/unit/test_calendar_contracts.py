@@ -7,7 +7,7 @@ import yaml
 
 
 def _load_cassette() -> list[dict]:
-    cassette = Path("/Users/ericfeunekes/coding/ai-assistant/tests/cassettes/calendar_full_flow.yaml")
+    cassette = Path(__file__).resolve().parents[1] / "cassettes" / "calendar_full_flow.yaml"
     if not cassette.exists():
         raise AssertionError(f"Missing VCR cassette: {cassette}")
     data = yaml.safe_load(cassette.read_text())

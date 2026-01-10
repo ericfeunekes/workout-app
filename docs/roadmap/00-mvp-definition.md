@@ -1,16 +1,16 @@
 # MVP Definition (what "done" means)
 
 ## MVP user stories
-1) As Eric, I can create a local SQLite DB and evolve it with migrations.
-2) As Eric, I can seed a reference library manually (templates + tags) without a bulk importer.
-3) As Eric, I can schedule workouts for myself and my wife (planned calendar in DB), or keep a plan unassigned as a reference.
-4) As Eric, I can generate or instantiate a 28-day plan for my wife based on:
+1) As a user, I can create a local SQLite DB and evolve it with migrations.
+2) As a user, I can seed a reference library manually (templates + tags) without a bulk importer.
+3) As a user, I can schedule workouts for myself and my partner (planned calendar in DB), or keep a plan unassigned as a reference.
+4) As a user, I can generate or instantiate a 28-day plan for a partner based on:
    - her goal (e.g., strength, hypertrophy, conditioning)
    - her available days
    - constraints (time cap, equipment constraints if known)
-5) As Eric, I can author and adjust plans via YAML.
-6) As Eric, I can export a printable PDF plan and re-enter results in a structured, manual-first way.
-7) As Eric, I can export my library and schedule as JSON (and optionally `.ics`).
+5) As a user, I can author and adjust plans via YAML.
+6) As a user, I can export a printable PDF plan and re-enter results in a structured, manual-first way.
+7) As a user, I can export my library and schedule as JSON (and optionally `.ics`).
 
 ## Non-goals for MVP
 - No iOS UI

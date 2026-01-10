@@ -16,10 +16,10 @@ Create a config file (default `~/.workout-app/config.toml`):
 
 ```toml
 [paths]
-app_home = "/Users/ericfeunekes/.workout-app"
+app_home = "$HOME/.workout-app"
 
 [google]
-client_secret_path = "/Users/ericfeunekes/.workout-app/google-client.json"
+client_secret_path = "$HOME/.workout-app/google-client.json"
 
 [calendar]
 default_id = "primary"

@@ -29,6 +29,13 @@ Do not start iOS work until that loop is solid.
 - Never lose raw workout text on import
 - Parsing must fail gracefully (store errors; keep raw)
 
+## Intent taxonomy
+Use the dedicated taxonomy doc as the single source of truth:
+`docs/data/intent-taxonomy.md`.
+
+Good: reuse an existing label (`conditioning` → `intervals`).
+Bad: invent a near-duplicate label (`conditioning` → `tabata intervals`).
+
 ## Testing minimum
 - Apply migrations from scratch
 - Import fixture workouts

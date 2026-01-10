@@ -10,6 +10,7 @@ import typer
 from .calendar_api import build_event_payload, list_calendars, upsert_events
 from .config import ConfigError, load_config
 from .db import connect, query
+from .extracted_json_import import import_extracted_json_dir
 from .migrations import apply_migrations, pending_migrations
 from .yaml_import import import_intents, import_yaml
 from .yaml_io import validate_yaml
@@ -299,6 +300,49 @@ def migrate(db: Path = typer.Option(..., "--db", help="Path to SQLite DB")) -> N
             typer.echo(f"- {name}")
     else:
         typer.echo("No migrations to apply")
+
+
+@app.command("import-extracted-json")
+def import_extracted_json(
+    db: Path = typer.Option(..., "--db", help="Path to SQLite DB"),
+    input_dir: Path = typer.Option(..., "--input", help="Directory of extracted JSON files"),
+    source_title: str = typer.Option("STC workouts 2025", "--source-title"),
+    source_author: str | None = typer.Option("Synergy Training Centre", "--source-author"),
+    source_kind: str = typer.Option("file_import", "--source-kind"),
+    source_original_url: str | None = typer.Option(None, "--source-original-url"),
+    source_license_note: str | None = typer.Option(None, "--source-license-note"),
+    overwrite_templates: bool = typer.Option(False, "--overwrite-templates"),
+) -> None:
+    db.parent.mkdir(parents=True, exist_ok=True)
+    apply_migrations(db)
+    try:
+        result = import_extracted_json_dir(
+            db_path=db,
+            input_dir=input_dir,
+            source_title=source_title,
+            source_author=source_author,
+            source_kind=source_kind,
+            source_original_url=source_original_url,
+            source_license_note=source_license_note,
+            overwrite_templates=overwrite_templates,
+        )
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(1) from exc
+
+    typer.echo(f"Source created: {result.source_created}")
+    typer.echo(f"Pages seen: {result.pages_seen} (invalid: {result.pages_invalid})")
+    typer.echo(f"Workouts seen: {result.workouts_seen}")
+    typer.echo(
+        f"Raw workouts created/updated: {result.raw_workouts_created}/{result.raw_workouts_updated}"
+    )
+    typer.echo(
+        "Templates created/linked/overwritten: "
+        f"{result.templates_created}/{result.templates_linked_existing}/{result.templates_overwritten}"
+    )
+    typer.echo(f"Blocks created: {result.blocks_created}")
+    typer.echo(f"Items created: {result.items_created}")
+    typer.echo(f"Exercises created: {result.exercises_created}")
 
 
 @app.command("doctor")

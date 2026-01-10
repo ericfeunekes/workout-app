@@ -5,6 +5,12 @@ Every import is stored verbatim so we can re-parse later:
 - `workout_source` describes origin and licensing.
 - `raw_workout` stores the original text + parse status.
 
+Practical convention (recommended):
+- Use **one** `workout_source` row per logical corpus (e.g., "STC workouts 2025"),
+  even if it spans multiple files (PDFs/pages).
+- Treat `raw_workout.external_ref` as a stable, human-readable key **unique within a source**,
+  e.g. `stc-workouts-2025/page-001#day-1`.
+
 ## Templates
 Templates are the structured, reusable workouts:
 - `workout_template` is the workout container.

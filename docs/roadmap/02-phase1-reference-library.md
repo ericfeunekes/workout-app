@@ -57,7 +57,7 @@ CLI:
 ```yaml
 version: 1
 users:
-  - name: "Eric"
+  - name: "User"
 
 templates:
   - name: "Upper A"
@@ -81,7 +81,7 @@ templates:
 
 plans:
   - name: "Week 1"
-    user: "Eric"
+    user: "User"
     days:
       - date: 2026-01-06
         template: "Upper A"

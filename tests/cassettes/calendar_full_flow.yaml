@@ -1,0 +1,34 @@
+interactions:
+  - request:
+      method: GET
+      uri: https://www.googleapis.com/calendar/v3/users/me/calendarList
+      body: null
+    response:
+      status:
+        code: 200
+        message: OK
+      body:
+        string: |
+          {"kind":"calendar#calendarList","items":[{"id":"primary","summary":"Primary"}]}
+  - request:
+      method: GET
+      uri: https://www.googleapis.com/calendar/v3/calendars/primary/events
+      body: null
+    response:
+      status:
+        code: 200
+        message: OK
+      body:
+        string: |
+          {"kind":"calendar#events","items":[{"id":"evt1","htmlLink":"https://example.com/event/evt1","start":{"dateTime":"2026-01-01T10:00:00Z"},"end":{"dateTime":"2026-01-01T11:00:00Z"}}]}
+  - request:
+      method: GET
+      uri: https://www.googleapis.com/calendar/v3/calendars/primary/events/evt1
+      body: null
+    response:
+      status:
+        code: 200
+        message: OK
+      body:
+        string: |
+          {"kind":"calendar#event","id":"evt1","htmlLink":"https://example.com/event/evt1"}

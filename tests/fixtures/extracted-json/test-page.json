@@ -1,0 +1,72 @@
+{
+  "page_source": "test-page",
+  "title_raw": "STC- Phase 1: Week 4-6",
+  "athlete": "Test Athlete",
+  "program_name": "STC Phase 1",
+  "week_range": "4-6",
+  "workouts": [
+    {
+      "template_name": "STC Phase 1 — Week 4–6 — Day 1",
+      "metadata": {
+        "program_name": "STC Phase 1",
+        "week_range": "4-6",
+        "day_number": 1,
+        "page_source": "test-page",
+        "title_raw": "STC- Phase 1: Week 4-6",
+        "athlete": "Test Athlete"
+      },
+      "blocks": [
+        {
+          "block_index": 1,
+          "block_name": "A",
+          "block_type": "strength",
+          "structure_type": "straight_sets",
+          "intent": {},
+          "items": [
+            {
+              "item_index": 1,
+              "exercise_name": "Deadlift",
+              "prescription": {
+                "sets": 4,
+                "reps": "10, 8, 6, 4"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "template_name": "STC Phase 1 — Week 4–6 — Day 2",
+      "metadata": {
+        "program_name": "STC Phase 1",
+        "week_range": "4-6",
+        "day_number": 2,
+        "page_source": "test-page",
+        "title_raw": "STC- Phase 1: Week 4-6",
+        "athlete": "Test Athlete"
+      },
+      "blocks": [
+        {
+          "block_index": 1,
+          "block_name": "A",
+          "block_type": "conditioning",
+          "structure_type": "intervals",
+          "intent": {
+            "rounds": 10,
+            "work_sec": 20,
+            "rest_sec": 10
+          },
+          "items": [
+            {
+              "item_index": 1,
+              "exercise_name": "Skipping tabatas",
+              "prescription": {
+                "notes": "10 rounds x 20 sec fast, 10 sec rest"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

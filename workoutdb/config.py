@@ -124,10 +124,10 @@ def load_config(path: Optional[Path] = None) -> AppConfig:
 def config_example() -> str:
     return """
 [paths]
-app_home = "/Users/ericfeunekes/.workout-app"
+    app_home = "~/.workout-app"
 
 [google]
-client_secret_path = "/Users/ericfeunekes/.workout-app/google-client.json"
+    client_secret_path = "~/.workout-app/google-client.json"
 
 [calendar]
 default_id = "primary"

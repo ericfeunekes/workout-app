@@ -1,0 +1,45 @@
+name: CI
+
+# Narrow by design — see docs/WORKFLOW.md "CI scope".
+# Most validation happens locally via pre-commit and pre-push hooks.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  server:
+    name: Server (lint + tests)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+
+      - name: Set up Python
+        run: uv python install 3.11
+
+      - name: Install dependencies
+        run: uv sync --extra dev
+
+      # Swift is needed so the Swift schema package tests (invoked from Python contract
+      # tests) actually run in CI instead of skipping. Ubuntu-hosted, 1x multiplier.
+      - name: Install Swift
+        uses: SwiftyLab/setup-swift@latest
+        with:
+          swift-version: "6.0"
+
+      - name: ruff check
+        run: uv run ruff check .
+
+      - name: ruff format --check
+        run: uv run ruff format --check .
+
+      - name: import-linter (architectural boundaries)
+        run: uv run lint-imports
+
+      - name: pytest (includes `swift test` via contract tests)
+        run: uv run pytest

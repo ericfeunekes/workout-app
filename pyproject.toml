@@ -1,25 +1,25 @@
 [project]
-name = "workoutdb"
-version = "0.1.0"
-description = "Local-first workout planning and logging system"
+name = "workoutdb-server"
+version = "0.0.1"
+description = "WorkoutDB home server \u2014 FastAPI + SQLite exchange layer between Claude and the iOS app"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-  "typer>=0.12",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.32",
   "pydantic>=2.6",
-  "PyYAML>=6.0",
-  "google-api-python-client>=2.128",
-  "google-auth>=2.29",
-  "google-auth-oauthlib>=1.2",
+  "pydantic-settings>=2.4",
+  "sqlalchemy>=2.0",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.2",
+  "httpx>=0.27",
+  "ruff>=0.6",
+  "import-linter>=2.0",
+  "pre-commit>=3.7",
 ]
-
-[project.scripts]
-workoutdb = "workoutdb.cli:app"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
@@ -30,13 +30,51 @@ line-length = 100
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-filterwarnings = [
-  "ignore:.*setName.*deprecated.*:DeprecationWarning:httplib2.*",
-  "ignore:.*leaveWhitespace.*deprecated.*:DeprecationWarning:httplib2.*",
-  "ignore:.*setParseAction.*deprecated.*:DeprecationWarning:httplib2.*",
-  "ignore:.*addParseAction.*deprecated.*:DeprecationWarning:httplib2.*",
-  "ignore:.*delimitedList.*deprecated.*:DeprecationWarning:httplib2.*",
-]
 
 [tool.setuptools]
-packages = ["workoutdb"]
+package-dir = {"" = "server"}
+packages = ["workoutdb_server"]
+
+# Architectural boundaries enforced at lint time. Every new module/package must either
+# fit an existing contract or add a new one. See docs/WORKFLOW.md § "Architectural enforcement".
+# Run: `uv run lint-imports`
+[tool.importlinter]
+root_package = "workoutdb_server"
+
+# Layer 1 — config and logging_setup are the foundation.
+# Import nothing repo-local; imported by everything else.
+[[tool.importlinter.contracts]]
+name = "foundation has no repo-local imports"
+type = "forbidden"
+source_modules = [
+  "workoutdb_server.config",
+  "workoutdb_server.logging_setup",
+]
+forbidden_modules = [
+  "workoutdb_server.api",
+  "workoutdb_server.db",
+  "workoutdb_server.models",
+  "workoutdb_server.migrations",
+  "workoutdb_server.sync",
+]
+
+# Layer 2 — db + models + migrations sit above config, below api. Never reach up into api.
+[[tool.importlinter.contracts]]
+name = "data layer never depends on api layer"
+type = "forbidden"
+source_modules = [
+  "workoutdb_server.db",
+  "workoutdb_server.models",
+  "workoutdb_server.migrations",
+]
+forbidden_modules = ["workoutdb_server.api"]
+
+# Layer 3 — api is the outermost layer. Depends on everything below; nothing depends on it.
+# (Enforced by the contracts above — no explicit forbidden rule needed here.)
+
+# sync, when it exists, sits with api (outermost). Same rule.
+[[tool.importlinter.contracts]]
+name = "sync layer never depends on api routes directly"
+type = "forbidden"
+source_modules = ["workoutdb_server.sync"]
+forbidden_modules = ["workoutdb_server.api"]

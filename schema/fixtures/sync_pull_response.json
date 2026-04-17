@@ -1,0 +1,49 @@
+{
+  "workouts": [],
+  "exercises": [
+    {
+      "id": "back-squat",
+      "name": "Back Squat",
+      "notes": null,
+      "demo_url": null
+    }
+  ],
+  "user_parameters": [
+    {
+      "id": "66666666-6666-6666-6666-666666666666",
+      "user_id": "22222222-2222-2222-2222-222222222222",
+      "key": "bodyweight_kg",
+      "value": "81.5",
+      "updated_at": "2026-04-17T07:00:00Z",
+      "source": "claude"
+    }
+  ],
+  "last_performed": [
+    {
+      "exercise_id": "back-squat",
+      "last_set_logs": [
+        {
+          "id": "77777777-7777-7777-7777-777777777777",
+          "workout_item_id": "44444444-4444-4444-4444-444444444444",
+          "set_index": 1,
+          "reps": 5,
+          "weight": 100.0,
+          "weight_unit": "kg",
+          "duration_sec": null,
+          "distance_m": null,
+          "rpe": 7.5,
+          "is_warmup": false,
+          "started_at": null,
+          "completed_at": "2026-04-10T07:15:00Z",
+          "hr_avg_bpm": 142,
+          "hr_max_bpm": 168,
+          "cadence_avg_spm": null,
+          "motion_samples_ref": null,
+          "notes": null
+        }
+      ],
+      "prescription_json": "{\"sets\": 5, \"reps\": 5, \"load_kg\": 100}"
+    }
+  ],
+  "server_time": "2026-04-17T08:00:00Z"
+}

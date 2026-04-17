@@ -3,6 +3,23 @@ runs/
 __pycache__/
 *.pyc
 
+# Ephemeral / agent harness
+scratch/
+.codex/
+.xskills/
+.claude/settings.local.json
+
+# Secrets
+.env
+*.db
+*.db-journal
+
+# Swift build artifacts
+.build/
+.swiftpm/
+DerivedData/
+*.xcodeproj/xcuserdata/
+
 # Python
 .venv/
 env/

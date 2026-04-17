@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "code-analysis@ai-marketplace": true,
+    "repo-setup-improve@ai-marketplace": false
+  }
+}

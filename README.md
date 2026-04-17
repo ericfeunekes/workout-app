@@ -1,43 +1,23 @@
 # WorkoutDB
 
-Local-first workout planning/logging system (SQLite + CLI).
+A workout system built on the **"dumb app, smart conversation"** philosophy:
 
-## Quickstart
+- **Claude is the brain.** Programming, periodization, progression, alternatives, and readiness all happen in conversation.
+- **The app is dumb.** It shows the workout, times it, logs what happened. Nothing more.
+- **The home server is the exchange layer.** Claude pushes plans in; the app pulls plans and pushes results back.
 
-```bash
-uv venv
-uv pip install -e .
-workoutdb --help
-```
+## Monorepo layout
 
-## Google Calendar (optional)
+- `server/` — Python + FastAPI + SQLite home server (schema, API, sync)
+- `app/` — SwiftData iOS app (the dumb client)
+- `schema/` — shared schema definitions between server and app
+- `docs/` — architecture, testing contract, and the v2 spec
+- `tests/` — server tests (iOS tests live in `app/`)
 
-Create a config file (default `~/.workout-app/config.toml`):
+## Status
 
-```toml
-[paths]
-app_home = "$HOME/.workout-app"
+**Pre-v0.** Architecture is specced and accepted. Implementation has not started yet. See `docs/specs/v2-architecture.md` for the full target; see `docs/ARCHITECTURE.md` for the system map.
 
-[google]
-client_secret_path = "$HOME/.workout-app/google-client.json"
+## Agents
 
-[calendar]
-default_id = "primary"
-```
-
-Then list calendars and push timed workouts:
-
-```bash
-workoutdb plan calendar list
-workoutdb plan push-calendar --db path/to/workout.db --user "Name" --no-dry-run
-```
-
-Planned workouts must include `start_time` and `duration_min` to be pushed.
-
-## Testing
-
-See `docs/testing-pyramid.md` for the full testing structure and how to run it.
-
-## Data model
-
-See `docs/data-model/README.md` for the current model overview.
+Start at `AGENTS.md` (root) or `docs/AGENTS.md` (docs navigator).

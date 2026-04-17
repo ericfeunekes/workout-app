@@ -1,0 +1,44 @@
+# Local quality gates. Install once with:
+#   pre-commit install --hook-type pre-commit --hook-type pre-push
+#
+# Pre-commit: fast formatters and linters on staged files.
+# Pre-push:   full test suite before anything leaves the machine.
+#
+# See docs/WORKFLOW.md for the rationale (local-first hygiene, minimal CI).
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=512]
+
+  - repo: local
+    hooks:
+      - id: import-linter
+        name: import-linter (architectural boundaries)
+        entry: uv run lint-imports
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+
+      - id: pytest
+        name: pytest (server tests)
+        entry: uv run pytest
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true

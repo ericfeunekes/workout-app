@@ -1,0 +1,322 @@
+// Core entity DTOs — wire types that mirror the server's Pydantic schemas.
+//
+// Design choices:
+//   • Snake_case JSON mapped to camelCase Swift via CodingKeys.
+//   • JSON blob fields (prescription_json, timing_config_json, tags_json, etc.)
+//     stay as String. The server treats them as opaque; so does the client. Parse
+//     them separately per the documented shapes in docs/specs/v2-architecture.md.
+//   • Dates are ISO-8601 strings. JSONDecoder should use .iso8601 strategy.
+//   • All types are public + Sendable + Codable + Equatable for test-friendliness.
+
+import Foundation
+
+public struct AppUser: Codable, Sendable, Equatable {
+    public let id: String
+    public let name: String
+    public let createdAt: Date
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case createdAt = "created_at"
+    }
+
+    public init(id: String, name: String, createdAt: Date) {
+        self.id = id
+        self.name = name
+        self.createdAt = createdAt
+    }
+}
+
+public struct Exercise: Codable, Sendable, Equatable {
+    public let id: String
+    public let name: String
+    public let notes: String?
+    public let demoUrl: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case notes
+        case demoUrl = "demo_url"
+    }
+
+    public init(id: String, name: String, notes: String? = nil, demoUrl: String? = nil) {
+        self.id = id
+        self.name = name
+        self.notes = notes
+        self.demoUrl = demoUrl
+    }
+}
+
+public struct ExerciseAlternative: Codable, Sendable, Equatable {
+    public let id: String
+    public let exerciseId: String
+    public let reason: String
+    public let parameterOverridesJson: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case exerciseId = "exercise_id"
+        case reason
+        case parameterOverridesJson = "parameter_overrides_json"
+    }
+
+    public init(
+        id: String,
+        exerciseId: String,
+        reason: String,
+        parameterOverridesJson: String? = nil
+    ) {
+        self.id = id
+        self.exerciseId = exerciseId
+        self.reason = reason
+        self.parameterOverridesJson = parameterOverridesJson
+    }
+}
+
+public struct WorkoutItem: Codable, Sendable, Equatable {
+    public let id: String
+    public let position: Int
+    public let exerciseId: String
+    public let prescriptionJson: String
+    public let alternatives: [ExerciseAlternative]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case position
+        case exerciseId = "exercise_id"
+        case prescriptionJson = "prescription_json"
+        case alternatives
+    }
+
+    public init(
+        id: String,
+        position: Int,
+        exerciseId: String,
+        prescriptionJson: String,
+        alternatives: [ExerciseAlternative] = []
+    ) {
+        self.id = id
+        self.position = position
+        self.exerciseId = exerciseId
+        self.prescriptionJson = prescriptionJson
+        self.alternatives = alternatives
+    }
+}
+
+public struct Block: Codable, Sendable, Equatable {
+    public let id: String
+    public let position: Int
+    public let parentBlockId: String?
+    public let name: String?
+    public let timingMode: TimingMode
+    public let timingConfigJson: String
+    public let rounds: Int?
+    public let roundsRepSchemeJson: String?
+    public let notes: String?
+    public let workoutItems: [WorkoutItem]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case position
+        case parentBlockId = "parent_block_id"
+        case name
+        case timingMode = "timing_mode"
+        case timingConfigJson = "timing_config_json"
+        case rounds
+        case roundsRepSchemeJson = "rounds_rep_scheme_json"
+        case notes
+        case workoutItems = "workout_items"
+    }
+
+    public init(
+        id: String,
+        position: Int,
+        parentBlockId: String? = nil,
+        name: String? = nil,
+        timingMode: TimingMode,
+        timingConfigJson: String,
+        rounds: Int? = nil,
+        roundsRepSchemeJson: String? = nil,
+        notes: String? = nil,
+        workoutItems: [WorkoutItem] = []
+    ) {
+        self.id = id
+        self.position = position
+        self.parentBlockId = parentBlockId
+        self.name = name
+        self.timingMode = timingMode
+        self.timingConfigJson = timingConfigJson
+        self.rounds = rounds
+        self.roundsRepSchemeJson = roundsRepSchemeJson
+        self.notes = notes
+        self.workoutItems = workoutItems
+    }
+}
+
+public struct Workout: Codable, Sendable, Equatable {
+    public let id: String
+    public let userId: String
+    public let name: String
+    public let scheduledDate: String?
+    public let status: WorkoutStatus
+    public let source: WorkoutSource
+    public let notes: String?
+    public let tagsJson: String?
+    public let createdAt: Date
+    public let completedAt: Date?
+    public let blocks: [Block]
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userId = "user_id"
+        case name
+        case scheduledDate = "scheduled_date"
+        case status
+        case source
+        case notes
+        case tagsJson = "tags_json"
+        case createdAt = "created_at"
+        case completedAt = "completed_at"
+        case blocks
+    }
+
+    public init(
+        id: String,
+        userId: String,
+        name: String,
+        scheduledDate: String? = nil,
+        status: WorkoutStatus,
+        source: WorkoutSource,
+        notes: String? = nil,
+        tagsJson: String? = nil,
+        createdAt: Date,
+        completedAt: Date? = nil,
+        blocks: [Block] = []
+    ) {
+        self.id = id
+        self.userId = userId
+        self.name = name
+        self.scheduledDate = scheduledDate
+        self.status = status
+        self.source = source
+        self.notes = notes
+        self.tagsJson = tagsJson
+        self.createdAt = createdAt
+        self.completedAt = completedAt
+        self.blocks = blocks
+    }
+}
+
+public struct SetLog: Codable, Sendable, Equatable {
+    public let id: String
+    public let workoutItemId: String
+    public let setIndex: Int
+    public let reps: Int?
+    public let weight: Double?
+    public let weightUnit: WeightUnit?
+    public let durationSec: Double?
+    public let distanceM: Double?
+    public let rpe: Double?
+    public let isWarmup: Bool
+    public let startedAt: Date?
+    public let completedAt: Date
+    public let hrAvgBpm: Int?
+    public let hrMaxBpm: Int?
+    public let cadenceAvgSpm: Int?
+    public let motionSamplesRef: String?
+    public let notes: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case workoutItemId = "workout_item_id"
+        case setIndex = "set_index"
+        case reps
+        case weight
+        case weightUnit = "weight_unit"
+        case durationSec = "duration_sec"
+        case distanceM = "distance_m"
+        case rpe
+        case isWarmup = "is_warmup"
+        case startedAt = "started_at"
+        case completedAt = "completed_at"
+        case hrAvgBpm = "hr_avg_bpm"
+        case hrMaxBpm = "hr_max_bpm"
+        case cadenceAvgSpm = "cadence_avg_spm"
+        case motionSamplesRef = "motion_samples_ref"
+        case notes
+    }
+
+    public init(
+        id: String,
+        workoutItemId: String,
+        setIndex: Int,
+        reps: Int? = nil,
+        weight: Double? = nil,
+        weightUnit: WeightUnit? = nil,
+        durationSec: Double? = nil,
+        distanceM: Double? = nil,
+        rpe: Double? = nil,
+        isWarmup: Bool = false,
+        startedAt: Date? = nil,
+        completedAt: Date,
+        hrAvgBpm: Int? = nil,
+        hrMaxBpm: Int? = nil,
+        cadenceAvgSpm: Int? = nil,
+        motionSamplesRef: String? = nil,
+        notes: String? = nil
+    ) {
+        self.id = id
+        self.workoutItemId = workoutItemId
+        self.setIndex = setIndex
+        self.reps = reps
+        self.weight = weight
+        self.weightUnit = weightUnit
+        self.durationSec = durationSec
+        self.distanceM = distanceM
+        self.rpe = rpe
+        self.isWarmup = isWarmup
+        self.startedAt = startedAt
+        self.completedAt = completedAt
+        self.hrAvgBpm = hrAvgBpm
+        self.hrMaxBpm = hrMaxBpm
+        self.cadenceAvgSpm = cadenceAvgSpm
+        self.motionSamplesRef = motionSamplesRef
+        self.notes = notes
+    }
+}
+
+public struct UserParameter: Codable, Sendable, Equatable {
+    public let id: String
+    public let userId: String
+    public let key: String
+    public let value: String
+    public let updatedAt: Date
+    public let source: UserParameterSource
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case userId = "user_id"
+        case key
+        case value
+        case updatedAt = "updated_at"
+        case source
+    }
+
+    public init(
+        id: String,
+        userId: String,
+        key: String,
+        value: String,
+        updatedAt: Date,
+        source: UserParameterSource
+    ) {
+        self.id = id
+        self.userId = userId
+        self.key = key
+        self.value = value
+        self.updatedAt = updatedAt
+        self.source = source
+    }
+}

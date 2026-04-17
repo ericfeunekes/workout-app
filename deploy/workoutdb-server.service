@@ -1,0 +1,23 @@
+[Unit]
+Description=WorkoutDB home server
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=workoutdb
+Group=workoutdb
+WorkingDirectory=/opt/workoutdb
+EnvironmentFile=/etc/workoutdb/env
+ExecStart=/opt/workoutdb/.venv/bin/uvicorn workoutdb_server.main:app --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=3
+# Harden: no privilege escalation, read-only system paths, writable only to the DB directory.
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/lib/workoutdb
+
+[Install]
+WantedBy=multi-user.target

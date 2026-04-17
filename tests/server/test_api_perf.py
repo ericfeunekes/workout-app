@@ -1,0 +1,151 @@
+"""Performance regression tests — pin expected query counts.
+
+These are not load tests. They count emitted queries on representative paths so a
+future change that reintroduces N+1 fails the build.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+
+from sqlalchemy import event
+from sqlalchemy.orm import Session
+
+from workoutdb_server.models import (
+    AppUser,
+    Block,
+    Exercise,
+    SetLog,
+    Workout,
+    WorkoutItem,
+)
+
+
+class QueryCounter:
+    def __init__(self) -> None:
+        self.count = 0
+
+    def __call__(self, *_args, **_kwargs) -> None:
+        self.count += 1
+
+
+def _seed_workout_with_exercises(engine, n_exercises: int = 5) -> tuple[str, list[str]]:
+    """Seed a completed workout that has N exercises, each with 3 set_logs."""
+    with Session(engine) as session:
+        user = AppUser(name="Eric")
+        session.add(user)
+        session.flush()
+
+        exercise_ids: list[str] = []
+        workout = Workout(
+            user_id=user.id,
+            name="Past",
+            status="completed",
+            source="claude",
+            completed_at=datetime(2026, 4, 10, 7),
+        )
+        session.add(workout)
+        session.flush()
+        block = Block(
+            workout_id=workout.id,
+            position=0,
+            timing_mode="straight_sets",
+            timing_config_json="{}",
+        )
+        session.add(block)
+        session.flush()
+
+        for i in range(n_exercises):
+            exercise = Exercise(id=f"ex-{i}", name=f"Exercise {i}")
+            session.add(exercise)
+            exercise_ids.append(exercise.id)
+            item = WorkoutItem(
+                block_id=block.id,
+                position=i,
+                exercise_id=exercise.id,
+                prescription_json="{}",
+            )
+            session.add(item)
+            session.flush()
+            for set_index in range(1, 4):
+                session.add(
+                    SetLog(
+                        workout_item_id=item.id,
+                        set_index=set_index,
+                        reps=5,
+                        weight=100.0,
+                        weight_unit="kg",
+                        completed_at=datetime(2026, 4, 10, 7, 15),
+                    )
+                )
+
+        # Add a future planned workout referencing the same exercises — triggers last_performed.
+        future = Workout(
+            user_id=user.id,
+            name="Future",
+            status="planned",
+            source="claude",
+            scheduled_date="2026-04-20",
+        )
+        session.add(future)
+        session.flush()
+        fblock = Block(
+            workout_id=future.id,
+            position=0,
+            timing_mode="straight_sets",
+            timing_config_json="{}",
+        )
+        session.add(fblock)
+        session.flush()
+        for i, exercise_id in enumerate(exercise_ids):
+            session.add(
+                WorkoutItem(
+                    block_id=fblock.id,
+                    position=i,
+                    exercise_id=exercise_id,
+                    prescription_json="{}",
+                )
+            )
+        session.commit()
+        return user.id, exercise_ids
+
+
+def test_sync_pull_uses_bounded_queries(client, test_engine) -> None:
+    """sync/pull must scale with O(1) queries in exercise count, not O(N).
+
+    Pre-optimization: ~2N+M queries for N exercises. Post: small fixed count.
+    """
+    user_id, _ = _seed_workout_with_exercises(test_engine, n_exercises=5)
+
+    counter = QueryCounter()
+    event.listen(test_engine, "before_cursor_execute", counter)
+    try:
+        response = client.get(f"/api/sync/pull?user_id={user_id}")
+    finally:
+        event.remove(test_engine, "before_cursor_execute", counter)
+
+    assert response.status_code == 200
+    # Budget: workouts + exercises + user_parameters + last_performed (2 queries) +
+    # eager-load sidecars + overhead. Concretely well under 15. If a future change
+    # reintroduces N+1 this blows past the cap.
+    assert counter.count < 15, f"sync/pull issued {counter.count} queries (expected <15)"
+
+
+def test_get_workout_uses_bounded_queries(client, test_engine) -> None:
+    """GET /api/workouts/:id must not lazy-load blocks → items → alternatives."""
+    user_id, _ = _seed_workout_with_exercises(test_engine, n_exercises=6)
+
+    # Grab a workout id.
+    workouts = client.get(f"/api/workouts?user_id={user_id}").json()
+    wid = workouts[0]["id"]
+
+    counter = QueryCounter()
+    event.listen(test_engine, "before_cursor_execute", counter)
+    try:
+        response = client.get(f"/api/workouts/{wid}")
+    finally:
+        event.remove(test_engine, "before_cursor_execute", counter)
+
+    assert response.status_code == 200
+    # Workout + blocks + items + alternatives = at most 4 queries (selectinload fan-out).
+    assert counter.count <= 5, f"GET /api/workouts/:id issued {counter.count} queries (expected ≤5)"

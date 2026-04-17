@@ -86,22 +86,37 @@ def test_user_parameter_source_parity(swift_source: str) -> None:
     assert swift == {"claude", "app_log", "manual"}
 
 
-def test_swift_tests_pass() -> None:
+def _has_xcode() -> bool:
+    """Full Xcode (not just Command Line Tools) is required to run `swift test` on macOS.
+
+    Swift Testing and XCTest ship their runtime dylibs only with Xcode. Plain CLT has
+    the framework headers but the test bundle won't load at runtime.
+    """
+    result = subprocess.run(["xcode-select", "-p"], capture_output=True, text=True)
+    if result.returncode != 0:
+        return False
+    path = result.stdout.strip()
+    return path.endswith(".app/Contents/Developer") or "/Xcode" in path
+
+
+def test_swift_package_healthy() -> None:
     """Defensive — if the Swift package itself is broken, it must fail the Python suite too.
 
-    This makes `pytest` a one-stop signal: green pytest = server AND schema package healthy.
-    Skipped when swift is unavailable (e.g., non-macOS CI).
+    On machines with Xcode, run the Swift test suite (runtime validation of Codable
+    round-trips and fixture decoding). On CLT-only machines, fall back to `swift build`
+    which still catches compile-time drift in the DTOs. Skipped when swift is absent.
     """
     if subprocess.run(["which", "swift"], capture_output=True).returncode != 0:
         pytest.skip("swift CLI not available")
 
+    command = ["swift", "test"] if _has_xcode() else ["swift", "build"]
     result = subprocess.run(
-        ["swift", "test"],
+        command,
         cwd=_SCHEMA_ROOT,
         capture_output=True,
         text=True,
         timeout=180,
     )
-    assert (
-        result.returncode == 0
-    ), f"`swift test` failed in schema/:\n{result.stdout}\n{result.stderr}"
+    assert result.returncode == 0, (
+        f"`{' '.join(command)}` failed in schema/:\n{result.stdout}\n{result.stderr}"
+    )

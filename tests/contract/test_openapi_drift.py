@@ -27,9 +27,9 @@ def live_openapi(monkeypatch: pytest.MonkeyPatch) -> dict:
 
 
 def test_openapi_committed_matches_live(live_openapi: dict) -> None:
-    assert (
-        _SCHEMA_PATH.exists()
-    ), f"{_SCHEMA_PATH} missing — run the regen command in schema/README.md"
+    assert _SCHEMA_PATH.exists(), (
+        f"{_SCHEMA_PATH} missing — run the regen command in schema/README.md"
+    )
 
     committed = json.loads(_SCHEMA_PATH.read_text())
     if committed != live_openapi:

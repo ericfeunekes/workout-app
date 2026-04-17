@@ -81,6 +81,9 @@ class Workout(Base):
     notes: Mapped[str | None] = mapped_column(String)
     tags_json: Mapped[str | None] = mapped_column(String)
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
+    )
     completed_at: Mapped[datetime | None] = mapped_column(DateTime)
 
     user: Mapped[AppUser] = relationship(back_populates="workouts")
@@ -99,6 +102,7 @@ class Workout(Base):
         Index("idx_workout_user_scheduled", "user_id", "scheduled_date"),
         Index("idx_workout_user_status", "user_id", "status"),
         Index("idx_workout_user_completed", "user_id", "completed_at"),
+        Index("idx_workout_user_updated", "user_id", "updated_at"),
     )
 
 

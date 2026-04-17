@@ -13,12 +13,14 @@ from workoutdb_server.main import app
 from workoutdb_server.migrations import apply_migrations
 
 _REAL_TOKEN = "real-token-xyz-16chars"
+_REAL_USER_ID = "22222222-2222-2222-2222-222222222222"
 
 
 @pytest.fixture
 def auth_client(tmp_path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     # Provide real settings via env so lifespan + auth both see the same token.
     monkeypatch.setenv("WORKOUTDB_BEARER_TOKEN", _REAL_TOKEN)
+    monkeypatch.setenv("WORKOUTDB_USER_ID", _REAL_USER_ID)
     monkeypatch.setenv("WORKOUTDB_DB_PATH", str(tmp_path / "test.db"))
     get_settings.cache_clear()
 

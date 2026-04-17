@@ -12,7 +12,6 @@ from sqlalchemy import event
 from sqlalchemy.orm import Session
 
 from workoutdb_server.models import (
-    AppUser,
     Block,
     Exercise,
     SetLog,
@@ -29,16 +28,12 @@ class QueryCounter:
         self.count += 1
 
 
-def _seed_workout_with_exercises(engine, n_exercises: int = 5) -> tuple[str, list[str]]:
+def _seed_workout_with_exercises(engine, user_id: str, n_exercises: int = 5) -> list[str]:
     """Seed a completed workout that has N exercises, each with 3 set_logs."""
     with Session(engine) as session:
-        user = AppUser(name="Eric")
-        session.add(user)
-        session.flush()
-
         exercise_ids: list[str] = []
         workout = Workout(
-            user_id=user.id,
+            user_id=user_id,
             name="Past",
             status="completed",
             source="claude",
@@ -81,7 +76,7 @@ def _seed_workout_with_exercises(engine, n_exercises: int = 5) -> tuple[str, lis
 
         # Add a future planned workout referencing the same exercises — triggers last_performed.
         future = Workout(
-            user_id=user.id,
+            user_id=user_id,
             name="Future",
             status="planned",
             source="claude",
@@ -107,20 +102,20 @@ def _seed_workout_with_exercises(engine, n_exercises: int = 5) -> tuple[str, lis
                 )
             )
         session.commit()
-        return user.id, exercise_ids
+        return exercise_ids
 
 
-def test_sync_pull_uses_bounded_queries(client, test_engine) -> None:
+def test_sync_pull_uses_bounded_queries(client, test_engine, test_user_id) -> None:
     """sync/pull must scale with O(1) queries in exercise count, not O(N).
 
     Pre-optimization: ~2N+M queries for N exercises. Post: small fixed count.
     """
-    user_id, _ = _seed_workout_with_exercises(test_engine, n_exercises=5)
+    _seed_workout_with_exercises(test_engine, test_user_id, n_exercises=5)
 
     counter = QueryCounter()
     event.listen(test_engine, "before_cursor_execute", counter)
     try:
-        response = client.get(f"/api/sync/pull?user_id={user_id}")
+        response = client.get("/api/sync/pull")
     finally:
         event.remove(test_engine, "before_cursor_execute", counter)
 
@@ -131,12 +126,12 @@ def test_sync_pull_uses_bounded_queries(client, test_engine) -> None:
     assert counter.count < 15, f"sync/pull issued {counter.count} queries (expected <15)"
 
 
-def test_get_workout_uses_bounded_queries(client, test_engine) -> None:
+def test_get_workout_uses_bounded_queries(client, test_engine, test_user_id) -> None:
     """GET /api/workouts/:id must not lazy-load blocks → items → alternatives."""
-    user_id, _ = _seed_workout_with_exercises(test_engine, n_exercises=6)
+    _seed_workout_with_exercises(test_engine, test_user_id, n_exercises=6)
 
     # Grab a workout id.
-    workouts = client.get(f"/api/workouts?user_id={user_id}").json()
+    workouts = client.get("/api/workouts").json()
     wid = workouts[0]["id"]
 
     counter = QueryCounter()

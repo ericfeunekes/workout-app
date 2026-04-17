@@ -10,12 +10,15 @@ from workoutdb_server.config import Settings, get_settings
 def test_settings_load_with_env(monkeypatch: pytest.MonkeyPatch) -> None:
     get_settings.cache_clear()
     monkeypatch.setenv("WORKOUTDB_BEARER_TOKEN", "test-token-1234567890")
+    monkeypatch.setenv("WORKOUTDB_USER_ID", "11111111-1111-1111-1111-111111111111")
     monkeypatch.setenv("WORKOUTDB_DB_PATH", "/tmp/test.db")
     monkeypatch.setenv("WORKOUTDB_PORT", "9090")
 
     settings = Settings()
 
     assert settings.bearer_token.get_secret_value() == "test-token-1234567890"
+    assert settings.user_id == "11111111-1111-1111-1111-111111111111"
+    assert settings.user_name == "Eric"  # default
     assert settings.db_path == Path("/tmp/test.db")
     assert settings.port == 9090
     assert settings.debug is False  # default

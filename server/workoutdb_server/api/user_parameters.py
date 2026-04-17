@@ -1,32 +1,29 @@
-"""User parameters endpoints. Append-only log; latest value is MAX(updated_at) per key."""
+"""User parameters endpoints. Append-only log; latest value is MAX(updated_at) per key.
+
+Caller's user_id is resolved from the bearer token (ADR-2026-04-17).
+"""
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, Query
 from sqlalchemy import func, select
 
-from workoutdb_server.api.deps import Auth, DbSession
+from workoutdb_server.api.deps import CurrentUserId, DbSession
 from workoutdb_server.api.schemas import UserParameterIn, UserParameterRead
-from workoutdb_server.models import AppUser, UserParameter
+from workoutdb_server.models import UserParameter
 
 router = APIRouter(prefix="/api/user-parameters", tags=["user_parameters"])
 
 
-@router.post("", response_model=list[UserParameterRead], dependencies=[Auth])
-def append_parameters(payload: list[UserParameterIn], db: DbSession) -> list[UserParameter]:
+@router.post("", response_model=list[UserParameterRead])
+def append_parameters(
+    payload: list[UserParameterIn], db: DbSession, user_id: CurrentUserId
+) -> list[UserParameter]:
     """Always inserts. Never updates. That's the contract."""
-    # Validate all referenced users up front so the whole batch is atomic.
-    unknown = {item.user_id for item in payload if db.get(AppUser, item.user_id) is None}
-    if unknown:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unknown user_id(s): {sorted(unknown)}",
-        )
-
     inserted: list[UserParameter] = []
     for item in payload:
         row = UserParameter(
-            user_id=item.user_id,
+            user_id=user_id,
             key=item.key,
             value=item.value,
             updated_at=item.updated_at or datetime.now(UTC),
@@ -40,10 +37,10 @@ def append_parameters(payload: list[UserParameterIn], db: DbSession) -> list[Use
     return inserted
 
 
-@router.get("", response_model=list[UserParameterRead], dependencies=[Auth])
+@router.get("", response_model=list[UserParameterRead])
 def list_parameters(
     db: DbSession,
-    user_id: str = Query(..., description="Required — scopes the query to one user."),
+    user_id: CurrentUserId,
     latest: bool = Query(False, description="If true, return latest-per-key for the user."),
     key: str | None = Query(None, description="Filter to a single key (for history queries)."),
     since: datetime | None = Query(None, description="Return rows with updated_at > since."),

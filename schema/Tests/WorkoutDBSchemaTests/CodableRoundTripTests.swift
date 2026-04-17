@@ -80,6 +80,7 @@ struct CodableRoundTripTests {
             source: .claude,
             tagsJson: #"["hypertrophy_block_2"]"#,
             createdAt: createdAt,
+            updatedAt: createdAt,
             blocks: [
                 Block(
                     id: "b-1",

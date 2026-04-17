@@ -12,13 +12,21 @@ from workoutdb_server.api.deps import get_db, verify_bearer
 from workoutdb_server.config import get_settings
 from workoutdb_server.main import app
 from workoutdb_server.migrations import apply_migrations
+from workoutdb_server.models import AppUser
 
 _TEST_TOKEN = "test-token-1234567890"
+_TEST_USER_ID = "11111111-1111-1111-1111-111111111111"
 
 
 @pytest.fixture
 def tmp_db_path(tmp_path: Path) -> Path:
     return tmp_path / "test.db"
+
+
+@pytest.fixture
+def test_user_id() -> str:
+    """The user_id the auth override resolves to. Matches the row test_engine seeds."""
+    return _TEST_USER_ID
 
 
 @pytest.fixture
@@ -32,6 +40,10 @@ def test_engine(tmp_db_path: Path) -> Iterator[Engine]:
         cursor.close()
 
     apply_migrations(engine)
+    # Seed the auth'd user; production does this in main.py's lifespan.
+    with Session(engine) as session:
+        session.add(AppUser(id=_TEST_USER_ID, name="Eric"))
+        session.commit()
     yield engine
     engine.dispose()
 
@@ -44,6 +56,7 @@ def client(
 ) -> Iterator[TestClient]:
     """Settings-authed client with auth + db overrides for ergonomic testing."""
     monkeypatch.setenv("WORKOUTDB_BEARER_TOKEN", _TEST_TOKEN)
+    monkeypatch.setenv("WORKOUTDB_USER_ID", _TEST_USER_ID)
     monkeypatch.setenv("WORKOUTDB_DB_PATH", str(tmp_db_path))
     get_settings.cache_clear()
 
@@ -54,8 +67,8 @@ def client(
         finally:
             session.close()
 
-    def _override_auth() -> None:
-        return None
+    def _override_auth() -> str:
+        return _TEST_USER_ID
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[verify_bearer] = _override_auth

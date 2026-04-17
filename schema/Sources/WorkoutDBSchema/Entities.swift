@@ -165,6 +165,7 @@ public struct Workout: Codable, Sendable, Equatable {
     public let notes: String?
     public let tagsJson: String?
     public let createdAt: Date
+    public let updatedAt: Date
     public let completedAt: Date?
     public let blocks: [Block]
 
@@ -178,6 +179,7 @@ public struct Workout: Codable, Sendable, Equatable {
         case notes
         case tagsJson = "tags_json"
         case createdAt = "created_at"
+        case updatedAt = "updated_at"
         case completedAt = "completed_at"
         case blocks
     }
@@ -192,6 +194,7 @@ public struct Workout: Codable, Sendable, Equatable {
         notes: String? = nil,
         tagsJson: String? = nil,
         createdAt: Date,
+        updatedAt: Date,
         completedAt: Date? = nil,
         blocks: [Block] = []
     ) {
@@ -204,6 +207,7 @@ public struct Workout: Codable, Sendable, Equatable {
         self.notes = notes
         self.tagsJson = tagsJson
         self.createdAt = createdAt
+        self.updatedAt = updatedAt
         self.completedAt = completedAt
         self.blocks = blocks
     }

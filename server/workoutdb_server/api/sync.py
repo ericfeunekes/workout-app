@@ -1,10 +1,11 @@
 """Sync endpoints.
 
-- GET /api/sync/pull?user_id=...&since=... — server → app. Workouts, exercises, user_parameters
+- GET /api/sync/pull?since=... — server → app. Workouts, exercises, user_parameters
   modified after `since`, plus a `last_performed` snapshot per exercise in the pulled workouts.
 - POST /api/sync/results — app → server. Batch of set_logs + workout status transitions.
 
-Direction-based; no conflict resolution. See docs/specs/v2-architecture.md § "Sync model".
+The caller's user_id is resolved from the bearer token (ADR-2026-04-17). Direction-based;
+no conflict resolution. See docs/specs/v2-architecture.md § "Sync model".
 """
 
 from datetime import UTC, datetime
@@ -12,7 +13,7 @@ from datetime import UTC, datetime
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
-from workoutdb_server.api.deps import Auth, DbSession
+from workoutdb_server.api.deps import CurrentUserId, DbSession
 from workoutdb_server.api.workouts import workout_tree_loader
 from workoutdb_server.api.schemas import (
     ExerciseLastPerformed,
@@ -34,10 +35,10 @@ from workoutdb_server.models import (
 router = APIRouter(prefix="/api/sync", tags=["sync"])
 
 
-@router.get("/pull", response_model=SyncPullOut, dependencies=[Auth])
+@router.get("/pull", response_model=SyncPullOut)
 def sync_pull(
     db: DbSession,
-    user_id: str = Query(...),
+    user_id: CurrentUserId,
     since: datetime | None = Query(
         None,
         description="Return rows updated after this timestamp. Omit for full pull.",
@@ -45,7 +46,9 @@ def sync_pull(
 ) -> SyncPullOut:
     workouts_stmt = select(Workout).options(workout_tree_loader()).where(Workout.user_id == user_id)
     if since is not None:
-        workouts_stmt = workouts_stmt.where(Workout.created_at > since)
+        # updated_at catches both creation and post-create edits; filtering on
+        # created_at would silently miss PUT /api/workouts/:id changes.
+        workouts_stmt = workouts_stmt.where(Workout.updated_at > since)
     workouts_stmt = workouts_stmt.order_by(Workout.scheduled_date, Workout.created_at)
     workouts = list(db.execute(workouts_stmt).scalars().all())
 
@@ -53,6 +56,7 @@ def sync_pull(
     exercises = list(db.execute(select(Exercise).order_by(Exercise.name)).scalars().all())
 
     # Latest-per-key user parameters (what the app needs to resolve prescriptions).
+    # When `since` is set, skip keys whose latest row predates it — the app already has them.
     latest_subq = (
         select(UserParameter.key, func.max(UserParameter.updated_at).label("ts"))
         .where(UserParameter.user_id == user_id)
@@ -68,6 +72,8 @@ def sync_pull(
         )
         .where(UserParameter.user_id == user_id)
     )
+    if since is not None:
+        params_stmt = params_stmt.where(latest_subq.c.ts > since)
     user_parameters = list(db.execute(params_stmt).scalars().all())
 
     last_performed = _build_last_performed(db, user_id, workouts)
@@ -92,11 +98,15 @@ def _build_last_performed(
       1. A ranked join finds the latest completed workout_item per exercise_id.
       2. A single IN query fetches all relevant set_logs.
     """
+    # Include exercises referenced both directly and via alternatives — the app must
+    # be able to display history for any exercise the user can swap to mid-workout.
     exercise_ids: set[str] = set()
     for workout in pulled_workouts:
         for block in workout.blocks:
             for item in block.workout_items:
                 exercise_ids.add(item.exercise_id)
+                for alt in item.alternatives:
+                    exercise_ids.add(alt.exercise_id)
 
     if not exercise_ids:
         return []
@@ -153,15 +163,28 @@ def _build_last_performed(
     ]
 
 
-@router.post("/results", response_model=dict, dependencies=[Auth])
-def sync_results(payload: SyncResultsIn, db: DbSession) -> dict:
-    """App pushes completed workout data. Idempotent — UUIDs prevent duplicates."""
+@router.post("/results", response_model=dict)
+def sync_results(payload: SyncResultsIn, db: DbSession, user_id: CurrentUserId) -> dict:
+    """App pushes completed workout data. Idempotent — UUIDs prevent duplicates.
+
+    Every set_log and status update is scoped to the authenticated user. Set logs
+    for workout_items belonging to another user are rejected; status updates for
+    another user's workouts 404.
+    """
+    # Resolve each set_log's owner via its workout_item → block → workout → user_id
+    # chain, rejecting anything that crosses the tenant boundary.
     for log in payload.set_logs:
+        item = db.get(WorkoutItem, log.workout_item_id)
+        if item is None or item.block.workout.user_id != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"workout_item {log.workout_item_id} not found",
+            )
         _upsert_set_log(db, log)
 
     for update in payload.status_updates:
         workout = db.get(Workout, update.workout_id)
-        if workout is None:
+        if workout is None or workout.user_id != user_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Workout {update.workout_id} not found",
@@ -178,10 +201,10 @@ def sync_results(payload: SyncResultsIn, db: DbSession) -> dict:
 
 
 def _upsert_set_log(db: DbSession, payload: SetLogIn) -> SetLog:
-    row = db.get(SetLog, payload.id) if payload.id else None
+    row = db.get(SetLog, payload.id)
     if row is None:
         row = SetLog(
-            id=payload.id or None,  # let ORM default generate if missing
+            id=payload.id,
             workout_item_id=payload.workout_item_id,
             set_index=payload.set_index,
             reps=payload.reps,

@@ -2,12 +2,13 @@
 
 import json
 import uuid
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from workoutdb_server.api.deps import Auth, DbSession
+from workoutdb_server.api.deps import CurrentUserId, DbSession
 from workoutdb_server.api.schemas import (
     BlockIn,
     ExerciseAlternativeIn,
@@ -17,7 +18,6 @@ from workoutdb_server.api.schemas import (
     WorkoutUpdate,
 )
 from workoutdb_server.models import (
-    AppUser,
     Block,
     ExerciseAlternative,
     Workout,
@@ -43,10 +43,10 @@ def _new_id() -> str:
     return str(uuid.uuid4())
 
 
-def _build_workout_tree(payload: WorkoutCreate) -> Workout:
+def _build_workout_tree(payload: WorkoutCreate, user_id: str) -> Workout:
     workout = Workout(
         id=payload.id or _new_id(),
-        user_id=payload.user_id,
+        user_id=user_id,
         name=payload.name,
         scheduled_date=payload.scheduled_date,
         status=payload.status,
@@ -94,24 +94,21 @@ def _build_alt(payload: ExerciseAlternativeIn) -> ExerciseAlternative:
     )
 
 
-@router.post("", response_model=WorkoutRead, dependencies=[Auth])
-def create_workout(payload: WorkoutCreate, db: DbSession) -> Workout:
-    if db.get(AppUser, payload.user_id) is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"user_id {payload.user_id!r} does not exist",
-        )
-    workout = _build_workout_tree(payload)
+@router.post("", response_model=WorkoutRead)
+def create_workout(payload: WorkoutCreate, db: DbSession, user_id: CurrentUserId) -> Workout:
+    workout = _build_workout_tree(payload, user_id)
     db.add(workout)
     db.commit()
     db.refresh(workout)
     return workout
 
 
-@router.put("/{workout_id}", response_model=WorkoutRead, dependencies=[Auth])
-def update_workout(workout_id: str, payload: WorkoutUpdate, db: DbSession) -> Workout:
+@router.put("/{workout_id}", response_model=WorkoutRead)
+def update_workout(
+    workout_id: str, payload: WorkoutUpdate, db: DbSession, user_id: CurrentUserId
+) -> Workout:
     workout = db.get(Workout, workout_id)
-    if workout is None:
+    if workout is None or workout.user_id != user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
 
     for field in ("name", "scheduled_date", "status", "notes", "tags_json", "completed_at"):
@@ -123,15 +120,19 @@ def update_workout(workout_id: str, payload: WorkoutUpdate, db: DbSession) -> Wo
     if payload.blocks is not None:
         workout.blocks = [_build_block(b) for b in payload.blocks]
 
+    # Force updated_at to bump even when only nested blocks changed — SQLAlchemy's
+    # onupdate fires on column changes, not relationship replacements.
+    workout.updated_at = datetime.now(UTC)
+
     db.commit()
     db.refresh(workout)
     return workout
 
 
-@router.get("", response_model=list[WorkoutRead], dependencies=[Auth])
+@router.get("", response_model=list[WorkoutRead])
 def list_workouts(
     db: DbSession,
-    user_id: str = Query(..., description="Required — scopes the query to one user."),
+    user_id: CurrentUserId,
     status_filter: str | None = Query(None, alias="status"),
     after: str | None = Query(None, description="scheduled_date >= this (YYYY-MM-DD)."),
     tag: str | None = Query(None, description="Matches when tags_json contains this tag."),
@@ -156,9 +157,13 @@ def list_workouts(
     return list(db.execute(stmt).scalars().all())
 
 
-@router.get("/{workout_id}", response_model=WorkoutRead, dependencies=[Auth])
-def get_workout(workout_id: str, db: DbSession) -> Workout:
-    stmt = select(Workout).options(workout_tree_loader()).where(Workout.id == workout_id)
+@router.get("/{workout_id}", response_model=WorkoutRead)
+def get_workout(workout_id: str, db: DbSession, user_id: CurrentUserId) -> Workout:
+    stmt = (
+        select(Workout)
+        .options(workout_tree_loader())
+        .where(Workout.id == workout_id, Workout.user_id == user_id)
+    )
     workout = db.execute(stmt).scalar_one_or_none()
     if workout is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)

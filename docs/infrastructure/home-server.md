@@ -38,6 +38,7 @@ sudo -u workoutdb uv sync --no-dev
 # 4. Configure environment
 sudo tee /etc/workoutdb/env > /dev/null <<'EOF'
 WORKOUTDB_BEARER_TOKEN=<paste-generated-token>
+WORKOUTDB_USER_ID=<paste-generated-uuid>
 WORKOUTDB_DB_PATH=/var/lib/workoutdb/workout.db
 WORKOUTDB_HOST=0.0.0.0
 WORKOUTDB_PORT=8080
@@ -48,7 +49,9 @@ sudo chown root:workoutdb /etc/workoutdb/env
 
 # Generate a bearer token:
 #   python -c "import secrets; print(secrets.token_urlsafe(48))"
-# Then paste the same value into the iOS app's first-run settings.
+# Generate the user UUID (once per user ever — the app_user row is auto-created on startup):
+#   python -c "import uuid; print(uuid.uuid4())"
+# Paste both into the iOS app's first-run settings.
 
 # 5. Install the systemd unit
 sudo cp /opt/workoutdb/deploy/workoutdb-server.service /etc/systemd/system/
@@ -72,6 +75,7 @@ tailscale status | grep $(hostname)
 In the iOS app's first-run settings, paste:
 - **Server URL**: `http://<tailnet-hostname>:8080` (or an IP if MagicDNS isn't configured)
 - **Bearer token**: the same value as `WORKOUTDB_BEARER_TOKEN`
+- The token already encodes *which* user the app is acting as (`WORKOUTDB_USER_ID` on the server). The app never sends `user_id` on the wire.
 
 No TLS — the tailnet is the trust boundary. If that changes (e.g., exposing to the public internet), the design needs revisiting; see `docs/decisions/ADR-2026-04-17-ux-scope.md`.
 

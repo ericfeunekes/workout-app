@@ -54,10 +54,10 @@ Swift + SwiftData. The "dumb" client. Owns:
 Runs all 10 timing modes: `straight_sets`, `superset`, `circuit`, `emom`, `amrap`, `for_time`, `intervals`, `tabata`, `continuous`, `custom`. See `app/README.md` and spec § "Timing modes".
 
 ### `schema/` — Shared schema
-Single source of truth for cross-stack data contracts. Not yet populated — see `schema/README.md` for the decision still open (OpenAPI vs hand-mirrored).
+Single source of truth for cross-stack data contracts. Committed `openapi.json` is the wire contract; hand-written Swift Codable DTOs under `Sources/WorkoutDBSchema/` mirror the server's Pydantic schemas. Cross-decoded fixtures live in `fixtures/`. See `schema/README.md`.
 
 ### `tests/` — Cross-cutting tests
-Server tests under `tests/server/`. Contract tests that pin cross-stack schema parity under `tests/contract/` (once `schema/` is chosen).
+Server tests under `tests/server/`. Contract tests that pin cross-stack schema parity under `tests/contract/` (OpenAPI drift, Swift enum parity, fixture round-trips on both sides).
 
 ## Data model (summary)
 

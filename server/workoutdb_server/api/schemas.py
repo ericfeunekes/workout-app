@@ -127,10 +127,12 @@ class BlockRead(BaseModel):
 
 
 class WorkoutCreate(BaseModel):
-    """Accepts a full workout tree (blocks → items → alternatives) in one request."""
+    """Accepts a full workout tree (blocks → items → alternatives) in one request.
+
+    user_id is resolved from the bearer token, not the body (ADR-2026-04-17).
+    """
 
     id: str | None = None
-    user_id: str
     name: str
     scheduled_date: str | None = None
     status: Literal["planned", "active", "completed", "skipped"] = "planned"
@@ -164,6 +166,7 @@ class WorkoutRead(BaseModel):
     notes: str | None
     tags_json: str | None
     created_at: datetime
+    updated_at: datetime
     completed_at: datetime | None
     blocks: list[BlockRead]
 
@@ -172,7 +175,10 @@ class WorkoutRead(BaseModel):
 
 
 class SetLogIn(BaseModel):
-    id: str | None = None
+    # id is required — the app assigns a UUID when the set is logged (possibly offline).
+    # Requiring it here makes sync/results genuinely idempotent per the spec: the same
+    # SetLog pushed twice updates in place instead of inserting a duplicate.
+    id: str
     workout_item_id: str
     set_index: int
     reps: int | None = None
@@ -217,7 +223,8 @@ class SetLogRead(BaseModel):
 
 
 class UserParameterIn(BaseModel):
-    user_id: str
+    """user_id is resolved from the bearer token (ADR-2026-04-17)."""
+
     key: str
     value: str
     source: Literal["claude", "app_log", "manual"] = "claude"

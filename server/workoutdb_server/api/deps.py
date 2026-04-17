@@ -40,7 +40,12 @@ def get_db() -> Iterator[Session]:
 def verify_bearer(
     credentials: Annotated[HTTPAuthorizationCredentials, Depends(_bearer)],
     settings: Annotated[Settings, Depends(get_settings)],
-) -> None:
+) -> str:
+    """Validates the token and returns the user_id it authenticates as.
+
+    Per ADR-2026-04-17, the token is the only source of the caller's identity —
+    routes do not accept user_id from clients. Depend on `CurrentUserId` to read it.
+    """
     # Timing-safe comparison: never reveal token length or early-match behavior via timing.
     expected = settings.bearer_token.get_secret_value().encode("utf-8")
     provided = credentials.credentials.encode("utf-8")
@@ -49,7 +54,10 @@ def verify_bearer(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid bearer token",
         )
+    return settings.user_id
 
 
 DbSession = Annotated[Session, Depends(get_db)]
+CurrentUserId = Annotated[str, Depends(verify_bearer)]
+# Auth kept as an alias for endpoints that use dependencies=[Auth] (no injection of user_id).
 Auth = Depends(verify_bearer)

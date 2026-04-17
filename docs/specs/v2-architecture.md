@@ -147,6 +147,7 @@ A complete session ready to execute.
 | `source` | String | `claude` (pushed by conversation), `manual` (created in app) |
 | `notes` | String? | Session-level notes from Claude |
 | `created_at` | Timestamp | |
+| `updated_at` | Timestamp | Server-managed. Bumped on create, on PUT `/api/workouts/:id` (including nested block replacement), and on status transitions via POST `/api/sync/results`. `/api/sync/pull?since=X` filters on this. |
 | `completed_at` | Timestamp? | |
 | `tags_json` | String? | JSON array of free-form tags Claude attaches for analysis grouping, e.g. `["hypertrophy_block_2", "week_3", "pull_day", "deload_pending"]`. App ignores; used for querying. |
 
@@ -257,7 +258,9 @@ Not needed for v1. Pull-on-open is fine.
 
 ### Endpoints
 
-All JSON. Auth: simple bearer token (single-user system, doesn't need more).
+All JSON. Auth: simple bearer token (single-user system, doesn't need more). Per
+ADR-2026-04-17, the token maps to an `app_user` row; routes resolve `user_id`
+from the token — no endpoint accepts `user_id` in a query param or body.
 
 **Plans (Claude → Server → App):**
 
@@ -279,16 +282,26 @@ GET    /api/user-parameters?key=X&since=Y     — Full history for a key since t
 
 ```
 POST   /api/sync/results       — Push completed workout data (set_logs, status changes)
-                                 Body: array of workout results with nested set_logs
-                                 Idempotent (UUIDs prevent duplicates)
+                                 Body: { set_logs: [...], status_updates: [...] }
+                                 Each set_log MUST carry the UUID the app assigned; re-pushing
+                                 the same id updates in place (idempotent). Status updates bump
+                                 workout.updated_at so a subsequent /api/sync/pull sees them.
 ```
 
 **Sync (App pull):**
 
 ```
-GET    /api/sync/pull?since=<timestamp>  — Get everything changed since last sync
-                                          Returns: workouts, exercises, alternatives,
-                                          user_parameters updated after timestamp
+GET    /api/sync/pull?since=<timestamp>
+                                — Get everything changed since last sync. user_id is
+                                  resolved from the bearer token (ADR-2026-04-17).
+                                  Returns workouts with nested blocks/items/alternatives,
+                                  the full exercise library, and latest-per-key user_parameters
+                                  whose newest row is after `since`. Omit `since` for a full pull.
+                                  The response's `server_time` is what the app should send
+                                  as the next `since`. Filtering uses `workout.updated_at`, not
+                                  `created_at`, so PUT /api/workouts/:id edits are picked up.
+                                  `last_performed` covers exercises referenced both directly
+                                  and via alternatives (swap targets must carry their own history).
 ```
 
 ---

@@ -68,34 +68,40 @@ Before closeout:
 
 The pre-push git hook enforces the Python checks automatically; see `.pre-commit-config.yaml`.
 
-## Working with subagents — the implementer / reviewer cycle
+## The implementer / reviewer cycle — **Codex reviews, not same-model subagents**
 
-Subagents are the primary implementation vehicle for this project. The lead agent (the one Eric is talking to) orchestrates; subagents execute. The durable rule is:
+Implementation subagents are Claude. **Reviews are Codex (a different model).** This is load-bearing — a sibling Claude subagent shares too many blind spots with the lead Claude agent to catch real bugs. The durable rule is:
 
-> **Self-review by an implementer catches nothing new. An independent reviewer does.**
+> **A review is only trustworthy when it comes from a different model than the one that wrote the code.**
 
 ### The cycle
 
 For any non-trivial unit of work:
 
-1. **Dispatch an implementer** with a tight brief: what to build, which files to touch, what stop conditions (tests pass, build succeeds, specific gates green), and any conventions to follow. Attach full-path reading lists — don't make the implementer discover context.
+1. **Dispatch a Claude implementer subagent** with a tight brief: what to build, which files to touch, what stop conditions (tests pass, build succeeds, specific gates green), and any conventions to follow. Attach full-path reading lists — don't make the implementer discover context.
 2. **Implementer returns a self-report** including files changed, design decisions, gate outputs, and any deviations or judgment calls.
-3. **Dispatch an independent reviewer** on the same area. Reviewer's brief includes what the implementer *claims* they did, plus the real gates to re-run, plus the specific risk classes to inspect. The reviewer must re-run `swift test` / `pytest` / `swiftlint` themselves — never trust the implementer's assertion that gates pass.
-4. **Lead agent synthesizes.** Reviewer verdict = ship / needs-another-round. If needs-another-round, dispatch a fix-it implementer with the reviewer's findings. Loop until ship.
+3. **Dispatch a Codex review via `cxd task`** — Codex is a different model, reading the same repo. One-shot form:
+   ```bash
+   cxd task --sandbox read-only --detach --cwd $PWD \
+     --service-name review-<domain> --effort medium \
+     -f path/to/review-prompt.md
+   ```
+   The review prompt cites: what the implementer claims they did, the files to focus on, the questions to answer, the specific hazards to probe, and the gates Codex should re-run. See `scratch/codex-reviews/_template-header.md` + `_session-context.md` for the methodology baseline.
+4. **Lead agent synthesizes.** Codex verdict = ship / needs-another-round. If needs-another-round, dispatch another Claude implementer with Codex's findings inline. Loop until Codex signs off.
 
-Skipping the reviewer is the fastest way to let real bugs through. Examples from this project where the reviewer caught things self-review missed: the UUID-vs-slug fixture drift (Chunk 9), `DTOMapping` being `public` when it could have been `internal` (Chunk 8), autoreg precedence ambiguity (Chunk 6).
+Same-model Claude-subagent reviews are acceptable only for: trivial scoped fixes, pure doc edits, or config tweaks already guarded by automated checks. Every other change goes through Codex.
 
-### When a reviewer isn't necessary
+### Why Codex and not another Claude
 
-- Trivial scoped fixes (one or two lines, obvious intent).
-- Pure doc edits (reviewers read the same docs; the signal is cheap).
-- Config tweaks caught by existing automated checks (lint, tests, fitness functions).
+Codex sees the codebase cold. It doesn't carry the rationalizations the implementing agent built up. Historically this project has caught real bugs through Codex review that Claude self-review missed: silent `compactMap` drop on `advancementByBlock` restore, fire-and-forget `Task` snapshot race in session persistence, non-idempotent `.userParameter` push path. None of these were visible to Claude implementers or Claude reviewers.
 
-Every other case: review.
+### Parallel Codex reviews
 
-### Lightweight reviews for small slices
+For multi-domain work (e.g. a feature cutover touching drivers + sync + UI), fire parallel Codex reviews — one per domain — via `_dispatch.sh`. Monitor with `_monitor.sh`. Pattern lives in `scratch/codex-reviews/` as a working template.
 
-A reviewer brief doesn't have to be long. 200 words is often plenty if it names the specific risk classes and lists the gates to re-run. The overhead is a fresh pair of eyes and an independent gate-run, not a full audit.
+### Lightweight Codex reviews
+
+A Codex review prompt doesn't have to be long. 100–150 lines is typical: 3–5 files of focus, 5–8 domain-specific questions, 3–5 hazards to probe, plus the shared `_template-header.md` + `_session-context.md`. The value is the independent reading, not the prompt length.
 
 ## Skills — when to invoke which
 

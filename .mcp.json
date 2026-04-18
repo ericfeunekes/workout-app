@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "xcodebuild": {
+      "type": "stdio",
+      "command": "xcodebuildmcp",
+      "args": [
+        "mcp"
+      ],
+      "env": {
+        "XCODEBUILDMCP_ENABLED_WORKFLOWS": "simulator,simulator-management,ui-automation,debugging,logging,project-discovery,xcode-ide,utilities,swift-package"
+      }
+    }
+  }
+}

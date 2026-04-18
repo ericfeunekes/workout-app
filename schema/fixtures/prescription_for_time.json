@@ -1,0 +1,11 @@
+{
+  "timing_mode": "for_time",
+  "timing_config_json": {
+    "time_cap_sec": 600
+  },
+  "rounds": 3,
+  "rounds_rep_scheme": [21, 15, 9],
+  "prescription_json": {
+    "load_kg": 43
+  }
+}

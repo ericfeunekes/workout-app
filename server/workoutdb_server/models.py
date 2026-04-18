@@ -14,7 +14,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String
+from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 if TYPE_CHECKING:
@@ -62,6 +62,10 @@ class Exercise(Base):
     name: Mapped[str] = mapped_column(String, nullable=False)
     notes: Mapped[str | None] = mapped_column(String)
     demo_url: Mapped[str | None] = mapped_column(String)
+    # Library-level defaults merged into each workout_item's prescription on
+    # ingest. See docs/decisions/ADR-2026-04-18-smart-defaults.md.
+    default_prescription_json: Mapped[str | None] = mapped_column(String)
+    default_alternatives_json: Mapped[str | None] = mapped_column(String)
 
 
 # ---------- Workouts → Blocks → Items → Set Logs ----------
@@ -155,7 +159,12 @@ class WorkoutItem(Base):
     )
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     exercise_id: Mapped[str] = mapped_column(String, ForeignKey("exercise.id"), nullable=False)
+    # Always the *resolved* form (library defaults merged in). Immutable once
+    # stored — library mutations don't retro-edit historical workouts.
     prescription_json: Mapped[str] = mapped_column(String, nullable=False)
+    # The client's original sparse payload. Null when the client sent a fully-
+    # resolved prescription (i.e. the merge was a no-op).
+    prescription_json_raw: Mapped[str | None] = mapped_column(String)
 
     block: Mapped[Block] = relationship(back_populates="workout_items")
     exercise: Mapped[Exercise] = relationship()
@@ -198,13 +207,16 @@ class SetLog(Base):
     workout_item_id: Mapped[str] = mapped_column(
         String, ForeignKey("workout_item.id", ondelete="CASCADE"), nullable=False
     )
+    performed_exercise_id: Mapped[str | None] = mapped_column(
+        String, ForeignKey("exercise.id"), nullable=True
+    )
     set_index: Mapped[int] = mapped_column(Integer, nullable=False)
     reps: Mapped[int | None] = mapped_column(Integer)
     weight: Mapped[float | None] = mapped_column(Float)
     weight_unit: Mapped[str | None] = mapped_column(String)
     duration_sec: Mapped[float | None] = mapped_column(Float)
     distance_m: Mapped[float | None] = mapped_column(Float)
-    rpe: Mapped[float | None] = mapped_column(Float)
+    rir: Mapped[int | None] = mapped_column(Integer)
     is_warmup: Mapped[bool] = mapped_column(Integer, nullable=False, default=0)
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
     completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -219,7 +231,13 @@ class SetLog(Base):
     __table_args__ = (
         CheckConstraint("weight_unit IN ('kg', 'lb') OR weight_unit IS NULL"),
         CheckConstraint("is_warmup IN (0, 1)"),
+        CheckConstraint("rir IS NULL OR (rir >= 0 AND rir <= 5)"),
         Index("idx_set_log_item", "workout_item_id"),
+        Index(
+            "idx_set_log_performed_exercise",
+            "performed_exercise_id",
+            sqlite_where=text("performed_exercise_id IS NOT NULL"),
+        ),
     )
 
 
@@ -252,3 +270,37 @@ class UserParameter(Base):
         ),
         Index("idx_user_param_latest", "user_id", "key", "updated_at"),
     )
+
+
+# ---------- Telemetry event log ----------
+
+
+class EventLog(Base):
+    """Durable trail of app-side events. Permissive by design.
+
+    `data_json` is a freeform string — the server never cracks it, so new
+    event shapes don't require migrations. `workout_id` / `set_log_id` are
+    nullable pointers for convenient filtering; intentionally NOT FKs because
+    the app may emit events against IDs that haven't synced yet.
+
+    `ts` is the device-side timestamp (when the event happened). `received_at`
+    is the server-side insert time — the gap tells us how long the device
+    was offline.
+    """
+
+    __tablename__ = "event_log"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("app_user.id", ondelete="CASCADE"), nullable=False
+    )
+    ts: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    session_id: Mapped[str] = mapped_column(String, nullable=False)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    name: Mapped[str] = mapped_column(String, nullable=False)
+    data_json: Mapped[str | None] = mapped_column(String)
+    workout_id: Mapped[str | None] = mapped_column(String)
+    set_log_id: Mapped[str | None] = mapped_column(String)
+    received_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+    __table_args__ = (Index("idx_event_log_user_ts", "user_id", "ts"),)

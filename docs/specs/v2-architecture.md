@@ -39,6 +39,8 @@ An atomic movement. Minimal metadata — the app doesn't reason about exercises,
 | `name` | String | Display name ("Back Squat", "400m Run") |
 | `notes` | String? | Brief cue or form reminder, pushed by Claude |
 | `demo_url` | String? | Optional link to a video demo |
+| `default_prescription_json` | String? | Library-level prescription defaults (typically `target_rir` + `autoreg`) merged into every `workout_item` that references this exercise unless the item overrides. See `docs/decisions/ADR-2026-04-18-smart-defaults.md`. |
+| `default_alternatives_json` | String? | Library-level alternatives — a JSON array matching the `exercise_alternative` shape minus the `workout_item_id` pointer. Items that omit alternatives inherit this list. |
 
 No muscle groups, movement patterns, or modality on the exercise itself. That knowledge lives in conversation. If Claude wants the app to display a muscle tag for context, it goes in `notes` or `metadata_json`.
 
@@ -115,11 +117,12 @@ An exercise placed inside a block.
 | `block_id` | UUID | FK |
 | `position` | Int | Order within block |
 | `exercise_id` | UUID | FK |
-| `prescription_json` | String | What to do — mode-dependent (see below) |
+| `prescription_json` | String | Resolved "what to do" — server merges the exercise's `default_prescription_json` into whatever the client sent at ingest. Immutable once stored; library mutations don't rewrite history. See `docs/decisions/ADR-2026-04-18-smart-defaults.md`. |
+| `prescription_json_raw` | String? | The original sparse payload the client sent, preserved when the server's merge changed something. Null when the client sent a fully-resolved prescription. Diagnostic / re-merge aid only — the app reads only `prescription_json`. |
 
 **`prescription_json` by context:**
 
-- Strength: `{"sets": 3, "reps": 8, "load_kg": 80, "rpe_target": 7}`
+- Strength: `{"sets": 3, "reps": 8, "load_kg": 80, "target_rir": 2, "autoreg": { "overshoot_at": 2, "overshoot_step_kg": 2.5, "undershoot_at": 2, "undershoot_step_kg": 2.5, "apply_to": "remaining" }}` — `target_rir` + the `autoreg` subobject drive the app's load-adjustment rules on remaining sets. Server does not interpret; the app applies. See `docs/prescription.md` for the full vocabulary and `docs/decisions/ADR-2026-04-17-rir-autoreg-sync.md` for the decision record.
 - Reps-only: `{"sets": 4, "reps": 12}`
 - Time-based: `{"duration_sec": 45}` (e.g. plank hold within a circuit)
 - Distance: `{"distance_m": 400, "target_pace_sec_per_km": 270}`
@@ -131,7 +134,7 @@ An exercise placed inside a block.
 - Drop sets: `{"sets_detail": [{"reps": 10, "load_kg": 20}, {"reps": "amrap", "load_kg": 15, "drop": true}, {"reps": "amrap", "load_kg": 10, "drop": true}]}` — `drop: true` tells the app to collapse the group under one rest timer
 - Cluster sets / rest-pause / myo-reps: `{"sets": 4, "reps": 5, "load_kg": 100, "sub_sets": 4, "intra_set_rest_sec": 15}` — each of the 4 top-level sets = 4 sub-sets of 5 reps with 15s rest between sub-sets; `rest_between_sets_sec` still applies between top-level sets
 
-Keeping this as JSON means new prescription shapes don't require schema changes.
+Keeping this as JSON means new prescription shapes don't require schema changes. **The authoritative catalog of prescription shapes lives in `docs/prescription.md`** — that doc is the source the upstream "planning Claude" will be built against. If a shape appears in code but not in `docs/prescription.md`, the doc is wrong; fix the doc in the same commit that adds the shape.
 
 #### `workout`
 
@@ -158,14 +161,15 @@ What actually happened. One row per set performed.
 | Field | Type | Notes |
 |---|---|---|
 | `id` | UUID | |
-| `workout_item_id` | UUID | FK |
+| `workout_item_id` | UUID | FK — the planned item. Never changes; swaps are recorded via `performed_exercise_id`, not by rewriting this FK. |
+| `performed_exercise_id` | UUID? | The exercise actually performed. Null = the item's default exercise was performed as planned. Non-null = the user swapped to an alternative mid-workout (the alternative's `exercise_id`). Session-local swap is lossless on the log; the workout template is not mutated. |
 | `set_index` | Int | 1-based |
 | `reps` | Int? | |
 | `weight` | Float? | |
 | `weight_unit` | Enum | `kg`, `lb` |
 | `duration_sec` | Float? | |
 | `distance_m` | Float? | |
-| `rpe` | Float? | Perceived effort (6–10 scale) |
+| `rir` | Int? | Reps in Reserve (0–5 scale). 0 = failure, 5 = very easy. See `docs/prescription.md` § "RIR" for the full scale and `docs/decisions/ADR-2026-04-17-rir-autoreg-sync.md` for why this replaced RPE. |
 | `is_warmup` | Bool | |
 | `started_at` | Timestamp? | When the user tapped "start set" or the timed set began (watch) |
 | `completed_at` | Timestamp | |
@@ -183,7 +187,7 @@ User-specific data that Claude pushes so the app can resolve things like percent
 |---|---|---|
 | `id` | UUID | |
 | `user_id` | UUID | FK |
-| `key` | String | e.g. `1rm_back_squat_kg`, `resting_hr_bpm`, `5k_pr_sec`, `training_age_years`, `preference_rep_range`, `bodyweight_kg`, `sleep_hours_7d_avg` |
+| `key` | String | e.g. `1rm_back_squat_kg`, `resting_hr_bpm`, `5k_pr_sec`, `training_age_years`, `preference_rep_range`, `bodyweight_kg`, `sleep_hours_7d_avg`. The app pushes `bodyweight_kg` on workout completion when the user records it — body weight is a user_parameter, not a column on `workout`. |
 | `value` | String | Stored as string, interpreted by context |
 | `updated_at` | Timestamp | |
 | `source` | String | `claude`, `app_log`, `manual` |
@@ -230,18 +234,29 @@ This is a key-value log, not a fixed schema. Claude can push any parameter, any 
 | User parameters | Server → App | Claude (via server) |
 | Set logs (results) | App → Server | App (was there when the work happened) |
 | Workout status changes | App → Server | App (started, completed, skipped) |
+| Body weight at completion | App → Server | App (pushed as a `user_parameters` row with key `bodyweight_kg`) |
 
-**Sync mechanics:**
-- App pulls plans on refresh (manual pull-to-refresh or on app open).
-- App pushes results when a workout is completed (or on next connectivity if offline).
-- UUIDs everywhere — no auto-increment IDs. Makes merge trivial.
-- `updated_at` on every record. Last-write-wins within each flow direction.
-- Sync state tracked per-entity: `last_synced_at` on device.
+**Sync mechanics (summary — see `docs/sync.md` for the deep version):**
+- App pulls on every foregrounding (`GET /api/sync/pull?since=<last_server_time>`).
+- App pushes results after each log write; failures queue silently.
+- Gentle ~60s foreground retry flushes the queue.
+- UUIDs everywhere. Re-pushing a known UUID is idempotent.
+- `updated_at` on every record. Filter uses `workout.updated_at` so PUT edits are picked up.
+
+**Conflict rules:**
+- Server wins for prescriptions; app wins for logs.
+- Live session is frozen: a new prescription arriving mid-session applies to the *next* occurrence of that workout, not the one currently executing.
+- Swaps mid-workout are session-local — the workout template is not mutated; the actually-performed `exercise_id` is recorded on `set_log`.
 
 **Offline behavior:**
-- App works fully offline with whatever plans were last pulled.
-- Results queue locally and push on next sync.
-- No push notifications needed in v1. App pulls when opened.
+- Offline is the default assumption, not an error state. Neutral "offline" pill, no alarm colors.
+- App executes a fully-pulled workout with zero network calls (load-bearing invariant).
+- Results queue locally and push on next connectivity.
+- No push notifications in v1.
+
+**First-run UX:** single connection string (URL + bearer token) via paste or QR; no login form. Full detail in `docs/sync.md` § "First-run UX".
+
+See `docs/sync.md` for cadence details, conflict-case enumeration, and the first-run flow.
 
 ### Future: push signal
 
@@ -312,13 +327,20 @@ GET    /api/sync/pull?since=<timestamp>
 |---|---|---|
 | Which exercises this week | Claude | Pushes workout plans to server |
 | Sets, reps, load targets | Claude | In `prescription_json` |
+| Target RIR per exercise | Claude | `target_rir` in `prescription_json` |
+| Autoregulation rules (overshoot/undershoot steps) | Claude | `autoreg` subobject in `prescription_json` |
+| Load step / equipment granularity | Claude | `overshoot_step_kg` / `undershoot_step_kg` — no per-exercise default |
 | Alternatives if something's unavailable | Claude | Pre-computed in `exercise_alternative` |
 | User maxes, rep ranges, preferences | Claude | Pushes to `user_parameters` |
 | Percentage-based load resolution | App | Reads `percent_1rm` from prescription, resolves against `user_parameters` |
 | Timer behavior | App | Reads `timing_mode` + `timing_config_json`, drives UI |
-| Logging what happened | App | Writes `set_log` rows |
-| Swapping to an alternative mid-workout | User (in app) | Taps alternative, app swaps exercise on the item |
-| Adjusting reps/load on the fly | User (in app) | Edits prescription locally, logs actual |
+| Autoreg application (propose + apply to remaining sets) | App | Reads `target_rir` + `autoreg`, proposes on rest screen, applies on accept |
+| Hold-autoreg (session-scoped) | User (in app) | "Undo" on proposal sets local `autoregHeld` for the session; cleared on complete |
+| Logging what happened | App | Writes `set_log` rows including `rir` |
+| Body weight at completion | App → user_parameters | Optional prompt at completion writes a `bodyweight_kg` row |
+| Swapping to an alternative mid-workout | User (in app) | Taps alternative; session-local; log carries the performed exercise_id |
+| Editing a past (logged) set | User (in app) | Tap any cell; corrective — does **not** retrigger autoreg |
+| Editing a pending set | User (in app) | Tap load/reps cell; marks `adjust: "manual"` |
 | Progression decisions | Claude | Reads results from server, adjusts next week's plans |
 | "How are you feeling" / readiness | Conversation | Eric tells Claude, Claude adjusts plans before pushing |
 | Body photos, measurements | Conversation | Discussed here, not in app |

@@ -1,0 +1,10 @@
+{
+  "timing_mode": "continuous",
+  "timing_config_json": {
+    "target_duration_sec": 3600,
+    "target_distance_m": null,
+    "target_pace_sec_per_km": 360,
+    "target_hr_zone": 2
+  },
+  "prescription_json": {}
+}

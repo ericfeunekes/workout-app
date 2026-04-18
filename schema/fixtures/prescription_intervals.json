@@ -1,0 +1,10 @@
+{
+  "timing_mode": "intervals",
+  "timing_config_json": {
+    "work_distance_m": 400,
+    "rest_distance_m": 200,
+    "interval_count": 10,
+    "target_pace_sec_per_km": 270
+  },
+  "prescription_json": {}
+}

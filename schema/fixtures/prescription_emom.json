@@ -1,0 +1,11 @@
+{
+  "timing_mode": "emom",
+  "timing_config_json": {
+    "interval_sec": 60,
+    "total_minutes": 12
+  },
+  "prescription_json": {
+    "reps": 10,
+    "load_kg": 95
+  }
+}

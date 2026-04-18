@@ -1,0 +1,12 @@
+{
+  "timing_mode": "circuit",
+  "timing_config_json": {
+    "rest_between_exercises_sec": 0,
+    "rest_between_rounds_sec": 120
+  },
+  "rounds": 4,
+  "prescription_json": {
+    "reps": 12,
+    "load_kg": 20
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "sets_detail": [
+    { "reps": 10, "load_kg": 20 },
+    { "reps": "amrap", "load_kg": 15, "drop": true },
+    { "reps": "amrap", "load_kg": 10, "drop": true }
+  ]
+}

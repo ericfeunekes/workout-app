@@ -1,0 +1,13 @@
+{
+  "timing_mode": "custom",
+  "timing_config_json": {
+    "segments": [
+      { "type": "work", "duration_sec": 300, "label": "Z4 threshold", "target_hr_zone": 4 },
+      { "type": "rest", "duration_sec": 120, "label": "easy" },
+      { "type": "work", "duration_sec": 300, "label": "Z4 threshold", "target_hr_zone": 4 },
+      { "type": "rest", "duration_sec": 120, "label": "easy" },
+      { "type": "work", "duration_sec": 300, "label": "Z4 threshold", "target_hr_zone": 4 }
+    ]
+  },
+  "prescription_json": {}
+}

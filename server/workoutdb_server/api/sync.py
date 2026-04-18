@@ -14,7 +14,6 @@ from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
 from workoutdb_server.api.deps import CurrentUserId, DbSession
-from workoutdb_server.api.workouts import workout_tree_loader
 from workoutdb_server.api.schemas import (
     ExerciseLastPerformed,
     SetLogIn,
@@ -23,6 +22,7 @@ from workoutdb_server.api.schemas import (
     SyncResultsIn,
     UserParameterRead,
 )
+from workoutdb_server.api.workouts import workout_tree_loader
 from workoutdb_server.models import (
     Block,
     Exercise,
@@ -206,13 +206,14 @@ def _upsert_set_log(db: DbSession, payload: SetLogIn) -> SetLog:
         row = SetLog(
             id=payload.id,
             workout_item_id=payload.workout_item_id,
+            performed_exercise_id=payload.performed_exercise_id,
             set_index=payload.set_index,
             reps=payload.reps,
             weight=payload.weight,
             weight_unit=payload.weight_unit,
             duration_sec=payload.duration_sec,
             distance_m=payload.distance_m,
-            rpe=payload.rpe,
+            rir=payload.rir,
             is_warmup=payload.is_warmup,
             started_at=payload.started_at,
             completed_at=payload.completed_at,
@@ -225,13 +226,14 @@ def _upsert_set_log(db: DbSession, payload: SetLogIn) -> SetLog:
         db.add(row)
     else:
         for field in (
+            "performed_exercise_id",
             "set_index",
             "reps",
             "weight",
             "weight_unit",
             "duration_sec",
             "distance_m",
-            "rpe",
+            "rir",
             "is_warmup",
             "started_at",
             "completed_at",

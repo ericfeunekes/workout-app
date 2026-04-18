@@ -25,12 +25,13 @@
         {
           "id": "44444444-4444-4444-4444-444444444444",
           "position": 0,
-          "exercise_id": "back-squat",
+          "exercise_id": "e0000001-0000-4000-8000-000000000001",
           "prescription_json": "{\"sets\": 5, \"reps\": 5, \"load_kg\": 100}",
+          "prescription_json_raw": null,
           "alternatives": [
             {
               "id": "55555555-5555-5555-5555-555555555555",
-              "exercise_id": "front-squat",
+              "exercise_id": "e0000002-0000-4000-8000-000000000002",
               "reason": "bar taken",
               "parameter_overrides_json": null
             }

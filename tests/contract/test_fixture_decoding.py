@@ -8,8 +8,7 @@ import json
 from pathlib import Path
 
 import pytest
-
-from workoutdb_server.api.schemas import SyncPullOut, WorkoutRead
+from workoutdb_server.api.schemas import ExerciseRead, SyncPullOut, WorkoutRead
 
 _FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "schema" / "fixtures"
 
@@ -19,6 +18,7 @@ _FIXTURE_ROOT = Path(__file__).resolve().parents[2] / "schema" / "fixtures"
     [
         ("workout_create.json", WorkoutRead),
         ("sync_pull_response.json", SyncPullOut),
+        ("exercise_with_defaults.json", ExerciseRead),
     ],
 )
 def test_fixture_validates(fixture: str, model) -> None:

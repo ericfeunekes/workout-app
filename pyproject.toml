@@ -28,6 +28,27 @@ build-backend = "setuptools.build_meta"
 [tool.ruff]
 line-length = 100
 
+# FF-2 + FF-3 · Lint surface and complexity gate.
+# See docs/architecture/fitness-functions.md.
+[tool.ruff.lint]
+select = [
+  "E",     # pycodestyle errors
+  "F",     # pyflakes
+  "W",     # pycodestyle warnings
+  "I",     # isort (import order)
+  "B",     # flake8-bugbear (common footguns: mutable defaults, etc.)
+  "C901",  # McCabe cyclomatic complexity
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+# FastAPI's dependency-injection idiom uses `Depends()`, `Query()`, etc. as
+# argument defaults — which is exactly what B008 flags. The pattern is the
+# framework contract, not a footgun. Scope the exemption to the API layer.
+[tool.ruff.lint.per-file-ignores]
+"server/workoutdb_server/api/*.py" = ["B008"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

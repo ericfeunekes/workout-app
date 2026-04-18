@@ -48,7 +48,7 @@ The v2 architecture spec (`docs/specs/v2-architecture.md`) was accepted, but fou
 
 ### 3. App history: show what I need during a workout + a simple history tab
 
-**UX answer:** While working out, Eric wants to see his last performance of the current exercise inline (load, reps, RPE) — live decision support. Outside a workout, he wants a history tab of recent completed workouts and their set_logs. No graphs, no PR analytics, no trend charts in the app.
+**UX answer:** While working out, Eric wants to see his last performance of the current exercise inline (load, reps, effort) — live decision support. Outside a workout, he wants a history tab of recent completed workouts and their set_logs. No graphs, no PR analytics, no trend charts in the app. *(Effort field was decided later to be RIR 0–5, not RPE 6–10 — see `ADR-2026-04-17-rir-autoreg-sync.md`.)*
 
 **Implication:** Two distinct queries. The inline "last time" must be available offline during a workout (can't depend on network). The history tab can be online-only.
 

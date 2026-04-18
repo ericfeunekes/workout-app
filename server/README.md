@@ -2,7 +2,12 @@
 
 Python + FastAPI + SQLite. The exchange layer between Claude (who writes plans) and the iOS app (which executes them and logs results).
 
-See `docs/specs/v2-architecture.md` for the API contract and `docs/ARCHITECTURE.md` for the system map.
+See also:
+- `docs/specs/v2-architecture.md` — API contract and entity schema.
+- `docs/ARCHITECTURE.md` — system map.
+- `docs/sync.md` — sync cadence, conflict rules, first-run UX; the protocol the server has to serve.
+- `docs/prescription.md` — `prescription_json` and `timing_config_json` shapes the server stores opaquely but has to accept.
+- `docs/MIGRATIONS.md` — the schema cutover flow migrations have to follow.
 
 ## Layout
 

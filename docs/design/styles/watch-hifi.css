@@ -1,0 +1,484 @@
+/* WorkoutDB — Watch hi-fi styles */
+
+:root {
+  --bg: #0f0e0c;
+  --watch-bg: #000;
+  --watch-surface: #141210;
+  --watch-surface-2: #1e1a16;
+  --ink: #f5f1e8;
+  --ink-2: #c2bcae;
+  --ink-3: #8a8478;
+  --ink-4: #524e44;
+  --stroke: #28241e;
+  --accent: oklch(0.78 0.16 35);
+  --accent-soft: oklch(0.38 0.08 35);
+  --warn: oklch(0.8 0.18 75);
+  --danger: oklch(0.7 0.2 25);
+  --ok: oklch(0.78 0.14 150);
+  --hr: oklch(0.7 0.22 25);
+
+  --mono: "IBM Plex Mono", "SF Mono", ui-monospace, monospace;
+  --sans: -apple-system, "SF Pro Text", "Inter", system-ui, sans-serif;
+  --display: -apple-system, "SF Pro Display", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; -webkit-tap-highlight-color: transparent; margin: 0; padding: 0; }
+
+html, body {
+  background: #16130f;
+  color: var(--ink);
+  font-family: var(--sans);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  display: grid;
+  grid-template-columns: 1fr;
+  padding: 40px 32px 80px;
+  gap: 48px;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.header {
+  text-align: left;
+}
+.header h1 {
+  font-family: var(--display);
+  font-weight: 600;
+  font-size: 24px;
+  letter-spacing: -0.3px;
+  color: var(--ink);
+}
+.header p {
+  font-family: var(--mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.15em;
+  color: var(--ink-3);
+  margin-top: 6px;
+}
+.header .sub {
+  font-family: var(--sans);
+  font-size: 14px;
+  color: var(--ink-2);
+  margin-top: 12px;
+  max-width: 640px;
+  line-height: 1.5;
+}
+
+/* Layout: interactive demo on left, face gallery on right */
+.layout {
+  display: grid;
+  grid-template-columns: 340px 1fr;
+  gap: 56px;
+  align-items: start;
+}
+@media (max-width: 900px) {
+  .layout { grid-template-columns: 1fr; }
+}
+
+/* ── WATCH FRAME ── 184 × 224 aspect, realistic Series 10 49mm ── */
+.watch-wrap {
+  position: sticky;
+  top: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+}
+.watch {
+  width: 232px;
+  height: 282px;
+  background: linear-gradient(160deg, #6b5f52 0%, #3a332c 35%, #1f1a15 100%);
+  border-radius: 52px;
+  padding: 10px;
+  position: relative;
+  box-shadow:
+    0 40px 80px rgba(0,0,0,0.7),
+    0 0 0 1px #050403,
+    inset 0 3px 3px rgba(255,230,200,0.18),
+    inset 0 -3px 6px rgba(0,0,0,0.7);
+}
+/* digital crown */
+.watch::before {
+  content: "";
+  position: absolute;
+  right: -4px;
+  top: 64px;
+  width: 10px;
+  height: 32px;
+  background: linear-gradient(180deg, #3a3530, #2a2620);
+  border-radius: 2px 1px 1px 2px;
+  box-shadow: inset 0 0 1px rgba(0,0,0,0.6);
+}
+/* side button */
+.watch::after {
+  content: "";
+  position: absolute;
+  right: -3px;
+  top: 128px;
+  width: 8px;
+  height: 44px;
+  background: linear-gradient(180deg, #302b26, #1f1b17);
+  border-radius: 2px 1px 1px 2px;
+}
+.watch .screen {
+  width: 100%;
+  height: 100%;
+  background: var(--watch-bg);
+  border-radius: 44px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Crown/button affordance hints */
+.crown-hint, .button-hint {
+  position: absolute;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+.crown-hint { left: calc(100% + 16px); top: 76px; }
+.button-hint { left: calc(100% + 16px); top: 146px; }
+.crown-hint::before, .button-hint::before {
+  content: ""; display: inline-block;
+  width: 36px; height: 1px; background: var(--ink-4);
+  vertical-align: middle; margin-right: 6px;
+  transform: translateY(-1px);
+}
+
+/* Controls below watch */
+.controls {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  width: 232px;
+}
+.controls button {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: transparent;
+  color: var(--ink-2);
+  border: 1px solid var(--stroke);
+  border-radius: 6px;
+  padding: 8px 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.controls button:hover { border-color: var(--ink-3); color: var(--ink); }
+.controls button.active {
+  background: var(--accent-soft);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ── WATCH FACE PRIMITIVES ── */
+.face {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: 14px 14px 12px;
+  position: relative;
+}
+
+.face .time {
+  position: absolute;
+  top: 10px;
+  right: 16px;
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+  letter-spacing: 0.02em;
+}
+
+.face .kicker {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  line-height: 1.2;
+  margin-top: 4px;
+}
+
+.face .exname {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-top: 1px;
+  letter-spacing: -0.1px;
+  line-height: 1.2;
+}
+
+.face .hero {
+  font-family: var(--mono);
+  font-weight: 300;
+  color: var(--ink);
+  line-height: 0.92;
+  letter-spacing: -0.03em;
+}
+.face .hero.huge { font-size: 76px; margin-top: 14px; }
+.face .hero.big  { font-size: 60px; margin-top: 18px; }
+.face .hero.mid  { font-size: 44px; margin-top: 20px; }
+
+.face .hero .unit {
+  font-size: 14px;
+  color: var(--ink-3);
+  margin-left: 4px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+.face .sub {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-2);
+  margin-top: 6px;
+  letter-spacing: 0.02em;
+}
+
+.face .footer {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 10px;
+  border-top: 1px solid var(--stroke);
+}
+
+.face .hr {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--hr);
+  letter-spacing: 0.01em;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.face .hr::before {
+  content: "";
+  display: inline-block;
+  width: 8px; height: 8px;
+  background: var(--hr);
+  border-radius: 50%;
+  animation: pulse 1.1s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+.face .tap-hint {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-3);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.face .tap-hint.accent { color: var(--accent); }
+
+/* Dual buttons for superset */
+.face .dual {
+  margin-top: auto;
+  display: flex;
+  gap: 6px;
+}
+.face .dual button {
+  flex: 1;
+  padding: 10px 4px;
+  border-radius: 10px;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  border: none;
+  cursor: pointer;
+}
+.face .dual .primary {
+  flex: 2;
+  background: var(--accent);
+  color: #14110e;
+}
+.face .dual .secondary {
+  background: var(--watch-surface-2);
+  color: var(--ink-2);
+  border: 1px solid var(--stroke);
+}
+
+/* Rest ring */
+.ring-wrap {
+  position: absolute;
+  inset: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.ring-wrap svg {
+  width: 100%;
+  height: 100%;
+}
+
+/* RIR picker dots (compact) */
+.rir-dots {
+  display: flex;
+  gap: 6px;
+  margin-top: 14px;
+}
+.rir-dots .dot {
+  flex: 1;
+  height: 32px;
+  border-radius: 6px;
+  background: var(--watch-surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.rir-dots .dot.selected {
+  background: var(--accent);
+  color: #14110e;
+}
+
+/* Full-face primary action (huge tap target) */
+.primary-cta {
+  margin-top: auto;
+  padding: 14px 0;
+  border-radius: 14px;
+  background: var(--accent);
+  color: #14110e;
+  font-family: var(--mono);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  text-align: center;
+  cursor: pointer;
+  border: none;
+}
+
+/* Title on complete */
+.face.complete {
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding-top: 30px;
+}
+.face.complete .big {
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--ink);
+  margin-top: 6px;
+}
+
+/* ── GALLERY ── all faces as static cards ── */
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 28px 24px;
+}
+.gallery-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.gallery-card .gallery-watch {
+  width: 184px;
+  height: 224px;
+  background: linear-gradient(160deg, #6b5f52 0%, #3a332c 35%, #1f1a15 100%);
+  border-radius: 40px;
+  padding: 8px;
+  position: relative;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.5), 0 0 0 1px #050403, inset 0 2px 2px rgba(255,230,200,0.15), inset 0 -2px 4px rgba(0,0,0,0.6);
+}
+.gallery-card .gallery-watch::before {
+  content: "";
+  position: absolute;
+  right: -3px;
+  top: 52px;
+  width: 7px;
+  height: 24px;
+  background: #2a2620;
+  border-radius: 2px 1px 1px 2px;
+}
+.gallery-card .gallery-watch .screen {
+  width: 100%;
+  height: 100%;
+  background: var(--watch-bg);
+  border-radius: 34px;
+  overflow: hidden;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+.gallery-card .gallery-watch .face {
+  padding: 10px 12px 10px;
+}
+.gallery-card .gallery-watch .face .hero.huge { font-size: 56px; margin-top: 10px; }
+.gallery-card .gallery-watch .face .hero.big  { font-size: 44px; margin-top: 12px; }
+.gallery-card .gallery-watch .face .hero.mid  { font-size: 32px; margin-top: 12px; }
+.gallery-card .gallery-watch .face .time { font-size: 11px; top: 8px; right: 14px; }
+.gallery-card .gallery-watch .face .kicker { font-size: 9px; }
+.gallery-card .gallery-watch .face .exname { font-size: 12px; }
+.gallery-card .gallery-watch .face .sub { font-size: 10px; }
+.gallery-card .gallery-watch .face .hr { font-size: 11px; }
+.gallery-card .gallery-watch .face .tap-hint { font-size: 9px; }
+.gallery-card .gallery-watch .face .primary-cta { font-size: 12px; padding: 10px 0; }
+.gallery-card .gallery-watch .face .dual button { font-size: 10px; padding: 8px 2px; }
+.gallery-card .gallery-watch .face .rir-dots .dot { height: 24px; font-size: 11px; }
+.gallery-card .label {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.gallery-card .label strong {
+  color: var(--ink);
+  font-weight: 600;
+  display: block;
+  margin-bottom: 2px;
+}
+
+/* section divider */
+.gallery-section {
+  grid-column: 1 / -1;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--stroke);
+  margin-top: 20px;
+}
+.gallery-section:first-child { margin-top: 0; }
+
+/* Reset button / state label */
+.state-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.state-label strong { color: var(--ink); font-weight: 500; }

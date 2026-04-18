@@ -340,6 +340,7 @@
           "workouts"
         ],
         "summary": "Create Workout",
+        "description": "Create a workout, or upsert-in-place if the caller supplied an `id` that\nalready exists for this user.\n\nbug-041: prior to this change, a POST with an `id` that matched an existing\nrow returned 500 (PK constraint violation). Seed scripts and any client\nthat replays a POST with stable IDs hit that path. Single-user-cutover\nphilosophy says \"same id = upsert, not crash\" \u2014 so we route an existing-id\nPOST through the same tree-replace logic PUT uses. New-id POSTs take the\nplain insert path.",
         "operationId": "create_workout_api_workouts_post",
         "security": [
           {
@@ -685,6 +686,55 @@
                   "additionalProperties": true,
                   "type": "object",
                   "title": "Response Sync Results Api Sync Results Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/telemetry/events": {
+      "post": {
+        "tags": [
+          "telemetry"
+        ],
+        "summary": "Push Events",
+        "description": "Upsert a batch of telemetry events.\n\nTenant isolation: `user_id` is always taken from the bearer token, never\nthe body. If a row with the same id already exists under another user,\nwe treat it as a no-op \u2014 a user cannot overwrite another user's events.",
+        "operationId": "push_events_api_telemetry_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TelemetryEventsPayload"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Push Events Api Telemetry Events Post"
                 }
               }
             }
@@ -1054,6 +1104,28 @@
               }
             ],
             "title": "Demo Url"
+          },
+          "default_prescription_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Prescription Json"
+          },
+          "default_alternatives_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Alternatives Json"
           }
         },
         "type": "object",
@@ -1096,6 +1168,28 @@
               }
             ],
             "title": "Demo Url"
+          },
+          "default_prescription_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Prescription Json"
+          },
+          "default_alternatives_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Alternatives Json"
           }
         },
         "type": "object",
@@ -1128,6 +1222,17 @@
           "workout_item_id": {
             "type": "string",
             "title": "Workout Item Id"
+          },
+          "performed_exercise_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Performed Exercise Id"
           },
           "set_index": {
             "type": "integer",
@@ -1192,16 +1297,18 @@
             ],
             "title": "Distance M"
           },
-          "rpe": {
+          "rir": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 0.0
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Rpe"
+            "title": "Rir"
           },
           "is_warmup": {
             "type": "boolean",
@@ -1300,6 +1407,17 @@
             "type": "string",
             "title": "Workout Item Id"
           },
+          "performed_exercise_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Performed Exercise Id"
+          },
           "set_index": {
             "type": "integer",
             "title": "Set Index"
@@ -1359,16 +1477,16 @@
             ],
             "title": "Distance M"
           },
-          "rpe": {
+          "rir": {
             "anyOf": [
               {
-                "type": "number"
+                "type": "integer"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Rpe"
+            "title": "Rir"
           },
           "is_warmup": {
             "type": "boolean",
@@ -1377,8 +1495,7 @@
           "started_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"
@@ -1388,7 +1505,6 @@
           },
           "completed_at": {
             "type": "string",
-            "format": "date-time",
             "title": "Completed At"
           },
           "hr_avg_bpm": {
@@ -1451,13 +1567,14 @@
         "required": [
           "id",
           "workout_item_id",
+          "performed_exercise_id",
           "set_index",
           "reps",
           "weight",
           "weight_unit",
           "duration_sec",
           "distance_m",
-          "rpe",
+          "rir",
           "is_warmup",
           "started_at",
           "completed_at",
@@ -1501,7 +1618,6 @@
           },
           "server_time": {
             "type": "string",
-            "format": "date-time",
             "title": "Server Time"
           }
         },
@@ -1535,6 +1651,89 @@
         "type": "object",
         "title": "SyncResultsIn",
         "description": "App pushes this when a workout finishes (or on next connectivity)."
+      },
+      "TelemetryEventIn": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Timestamp"
+          },
+          "session_id": {
+            "type": "string",
+            "title": "Session Id"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "data_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Json"
+          },
+          "workout_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workout Id"
+          },
+          "set_log_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set Log Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "timestamp",
+          "session_id",
+          "kind",
+          "name"
+        ],
+        "title": "TelemetryEventIn",
+        "description": "One app-emitted telemetry event. See `server/db/migrations/005_event_log.sql`.\n\n`data_json` is a freeform string (not parsed) so new event shapes don't\nrequire schema changes. `workout_id` / `set_log_id` are nullable pointers\nfor filtering; not FK-validated because the app may emit events that\nreference IDs from the same batch."
+      },
+      "TelemetryEventsPayload": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/TelemetryEventIn"
+            },
+            "type": "array",
+            "maxItems": 500,
+            "title": "Events"
+          }
+        },
+        "type": "object",
+        "title": "TelemetryEventsPayload",
+        "description": "Batch of telemetry events. POST /api/telemetry/events body shape.\n\nPer-request cap of 500 events (bug-033). The client-side ring buffer\nholds 10k events locally; the push queue drains them one event per\n`PushItem.Payload.events([Event])` entry in practice (see\n`docs/features/telemetry.md` \u00a7 \"What it deliberately doesn't do\"), so\n500 per POST is generous \u2014 a misbehaving client that fans an entire\n10k buffer into one payload would be rejected before we touch the DB.\nPydantic emits 422 on overflow, which the app retries on its next\nflush tick with a smaller batch."
       },
       "UserParameterIn": {
         "properties": {
@@ -1597,7 +1796,6 @@
           },
           "updated_at": {
             "type": "string",
-            "format": "date-time",
             "title": "Updated At"
           },
           "source": {
@@ -1833,6 +2031,17 @@
             "type": "string",
             "title": "Prescription Json"
           },
+          "prescription_json_raw": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prescription Json Raw"
+          },
           "alternatives": {
             "items": {
               "$ref": "#/components/schemas/ExerciseAlternativeRead"
@@ -1908,19 +2117,16 @@
           },
           "created_at": {
             "type": "string",
-            "format": "date-time",
             "title": "Created At"
           },
           "updated_at": {
             "type": "string",
-            "format": "date-time",
             "title": "Updated At"
           },
           "completed_at": {
             "anyOf": [
               {
-                "type": "string",
-                "format": "date-time"
+                "type": "string"
               },
               {
                 "type": "null"

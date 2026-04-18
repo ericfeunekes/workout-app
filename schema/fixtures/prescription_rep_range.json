@@ -1,0 +1,7 @@
+{
+  "sets": 3,
+  "reps_min": 8,
+  "reps_max": 12,
+  "load_kg": 70,
+  "target_rir": 1
+}

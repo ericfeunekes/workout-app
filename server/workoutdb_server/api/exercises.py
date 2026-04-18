@@ -32,13 +32,20 @@ def upsert_exercises(payload: list[ExerciseUpsert], db: DbSession) -> list[Exerc
         existing = db.get(Exercise, item.id)
         if existing is None:
             existing = Exercise(
-                id=item.id, name=item.name, notes=item.notes, demo_url=item.demo_url
+                id=item.id,
+                name=item.name,
+                notes=item.notes,
+                demo_url=item.demo_url,
+                default_prescription_json=item.default_prescription_json,
+                default_alternatives_json=item.default_alternatives_json,
             )
             db.add(existing)
         else:
             existing.name = item.name
             existing.notes = item.notes
             existing.demo_url = item.demo_url
+            existing.default_prescription_json = item.default_prescription_json
+            existing.default_alternatives_json = item.default_alternatives_json
         result.append(existing)
     db.commit()
     for e in result:

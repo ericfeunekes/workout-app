@@ -1,3 +1,14 @@
+---
+title: Architecture
+status: accepted
+purpose: One-page system map + domain router. Summarizes the shape; routes to the spec and per-package READMEs for detail.
+covers:
+  - docs/
+  - server/
+  - app/
+  - schema/
+---
+
 # Architecture
 
 Top-level system map for WorkoutDB. The canonical, detailed reference is `docs/specs/v2-architecture.md` — this file routes to it and summarizes the shape.
@@ -51,7 +62,7 @@ Swift + SwiftData. The "dumb" client. Owns:
 - Pull-to-refresh and queued push (works fully offline)
 - Percentage-based load resolution via `user_parameters`
 
-Runs all 10 timing modes: `straight_sets`, `superset`, `circuit`, `emom`, `amrap`, `for_time`, `intervals`, `tabata`, `continuous`, `custom`. See `app/README.md` and spec § "Timing modes".
+Runs the 10 timing modes + standalone `rest` blocks: `straight_sets`, `superset`, `circuit`, `emom`, `amrap`, `for_time`, `intervals`, `tabata`, `continuous`, `custom`, `rest`. Applies client-side autoregulation based on per-item `target_rir` and `autoreg` rules. See `app/README.md` for the in-app behavior contract, `docs/prescription.md` for the per-mode prescription shapes, and `docs/sync.md` for sync + first-run behavior.
 
 ### `schema/` — Shared schema
 Single source of truth for cross-stack data contracts. Committed `openapi.json` is the wire contract; hand-written Swift Codable DTOs under `Sources/WorkoutDBSchema/` mirror the server's Pydantic schemas. Cross-decoded fixtures live in `fixtures/`. See `schema/README.md`.
@@ -70,15 +81,23 @@ See spec § "Data model" for field-level definitions.
 ## Sync model
 
 Direction-based, no conflict resolution:
-- Server → app: workouts, exercises, alternatives, user_parameters
-- App → server: set_logs, workout status changes
+- Server → app: workouts, exercises, alternatives, user_parameters, `last_performed` snapshots
+- App → server: set_logs, workout status changes, body-weight-at-completion (as a `user_parameters` row)
 
-See spec § "Persistence architecture" and § "Sync mechanics".
+Cadence: on app open + on log write + ~60s foreground retry. Conflict rule: server wins for prescriptions, app wins for logs, live session is frozen. First-run: connection string (URL + bearer token) via paste or QR — no login surface.
+
+See `docs/sync.md` for the full rules, and the spec § "Persistence architecture" for the entity/contract details.
 
 ## Where to go next
 
 - Target spec (authoritative) → `docs/specs/v2-architecture.md`
+- Structural contract (boundaries + fitness functions + hotspots + Swift package graph) → `docs/architecture/` (start at `context.md`)
+- Prescription authoring vocabulary → `docs/prescription.md` (what Claude puts in a workout; per-mode shapes; autoreg rules)
+- Sync + connectivity + first-run → `docs/sync.md`
 - Proof contract → `docs/TESTING.md`
 - Server specifics → `server/README.md`
-- App specifics → `app/README.md`
+- App specifics → `app/README.md` (the in-app behavior contract lives here)
 - Cross-stack schema → `schema/README.md`
+- Design reference (wireframes, hi-fi, rules) → `docs/design/` (start at `ORIGIN.md`)
+- Decision records → `docs/decisions/`
+- Open questions → `docs/open-questions.md`

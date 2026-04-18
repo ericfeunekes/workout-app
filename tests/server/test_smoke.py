@@ -1,8 +1,7 @@
 """Smoke tests: prove the package installs and the FastAPI app boots."""
 
-from fastapi.testclient import TestClient
-
 import workoutdb_server
+from fastapi.testclient import TestClient
 from workoutdb_server.main import app
 
 

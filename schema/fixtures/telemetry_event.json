@@ -1,0 +1,10 @@
+{
+  "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+  "timestamp": "2026-04-18T14:32:15.123Z",
+  "session_id": "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+  "kind": "interaction",
+  "name": "today.start_tap",
+  "data_json": "{\"tab\":\"today\"}",
+  "workout_id": "11111111-1111-1111-1111-111111111111",
+  "set_log_id": null
+}

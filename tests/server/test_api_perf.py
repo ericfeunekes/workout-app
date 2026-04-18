@@ -10,7 +10,6 @@ from datetime import datetime
 
 from sqlalchemy import event
 from sqlalchemy.orm import Session
-
 from workoutdb_server.models import (
     Block,
     Exercise,

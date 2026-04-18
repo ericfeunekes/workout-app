@@ -1,0 +1,20 @@
+{
+  "timing_mode": "straight_sets",
+  "timing_config_json": {
+    "rest_between_sets_sec": 180,
+    "rest_between_exercises_sec": 180
+  },
+  "prescription_json": {
+    "sets": 4,
+    "reps": 5,
+    "load_kg": 102.5,
+    "target_rir": 2,
+    "autoreg": {
+      "overshoot_at": 2,
+      "overshoot_step_kg": 2.5,
+      "undershoot_at": 2,
+      "undershoot_step_kg": 2.5,
+      "apply_to": "remaining"
+    }
+  }
+}

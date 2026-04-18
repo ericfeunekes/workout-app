@@ -6,7 +6,6 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session
-
 from workoutdb_server.api.deps import get_db, verify_bearer
 from workoutdb_server.config import get_settings
 from workoutdb_server.main import app

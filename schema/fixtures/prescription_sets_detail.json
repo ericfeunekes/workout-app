@@ -1,0 +1,16 @@
+{
+  "sets_detail": [
+    { "reps": 12, "load_kg": 60 },
+    { "reps": 10, "load_kg": 65 },
+    { "reps": 8, "load_kg": 70 },
+    { "reps": 6, "load_kg": 75 }
+  ],
+  "target_rir": 2,
+  "autoreg": {
+    "overshoot_at": 2,
+    "overshoot_step_kg": 2.5,
+    "undershoot_at": 2,
+    "undershoot_step_kg": 2.5,
+    "apply_to": "remaining"
+  }
+}

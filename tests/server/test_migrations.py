@@ -5,7 +5,6 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
-
 from workoutdb_server.migrations import apply_migrations
 
 

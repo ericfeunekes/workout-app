@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>WorkoutDB — Flow Map</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #111;
+    --paper: #fafaf7;
+    --line: #2a2a28;
+    --muted: #6e6e68;
+    --hifi: #c25a3c;
+    --wire: #6b6b64;
+    --todo: #b8b8b0;
+    --oos: #d6d6cf;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--paper); color: var(--ink); font-family: Inter, sans-serif; }
+  body { padding: 40px 48px 120px; }
+  header { max-width: 1200px; margin: 0 auto 32px; }
+  h1 { font-size: 28px; font-weight: 700; margin: 0 0 4px; letter-spacing: -0.01em; }
+  .sub { font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); }
+  .legend { display: flex; gap: 20px; margin-top: 18px; flex-wrap: wrap; font-family: 'IBM Plex Mono', monospace; font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .legend span { display: inline-flex; align-items: center; gap: 8px; }
+  .dot { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .dot.hifi { background: var(--hifi); }
+  .dot.wire { background: var(--wire); }
+  .dot.todo { background: var(--todo); }
+  .dot.oos  { background: var(--oos); }
+
+  main { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: 1fr; gap: 28px; }
+
+  section.area {
+    border: 1.5px solid var(--line);
+    background: #fff;
+    padding: 22px 24px 28px;
+  }
+  .area h2 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    margin: 0 0 4px;
+    color: var(--ink);
+  }
+  .area .blurb { font-size: 13px; color: var(--muted); margin: 0 0 18px; max-width: 640px; }
+
+  .row { display: flex; align-items: stretch; gap: 10px; flex-wrap: wrap; }
+  .row + .row { margin-top: 14px; }
+  .node {
+    min-width: 130px;
+    padding: 12px 14px;
+    border: 1.5px solid var(--line);
+    background: #fff;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    line-height: 1.35;
+    position: relative;
+  }
+  .node .name { font-weight: 600; font-size: 12px; letter-spacing: 0.02em; }
+  .node .note { font-size: 10px; color: var(--muted); margin-top: 3px; text-transform: uppercase; letter-spacing: 0.08em; }
+  .node.hifi { border-left: 6px solid var(--hifi); }
+  .node.wire { border-left: 6px solid var(--wire); background: #f4f4f0; }
+  .node.todo { border-left: 6px solid var(--todo); background: #f8f8f5; border-style: dashed; }
+  .node.oos  { border-left: 6px solid var(--oos); background: #efefe9; color: var(--muted); border-style: dashed; }
+
+  .arrow {
+    align-self: center;
+    color: var(--muted);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 14px;
+    padding: 0 4px;
+  }
+  .arrow.down { width: 100%; text-align: center; padding: 4px 0; }
+  .arrow.fork { font-weight: 600; color: var(--ink); }
+
+  .group {
+    border: 1px dashed var(--muted);
+    padding: 10px 12px;
+    display: inline-flex;
+    flex-direction: column;
+    gap: 8px;
+    position: relative;
+  }
+  .group > .label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 2px;
+  }
+  .group .stack { display: flex; flex-direction: column; gap: 8px; }
+
+  .foot { margin-top: 14px; font-size: 12px; color: var(--muted); font-style: italic; }
+
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+
+  .pill {
+    display: inline-block;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border: 1px solid var(--line);
+    margin-left: 8px;
+    vertical-align: middle;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>WorkoutDB — Flow Map</h1>
+  <div class="sub">every screen · grouped by area · colored by fidelity</div>
+  <div class="legend">
+    <span><i class="dot hifi"></i> Hi-fi interactive</span>
+    <span><i class="dot wire"></i> Wireframed (v2)</span>
+    <span><i class="dot todo"></i> Listed, not designed</span>
+    <span><i class="dot oos"></i> Out of scope v1</span>
+  </div>
+  <div class="legend" style="margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px;">
+    <span style="font-family:'IBM Plex Mono',monospace; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted);">Artifacts →</span>
+    <a href="WorkoutDB Hi-Fi.html" style="font-family:'IBM Plex Mono',monospace; font-size: 11px; color: var(--hifi); text-decoration: underline;">Phone hi-fi</a>
+    <a href="WorkoutDB Watch Hi-Fi.html" style="font-family:'IBM Plex Mono',monospace; font-size: 11px; color: var(--hifi); text-decoration: underline;">Watch hi-fi</a>
+    <a href="WorkoutDB Wireframes v2.html" style="font-family:'IBM Plex Mono',monospace; font-size: 11px; color: var(--wire); text-decoration: underline;">Core wires v2</a>
+    <a href="WorkoutDB Wireframes - Meta & History.html" style="font-family:'IBM Plex Mono',monospace; font-size: 11px; color: var(--wire); text-decoration: underline;">Meta & History wires</a>
+  </div>
+</header>
+
+<main>
+
+  <!-- ───────────────────────── ENTRY ──────────────────────── -->
+  <section class="area">
+    <h2>1 · Entry & onboarding</h2>
+    <p class="blurb">How the user lands in the app and gets to a workout. Today is the home base.</p>
+    <div class="row">
+      <div class="node todo">
+        <div class="name">App launch</div>
+        <div class="note">Cold start → routing</div>
+      </div>
+      <span class="arrow">→</span>
+      <div class="node wire">
+        <div class="name">First Run</div>
+        <div class="note">Wireframes v2 §6</div>
+      </div>
+      <span class="arrow">→</span>
+      <div class="node todo">
+        <div class="name">Program picker</div>
+        <div class="note">Not designed · see BACKLOG</div>
+      </div>
+      <span class="arrow">→</span>
+      <div class="node hifi">
+        <div class="name">Today</div>
+        <div class="note">Hi-fi</div>
+      </div>
+    </div>
+    <p class="foot">Gap: nothing between App launch and Today except a First Run wireframe. Program picker and cold-start routing are not designed. <b>Highest-priority gap to fill next.</b></p>
+  </section>
+
+  <!-- ───────────────────────── CORE LOOP ──────────────────── -->
+  <section class="area">
+    <h2>2 · Core workout loop — straight sets</h2>
+    <p class="blurb">The only scheme designed to hi-fi. This is the reference implementation for all other schemes.</p>
+
+    <div class="row">
+      <div class="node hifi">
+        <div class="name">Today</div>
+        <div class="note">Workout card · exercise list</div>
+      </div>
+      <span class="arrow fork">⇣</span>
+    </div>
+
+    <div class="row" style="margin-top: 8px;">
+      <div class="group">
+        <span class="label">Tap exercise row</span>
+        <div class="stack">
+          <div class="node hifi"><div class="name">Plan sheet</div><div class="note">Edit sets·reps·load · start here</div></div>
+        </div>
+      </div>
+      <div class="group">
+        <span class="label">Tap "Last session" chip</span>
+        <div class="stack">
+          <div class="node hifi"><div class="name">History drawer</div><div class="note">All sessions · expandable</div></div>
+        </div>
+      </div>
+      <div class="group">
+        <span class="label">Tap Start workout</span>
+        <div class="stack">
+          <div class="node hifi"><div class="name">Active set</div><div class="note">Log load · reps · RIR</div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top: 14px;">
+      <div class="node hifi">
+        <div class="name">Active set</div>
+        <div class="note">Numpad · RIR sheet · last-time chip</div>
+      </div>
+      <span class="arrow">→</span>
+      <div class="node hifi">
+        <div class="name">Rest</div>
+        <div class="note">Timer · autoreg proposal · edit-last</div>
+      </div>
+      <span class="arrow">→</span>
+      <div class="node hifi">
+        <div class="name">Active set (next)</div>
+        <div class="note">Loop N times</div>
+      </div>
+      <span class="arrow">→</span>
+      <div class="node hifi">
+        <div class="name">Complete</div>
+        <div class="note">Ledger · note · save</div>
+      </div>
+      <span class="arrow">→</span>
+      <div class="node hifi">
+        <div class="name">Today</div>
+        <div class="note">Fresh</div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top: 14px;">
+      <div class="group">
+        <span class="label">From Active — longpress exercise</span>
+        <div class="stack">
+          <div class="node wire"><div class="name">Swap longpress</div><div class="note">v2 wire</div></div>
+          <div class="node wire"><div class="name">Swap sheet</div><div class="note">Exercise picker · v2 wire</div></div>
+        </div>
+      </div>
+      <div class="group">
+        <span class="label">From Active — tap "Last time" chip</span>
+        <div class="stack">
+          <div class="node hifi"><div class="name">History drawer</div><div class="note">Filtered to this exercise</div></div>
+        </div>
+      </div>
+      <div class="group">
+        <span class="label">From Rest — tap edit-last</span>
+        <div class="stack">
+          <div class="node hifi"><div class="name">Past set sheet</div><div class="note">Corrective · no autoreg</div></div>
+        </div>
+      </div>
+      <div class="group">
+        <span class="label">From Complete — tap exercise</span>
+        <div class="stack">
+          <div class="node wire"><div class="name">Complete group edit</div><div class="note">v2 wire · expand exercise</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── OTHER SCHEMES ──────────────── -->
+  <section class="area">
+    <h2>3 · Other workout schemes</h2>
+    <p class="blurb">Each scheme has its own Active / Rest variant. All wireframed, none hi-fi. Branch from Today when the block has a non-straight-sets scheme.</p>
+
+    <div class="cols">
+      <div class="row">
+        <div class="group">
+          <span class="label">Strength / hypertrophy</span>
+          <div class="stack">
+            <div class="node wire"><div class="name">Superset</div><div class="note">A/B alternating · NEXT-only</div></div>
+            <div class="node wire"><div class="name">Circuit</div><div class="note">Multi-station round</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="group">
+          <span class="label">Conditioning</span>
+          <div class="stack">
+            <div class="node wire"><div class="name">EMOM</div><div class="note">Every min on the min</div></div>
+            <div class="node wire"><div class="name">AMRAP</div><div class="note">+1 round · partial on end</div></div>
+            <div class="node wire"><div class="name">For Time</div><div class="note">Big NEXT per group</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="group">
+          <span class="label">Cardio / timed</span>
+          <div class="stack">
+            <div class="node wire"><div class="name">Intervals</div><div class="note">Work/rest cycles</div></div>
+            <div class="node wire"><div class="name">Tabata</div><div class="note">8 × 20/10</div></div>
+            <div class="node wire"><div class="name">Continuous</div><div class="note">Z2 · HR-centric</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+        <div class="group">
+          <span class="label">Misc</span>
+          <div class="stack">
+            <div class="node wire"><div class="name">Custom</div><div class="note">Multi-segment</div></div>
+            <div class="node wire"><div class="name">Rest block</div><div class="note">Standalone timer</div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── WATCH ──────────────────────── -->
+  <section class="area">
+    <h2>4 · Watch companion</h2>
+    <p class="blurb">Parallel surface to phone. <strong>Now hi-fi:</strong> Series-10 49mm, dark OLED, HR + time always visible. One tap to progress on every face.</p>
+    <div class="row">
+      <div class="node hifi"><div class="name">Watch · Ready</div><div class="note">Pre-set · 102.5 × 5</div></div>
+      <div class="node hifi"><div class="name">Watch · Active</div><div class="note">In-set timer · HR</div></div>
+      <div class="node hifi"><div class="name">Watch · RIR pick</div><div class="note">Crown scrolls · tap logs</div></div>
+      <div class="node hifi"><div class="name">Watch · Autoreg</div><div class="note">OK / Hold · nudge confirm</div></div>
+      <div class="node hifi"><div class="name">Watch · Rest</div><div class="note">Countdown · ring depletes</div></div>
+      <div class="node hifi"><div class="name">Watch · Up next</div><div class="note">Between exercises</div></div>
+      <div class="node hifi"><div class="name">Watch · Complete</div><div class="note">Workout summary</div></div>
+      <div class="node hifi"><div class="name">Watch · Superset</div><div class="note">NEXT + END dual</div></div>
+      <div class="node hifi"><div class="name">Watch · EMOM</div><div class="note">Minute countdown · HR-led</div></div>
+      <div class="node hifi"><div class="name">Watch · AMRAP</div><div class="note">Tap = +1 round</div></div>
+      <div class="node hifi"><div class="name">Watch · For time</div><div class="note">Elapsed · next round</div></div>
+    </div>
+    <p class="foot">Open: sync model (watch writes → phone reads? vs. phone source of truth). See RULES.md open questions.</p>
+  </section>
+
+  <!-- ───────────────────────── HISTORY & STATS ────────────── -->
+  <section class="area">
+    <h2>5 · History, stats, library</h2>
+    <p class="blurb">Non-training surfaces. Some wireframed, some listed only.</p>
+    <div class="row">
+      <div class="node hifi"><div class="name">History drawer</div><div class="note">Embedded from Today / Active</div></div>
+      <div class="node wire"><div class="name">History list</div><div class="note">Full-screen · v2 wire</div></div>
+      <div class="node wire"><div class="name">History detail</div><div class="note">Session deep-dive · v2 wire</div></div>
+      <div class="node todo"><div class="name">Per-exercise charts</div><div class="note">Load/volume over time</div></div>
+      <div class="node todo"><div class="name">Exercise library</div><div class="note">Database · filters</div></div>
+      <div class="node todo"><div class="name">Body weight log</div><div class="note">Trend</div></div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── PROGRAM MGMT ───────────────── -->
+  <section class="area">
+    <h2>6 · Program management</h2>
+    <p class="blurb">How workouts get authored and assigned. Biggest open gap.</p>
+    <div class="row">
+      <div class="node todo"><div class="name">Program picker</div><div class="note">Browse / pick active program</div></div>
+      <div class="node todo"><div class="name">Program detail</div><div class="note">Week/day overview</div></div>
+      <div class="node todo"><div class="name">Program builder</div><div class="note">Author a program</div></div>
+      <div class="node todo"><div class="name">Workout builder</div><div class="note">Author a single day</div></div>
+    </div>
+    <p class="foot">Open: who authors — user? coach? both? Affects builder scope massively.</p>
+  </section>
+
+  <!-- ───────────────────────── ACCOUNT & SYSTEM ───────────── -->
+  <section class="area">
+    <h2>7 · Account & system</h2>
+    <p class="blurb">Settings, auth, offline. Mostly not yet scoped.</p>
+    <div class="row">
+      <div class="node wire"><div class="name">Today · offline</div><div class="note">Quiet pill · v2 wire §6</div></div>
+      <div class="node todo"><div class="name">Settings</div><div class="note">Not designed</div></div>
+      <div class="node todo"><div class="name">Account / auth</div><div class="note">Not designed</div></div>
+      <div class="node todo"><div class="name">Plate math / warmup</div><div class="note">Open question — see BACKLOG</div></div>
+      <div class="node todo"><div class="name">Rest day screen</div><div class="note">Not designed</div></div>
+      <div class="node todo"><div class="name">Notifications</div><div class="note">Not designed</div></div>
+    </div>
+  </section>
+
+  <!-- ───────────────────────── OUT OF SCOPE ───────────────── -->
+  <section class="area">
+    <h2>8 · Out of scope for v1</h2>
+    <p class="blurb">Do not design these. Do not let scope creep build them.</p>
+    <div class="row">
+      <div class="node oos"><div class="name">Social feed</div></div>
+      <div class="node oos"><div class="name">AI coach</div></div>
+      <div class="node oos"><div class="name">Nutrition</div></div>
+      <div class="node oos"><div class="name">Recovery score</div></div>
+      <div class="node oos"><div class="name">Marketplace</div></div>
+      <div class="node oos"><div class="name">Video demos</div></div>
+      <div class="node oos"><div class="name">Light mode</div></div>
+      <div class="node oos"><div class="name">Localization</div></div>
+    </div>
+  </section>
+
+</main>
+
+</body>
+</html>

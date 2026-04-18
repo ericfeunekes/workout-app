@@ -1,0 +1,11 @@
+{
+  "exercise_id": "e0000003-0000-4000-8000-000000000003",
+  "reason": "bench platform taken",
+  "parameter_overrides_json": {
+    "sets": 3,
+    "reps": 10,
+    "load_kg": 32.5,
+    "per_side": true,
+    "target_rir": 2
+  }
+}

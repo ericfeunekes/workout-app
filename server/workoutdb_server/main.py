@@ -13,7 +13,14 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from workoutdb_server import __version__
-from workoutdb_server.api import exercises, sync, user_parameters, version, workouts
+from workoutdb_server.api import (
+    exercises,
+    sync,
+    telemetry,
+    user_parameters,
+    version,
+    workouts,
+)
 from workoutdb_server.config import Settings, get_settings
 from workoutdb_server.db import make_engine
 from workoutdb_server.logging_setup import RequestIdMiddleware, configure_logging
@@ -83,3 +90,4 @@ app.include_router(exercises.router)
 app.include_router(user_parameters.router)
 app.include_router(workouts.router)
 app.include_router(sync.router)
+app.include_router(telemetry.router)

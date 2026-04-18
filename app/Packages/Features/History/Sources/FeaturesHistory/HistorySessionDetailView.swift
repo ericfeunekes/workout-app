@@ -1,0 +1,209 @@
+// HistorySessionDetailView.swift
+//
+// Session detail screen. Mirrors the `SessionDetail` design variant
+// (docs/design/components/history-full.jsx lines 94-133):
+//   - big program name in display type
+//   - short meta line under it (avg RIR · duration · body weight)
+//   - per-exercise cards with mono set rows
+//   - optional workout-level note at the bottom
+//
+// Set rows are tap-to-edit: tapping a row opens `EditSetSheet` which
+// commits through `HistoryViewModel.editPastSet(workoutID:setLogID:…)`.
+// The edit writes locally AND enqueues a push via the shell-wired
+// `onSetLogEdited` hook. Fixes bug-015 — the prior stub flashed a
+// highlight and did nothing.
+
+import SwiftUI
+import CoreDomain
+import DesignSystem
+
+struct HistorySessionDetailView: View {
+    let viewModel: SessionDetailViewModel
+    let historyViewModel: HistoryViewModel
+
+    @State private var highlightedSetID: UUID?
+    @State private var editingSetLogID: UUID?
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: DSSpacing.xl) {
+                header
+                ForEach(viewModel.cards) { card in
+                    exerciseCard(card)
+                }
+                if let note = viewModel.workoutNote {
+                    noteBlock(note)
+                }
+            }
+            .padding(.horizontal, DSSpacing.xl)
+            .padding(.top, DSSpacing.lg)
+            .padding(.bottom, DSSpacing.xxl)
+        }
+        .background(DSColors.background)
+        .sheet(item: editingSetLogBinding) { editing in
+            EditSetSheet(
+                setIndex: editing.setLog.setIndex,
+                initialReps: editing.setLog.reps,
+                initialRir: editing.setLog.rir,
+                initialLoadKg: editing.setLog.weight,
+                onCommit: { reps, rir, loadKg in
+                    commitEdit(
+                        setLogID: editing.setLog.id,
+                        reps: reps, rir: rir, loadKg: loadKg
+                    )
+                }
+            )
+        }
+    }
+
+    // MARK: - Sections
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: DSSpacing.sm) {
+            Text(viewModel.programName)
+                .font(DSTypography.display)
+                .foregroundStyle(DSColors.foreground)
+            Text(viewModel.longDate)
+                .font(DSTypography.caption)
+                .tracking(1.0)
+                .foregroundStyle(DSColors.foregroundMuted)
+            HStack(spacing: DSSpacing.md) {
+                Text(viewModel.summary)
+                    .font(DSTypography.caption)
+                    .tracking(0.5)
+                    .foregroundStyle(DSColors.foregroundDim)
+                if let bw = viewModel.bodyweight {
+                    Text("·")
+                        .font(DSTypography.caption)
+                        .foregroundStyle(DSColors.foregroundDim)
+                    Text(bw)
+                        .font(DSTypography.caption)
+                        .tracking(0.5)
+                        .foregroundStyle(DSColors.foregroundDim)
+                }
+            }
+        }
+    }
+
+    private func exerciseCard(_ card: SessionDetailViewModel.ExerciseCard) -> some View {
+        VStack(alignment: .leading, spacing: DSSpacing.sm) {
+            Text(card.name.uppercased())
+                .font(DSTypography.caption)
+                .tracking(1.0)
+                .foregroundStyle(DSColors.foregroundDim)
+            VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                ForEach(card.setRows) { row in
+                    setRowView(row)
+                }
+            }
+            if let note = card.note {
+                Text(note)
+                    .font(DSTypography.caption)
+                    .foregroundStyle(DSColors.foregroundMuted)
+                    .padding(.top, DSSpacing.xs)
+            }
+        }
+    }
+
+    private func setRowView(_ row: SessionDetailViewModel.SetRow) -> some View {
+        Button(action: { handleSetRowTap(rowID: row.id) }, label: {
+            Text(row.display)
+                .font(DSTypography.mono)
+                .monospacedDigit()
+                .foregroundStyle(
+                    highlightedSetID == row.id
+                        ? DSColors.accentInk
+                        : DSColors.foregroundMuted
+                )
+                .padding(.vertical, 2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        })
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("history.session.setrow.\(row.id.uuidString)")
+    }
+
+    /// Tap handler: flash the accent highlight (so the user sees the row
+    /// respond) and open the edit sheet. The highlight clears when the
+    /// sheet dismisses.
+    private func handleSetRowTap(rowID: UUID) {
+        withAnimation(.easeInOut(duration: 0.15)) {
+            highlightedSetID = rowID
+        }
+        editingSetLogID = rowID
+    }
+
+    private func commitEdit(
+        setLogID: UUID,
+        reps: Int?,
+        rir: Int?,
+        loadKg: Double?
+    ) {
+        let workoutID = viewModel.workoutID
+        let historyVM = historyViewModel
+        // swiftlint:disable:next no_direct_task_unstructured
+        Task { @MainActor in
+            await historyVM.editPastSet(
+                workoutID: workoutID,
+                setLogID: setLogID,
+                reps: reps,
+                rir: rir,
+                loadKg: loadKg
+            )
+        }
+        // Dismiss the sheet + clear highlight immediately so the UI
+        // feels responsive. The local-cache write + push + reload happen
+        // in the Task above.
+        editingSetLogID = nil
+        withAnimation(.easeInOut(duration: 0.2)) {
+            highlightedSetID = nil
+        }
+    }
+
+    private func noteBlock(_ note: String) -> some View {
+        DSCard {
+            VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                Text("NOTE")
+                    .font(DSTypography.caption)
+                    .tracking(1.5)
+                    .foregroundStyle(DSColors.foregroundDim)
+                Text(note)
+                    .font(DSTypography.body)
+                    .foregroundStyle(DSColors.foreground)
+            }
+        }
+    }
+
+    /// `.sheet(item:)` binding: resolves `editingSetLogID` to the full
+    /// `SetLog` the sheet needs for its prefills. When the id is unknown
+    /// (stale state, concurrent reload) the binding collapses back to
+    /// nil so the sheet stays dismissed.
+    private var editingSetLogBinding: Binding<EditingTarget?> {
+        Binding(
+            get: {
+                guard let id = editingSetLogID,
+                      let log = viewModel.setLogsByID[id] else {
+                    return nil
+                }
+                return EditingTarget(setLog: log)
+            },
+            set: { newValue in
+                if newValue == nil {
+                    editingSetLogID = nil
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        highlightedSetID = nil
+                    }
+                }
+            }
+        )
+    }
+
+    /// Wrapper so `.sheet(item:)` has an `Identifiable` payload. Holding
+    /// just the UUID in state means we look up the full row at sheet-
+    /// present time, so reloads between tap and present can't desync
+    /// the prefill.
+    private struct EditingTarget: Identifiable {
+        let setLog: SetLog
+        var id: UUID { setLog.id }
+    }
+}

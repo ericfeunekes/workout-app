@@ -1,6 +1,19 @@
+---
+title: Testing
+status: accepted
+purpose: Proof contract — what each test tier covers, how to run it, and what changes require which tier.
+covers:
+  - tests/
+  - server/
+  - app/
+  - schema/
+---
+
 # Testing
 
 Proof contract for WorkoutDB. Every change should leave its proof surface green before merge.
+
+See also: `docs/MIGRATIONS.md` (schema cutover flow — contract tests run as part of each migration), `docs/prescription.md` (prescription shape contract — when a new shape lands, add a fixture and update the parity tests), `docs/sync.md` (sync protocol contract — offline execution is a load-bearing invariant that needs explicit coverage once the app exists).
 
 The system has three testable stacks — each gets its own tier:
 

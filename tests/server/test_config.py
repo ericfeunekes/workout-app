@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-
 from workoutdb_server.config import Settings, get_settings
 
 

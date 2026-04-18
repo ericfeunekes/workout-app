@@ -51,3 +51,33 @@ def test_latest_per_key(client, test_user_id) -> None:
     latest_by_key = {r["key"]: r["value"] for r in rows}
     assert latest_by_key == {"bodyweight_kg": "81.5", "1rm_back_squat_kg": "150"}
     assert all(r["user_id"] == test_user_id for r in rows)
+
+
+def test_append_accepts_app_shaped_bodyweight_payload(client, test_user_id) -> None:
+    """Pin the shape the iOS `CompleteView` sends on save & done (bug-011).
+
+    The app posts a single-element array with `source: "app_log"` and an
+    `updated_at` stamped at completion time. `user_id` + row id are both
+    server-derived and MUST NOT be present in the payload.
+    """
+    response = client.post(
+        "/api/user-parameters",
+        json=[
+            {
+                "key": "bodyweight_kg",
+                "value": "82.5",
+                "source": "app_log",
+                "updated_at": "2026-04-18T12:34:56Z",
+            }
+        ],
+    )
+    assert response.status_code == 200
+    rows = response.json()
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["key"] == "bodyweight_kg"
+    assert row["value"] == "82.5"
+    assert row["source"] == "app_log"
+    assert row["user_id"] == test_user_id
+    # Server-generated id is a lowercase UUID string.
+    assert len(row["id"]) == 36

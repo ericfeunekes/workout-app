@@ -33,19 +33,37 @@ public struct Exercise: Codable, Sendable, Equatable {
     public let name: String
     public let notes: String?
     public let demoUrl: String?
+    /// Library-level prescription defaults merged into every workout_item
+    /// referencing this exercise (unless the item overrides). See
+    /// `docs/decisions/ADR-2026-04-18-smart-defaults.md`.
+    public let defaultPrescriptionJson: String?
+    /// Library-level alternatives list — a JSON array matching the
+    /// `ExerciseAlternative` shape minus the workout_item pointer.
+    public let defaultAlternativesJson: String?
 
     enum CodingKeys: String, CodingKey {
         case id
         case name
         case notes
         case demoUrl = "demo_url"
+        case defaultPrescriptionJson = "default_prescription_json"
+        case defaultAlternativesJson = "default_alternatives_json"
     }
 
-    public init(id: String, name: String, notes: String? = nil, demoUrl: String? = nil) {
+    public init(
+        id: String,
+        name: String,
+        notes: String? = nil,
+        demoUrl: String? = nil,
+        defaultPrescriptionJson: String? = nil,
+        defaultAlternativesJson: String? = nil
+    ) {
         self.id = id
         self.name = name
         self.notes = notes
         self.demoUrl = demoUrl
+        self.defaultPrescriptionJson = defaultPrescriptionJson
+        self.defaultAlternativesJson = defaultAlternativesJson
     }
 }
 
@@ -79,7 +97,13 @@ public struct WorkoutItem: Codable, Sendable, Equatable {
     public let id: String
     public let position: Int
     public let exerciseId: String
+    /// Always the resolved form (library defaults merged in).
     public let prescriptionJson: String
+    /// The client's original sparse payload (null when the resolved form
+    /// equals what the client sent). Round-tripped for completeness but not
+    /// used at runtime — the app reads only the resolved
+    /// `prescriptionJson`. See `ADR-2026-04-18-smart-defaults.md`.
+    public let prescriptionJsonRaw: String?
     public let alternatives: [ExerciseAlternative]
 
     enum CodingKeys: String, CodingKey {
@@ -87,6 +111,7 @@ public struct WorkoutItem: Codable, Sendable, Equatable {
         case position
         case exerciseId = "exercise_id"
         case prescriptionJson = "prescription_json"
+        case prescriptionJsonRaw = "prescription_json_raw"
         case alternatives
     }
 
@@ -95,12 +120,14 @@ public struct WorkoutItem: Codable, Sendable, Equatable {
         position: Int,
         exerciseId: String,
         prescriptionJson: String,
+        prescriptionJsonRaw: String? = nil,
         alternatives: [ExerciseAlternative] = []
     ) {
         self.id = id
         self.position = position
         self.exerciseId = exerciseId
         self.prescriptionJson = prescriptionJson
+        self.prescriptionJsonRaw = prescriptionJsonRaw
         self.alternatives = alternatives
     }
 }
@@ -216,13 +243,14 @@ public struct Workout: Codable, Sendable, Equatable {
 public struct SetLog: Codable, Sendable, Equatable {
     public let id: String
     public let workoutItemId: String
+    public let performedExerciseId: String?
     public let setIndex: Int
     public let reps: Int?
     public let weight: Double?
     public let weightUnit: WeightUnit?
     public let durationSec: Double?
     public let distanceM: Double?
-    public let rpe: Double?
+    public let rir: Int?
     public let isWarmup: Bool
     public let startedAt: Date?
     public let completedAt: Date
@@ -235,13 +263,14 @@ public struct SetLog: Codable, Sendable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id
         case workoutItemId = "workout_item_id"
+        case performedExerciseId = "performed_exercise_id"
         case setIndex = "set_index"
         case reps
         case weight
         case weightUnit = "weight_unit"
         case durationSec = "duration_sec"
         case distanceM = "distance_m"
-        case rpe
+        case rir
         case isWarmup = "is_warmup"
         case startedAt = "started_at"
         case completedAt = "completed_at"
@@ -255,13 +284,14 @@ public struct SetLog: Codable, Sendable, Equatable {
     public init(
         id: String,
         workoutItemId: String,
+        performedExerciseId: String? = nil,
         setIndex: Int,
         reps: Int? = nil,
         weight: Double? = nil,
         weightUnit: WeightUnit? = nil,
         durationSec: Double? = nil,
         distanceM: Double? = nil,
-        rpe: Double? = nil,
+        rir: Int? = nil,
         isWarmup: Bool = false,
         startedAt: Date? = nil,
         completedAt: Date,
@@ -273,13 +303,14 @@ public struct SetLog: Codable, Sendable, Equatable {
     ) {
         self.id = id
         self.workoutItemId = workoutItemId
+        self.performedExerciseId = performedExerciseId
         self.setIndex = setIndex
         self.reps = reps
         self.weight = weight
         self.weightUnit = weightUnit
         self.durationSec = durationSec
         self.distanceM = distanceM
-        self.rpe = rpe
+        self.rir = rir
         self.isWarmup = isWarmup
         self.startedAt = startedAt
         self.completedAt = completedAt

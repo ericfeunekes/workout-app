@@ -2,7 +2,7 @@
   "workouts": [],
   "exercises": [
     {
-      "id": "back-squat",
+      "id": "e0000001-0000-4000-8000-000000000001",
       "name": "Back Squat",
       "notes": null,
       "demo_url": null
@@ -20,18 +20,19 @@
   ],
   "last_performed": [
     {
-      "exercise_id": "back-squat",
+      "exercise_id": "e0000001-0000-4000-8000-000000000001",
       "last_set_logs": [
         {
           "id": "77777777-7777-7777-7777-777777777777",
           "workout_item_id": "44444444-4444-4444-4444-444444444444",
+          "performed_exercise_id": null,
           "set_index": 1,
           "reps": 5,
           "weight": 100.0,
           "weight_unit": "kg",
           "duration_sec": null,
           "distance_m": null,
-          "rpe": 7.5,
+          "rir": 2,
           "is_warmup": false,
           "started_at": null,
           "completed_at": "2026-04-10T07:15:00Z",

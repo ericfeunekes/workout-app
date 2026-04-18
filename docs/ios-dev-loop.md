@@ -1,0 +1,182 @@
+---
+title: iOS dev loop for Claude Code
+status: accepted
+date: 2026-04-18
+purpose: How Claude (or another coding agent) drives the iOS app build → launch → inspect → interact → screenshot → iterate loop. Names the recommended tool (XcodeBuildMCP) and documents the ad-hoc fallback that works without it.
+covers:
+  - app/
+  - docs/
+---
+
+# iOS dev loop for Claude Code
+
+The iOS app (`app/WorkoutDB.xcodeproj`) is generated from `app/project.yml` via XcodeGen. Once the Xcode project exists, an agent working on the app needs to build, launch in the Simulator, see what renders, drive gestures, read logs, and iterate. This doc picks the tool stack and documents the fallback.
+
+## Recommended stack — install this before long iteration sessions
+
+**Primary tools** (the ones that make the loop actually tight):
+
+1. **Xcode 26.3+** — Apple's own agentic bridge lives here. The Xcode UI can expose an MCP bridge to external agents (previews, issue navigator, project-aware edits).
+2. **Claude Code** (this tool) or **Codex CLI** — the coding agent.
+3. **XcodeBuildMCP** — the MCP server that turns Xcode / simctl / device-control into structured tool calls. Install via `npm install -g xcodebuildmcp` (or run via `npx` on first use).
+4. **Xcode's external-agent MCP bridge**, enabled from within Xcode.
+
+**What the MCP tools give you** (each is a real Claude Code tool call, not a shell one-liner):
+
+| Tool | What it does |
+|---|---|
+| `discover_projs` / `list_schemes` | Project + scheme discovery without parsing xcodeproj guts |
+| `build_run_sim` | Build + install + launch on a named simulator in one call |
+| `snapshot_ui` | UI / accessibility tree with coordinates — the big one for "agent looks at the UI" |
+| `tap` / `swipe` / `type_text` / `long_press` | Structured gesture input — no cliclick, no idb, no coordinate math |
+| `screenshot` | Capture the current simulator state |
+| `lldb_attach` | Debugger access from the agent |
+| `xcode_ide` tools | Previews, issue navigator, project outline when the Xcode IDE bridge is on |
+
+**Why this beats pixel-driving:** the accessibility tree gives the agent stable, semantic handles. `tap(on: "log set 1")` survives layout changes; `cliclick 400 1200` doesn't.
+
+## Ad-hoc fallback — what to do when XcodeBuildMCP isn't wired
+
+Works today with only Xcode + Command Line Tools. Every iteration is a shell command.
+
+### Build + run
+
+```bash
+DEVICE=$(xcrun simctl list devices available | grep 'iPhone 16 Pro' | head -1 | sed -E 's/.*\(([-A-F0-9]+)\).*/\1/')
+
+xcodebuild -project app/WorkoutDB.xcodeproj -scheme WorkoutDB \
+  -destination "id=$DEVICE" -configuration Debug \
+  CODE_SIGNING_ALLOWED=NO \
+  -derivedDataPath /tmp/wdb-build build
+
+APP=$(find /tmp/wdb-build/Build/Products -name "WorkoutDB.app" -type d | head -1)
+
+xcrun simctl terminate "$DEVICE" com.ericfeunekes.WorkoutDB 2>/dev/null
+xcrun simctl uninstall "$DEVICE" com.ericfeunekes.WorkoutDB
+xcrun simctl install "$DEVICE" "$APP"
+xcrun simctl launch "$DEVICE" com.ericfeunekes.WorkoutDB [--launch-args...]
+```
+
+### See what rendered
+
+```bash
+xcrun simctl io "$DEVICE" screenshot /tmp/shot.png
+# Then Read /tmp/shot.png — Claude Code handles PNG via the Read tool.
+```
+
+### Gesture input — no good path without MCP
+
+Two workarounds that exist in this repo:
+
+1. **`cliclick`** (`brew install cliclick`) — clicks physical screen coordinates. Requires the user to grant Accessibility permission in System Settings. Pixel-coordinate fragile.
+2. **Debug launch arguments** — the app shell honours `--start-active`, `--jump-rest`, `--jump-complete` in `#if DEBUG` to jump to specific routes. Added as an expedient; see `app/WorkoutDB/WorkoutDBApp.swift`. This is the most reliable fallback for screenshot verification of specific screens.
+
+Neither is a substitute for `snapshot_ui` + `tap` from XcodeBuildMCP. When iteration volume starts burning minutes per screen, install MCP.
+
+### `idb` (Meta)
+
+Ideal for CLI-only setups, but the install went south on this machine due to a cert issue on the Facebook brew tap (`brew tap facebook/fb` failed with "error setting certificate verify locations"). Listed here as a known-available option elsewhere; not usable in this environment.
+
+## Watch apps — narrower path
+
+Watch automation is less mature:
+
+- XcodeBuildMCP's UI tools are **documented for iOS simulator specifically**, not watchOS. Build + scheme + log tools work on watch; gesture tools may not.
+- Appium's watchOS support has unresolved issues with modern architectures.
+- `xcrun simctl` for watchOS sims supports build/install/launch/screenshot but not tap.
+
+Practical rule: use **XCTest UI tests** for watch behavior. Agent writes the test, runs it, reads the result. Don't expect the same tap-screenshot-tap loop on watch that works on iPhone.
+
+## Decision guide
+
+| Goal | Use |
+|---|---|
+| Fast iteration on iPhone UI | **XcodeBuildMCP** (install it) |
+| Quick one-shot check, MCP not yet wired | Shell + screenshot + Read (fallback) |
+| Specific screen state for screenshot | `--start-active` / `--jump-rest` / `--jump-complete` launch args |
+| WatchOS behavior | XCTest UI test, not gesture automation |
+| Cross-platform (Android too) or WebDriver-style | Appium — only if those constraints exist |
+| Can't find a structured tool for a weird Xcode GUI gap | Claude computer-use (beta) as a last resort |
+
+## Installing XcodeBuildMCP (one-time — done in this repo at 2026-04-18)
+
+### Status
+
+Already installed + configured. `.mcp.json` at repo root registers the server with the full workflow set enabled via env var. On a fresh Claude Code session in this repo, 60 tools are exposed.
+
+### What was done
+
+```bash
+# 1. Install via npm (uses the volta-managed node toolchain):
+npm install -g xcodebuildmcp
+# → binary at ~/.volta/bin/xcodebuildmcp
+
+# 2. Register with Claude Code at project scope. This writes .mcp.json
+#    at the repo root — committed so any clone picks it up.
+#    (The full shape of .mcp.json is visible at /Users/efeunekes001/coding/workout-app/.mcp.json.)
+```
+
+### The committed `.mcp.json`
+
+```json
+{
+  "mcpServers": {
+    "xcodebuild": {
+      "type": "stdio",
+      "command": "xcodebuildmcp",
+      "args": ["mcp"],
+      "env": {
+        "XCODEBUILDMCP_ENABLED_WORKFLOWS": "simulator,simulator-management,ui-automation,debugging,logging,project-discovery,xcode-ide,utilities,swift-package"
+      }
+    }
+  }
+}
+```
+
+**Why the env var matters:** `xcodebuildmcp mcp` with no env loads only 27 tools from the `session-management` + `simulator` workflows. The env list above unlocks `ui-automation` (tap, swipe, snapshot-ui, screenshot, type-text), `debugging` (LLDB, breakpoints), `logging` (sim log capture), and `xcode-ide` (Xcode bridge) — 60 tools total.
+
+### Xcode IDE bridge (optional but useful)
+
+In Xcode 26.3+ under **Xcode → Settings → Internal (or Agents)**, toggle "Allow external agents to access Xcode tools." This unlocks the `xcode-ide` workflow's IDE-only capabilities (previews, issue navigator).
+
+### Restart gotcha
+
+Claude Code loads MCP tool registries at session start. After installing or changing `.mcp.json`, **the currently running Claude Code session will not see the new tools** — restart Claude Code to pick them up. `claude mcp list` shows Connected regardless of session state, so it's not a reliable "will this work" check; only the next session is.
+
+### Verify after restart
+
+In the next session, these tool calls should succeed:
+
+```
+mcp__xcodebuild__simulator-list()                    → list of simulators
+mcp__xcodebuild__project-discovery-discover-projs()  → finds WorkoutDB.xcodeproj
+mcp__xcodebuild__simulator-list-schemes(project=...) → lists all schemes
+mcp__xcodebuild__simulator-build-and-run(
+    scheme="WorkoutDB",
+    destination="iPhone 16 Pro")
+mcp__xcodebuild__ui-automation-snapshot-ui()         → hierarchy + coords
+mcp__xcodebuild__ui-automation-tap(label="log set 1")
+mcp__xcodebuild__ui-automation-screenshot()          → PNG bytes
+```
+
+The exact tool name format is `mcp__<server>__<workflow>-<tool>` in Claude Code. Use `ToolSearch("xcodebuild")` within a session to discover the live names.
+
+## When the fallback is fine
+
+- You're taking one or two screenshots as a sanity check on a specific change.
+- You only need to verify the app builds and launches.
+- The screen you're verifying can be reached via a launch argument.
+
+## When to upgrade to MCP
+
+- You're doing UI iteration — comparing design fidelity, trying multiple variants.
+- You need to exercise a flow with real gesture input (tap a card → expand → edit → confirm).
+- You're running XCTest UI tests and want the agent to read test output structurally.
+- Any agent session that will spend more than ~20 minutes on UI work.
+
+## References
+
+- XcodeBuildMCP README and tool list.
+- Apple's Xcode 26.3 external-agent docs.
+- OpenAI native-iOS guidance recommending CLI-first with XcodeBuildMCP for deeper automation.
+- Anthropic computer-use: beta desktop automation, useful as a fallback only.

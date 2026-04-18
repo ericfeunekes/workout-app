@@ -1,0 +1,200 @@
+# FF-13, FF-14, FF-15 · SwiftLint configuration for the iOS app.
+#
+# See docs/architecture/fitness-functions.md for the full rule registry and
+# docs/architecture/boundaries.md for the dependency rules that SwiftPM
+# enforces at compile time. This config catches the subtler within-package
+# violations that a package graph alone can't see.
+#
+# Activation: this config runs as soon as a SwiftLint-capable target exists
+# in app/. Pre-commit invokes it via `.pre-commit-config.yaml` (conditional
+# on the Xcode project being present).
+
+# Only scan app source — fixtures, scratch, and bundle assets are exempt.
+included:
+  - Packages
+  - WorkoutDB
+  - WorkoutDBWatch
+
+excluded:
+  - .build
+  - DerivedData
+  - Packages/*/.build
+  - "**/*.generated.swift"
+  # Test targets are held to a different bar: forced unwraps are fine in
+  # tests (fail-fast assertion semantics), test files can get long as
+  # coverage accumulates, and test-only helpers can exceed production
+  # function-body limits. Architectural rules still apply (no URLSession
+  # outside Sync, etc.) — those live under custom_rules and are not bypassed.
+  - Packages/*/Tests
+  - Packages/Core/*/Tests
+  - Packages/Features/*/Tests
+
+# Fail on any rule, treated as an error, blocks pre-commit + CI.
+strict: true
+
+# FF-14 · Cyclomatic complexity. Same threshold as Python (ruff C901).
+cyclomatic_complexity:
+  warning: 10
+  error: 11
+  ignores_case_statements: true
+
+# HS-2, HS-4 · File- and type-body length caps. Prevent god-files before they form.
+file_length:
+  warning: 350
+  error: 400
+  ignore_comment_only_lines: true
+
+type_body_length:
+  warning: 180
+  error: 200
+
+function_body_length:
+  warning: 40
+  error: 60
+
+# Catch a stray `// MARK:` dumping-ground pattern — see HS-4.
+# More than 6 MARK headers in one file is a smell.
+large_tuple:
+  warning: 3
+  error: 4
+
+# Disable opinionated noise.
+disabled_rules:
+  - todo                      # we use docs/open-questions.md, not TODO
+  - line_length               # handled via SwiftFormat
+  - trailing_comma            # SwiftFormat owns this
+  - identifier_name           # too noisy; rely on code review
+
+# Opt-in extras worth having.
+opt_in_rules:
+  - array_init
+  - closure_end_indentation
+  - closure_spacing
+  - contains_over_first_not_nil
+  - empty_count
+  - explicit_init
+  - fatal_error_message
+  - first_where
+  - force_unwrapping
+  - implicitly_unwrapped_optional
+  - last_where
+  - operator_usage_whitespace
+  - overridden_super_call
+  - redundant_nil_coalescing
+  - single_test_class
+  - sorted_first_last
+  - toggle_bool
+  - unneeded_parentheses_in_closure_argument
+  - unused_import
+
+# FF-13 · Architectural custom rules. Each catches a cross-package boundary
+# violation that the SwiftPM graph alone can't see (e.g., a sibling file
+# within the same Feature package sneaking a URLSession import).
+custom_rules:
+
+  no_print_use_logger:
+    name: "No print(), use os.Logger"
+    regex: '^\s*(debugPrint\s*\(|print\s*\()'
+    message: >-
+      Use Logger from os.log instead of print/debugPrint. Logs need structured
+      output, privacy annotations, and subsystem tagging. See HS docs and
+      docs/architecture/fitness-functions.md § FF-13.
+    severity: error
+    included: ".*\\.swift"
+    excluded: ".*Tests/.*\\.swift"
+
+  no_urlsession_outside_sync:
+    name: "URLSession must live in Sync"
+    regex: '\b(URLSession|URLRequest|URLSessionTask|URLSessionDataTask|URLSessionDownloadTask)\b'
+    message: >-
+      Networking belongs in the Sync package. Any other module that needs
+      data from the server must go through a Sync-provided protocol.
+      See docs/architecture/boundaries.md and HS-1.
+    severity: error
+    included: ".*\\.swift"
+    # Package.swift manifests frequently mention URLSession in comments
+    # explaining why a package does NOT depend on networking — excluding
+    # them is safe because manifests cannot contain executable code anyway.
+    excluded: "(Packages/Sync/.*|.*Tests/.*|.*/Package\\.swift)"
+
+  no_swiftdata_outside_persistence:
+    name: "SwiftData must live in Persistence"
+    regex: '\b(ModelContainer|ModelContext|@Model|Schema\s*\(\s*versionedSchema)'
+    message: >-
+      SwiftData persistence belongs in the Persistence package. Domain,
+      Features, and Sync code operate on Core/Domain types and interact
+      with storage via Persistence-provided protocols. See HS-3 and
+      docs/architecture/boundaries.md.
+    severity: error
+    included: ".*\\.swift"
+    excluded: "(Packages/Persistence/.*|.*Tests/.*)\\.swift"
+
+  no_healthkit_outside_bridge:
+    name: "HealthKit must live in HealthKitBridge"
+    regex: '\b(HKHealthStore|HKSampleQuery|HKLiveWorkoutBuilder|HKQuantitySample|HKWorkoutSession)\b'
+    message: >-
+      HealthKit access belongs in the HealthKitBridge package. Features
+      and Core request HR/cadence/body-weight via a HealthKitBridge
+      protocol, not by importing HealthKit directly.
+    severity: error
+    included: ".*\\.swift"
+    excluded: "(Packages/HealthKitBridge/.*|.*Tests/.*)\\.swift"
+
+  no_watchconnectivity_outside_watchbridge:
+    name: "WatchConnectivity must live in WatchBridge"
+    regex: '\b(WCSession|WCSessionDelegate)\b'
+    message: >-
+      iPhone ↔ Watch IPC belongs in the WatchBridge package. Features
+      send actions via a WatchBridge protocol.
+    severity: error
+    included: ".*\\.swift"
+    excluded: "(Packages/WatchBridge/.*|.*Tests/.*)\\.swift"
+
+  no_rpe_resurrection:
+    name: "No RPE resurrection"
+    regex: '\brpe\b|\bRPE\b|\brpe_target\b'
+    message: >-
+      The system is RIR-only per ADR-2026-04-17-rir-autoreg-sync. The
+      effort scale is reps-in-reserve (0–5), not RPE (6–10). If you see
+      RPE in pulled DTOs, the openapi drift should have caught it first —
+      investigate.
+    severity: error
+    included: ".*\\.swift"
+
+  no_utils_bucket:
+    name: "No Utils/Helpers/Common dumping ground"
+    regex: '^\s*import\s+(Utils|Helpers|Common|Misc|Shared)\s*$'
+    message: >-
+      We don't have an "everything" module. If shared code exists, it
+      lives in a named package (Core/Foundation for pure utilities,
+      DesignSystem for visual primitives). See HS-5.
+    severity: error
+    included: ".*\\.swift"
+
+  no_feature_cross_import:
+    name: "Features must not import sibling Features"
+    # Conservative regex: catches "import FeatureX" patterns. SwiftPM will
+    # also reject this at compile time if Package.swift doesn't declare it,
+    # but this catches the case where someone adds the dep to Package.swift
+    # out of convenience. If the import is legitimate, the shared code
+    # moves to Core.
+    regex: '^\s*import\s+Features[A-Z]\w+$'
+    message: >-
+      A Feature cannot import another Feature. If two Features share
+      something, it belongs in Core. See HS-2, HS-4, and
+      docs/architecture/boundaries.md.
+    severity: error
+    included: "Packages/Features/.*\\.swift"
+
+  no_direct_task_unstructured:
+    name: "Prefer structured concurrency"
+    # Task { ... } at top-level detaches work — caller can't await,
+    # can't cancel, can't trace. Structured concurrency should be the default.
+    regex: '^\s*Task\s*\{'
+    message: >-
+      Unstructured Task { } at call sites dodges cancellation and tracing.
+      If you need background work, use Task.detached with an explicit
+      rationale, or push the async boundary up to a caller that can await.
+    severity: warning
+    included: "Packages/.*\\.swift"
+    excluded: "(Packages/Sync/.*|.*Tests/.*)\\.swift"

@@ -20,6 +20,10 @@ scratch/
 DerivedData/
 *.xcodeproj/xcuserdata/
 
+# Xcode project is generated from app/project.yml via `make xcodegen`.
+# Source of truth is project.yml, not the .xcodeproj.
+app/WorkoutDB.xcodeproj/
+
 # Python
 .venv/
 env/
@@ -31,3 +35,9 @@ build/
 .mypy_cache/
 .coverage
 htmlcov/
+
+# Local-only tool directories — FF-4 (monorepo shape test) honours .gitignore
+# so these don't count against the allowed top-level set.
+scripts/             # local one-off scripts; not architectural
+backups/             # created by `make db-backup`; SQLite snapshots
+*.sqlite.backup      # ad-hoc backup artifacts

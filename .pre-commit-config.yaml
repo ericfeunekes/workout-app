@@ -36,9 +36,32 @@ repos:
         always_run: true
 
       - id: pytest
-        name: pytest (server tests)
+        name: pytest (server + architecture tests)
         entry: uv run pytest
         language: system
         stages: [pre-push]
         pass_filenames: false
         always_run: true
+
+      # SwiftLint runs when the Xcode project is in place. If SwiftLint is
+      # not installed (e.g., on a Linux CI runner) or the project doesn't
+      # exist yet, the hook no-ops silently. Activates automatically once
+      # the app lands. See docs/architecture/fitness-functions.md § FF-13.
+      - id: swiftlint
+        name: swiftlint (app architectural rules)
+        entry: bash -c 'if command -v swiftlint >/dev/null 2>&1 && { [ -d app/WorkoutDB.xcodeproj ] || [ -d app/Packages ]; }; then cd app && swiftlint lint --strict; else echo "swiftlint: skipped (not installed or no Xcode project yet)"; fi'
+        language: system
+        stages: [pre-commit]
+        pass_filenames: false
+        always_run: true
+
+      # Xcode project stays in sync with app/project.yml. If project.yml
+      # changed and xcodegen is available, regenerate. The .xcodeproj is
+      # gitignored — regeneration is local only.
+      - id: xcodegen
+        name: xcodegen (regenerate Xcode project from project.yml)
+        entry: bash -c 'if command -v xcodegen >/dev/null 2>&1; then cd app && xcodegen generate --quiet; else echo "xcodegen: skipped (not installed; run: brew install xcodegen)"; fi'
+        language: system
+        files: ^app/project\.yml$
+        stages: [pre-commit]
+        pass_filenames: false

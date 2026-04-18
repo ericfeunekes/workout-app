@@ -1,0 +1,8 @@
+{
+  "sets": 4,
+  "reps": 5,
+  "load_kg": 100,
+  "sub_sets": 4,
+  "intra_set_rest_sec": 15,
+  "target_rir": 1
+}

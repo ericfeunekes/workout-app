@@ -1,0 +1,13 @@
+{
+  "sets": 4,
+  "reps": 6,
+  "load_kg": 20,
+  "target_rir": 2,
+  "autoreg": {
+    "overshoot_at": 2,
+    "overshoot_step_kg": 2.5,
+    "undershoot_at": 2,
+    "undershoot_step_kg": 2.5,
+    "apply_to": "remaining"
+  }
+}

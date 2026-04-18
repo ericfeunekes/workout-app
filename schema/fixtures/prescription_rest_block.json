@@ -1,0 +1,7 @@
+{
+  "timing_mode": "rest",
+  "timing_config_json": {
+    "duration_sec": 180
+  },
+  "prescription_json": {}
+}

@@ -7,7 +7,6 @@ import pytest
 from sqlalchemy import create_engine, event
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-
 from workoutdb_server.migrations import apply_migrations
 from workoutdb_server.models import (
     AppUser,
@@ -38,9 +37,15 @@ def session(tmp_path: Path):
     engine.dispose()
 
 
+# Canonical test UUIDs. Per docs/specs/v2-architecture.md, all entity ids are UUIDs.
+_BACK_SQUAT = "e0000001-0000-4000-8000-000000000001"
+_FRONT_SQUAT = "e0000002-0000-4000-8000-000000000002"
+_NONEXISTENT_WORKOUT = "00000000-0000-4000-8000-000000000000"
+
+
 def _seed_user_and_exercise(session: Session) -> tuple[AppUser, Exercise]:
     user = AppUser(name="Eric")
-    exercise = Exercise(id="back-squat", name="Back Squat")
+    exercise = Exercise(id=_BACK_SQUAT, name="Back Squat")
     session.add_all([user, exercise])
     session.commit()
     return user, exercise
@@ -78,7 +83,7 @@ def test_full_round_trip(session: Session) -> None:
     session.add(item)
     session.flush()
 
-    alt_exercise = Exercise(id="front-squat", name="Front Squat")
+    alt_exercise = Exercise(id=_FRONT_SQUAT, name="Front Squat")
     session.add(alt_exercise)
     session.flush()
 
@@ -95,7 +100,7 @@ def test_full_round_trip(session: Session) -> None:
         reps=5,
         weight=100.0,
         weight_unit="kg",
-        rpe=7.5,
+        rir=2,
         is_warmup=False,
         completed_at=datetime(2026, 4, 17, 7, 30),
         hr_avg_bpm=142,
@@ -204,7 +209,7 @@ def test_user_parameters_append_only(session: Session) -> None:
 def test_foreign_key_enforcement(session: Session) -> None:
     # block.workout_id references a nonexistent workout → FK violation.
     bad = Block(
-        workout_id="nonexistent-uuid",
+        workout_id=_NONEXISTENT_WORKOUT,
         position=0,
         timing_mode="straight_sets",
         timing_config_json="{}",

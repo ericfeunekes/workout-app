@@ -63,10 +63,64 @@ Before closeout:
 - `ruff check` + `ruff format --check`
 - `pytest` (server tests pass)
 - Contract tests pass (once they exist)
-- For app changes: `xcodebuild test` in Xcode
-- For non-trivial changes: dispatch a critic agent for independent review
+- For app changes: `xcodebuild` on the iOS Simulator scheme (see `docs/ios-dev-loop.md`)
+- For non-trivial changes: **always** dispatch an independent reviewer agent — self-review by the implementer catches nothing new
 
 The pre-push git hook enforces the Python checks automatically; see `.pre-commit-config.yaml`.
+
+## Working with subagents — the implementer / reviewer cycle
+
+Subagents are the primary implementation vehicle for this project. The lead agent (the one Eric is talking to) orchestrates; subagents execute. The durable rule is:
+
+> **Self-review by an implementer catches nothing new. An independent reviewer does.**
+
+### The cycle
+
+For any non-trivial unit of work:
+
+1. **Dispatch an implementer** with a tight brief: what to build, which files to touch, what stop conditions (tests pass, build succeeds, specific gates green), and any conventions to follow. Attach full-path reading lists — don't make the implementer discover context.
+2. **Implementer returns a self-report** including files changed, design decisions, gate outputs, and any deviations or judgment calls.
+3. **Dispatch an independent reviewer** on the same area. Reviewer's brief includes what the implementer *claims* they did, plus the real gates to re-run, plus the specific risk classes to inspect. The reviewer must re-run `swift test` / `pytest` / `swiftlint` themselves — never trust the implementer's assertion that gates pass.
+4. **Lead agent synthesizes.** Reviewer verdict = ship / needs-another-round. If needs-another-round, dispatch a fix-it implementer with the reviewer's findings. Loop until ship.
+
+Skipping the reviewer is the fastest way to let real bugs through. Examples from this project where the reviewer caught things self-review missed: the UUID-vs-slug fixture drift (Chunk 9), `DTOMapping` being `public` when it could have been `internal` (Chunk 8), autoreg precedence ambiguity (Chunk 6).
+
+### When a reviewer isn't necessary
+
+- Trivial scoped fixes (one or two lines, obvious intent).
+- Pure doc edits (reviewers read the same docs; the signal is cheap).
+- Config tweaks caught by existing automated checks (lint, tests, fitness functions).
+
+Every other case: review.
+
+### Lightweight reviews for small slices
+
+A reviewer brief doesn't have to be long. 200 words is often plenty if it names the specific risk classes and lists the gates to re-run. The overhead is a fresh pair of eyes and an independent gate-run, not a full audit.
+
+## Skills — when to invoke which
+
+Claude Code exposes named skills for specific phases of work. Use them rather than improvising — they encode project-wide conventions and produce durable artifacts.
+
+| Skill | Use when |
+|---|---|
+| `scoping:feature-planning` | Before writing any code on a non-trivial feature. Clarifies user stories, scope, decomposition, and acceptance criteria. Produces a feature spec. |
+| `scoping:implementation-planning` | After `feature-planning`, when the unit of work is scoped and you want the full plan for building + proving + reviewing + closing out. |
+| `code-analysis:architecture` | Any question about where a piece of code belongs, what a new module's dependencies should look like, or whether two concerns should share a file. Three modes: audit (existing), greenfield (new), enforcement (automated checks). |
+| `code-analysis:review` | Multi-perspective review of a change. Lead agent understands the context, subagents attack from distinct angles, lead synthesizes. Uses the implementer/reviewer cycle described above. |
+| `code-analysis:debugging` | Hypothesis-driven bug investigation. If you've done two rounds of guessing and haven't isolated the root cause, invoke this instead of guessing a third time. |
+| `code-analysis:diagnose-problem-pattern` | When several recent bugs or tests point at a shared structural issue — surface the pattern before patching another symptom. |
+| `codex:review` / `codex:second-opinion` | When the main agent's reasoning needs a fresh set of eyes from a different model (Codex). Especially useful after deep-context work where the main agent may have blind spots. |
+
+Skills are composable. A non-trivial change typically goes: feature-planning → architecture (if structural) → implementation-planning → implementer subagent → reviewer (via code-analysis:review) → fix-it loop → close.
+
+## iOS development loop
+
+See `docs/ios-dev-loop.md` for the full story. Short version:
+
+- **Preferred stack:** XcodeBuildMCP registered in `.mcp.json`. Exposes structured tool calls for build, install, launch, `snapshot-ui`, `tap`, `screenshot`, log capture, LLDB. Activates on Claude Code session start.
+- **Fallback stack (documented):** `xcrun simctl` + `xcodebuild` + screenshot → Read, with `#if DEBUG` launch arguments (`--start-active`, `--jump-rest`, `--jump-complete`) for screen-specific jumps.
+- **SourceKit diagnostic noise:** a flood of "No such module" SourceKit warnings is an editor-index artifact, not a build failure. Trust `swift build` / `xcodebuild` output; ignore the editor diagnostic stream.
+- **UI snapshot testing:** not wired yet. When layout regressions start biting, reach for `swift-snapshot-testing`.
 
 ### Close
 
@@ -80,7 +134,7 @@ Deploy flow:
 
 1. Eric commits + pushes to `main` on GitHub.
 2. Eric SSHs to the home server over Tailscale.
-3. On the server: `git pull && uv sync && systemctl restart workoutdb-server` (or equivalent — see `docs/infrastructure/deployment.md` once it exists).
+3. On the server: `git pull && uv sync && systemctl restart workoutdb-server` (or equivalent — see `docs/infrastructure/home-server.md`).
 4. App deploy: open Xcode, rebuild, install to Eric's phone via USB or TestFlight personal build.
 
 Downtime during deploy is acceptable — Eric isn't working out during the deploy.

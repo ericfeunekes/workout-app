@@ -7,7 +7,6 @@ owned by that user and call endpoints without passing user_id in the request.
 from datetime import datetime
 
 from sqlalchemy.orm import Session
-
 from workoutdb_server.models import (
     AppUser,
     Block,
@@ -18,11 +17,18 @@ from workoutdb_server.models import (
     WorkoutItem,
 )
 
+# Canonical test UUIDs. Per docs/specs/v2-architecture.md, all entity ids are UUIDs.
+_BACK_SQUAT = "e0000001-0000-4000-8000-000000000001"
+_FRONT_SQUAT = "e0000002-0000-4000-8000-000000000002"
+_OHP = "e0000004-0000-4000-8000-000000000004"
+_OTHER_USER = "e0000009-0000-4000-8000-000000000009"
+_NONEXISTENT_WORKOUT = "00000000-0000-4000-8000-000000000000"
+
 
 def _seed_completed_workout(engine, user_id: str) -> tuple[str, str]:
     """Returns (exercise_id, workout_item_id). `user_id` is the auth'd user."""
     with Session(engine) as session:
-        exercise = Exercise(id="back-squat", name="Back Squat")
+        exercise = Exercise(id=_BACK_SQUAT, name="Back Squat")
         session.add(exercise)
         session.flush()
 
@@ -114,14 +120,14 @@ def test_pull_returns_workouts_and_last_performed(client, test_engine, test_user
 
     assert len(body["workouts"]) == 2  # completed + future
     assert len(body["exercises"]) == 1
-    assert body["exercises"][0]["id"] == "back-squat"
+    assert body["exercises"][0]["id"] == _BACK_SQUAT
     assert len(body["user_parameters"]) == 1
     assert body["user_parameters"][0]["key"] == "bodyweight_kg"
 
     # last_performed contains the completed session's logs
     assert len(body["last_performed"]) == 1
     last = body["last_performed"][0]
-    assert last["exercise_id"] == "back-squat"
+    assert last["exercise_id"] == _BACK_SQUAT
     assert len(last["last_set_logs"]) == 1
     assert last["last_set_logs"][0]["weight"] == 100.0
 
@@ -145,7 +151,7 @@ def test_push_set_logs_and_status(client, test_engine, test_user_id) -> None:
                     "reps": 5,
                     "weight": 105.0,
                     "weight_unit": "kg",
-                    "rpe": 7.0,
+                    "rir": 2,
                     "completed_at": "2026-04-20T07:30:00Z",
                 }
             ],
@@ -206,7 +212,7 @@ def test_pull_since_returns_workouts_edited_after_creation(client, test_engine) 
     never pull the change.
     """
     with Session(test_engine) as session:
-        session.add(Exercise(id="back-squat", name="Back Squat"))
+        session.add(Exercise(id=_BACK_SQUAT, name="Back Squat"))
         session.commit()
 
     payload = {
@@ -222,7 +228,7 @@ def test_pull_since_returns_workouts_edited_after_creation(client, test_engine) 
                 "workout_items": [
                     {
                         "position": 0,
-                        "exercise_id": "back-squat",
+                        "exercise_id": _BACK_SQUAT,
                         "prescription_json": '{"sets": 5, "reps": 5, "load_kg": 100}',
                     }
                 ],
@@ -247,7 +253,7 @@ def test_pull_since_returns_workouts_edited_after_creation(client, test_engine) 
                 "workout_items": [
                     {
                         "position": 0,
-                        "exercise_id": "back-squat",
+                        "exercise_id": _BACK_SQUAT,
                         "prescription_json": '{"sets": 5, "reps": 5, "load_kg": 110}',
                     }
                 ],
@@ -262,7 +268,9 @@ def test_pull_since_returns_workouts_edited_after_creation(client, test_engine) 
     assert len(body["workouts"]) == 1
     assert body["workouts"][0]["id"] == workout_id
     pj = body["workouts"][0]["blocks"][0]["workout_items"][0]["prescription_json"]
-    assert '"load_kg": 110' in pj
+    # Smart-defaults merge re-serializes with sort_keys + compact separators;
+    # assert on the key/value pair rather than a whitespace-specific literal.
+    assert '"load_kg":110' in pj
 
 
 def test_push_set_logs_is_idempotent_by_id(client, test_engine, test_user_id) -> None:
@@ -306,8 +314,8 @@ def test_pull_last_performed_covers_alternatives(client, test_engine, test_user_
     """A user can swap to an alternative mid-workout; the app needs its history too."""
     # Seed: a completed front-squat session (this will be the alternative).
     with Session(test_engine) as session:
-        back_squat = Exercise(id="back-squat", name="Back Squat")
-        front_squat = Exercise(id="front-squat", name="Front Squat")
+        back_squat = Exercise(id=_BACK_SQUAT, name="Back Squat")
+        front_squat = Exercise(id=_FRONT_SQUAT, name="Front Squat")
         session.add_all([back_squat, front_squat])
         session.flush()
 
@@ -367,11 +375,11 @@ def test_pull_last_performed_covers_alternatives(client, test_engine, test_user_
                     "workout_items": [
                         {
                             "position": 0,
-                            "exercise_id": "back-squat",
+                            "exercise_id": _BACK_SQUAT,
                             "prescription_json": "{}",
                             "alternatives": [
                                 {
-                                    "exercise_id": "front-squat",
+                                    "exercise_id": _FRONT_SQUAT,
                                     "reason": "bar taken",
                                 }
                             ],
@@ -384,9 +392,40 @@ def test_pull_last_performed_covers_alternatives(client, test_engine, test_user_
 
     body = client.get("/api/sync/pull").json()
     exercise_ids = {lp["exercise_id"] for lp in body["last_performed"]}
-    assert "front-squat" in exercise_ids, (
+    assert _FRONT_SQUAT in exercise_ids, (
         "sync/pull must include last_performed for exercises referenced only as alternatives"
     )
+
+
+def test_push_set_log_for_missing_workout_item_404(client) -> None:
+    """A set_log referencing a non-existent workout_item_id must 404, not silently drop."""
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "set_logs": [
+                {
+                    "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+                    "workout_item_id": _NONEXISTENT_WORKOUT,
+                    "set_index": 1,
+                    "completed_at": "2026-04-20T07:30:00Z",
+                }
+            ],
+            "status_updates": [],
+        },
+    )
+    assert response.status_code == 404
+    # Detail mentions the offending workout_item_id so the app can surface a useful error.
+    assert _NONEXISTENT_WORKOUT in response.json()["detail"]
+
+
+def test_push_results_malformed_input_422(client) -> None:
+    """Malformed sync/results payload returns 422 (FastAPI default) with structured detail."""
+    response = client.post(
+        "/api/sync/results",
+        json={"set_logs": "not-a-list", "status_updates": []},
+    )
+    assert response.status_code == 422
+    assert "detail" in response.json()
 
 
 def test_push_status_for_missing_workout_404(client) -> None:
@@ -395,7 +434,7 @@ def test_push_status_for_missing_workout_404(client) -> None:
         json={
             "set_logs": [],
             "status_updates": [
-                {"workout_id": "nonexistent", "status": "completed"},
+                {"workout_id": _NONEXISTENT_WORKOUT, "status": "completed"},
             ],
         },
     )
@@ -405,12 +444,12 @@ def test_push_status_for_missing_workout_404(client) -> None:
 def test_push_rejects_cross_tenant_set_log(client, test_engine) -> None:
     """A set_log for another user's workout_item must 404 — tenant isolation."""
     with Session(test_engine) as session:
-        other = AppUser(id="other-user", name="Other")
-        exercise = Exercise(id="ohp", name="OHP")
+        other = AppUser(id=_OTHER_USER, name="Other")
+        exercise = Exercise(id=_OHP, name="OHP")
         session.add_all([other, exercise])
         session.flush()
         workout = Workout(
-            user_id="other-user",
+            user_id=_OTHER_USER,
             name="Other's workout",
             status="planned",
             source="claude",
@@ -450,3 +489,121 @@ def test_push_rejects_cross_tenant_set_log(client, test_engine) -> None:
         },
     )
     assert response.status_code == 404
+
+
+def test_sync_results_rejects_malformed_uuid(client, test_user_id):
+    """bug-030 regression: posting a non-UUID string in `id` must 422, not silently insert.
+
+    Before the fix, the UUID-normalizing base lowercased the string but did
+    not validate UUID format — so `"id": "not-a-uuid"` returned 200 and
+    inserted the raw string as primary key, corrupting the event_log /
+    set_log table. Input-side schemas now inherit `_UuidInputBase`, which
+    enforces format.
+    """
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "set_logs": [
+                {
+                    "id": "not-a-uuid",
+                    "workout_item_id": "c0000001-0000-4000-8000-000000000001",
+                    "set_index": 1,
+                    "reps": 5,
+                    "weight": 100.0,
+                    "weight_unit": "kg",
+                    "completed_at": "2026-04-20T07:30:00Z",
+                }
+            ],
+            "status_updates": [],
+        },
+    )
+    assert response.status_code == 422, response.text
+    assert "not a valid UUID" in response.text.lower() or "uuid" in response.text.lower()
+
+
+def test_sync_pull_tolerates_legacy_non_uuid_exercise_id(client, test_engine, test_user_id):
+    """bug-031 regression: Read-side schemas must trust the DB, not revalidate UUIDs.
+
+    bug-030's fix (reject malformed UUIDs at ingest) accidentally also ran on
+    ORM → Pydantic conversions during sync_pull. Any pre-existing non-UUID
+    id in the DB (seed data, legacy imports, test fixtures) 500'd the pull
+    with `ValidationError: exercise_id is not a valid UUID: 'ex-0'`. The fix
+    split the base class: `_UuidInputBase` enforces format at write time,
+    `_UuidReadBase` only lowercases on read — the DB is trusted.
+    """
+    legacy_exercise_id = "ex-0"
+    with Session(test_engine) as session:
+        session.add(Exercise(id=legacy_exercise_id, name="Legacy Exercise"))
+        session.flush()
+        workout = Workout(
+            user_id=test_user_id,
+            name="Past",
+            status="completed",
+            source="claude",
+            completed_at=datetime(2026, 4, 10, 7),
+        )
+        session.add(workout)
+        session.flush()
+        block = Block(
+            workout_id=workout.id,
+            position=0,
+            timing_mode="straight_sets",
+            timing_config_json="{}",
+        )
+        session.add(block)
+        session.flush()
+        item = WorkoutItem(
+            block_id=block.id,
+            position=0,
+            exercise_id=legacy_exercise_id,
+            prescription_json="{}",
+        )
+        session.add(item)
+        session.flush()
+        session.add(
+            SetLog(
+                workout_item_id=item.id,
+                set_index=1,
+                reps=5,
+                weight=100.0,
+                weight_unit="kg",
+                completed_at=datetime(2026, 4, 10, 7, 15),
+            )
+        )
+        session.commit()
+
+    response = client.get("/api/sync/pull")
+    assert response.status_code == 200, response.text
+    body = response.json()
+
+    # Legacy id round-trips unchanged (already lowercase, not rejected).
+    exercise_ids = {e["id"] for e in body["exercises"]}
+    assert legacy_exercise_id in exercise_ids
+    last_performed_ids = {lp["exercise_id"] for lp in body["last_performed"]}
+    assert legacy_exercise_id in last_performed_ids
+
+
+def test_sync_results_rejects_malformed_workout_item_id(client, test_user_id):
+    """Same class as test_sync_results_rejects_malformed_uuid but for a *_id field.
+
+    Any UUID-typed field the `_UuidInputBase` validator covers must reject
+    malformed strings identically, not just the primary `id` column.
+    """
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "set_logs": [
+                {
+                    "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "workout_item_id": "this-is-not-a-uuid-either",
+                    "set_index": 1,
+                    "reps": 5,
+                    "weight": 100.0,
+                    "weight_unit": "kg",
+                    "completed_at": "2026-04-20T07:30:00Z",
+                }
+            ],
+            "status_updates": [],
+        },
+    )
+    assert response.status_code == 422, response.text

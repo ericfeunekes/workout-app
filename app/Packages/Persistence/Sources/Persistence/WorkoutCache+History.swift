@@ -40,11 +40,15 @@ extension WorkoutCacheImpl {
             SortDescriptor(\WorkoutModel.completedAt, order: .reverse),
             SortDescriptor(\WorkoutModel.scheduledDate, order: .reverse),
         ]
+        // Push pagination into the fetch itself so SwiftData doesn't
+        // materialize every completed workout just to discard the
+        // leading `offset` rows and the trailing overflow. With a
+        // bounded `limit` (History uses 200) this is linear in `limit`
+        // instead of total completed-history.
+        descriptor.fetchOffset = max(0, offset)
+        descriptor.fetchLimit = limit
         let rows = try modelContext.fetch(descriptor)
-        let start = max(0, offset)
-        guard start < rows.count else { return [] }
-        let end = min(rows.count, start + limit)
-        return rows[start..<end].map { $0.toDomain() }
+        return rows.map { $0.toDomain() }
     }
 
     public func loadSetLogs(workoutID: WorkoutID) async throws -> [SetLog] {
@@ -179,6 +183,15 @@ extension WorkoutCacheImpl {
     /// composite key is just a compact way to encode the two-axis sort
     /// in a single `Int` — the exact magnitude doesn't matter, only
     /// that later blocks / items dominate earlier ones.
+    ///
+    /// Two fetches total (blocks, then one items fetch scoped to all of
+    /// the workout's block IDs) — the prior shape issued one items
+    /// fetch per block, which dominated session-detail load time once a
+    /// workout had more than a couple of blocks. Chosen over
+    /// denormalizing block/item position onto `SetLogModel`: denorm
+    /// would require a schema bump + V3→V4 migration and a backfill
+    /// pass, while the bulk fetch is a pure code change with the same
+    /// observable output.
     private func itemPositions(workoutID: UUID) throws -> [UUID: Int] {
         let blocksDescriptor = FetchDescriptor<BlockModel>(
             predicate: #Predicate<BlockModel> { $0.workoutID == workoutID }
@@ -187,17 +200,17 @@ extension WorkoutCacheImpl {
         guard !blocks.isEmpty else { return [:] }
         let blockPosition = Dictionary(uniqueKeysWithValues: blocks.map { ($0.id, $0.position) })
 
+        let blockIDs = Set(blocks.map(\.id))
+        let itemsDescriptor = FetchDescriptor<WorkoutItemModel>(
+            predicate: #Predicate<WorkoutItemModel> { blockIDs.contains($0.blockID) }
+        )
+        let items = try modelContext.fetch(itemsDescriptor)
+
         var out: [UUID: Int] = [:]
-        for block in blocks {
-            let blockID = block.id
-            let itemsDescriptor = FetchDescriptor<WorkoutItemModel>(
-                predicate: #Predicate<WorkoutItemModel> { $0.blockID == blockID }
-            )
-            let items = try modelContext.fetch(itemsDescriptor)
-            for item in items {
-                let bp = blockPosition[item.blockID] ?? 0
-                out[item.id] = bp * 10_000 + item.position
-            }
+        out.reserveCapacity(items.count)
+        for item in items {
+            let bp = blockPosition[item.blockID] ?? 0
+            out[item.id] = bp * 10_000 + item.position
         }
         return out
     }

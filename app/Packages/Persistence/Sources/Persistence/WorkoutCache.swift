@@ -66,6 +66,20 @@ public protocol WorkoutCache: Sendable {
     /// All items for a given block, in position order.
     func loadItems(blockID: BlockID) async throws -> [WorkoutItem]
 
+    /// Bulk variant: returns every item belonging to any block of any of
+    /// the supplied `workoutIDs`, keyed by `workoutID`. The History
+    /// surface uses this to build per-session item lookups (`itemID →
+    /// exerciseID`) and the current-program exercise set in two fetches
+    /// regardless of how many workouts are involved — the per-workout
+    /// loop in the previous shape issued `1 + N_blocks` fetches per
+    /// workout which dominated load time for a 200-workout history.
+    ///
+    /// Items within each workout's list are sorted by (block position,
+    /// item position) so callers that only need a flat per-workout
+    /// iteration still get stable ordering. Workouts with no items
+    /// simply don't appear in the output map.
+    func loadItems(workoutIDs: [WorkoutID]) async throws -> [WorkoutID: [WorkoutItem]]
+
     /// All alternatives for a given item.
     func loadAlternatives(workoutItemID: WorkoutItemID) async throws -> [ExerciseAlternative]
 
@@ -266,6 +280,59 @@ public actor WorkoutCacheImpl: WorkoutCache {
         descriptor.sortBy = [SortDescriptor(\WorkoutItemModel.position)]
         let rows = try modelContext.fetch(descriptor)
         return rows.map { $0.toDomain() }
+    }
+
+    public func loadItems(
+        workoutIDs: [WorkoutID]
+    ) async throws -> [WorkoutID: [WorkoutItem]] {
+        guard !workoutIDs.isEmpty else { return [:] }
+        // Two fetches total, regardless of how many workouts the caller
+        // asks about:
+        //   1. All blocks whose `workoutID` is in the requested set.
+        //   2. All items whose `blockID` is one of the blocks from (1).
+        // The History feature previously looped per-workout + per-block,
+        // issuing `2N + sum(blocks)` fetches. For a 200-workout history
+        // with ~3 blocks/workout that collapsed to ~800 round-trips;
+        // this path is 2.
+        let workoutIDSet = Set(workoutIDs)
+        let blocksDescriptor = FetchDescriptor<BlockModel>(
+            predicate: #Predicate<BlockModel> { workoutIDSet.contains($0.workoutID) }
+        )
+        let blocks = try modelContext.fetch(blocksDescriptor)
+        guard !blocks.isEmpty else { return [:] }
+
+        var workoutIDByBlock: [BlockID: WorkoutID] = [:]
+        var blockPosition: [BlockID: Int] = [:]
+        var blockIDs: [BlockID] = []
+        blockIDs.reserveCapacity(blocks.count)
+        for block in blocks {
+            workoutIDByBlock[block.id] = block.workoutID
+            blockPosition[block.id] = block.position
+            blockIDs.append(block.id)
+        }
+
+        let blockIDSet = Set(blockIDs)
+        let itemsDescriptor = FetchDescriptor<WorkoutItemModel>(
+            predicate: #Predicate<WorkoutItemModel> { blockIDSet.contains($0.blockID) }
+        )
+        let items = try modelContext.fetch(itemsDescriptor)
+
+        // Sort in memory by (block.position, item.position) so callers
+        // that iterate workout → items get the same ordering the old
+        // per-block fetch produced naturally.
+        let sorted = items.sorted { lhs, rhs in
+            let lhsBlock = blockPosition[lhs.blockID] ?? Int.max
+            let rhsBlock = blockPosition[rhs.blockID] ?? Int.max
+            if lhsBlock != rhsBlock { return lhsBlock < rhsBlock }
+            return lhs.position < rhs.position
+        }
+
+        var out: [WorkoutID: [WorkoutItem]] = [:]
+        for item in sorted {
+            guard let workoutID = workoutIDByBlock[item.blockID] else { continue }
+            out[workoutID, default: []].append(item.toDomain())
+        }
+        return out
     }
 
     public func loadAlternatives(workoutItemID: WorkoutItemID) async throws -> [ExerciseAlternative] {

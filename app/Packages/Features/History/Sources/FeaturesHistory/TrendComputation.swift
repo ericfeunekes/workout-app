@@ -48,20 +48,6 @@ public enum TrendComputation {
             self.unit = unit
             self.reps = reps
         }
-
-        /// Back-compat accessor for callers that still treat the series
-        /// as kg-denominated. Returns the weight verbatim when the unit
-        /// is `.kg`; otherwise converts using the spec's lb → kg
-        /// constant (1 lb = 0.45359237 kg). Today no caller uses this
-        /// — the display path reads `weight` + `unit` directly — but
-        /// kept so future pure-kg consumers don't need to re-derive the
-        /// constant inline.
-        public var weightKg: Double {
-            switch unit {
-            case .kg: return weight
-            case .lb: return weight * 0.45359237
-            }
-        }
     }
 
     /// Output summary.

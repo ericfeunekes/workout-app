@@ -88,6 +88,60 @@ final class HistoryViewModelTests: XCTestCase {
         XCTAssertEqual(squatRow?.sessionSummary, "1 SESSION")
     }
 
+    func testHistoryLoadUsesSingleItemFetchPerLoad() async {
+        // perf-003 guard: the old shape fired `1 + N_blocks` item/block
+        // fetches per loaded workout. With 3 seeded completed workouts
+        // + at least one planned workout this used to be >6 per-block
+        // fetches. The new path uses the bulk `loadItems(workoutIDs:)`
+        // API once for completed sessions and once for current program
+        // (2 total regardless of N), and the per-block
+        // `loadItems(blockID:)` fetch is NEVER hit from `load()`.
+        let (cache, ids) = makeFixtures()
+        // Seed one planned workout so `loadCurrentProgram` exercises
+        // the same bulk path as `loadCompleted`.
+        let planned = Workout(
+            id: UUID(), userID: ids.userID, name: "Planned Push",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil,
+            createdAt: now, updatedAt: now, completedAt: nil,
+            tagsJSON: nil
+        )
+        cache.workouts.append(planned)
+        let plannedBlockID = UUID()
+        let plannedItemID = UUID()
+        cache.blocksByWorkout[planned.id] = [
+            Block(id: plannedBlockID, workoutID: planned.id, parentBlockID: nil,
+                  position: 0, name: nil, timingMode: .straightSets,
+                  timingConfigJSON: "{}", rounds: nil,
+                  roundsRepSchemeJSON: nil, notes: nil),
+        ]
+        cache.itemsByBlock[plannedBlockID] = [
+            WorkoutItem(id: plannedItemID, blockID: plannedBlockID,
+                        position: 0, exerciseID: ids.benchID,
+                        prescriptionJSON: "{}"),
+        ]
+
+        let vm = HistoryViewModel(
+            cache: cache,
+            calendar: utcCalendar,
+            now: { [now] in now }
+        )
+        await vm.load()
+
+        XCTAssertEqual(
+            cache.loadItemsCallCount, 0,
+            "Per-block loadItems must never fire from HistoryViewModel.load()"
+        )
+        XCTAssertLessThanOrEqual(
+            cache.loadItemsBulkCallCount, 2,
+            "Bulk loadItems must fire at most twice (completed + planned)"
+        )
+        XCTAssertGreaterThan(
+            cache.loadItemsBulkCallCount, 0,
+            "Bulk loadItems must fire at least once when completed workouts exist"
+        )
+    }
+
     func testSessionDetailBuildsCardsInOrder() async {
         let (cache, ids) = makeFixtures()
         let vm = HistoryViewModel(

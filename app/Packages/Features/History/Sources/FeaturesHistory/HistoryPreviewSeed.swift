@@ -244,6 +244,31 @@ final class SeedCache: WorkoutCache, @unchecked Sendable {
         seed.items.filter { $0.blockID == blockID }
     }
 
+    func loadItems(
+        workoutIDs: [WorkoutID]
+    ) async throws -> [WorkoutID: [WorkoutItem]] {
+        guard !workoutIDs.isEmpty else { return [:] }
+        let wanted = Set(workoutIDs)
+        let blocksByWorkout = Dictionary(
+            grouping: seed.blocks.filter { wanted.contains($0.workoutID) }
+        ) { $0.workoutID }
+        var out: [WorkoutID: [WorkoutItem]] = [:]
+        for (workoutID, blocks) in blocksByWorkout {
+            let orderedBlocks = blocks.sorted { $0.position < $1.position }
+            var items: [WorkoutItem] = []
+            for block in orderedBlocks {
+                let blockItems = seed.items
+                    .filter { $0.blockID == block.id }
+                    .sorted { $0.position < $1.position }
+                items.append(contentsOf: blockItems)
+            }
+            if !items.isEmpty {
+                out[workoutID] = items
+            }
+        }
+        return out
+    }
+
     func loadAlternatives(workoutItemID: WorkoutItemID) async throws -> [ExerciseAlternative] {
         []
     }

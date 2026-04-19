@@ -1,0 +1,11 @@
+#:schema https://developers.openai.com/codex/config-schema.json
+# Repo-local Codex overlay for workout-app.
+# Mirrors the Claude Code .mcp.json so Codex has the same iOS QA toolchain
+# (xcodebuildmcp — simulator build/run/test, UI automation, screenshots, logs).
+
+[mcp_servers.xcodebuild]
+command = "xcodebuildmcp"
+args = ["mcp"]
+env = { XCODEBUILDMCP_ENABLED_WORKFLOWS = "simulator,simulator-management,ui-automation,debugging,logging,project-discovery,xcode-ide,utilities,swift-package" }
+startup_timeout_sec = 30
+tool_timeout_sec = 300

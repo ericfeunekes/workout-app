@@ -14,9 +14,6 @@ import PackageDescription
 // model + view. Dependencies mirror iOS Features packages but are scoped
 // to what a watch face actually needs:
 //
-//   - CoreDomain    : nothing directly today, but reserved so future faces
-//                     can render exercise/item types without re-wiring the
-//                     package graph.
 //   - CoreSession   : `SessionState.Route` + structural types used for
 //                     face-state semantics. The watch does NOT run the
 //                     reducer — the phone is authoritative; the watch
@@ -48,7 +45,6 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(path: "../../Core/Domain"),
         .package(path: "../../Core/Session"),
         .package(path: "../../DesignSystem"),
         .package(path: "../../WatchBridge"),
@@ -57,7 +53,6 @@ let package = Package(
         .target(
             name: "FeaturesWatchFaces",
             dependencies: [
-                .product(name: "CoreDomain", package: "Domain"),
                 .product(name: "CoreSession", package: "Session"),
                 .product(name: "DesignSystem", package: "DesignSystem"),
                 .product(name: "WatchBridge", package: "WatchBridge"),

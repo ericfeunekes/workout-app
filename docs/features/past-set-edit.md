@@ -6,7 +6,6 @@ covers:
   - app/Packages/Features/Execution/Sources/FeaturesExecution/ExecutionViewModel.swift
   - app/Packages/Features/Execution/Sources/FeaturesExecution/ExecutionViewModel+Push.swift
   - app/Packages/Features/Execution/Sources/FeaturesExecution/RestView+Sheets.swift
-  - app/Packages/Features/Execution/Sources/FeaturesExecution/Sheets/PastSetSheet.swift
   - app/Packages/Features/Execution/Sources/FeaturesExecution/Sheets/NumPadSheet.swift
   - app/Packages/Features/Execution/Sources/FeaturesExecution/Sheets/RirSheet.swift
   - app/Packages/Features/History/Sources/FeaturesHistory/HistorySessionDetailView.swift
@@ -16,11 +15,11 @@ covers:
 # past-set-edit
 
 ## What it does
-Correctively edit a logged set's load, reps, or RIR. **In active session** (RestView): tap the corresponding `DSPill` in the "JUST LOGGED" row. Load and reps open `NumPadSheet`; RIR opens `RirSheet` (`RestView+Sheets.swift:17-87`). Only the `lastLoggedSet` is editable here — `RestView.swift:144` reads `viewModel.lastLoggedSet` and the pills dispatch to the sheet for that single set. Commit calls `viewModel.editPastSet(...)` which dispatches the `.editPastSet` reducer mutation AND — after the apply — enqueues the corrected `SetLog` through `onSetLogged` with the SAME deterministic UUID as the original log push so the server upserts the existing row in place (`ExecutionViewModel.swift:editPastSet` → `ExecutionViewModel+Push.swift:handlePastSetEditSideEffects` → `enqueueEditedSet`). The shared UUID is derived by `ExecutionViewModel.setLogID(itemID:setIndex:)` via `Insecure.MD5` of `"\(itemID)|\(setIndex)"` fed into `UUID(uuid:)` — deterministic, so the original log and every edit push always carry the same id. Reducer updates load/reps/rir, stamps `adjust=.manual`, never fires autoreg (`SessionReducer+Handlers.swift:81-101`, comment: "Corrective — does NOT retrigger autoreg"). **In History** (`HistorySessionDetailView`): set rows are tappable but the sheet is stubbed — tap animates a brief highlight and calls `handleSetRowTap` which only toggles `highlightedSetID` (`HistorySessionDetailView.swift:88-125`, TODO at line 89). The push path is now available for the History-screen sheet to call into once it's built (bug-015).
+Correctively edit a logged set's load, reps, or RIR. **In active session** (RestView): tap the corresponding `DSPill` in the "JUST LOGGED" row. Load and reps open `NumPadSheet`; RIR opens `RirSheet` (`RestView+Sheets.swift:17-87`). Only the `lastLoggedSet` is editable here — `RestView.swift:144` reads `viewModel.lastLoggedSet` and the pills dispatch to the sheet for that single set. Commit calls `viewModel.editPastSet(...)` which dispatches the `.editPastSet` reducer mutation AND — after the apply — enqueues the corrected `SetLog` through `onSetLogged` with the SAME deterministic UUID as the original log push so the server upserts the existing row in place (`ExecutionViewModel.swift:editPastSet` → `ExecutionViewModel+Push.swift:handlePastSetEditSideEffects` → `enqueueEditedSet`). The shared UUID is derived by `ExecutionViewModel.setLogID(itemID:setIndex:)` via `Insecure.MD5` of `"\(itemID)|\(setIndex)"` fed into `UUID(uuid:)` — deterministic, so the original log and every edit push always carry the same id. Reducer updates load/reps/rir, stamps `adjust=.manual`, never fires autoreg (`SessionReducer+Handlers.swift:81-101`, comment: "Corrective — does NOT retrigger autoreg"). **In History** (`HistorySessionDetailView`): set rows are tap-to-edit — tapping a row opens `EditSetSheet` which calls back into `HistoryViewModel.editPastSet`, reusing the same deterministic `setLogID` so the server upserts in place (bug-015 / bug-051).
 
 ## State surface
 - **Inputs (active session, Rest screen):** tap on load pill → `NumPadSheet(step: 2.5, allowsDecimal: true)` (`RestView+Sheets.swift:28-48`). Tap reps pill → `NumPadSheet(step: 1, allowsDecimal: false)` (`:50-70`). Tap RIR pill → `RirSheet(initialValue: set.rir)` (`:72-87`). All sheets subtitle "correcting log · no autoreg".
-- **Inputs (History tab):** tap on a set row in `HistorySessionDetailView` — **sheet stubbed** (`HistorySessionDetailView.swift:89-92`).
+- **Inputs (History tab):** tap on a set row in `HistorySessionDetailView` opens `EditSetSheet` (bug-015 / bug-051 shipped) — labels per source `weightUnit`, reps capped at 999, RIR clear via explicit-clear enum.
 - **Outputs / side effects:** `.editPastSet` dispatched. Reducer: `adjust → .manual`, load/reps/rir updated where non-nil (nil = leave unchanged), `done` preserved (`SessionReducer+Handlers.swift:86-100`). Session persisted via `persist()` (`ExecutionViewModel+Persistence.swift:37-54`). Post-apply: `enqueueEditedSet` fires a `SetLog` through `onSetLogged` (same deterministic UUID as the original log → server upserts in place) and `emitPastSetEdited` fires `execution.past_set_edited` on the telemetry emitter.
 - **State transitions:** purely a set-log mutation. No route change. No autoreg trigger. Push fires (fire-and-forget, same UUID as original log).
 
@@ -29,8 +28,7 @@ Correctively edit a logged set's load, reps, or RIR. **In active session** (Rest
 - Does not change `done` — a past-set edit is by definition on a logged set; `applyEditPastSet` returns unchanged state when `old.done == false` (`SessionReducer+Handlers.swift:88-90`).
 - Does not scope — no "this set / remaining" toggle. `NumPadSheet` comment flags the future scoped variant (`NumPadSheet.swift:10-14`).
 - Does not allow editing anything but the **last-logged set** from RestView. There's no active-screen past-set picker in v0.
-- Does not route to server on History-screen edits — because History-screen edits aren't wired (see bug-015). RestView edits DO push as of bug-010's fix; the History sheet will call the same `editPastSet` path once built.
-- `PastSetSheet.swift` is a dispatcher type that's not actually used — `RestView+Sheets.swift` inlines the dispatch. Dead code kept for a future caller (`PastSetSheet.swift:8-11`).
+- RestView edits DO push as of bug-010's fix; History-screen edits DO push as of bug-015's fix — both paths go through the same deterministic-UUID `editPastSet` path, so the server upserts the set_log row in place.
 
 ## Edge cases handled in code
 - Nil load/reps/rir in the mutation → "leave unchanged" (`SessionReducer+Handlers.swift:94-98` uses `?? old.loadKg` etc.).
@@ -98,10 +96,10 @@ Correctively edit a logged set's load, reps, or RIR. **In active session** (Rest
 - **steps:** edit load / reps / rir via the pill.
 - **expected:** a SECOND `onSetLogged` call fires carrying the POST-edit `reps`, `weight`, and `rir`, using the SAME deterministic UUID as the original log — derived from `(itemID, setIndex)` via `ExecutionViewModel.setLogID`. The server upserts the existing set_log row in place; no second row is created. Repeated edits all share the one UUID; the final state wins.
 
-### S11. History-screen edit (stubbed)
+### S11. History-screen edit
 - **setup:** History tab → session detail for a completed workout.
 - **steps:** tap any set row.
-- **expected:** brief accent-color flash via `highlightedSetID` animation (`HistorySessionDetailView.swift:93-106`). No sheet. No mutation. **Not built** — TODO at `:89-92` and `docs/open-questions.md:182-185`.
+- **expected:** `EditSetSheet` opens with the row's current reps / load / RIR prefilled. Commit calls `HistoryViewModel.editPastSet` which pushes the corrected `SetLog` with the same deterministic UUID → server upserts in place. Labels follow the source `weightUnit` (lb vs kg, bug-051).
 
 ### S12. Session detail set indexes render 2..N (watchlist)
 - **setup:** Session detail for a workout with N sets on an exercise.
@@ -142,7 +140,7 @@ Correctively edit a logged set's load, reps, or RIR. **In active session** (Rest
 ### S20. Edit AFTER save & done
 - **setup:** save the workout.
 - **steps:** re-open History → session detail → tap a set row.
-- **expected:** stubbed (S11). Until the History edit sheet ships, there is no path to correct a completed workout's sets from the client. Server has no endpoint for set_log edits today either (would be a `PUT /api/sync/results` with same UUID — infrastructure assumed but not verified in this audit).
+- **expected:** History edit sheet (S11) shipped — the tap opens `EditSetSheet` and pushes the corrected `SetLog` with the same deterministic UUID so the server upserts the existing row (bug-015 / bug-051).
 
 ### S_HISTORY_IDEMPOTENT. History edit upserts the server row in place (bug-040, fixed)
 - **setup:** log a set on Active; save & done; server + local cache both carry the same deterministic `setLogID(itemID, setIndex)`. Open History → session detail → tap the set row → EditSetSheet → change reps → save.

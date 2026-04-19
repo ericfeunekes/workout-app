@@ -74,13 +74,13 @@ Long-press on the Active screen's card fires a medium haptic + opens `SwapSheet`
 
 ### S5. Swap mid-set
 - **setup:** Active screen, set 2 of 3.
-- **steps:** (if UI existed) swap; return to active.
-- **expected — code behavior:** pending set 2's `loadKg` and `reps` are unchanged (swap doesn't reseed). Only the display name flips. Logging set 2 produces a set_log with `performedExerciseID` set to the alternative.
+- **steps:** long-press → SwapSheet → tap alternative → return to active.
+- **expected — code behavior:** pending set 2's `loadKg` and `reps` are unchanged (swap doesn't reseed — non-manual rows pick up the override's values, but set 2 is the current cursor). Only the display name flips. Logging set 2 produces a set_log with `performedExerciseID` set to the alternative.
 
 ### S6. Empty alternatives list
 - **setup:** item with `alternatives[]=[]` in the pulled workout.
-- **steps:** (spec) long-press.
-- **expected:** sheet should render "no alternatives" or not open at all. **Not built** — no sheet, no check.
+- **steps:** long-press.
+- **expected:** `SwapSheet` opens and renders a "no alternatives" DSCard placeholder instead of a row list. Tap / drag-down dismisses without mutation.
 
 ### S7. Swap to same exercise (no-op)
 - **setup:** alternative's `exerciseID == item.exerciseID`.

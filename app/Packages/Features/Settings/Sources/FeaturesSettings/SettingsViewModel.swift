@@ -82,9 +82,8 @@ public final class SettingsViewModel {
     let tokenStore: any TokenStore
     let autoregStore: any AutoregDefaultsStore
     let unitsStore: any UnitsPreferenceStore
-    let syncMetadata: (any SyncMetadataStore)?
+    let syncMetadata: any SyncMetadataStore
     let buildInfo: BuildInfo
-    let lastSyncProvider: @MainActor () -> Date?
     let pairedWatchProvider: @MainActor () -> String?
     let onSyncNow: @Sendable () async -> Void
     let onResetCache: @Sendable () async -> Void
@@ -95,20 +94,21 @@ public final class SettingsViewModel {
 
     var cachedAutoregDefaults: AutoregDefaults
     var cachedUnits: UnitsPreference
-    /// Latest `lastSyncAt` snapshot — populated by `refreshAsync()` when a
-    /// `SyncMetadataStore` is wired. Kept separately from the closure-based
-    /// `lastSyncProvider` so tests can pin a value and async consumers can
-    /// feed through the real protocol.
+    /// Latest `lastSyncAt` snapshot — populated by `refreshAsync()` from
+    /// the injected `SyncMetadataStore`. Synchronous `refresh()` does not
+    /// touch it (SwiftData/UserDefaults reads through the store protocol
+    /// are async), so first paint before `.task` fires shows the
+    /// placeholder.
     var cachedLastSyncAt: Date?
 
     // MARK: - Init
 
     /// Primary initializer.
     ///
-    /// `lastSyncProvider` is a closure because the sync-integration slice
-    /// is still landing; once `SyncMetadataStore` exists in Persistence
-    /// we'll swap the closure for the protocol. Same reasoning for
-    /// `pairedWatchProvider` — WatchBridge runtime isn't wired yet.
+    /// `syncMetadata` is the single source for the "last synced" row —
+    /// the shell passes in `PersistenceFactory.syncMetadataStore`, tests
+    /// and previews inject an in-memory fake. `pairedWatchProvider` is
+    /// still a closure because WatchBridge runtime isn't wired yet.
     ///
     /// The three `on*` closures let the viewModel stay ignorant of the
     /// concrete `PullService` / `WorkoutCache` — the shell passes the
@@ -117,9 +117,8 @@ public final class SettingsViewModel {
         tokenStore: any TokenStore,
         autoregStore: any AutoregDefaultsStore = UserDefaultsAutoregStore(),
         unitsStore: any UnitsPreferenceStore = UserDefaultsUnitsStore(),
-        syncMetadata: (any SyncMetadataStore)? = nil,
+        syncMetadata: any SyncMetadataStore,
         buildInfo: BuildInfo = .fromMainBundle(),
-        lastSyncProvider: @escaping @MainActor () -> Date? = { nil },
         pairedWatchProvider: @escaping @MainActor () -> String? = { nil },
         onSyncNow: @escaping @Sendable () async -> Void = {},
         onResetCache: @escaping @Sendable () async -> Void = {},
@@ -131,7 +130,6 @@ public final class SettingsViewModel {
         self.unitsStore = unitsStore
         self.syncMetadata = syncMetadata
         self.buildInfo = buildInfo
-        self.lastSyncProvider = lastSyncProvider
         self.pairedWatchProvider = pairedWatchProvider
         self.onSyncNow = onSyncNow
         self.onResetCache = onResetCache
@@ -155,13 +153,11 @@ public final class SettingsViewModel {
         rebuild()
     }
 
-    /// Read the async `SyncMetadataStore` (if supplied) and rebuild. Views
-    /// should call this from a `.task` on appear. Falls back to the plain
-    /// `refresh()` behavior when no store is wired — nothing async happens.
+    /// Read the async `SyncMetadataStore` and rebuild. Views should call
+    /// this from a `.task` on appear so the "last synced" row reflects the
+    /// latest pull.
     public func refreshAsync() async {
-        if let store = syncMetadata {
-            cachedLastSyncAt = await store.getLastSyncAt()
-        }
+        cachedLastSyncAt = await syncMetadata.getLastSyncAt()
         cachedAutoregDefaults = autoregStore.load()
         cachedUnits = unitsStore.load()
         rebuild()

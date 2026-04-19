@@ -49,7 +49,7 @@ This doc is the matrix. A "✓" means that layer records this action; "—" mean
 | Log a strength set (reps + RIR) | SetPlan[idx].done=true, rir populated, `startedAt = workStartedAt anchor`, `completedAt = clock.now` | — | `.setLogs(SetLog)` enqueued with **deterministic UUID** from (itemID, setIndex) | on flush: upsert `set_log` by id | `execution.session_mutation (logSet)` ✓ |
 | Log a cardio set (duration / distance / HR / cadence) | SetPlan[idx].done=true, cardio fields populated via `.logCardioSet`; elapsed wins over authored target | — | `.setLogs(SetLog)` enqueued with deterministic UUID | on flush: upsert `set_log` with cardio columns | `execution.session_mutation (logSet, kind=cardio)` ✓ |
 | Log with RIR that triggers autoreg | proposal on currentProposal; remaining SetPlans' loadKg updated; clamp at 0 | — | (set_log already pushed) | — | `execution.autoreg_proposed` (typed payload: `step_kg`, reason token) ✓ |
-| Accept autoreg (default) | remaining SetPlans keep adjusted loadKg | — | — | — | — (accept is implicit; no explicit event today) |
+| Accept autoreg (default) | remaining SetPlans keep adjusted loadKg | — | — | — | `execution.autoreg_accepted` ✓ |
 | Undo autoreg | `itemLog.autoregHeld = true`, remaining SetPlans revert | — | — | — | `execution.autoreg_undo` ✓ |
 | Enter rest | route: active → rest; `restEndsAt = now + driver.restDuration` | — | — | — | — (no event; could add for debugging) |
 | EMOM interval tick | `intervalAnchorAt` drives `.advanceFromRest` when `now >= anchor + interval_sec` | — | — | — | `execution.session_mutation (advance)` ✓ |
@@ -121,7 +121,7 @@ Each feature doc's scenarios should exercise the rows above. Current gaps flagge
 - **No telemetry event for "enter rest"** — makes it harder to diff "did the rest timer fire at the right moment" from logs alone. Low-priority gap; filable if we hit a debugging wall.
 - **No telemetry event for tab switches or history row taps** — same; only matters if we're diagnosing routing bugs.
 - **Skipping RIR by tapping "skip"** — this path should produce a SetLog with rir=nil and a `logSet` event; verify during persona QA.
-- **Accept autoreg is not a discrete event** — accept-by-default means it's implicit. If the user never taps undo, the fact that they accepted is derivable from state, not from an event. Acceptable.
+- **Accept autoreg is a discrete event now** — `execution.autoreg_accepted` fires from `acceptAutoreg()` (banner dismiss). If the user never taps the banner at all, the "accept-by-default" path is still derivable from state rather than from an event — the event only fires on explicit dismiss.
 - **Mid-workout "End" button** — `complete()` doesn't enqueue status_update (intentional per bug-005/006 fix); only `saveAndDone` does. Persona QA should verify: explicit End → navigate away without saveAndDone → workout stays `active` on server. That's correct.
 - **Device clock skew** — no mitigation. Worth a flag in docs/open-questions.md.
 

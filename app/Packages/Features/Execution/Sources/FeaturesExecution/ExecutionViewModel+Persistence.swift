@@ -175,21 +175,21 @@ extension ExecutionViewModel {
     /// monotonic revision at enqueue time and stale ops are dropped by
     /// the pipeline before touching the store. In-memory state is
     /// authoritative for this session; the on-disk copy catches up.
+    ///
+    /// The snapshot is passed in unencoded; the pipeline does the JSON
+    /// encode INSIDE the chained task, after deciding whether this
+    /// revision is still the latest pending save. Bursts of rapid
+    /// `apply()` (log set → advance → edit etc.) therefore produce at
+    /// most one encode + one disk write for the final snapshot rather
+    /// than N encodes + N writes. See perf-001 in the 2026-04-19 perf
+    /// sweep.
     func persist() {
         guard let pipeline = persistencePipelineHandle() else { return }
         let snapshot = SessionStateCodable(state: state)
         let revision = nextPersistenceRevision()
         // swiftlint:disable:next no_direct_task_unstructured
         Task { [pipeline, snapshot, revision] in
-            let data: Data
-            do {
-                data = try JSONEncoder().encode(snapshot)
-            } catch {
-                // Encoding failure is not user-fatal — the next mutation
-                // will re-encode and retry.
-                return
-            }
-            await pipeline.enqueue(op: .save(data), revision: revision)
+            await pipeline.enqueue(op: .save(snapshot), revision: revision)
         }
     }
 

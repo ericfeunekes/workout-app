@@ -73,7 +73,7 @@ No `is_active` or `deleted_at` on `exercise`. Orphaned exercises accumulate.
 ### Offline completion atomicity
 Set_logs and `status_updates` push as separate items in a queue. If the queue partially drains (set_logs succeed, status_update fails), the server sees logs against a workout that's still "active."
 - **Assumption:** the server accepts this state and the status_update retries; no harm done.
-- **Disposition:** resolve-in-code. Easy to get right in the push queue — batch or sequence so the status_update is last.
+- **Disposition:** resolve-in-code. Priority-weighted FIFO (bug-056) now sequences results (set_log / status / user_parameter) ahead of telemetry; intra-results ordering is still first-come-first-served.
 
 ### Multiple active workouts
 Spec allows `status=active` on more than one workout; app persists one session cursor.
@@ -83,11 +83,6 @@ Spec allows `status=active` on more than one workout; app persists one session c
 ### Watch independent of phone
 Watch records set start/end locally when paired phone is off. What happens on reconnect.
 - **Disposition:** defer-to-v1.1+. Out of scope per ADR-UX-scope.
-
-### Partial-first-sync recovery UI
-First-sync crash is all-or-nothing. The welcome → retry path handles this, but the UX for "you were 10% into a 500 MB first sync, try again" isn't sketched.
-- **Assumption:** show a generic "Retry sync" after failure; don't expose partial progress.
-- **Disposition:** resolve-in-code. *(Shell.AppBootstrap now falls back to cached data on pull failure; FirstRun shows a failure banner with retry. Resolved in code; remove on next sweep.)*
 
 ---
 
@@ -175,31 +170,18 @@ Can't mark "this was a 1RM test" distinctly. Tags work but are free-form.
 
 ## App behavior
 
-### In-flight rest timer persistence
-Already decided — persist `rest_ends_at` as an absolute timestamp (captured in `app/README.md`). Listed here only so the reasoning is traceable.
-- **Disposition:** resolved.
-
-### Editing a completed, synced set from history
-Corrective edits to a set in a workout from three weeks ago — is that allowed? Does it push back to the server?
-- **Assumption:** yes, allowed, and push. UUIDs make it idempotent.
-- **Disposition:** resolve-in-code.
-
 ### Body weight freshness
 Autoreg doesn't consume `bodyweight_kg`. But if a future prescription shape uses `percent_bw`, stale BW would mislead.
 - **Disposition:** watchlist. Revisit when (if) `percent_bw` shapes appear.
 
+### SessionDetail set-row labeling: pipeline index vs "set N" display
+`SessionDetailViewModel.formatSetRow` renders `String(log.setIndex)` as-is (no +1); the comment at `SessionDetailViewModel.swift:156-158` asserts the pipeline is 1-based end-to-end. But test fixtures disagree — `TrendComputationTests.swift` constructs `SetLog(..., setIndex: 0, ...)` while `CoreSessionTests/main.swift` and `CoreAutoregTests/main.swift` use `setIndex: 1`. Both coexist today, so whether a "0" row renders as set "0" or set "1" depends on which producer wrote it.
+- **Assumption:** the code is correct (1-based throughout); the 0-based `TrendComputationTests` fixtures are a test-side shortcut that doesn't exercise rendering.
+- **Disposition:** decide-next. Either (a) rename `SetRow`'s user-visible number to "pipeline position" and document 1-based as the contract, tightening fixtures to match; or (b) treat `setIndex` as an opaque sort key and shift to an explicit position counter at render time so fixtures can be 0- or 1-based without visual impact.
+
 ---
 
 ## Process
-
-### Contract tests for prescription shapes
-`docs/TESTING.md` mentions contract tests generically. We now have a growing prescription shape vocabulary in `docs/prescription.md` — specific shapes should get fixture coverage.
-- **Disposition:** resolve-in-code. *(FF-6 is live, 23 fixtures cover every shape in EXPECTED_SHAPES. Also: Chunk 5 added Swift-side CorePrescription parsers tested against the same fixtures. Contract is enforced both sides. Remove on next sweep.)*
-
-### Shell package directory placement
-Shell lives at `app/Packages/Shell/`, not under `Features/`. The rationale is that SwiftLint's `no_feature_cross_import` rule blocks any file under `Packages/Features/` from importing another Features module, and Shell is the one package that legitimately needs to see both Features/Today and Features/Execution to compose the app on launch. Captured in `docs/architecture/swift-packages.md` but not in an ADR.
-- **Assumption:** the name "Shell" is clear enough that future agents won't try to relocate it.
-- **Disposition:** decide-next. Land an ADR when there's time — or at least add a one-liner invariant at the top of the swift-packages.md table.
 
 ### Autoreg defaults — Settings vs prescription
 `Features/Settings` has an "AUTOREG DEFAULTS" section (target_rir, overshoot_step_kg, undershoot_step_kg) backed by UserDefaults. But per-block autoreg lives in `prescription_json` authored by Claude. What's the relationship?
@@ -207,36 +189,6 @@ Shell lives at `app/Packages/Shell/`, not under `Features/`. The rationale is th
 - **Option (b):** Settings defaults are advisory overrides that Claude reads from `user_parameters` and respects.
 - **Assumption:** (a) — defaults are for fallback rendering; the authoritative rules come from the prescription.
 - **Disposition:** decide-next. Worth a one-line note in `docs/prescription.md` § "Autoregulation" clarifying the precedence.
-
-### Today → Active navigation end-to-end
-Every screen (Today, Active, Rest, Complete) has been verified in isolation via debug launch args. The actual user tap path ("start workout" button → route advances → Execution view model loads → ActiveView renders) has compile-time coherence but no runtime verification.
-- **Assumption:** it works because `TodayViewModel.start()`, `ExecutionViewModel.start()`, and the routedView switch have all been independently exercised.
-- **Disposition:** decide-next. Needs a manual tap-through (or a UI test once XcodeBuildMCP is active next session).
-
-### FirstRun `connect()` re-entrancy (MUST-FIX found 2026-04-18)
-Reviewer of FirstRun caught: double-tapping the "connect" DSButton enqueues two concurrent `Task { await connect() }` pipelines. Both can reach TokenStore.save and `onComplete()`, producing duplicate saves + duplicate pulls. 10 tests didn't catch it because they run a single task.
-- **Assumption:** needs a re-entrancy guard at the top of `connect()` (early-return if `state != .welcome && state != .failed`), AND/OR disable the DSButton while a connect is in flight.
-- **Disposition:** decide-next. Dispatch a targeted fix in the next chunk.
-
-### App shell double-bootstrap race (MUST-FIX found 2026-04-18)
-Reviewer of WorkoutDBApp.swift caught: on FirstRun success, `onComplete` sets `phase = .bootstrapping` then calls `runBootstrap()`. Setting the phase also triggers `BootstrapLoadingView().task { runBootstrap() }`, so two bootstraps fire concurrently — two pulls, two cache writes, non-deterministic which `.ready` assignment wins. First-ever-connect UX is wasteful and subtly broken.
-- **Assumption:** fix is either "remove `.task` from `BootstrapLoadingView`" (let `onComplete` drive it) or a `didStartBootstrap` flag.
-- **Disposition:** decide-next. Dispatch a targeted fix in the next chunk.
-
-### WorkoutCacheImpl.save non-atomicity
-Reviewer of Shell surfaced an issue owned by Persistence: `WorkoutCacheImpl.save(...)` loops upserts then calls `modelContext.save()`. A mid-loop throw leaves the in-memory ModelContext dirty with no rollback; disk stays clean only because `save()` hasn't been called yet, but a subsequent successful save would flush the partial state.
-- **Assumption:** wrap the loop in a manual transaction scope and `rollback()` on throw. SwiftData has `transaction { }` closure APIs in iOS 17+.
-- **Disposition:** decide-next. Fix alongside the concurrency patch.
-
-### Empty-cache state dead end
-Reviewer caught: `Shell.BootstrapResult.empty` lands the user on an `EmptyStateView` with no retry button and no way to Settings. Force-quit is the only way forward.
-- **Assumption:** add a "try again" `DSButton.primary` that re-runs the bootstrap, and (when Settings has an entry point) a "change server" link.
-- **Disposition:** decide-next. Two-line fix; land with the concurrency patch.
-
-### Settings has no entry point yet
-Settings is compiled but unreachable — the TodayView gear icon / shell-level entry hasn't been wired.
-- **Assumption:** wire a gear icon on the Today header (top-right) that presents SettingsView as a sheet.
-- **Disposition:** decide-next. Settings UX is a user-visible feature so this should land before any alpha user.
 
 ### Watch → phone message integration (phone-side subscriber missing)
 The Features/WatchFaces slice (2026-04-18) wired the watch-side: it subscribes to `WatchBridge.messages()` and sends `.setStarted` / `.setEnded` on tap. But the **phone-side subscriber** that translates those incoming messages into `SessionMutation`s on `ExecutionViewModel` does not exist. Watch taps currently go nowhere on the phone.
@@ -257,19 +209,10 @@ Tests use a 50ms `Task.sleep` to let the detached `Task { await vm.start() }` re
 - **Assumption:** add an `awaitSubscription()` hook on `FakeWatchBridge` that yields until a continuation is registered.
 - **Disposition:** watchlist.
 
-### Systemd unit scope — user vs system (server deploy)
-`deploy/workoutdb-server.service` is currently system-scope with hardcoded `/opt/workoutdb/.venv/bin/uvicorn`. The new release-dir layout documented in `docs/infrastructure/home-server.md` assumes user-scope systemd with `/opt/workoutdb/current/.venv/...`. Before fleshing out `make deploy`, the unit file needs to match the docs OR the docs need to match the unit. User-scope requires `loginctl enable-linger workoutdb` for autostart; system-scope needs `sudo` for service operations.
-- **Assumption:** go with user-scope (matches docs, no sudo in the deploy path).
-- **Disposition:** decide-next. Eric's call before we implement the real `make deploy`.
-
 ### Tab bar accessibility IDs missing (harder than expected)
 SwiftUI `TabView` in `Shell.RootTabView` doesn't expose child tab items as individually-tappable accessibility elements. Tried `.accessibilityIdentifier("tab-today")` on each tab view — the identifier lands on the content view, NOT on the tab bar button. Coordinate-tap still works for MCP automation but `tap(label:)` / `tap(id:)` does not.
 - **Assumption:** real fix is either (a) `.accessibilityLabel` on the `Label` inside `.tabItem` plus `.tabItem` customization hooks, (b) switch to a custom tab bar (visible `HStack` of buttons below the content), or (c) use UIKit `UITabBarController` via `UIViewControllerRepresentable`. Worth a short investigation before picking.
-- **Disposition:** watchlist. Coordinate-tap is fine for now. Revisit if/when we want UI-test automation of the tab surface.
-
-### Session detail renders "2..N" set numbers instead of "1..N" (watchlist)
-`SessionDetailViewModel.formatSetRow` prepends `log.setIndex + 1` assuming logs are stored 0-based. E2E shows the first set displays as "2" — the execution pipeline is emitting 1-based indexes, so the +1 double-increments. Either the store or the formatter needs to agree on the convention. Fix probably belongs in `ExecutionViewModel.logSet` (emit 0-based) rather than the formatter, since "stored 0-based" is the existing comment.
-- **Disposition:** watchlist. Cosmetic-only on the detail screen; doesn't break any list/summary math.
+- **Disposition:** watchlist. Coordinate-tap is fine for now. Revisit if/when we want UI-test automation of the tab surface. Companion to `bug-029` (deferred to v1.1+).
 
 ### FirstRun connection string format — URL + token vs unified QR payload
 `docs/sync.md` describes the connection string as a single paste-or-QR payload (URL + embedded token). `Features/FirstRun` as shipped has two separate text fields (URL, bearer token). They diverge.
@@ -277,7 +220,7 @@ SwiftUI `TabView` in `Shell.RootTabView` doesn't expose child tab items as indiv
 - **Disposition:** defer-to-v1.1+.
 
 ### ADR index
-`docs/decisions/` has two ADRs now. No README or index.
+`docs/decisions/` has five ADRs now. No README or index.
 - **Assumption:** listing ADRs directly in `docs/AGENTS.md` is enough at this scale.
 - **Disposition:** watchlist. Add an index file when the count exceeds ~6.
 

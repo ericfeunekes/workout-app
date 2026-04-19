@@ -43,7 +43,7 @@ The persisted snapshot captures everything needed to resume: `workoutID`, `route
 - No explicit schema version for `SessionStateCodable` bytes — if the shape changes we rely on decode failure + fresh session; data loss is bounded to the one live session.
 - **SwiftData schema is versioned** (bug-047): `WorkoutDBSchemaV1` → `V2` (exercise defaults) → `V3` (`SetLog.workoutID` + `plannedExerciseID` denormalization). V2→V3 uses a lightweight stage with a backfill that walks the surviving-items map so logs keep their workoutID reference. Pinned by `SchemaMigrationTests`.
 - **Subtree reconcile** (bug-046): `WorkoutCache.save` reconciles per workout id — diff incoming vs cached blocks/items/alternatives, detach children before deleting the orphan, re-upsert. SetLogs explicitly preserved via detach-before-delete. New `loadOrphanedSetLogs()` API returns logs whose item was removed so History can still surface them.
-- **Session-persistence pipeline** (bug-043): every `apply(_:)` enqueues a monotonic-revision snapshot on a VM-owned `SessionPersistencePipeline` handle (replaced the `Task {}` + `ObjectIdentifier` static table). FIFO preserved; restore applies a normalization pass that re-runs `enterRestIfZeroItemBlock` / `enterBlockTimerIfNeeded` / `enterTabataWorkWindowIfNeeded` so a timer-midflight kill can't restore malformed.
+- **Session-persistence pipeline** (bug-043 + perf-001): every `apply(_:)` enqueues a monotonic-revision snapshot on a VM-owned `SessionPersistencePipeline` handle (replaced the `Task {}` + `ObjectIdentifier` static table). FIFO preserved; restore applies a normalization pass that re-runs `enterRestIfZeroItemBlock` / `enterBlockTimerIfNeeded` / `enterTabataWorkWindowIfNeeded` so a timer-midflight kill can't restore malformed. **Saves are coalesced**: the pipeline op carries the raw `SessionStateCodable` snapshot (not encoded bytes), and a save whose revision is below the latest-enqueued save revision is dropped before it encodes or writes. Bursts of rapid `apply()` (log → advance → edit) now produce ≤ a handful of encodes + writes rather than one per tap. Clears are still FIFO ordered against saves; they don't coalesce.
 - Persist pipeline swallows encode/save errors. In-memory state wins; bounded loss ≤ 1 mutation.
 
 ## QA scenarios
@@ -106,8 +106,8 @@ The persisted snapshot captures everything needed to resume: `workoutID`, `route
 ### S11. Rapid logSet writes
 - **setup:** Fire 10 `logSet` calls in rapid succession (scripted via test harness).
 - **steps:** Observe in-memory `state` vs last persisted bytes.
-- **expected:** In-memory is always latest. Persisted bytes converge to the latest within a few ticks — each `Task` encodes from its captured `snapshot` (`ExecutionViewModel+Persistence.swift:44`). Intermediate snapshots may be overwritten before ever touching disk; that's fine.
-- **notes:** Task execution order is not strictly serialized via the actor hop; kill-and-relaunch could return any recent snapshot. Acceptable.
+- **expected:** In-memory is always latest. Persisted bytes converge to the latest within a few ticks. The pipeline's coalescing gate drops intermediate saves whose revision has already been superseded — only a handful of the 10 actually encode + write, and the final bytes on disk match the final in-memory state. Intermediate snapshots never touch disk by design.
+- **notes:** Enforced by `testCoalesceDropsIntermediateSnapshotsUnderBurst` (≤ 3 performed saves for a burst of 11 enqueues). Kill-and-relaunch during the burst can still return any already-written snapshot; acceptable — bounded loss ≤ 1 mutation behind.
 
 ### S12. `ExecutionViewModel.apply` with no sessionStore
 - **setup:** Test init with `sessionStore: nil`.

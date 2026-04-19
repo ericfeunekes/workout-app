@@ -119,6 +119,47 @@ final class ExecutionAutoregTelemetryTests: XCTestCase {
         )
     }
 
+    /// Accepting the banner emits `execution.autoreg_accepted` tagged with
+    /// the current workoutID. The emit path in `acceptAutoreg()` was live
+    /// in code but had no pinning test — a regression that silently dropped
+    /// the event would have gone unnoticed. Matches the shape conventions
+    /// of `testSwapEmitsTelemetry` / `testEditPastSetEmitsTelemetry`.
+    func testAutoregAcceptedEventFiresOnBannerDismiss() throws {
+        let (ctx, _) = Self.context(targetRir: 2)
+        let telemetry = TelemetryRecorder()
+        let vm = ExecutionViewModel(context: ctx, telemetry: telemetry)
+        vm.start()
+
+        // Overshoot log → banner presents with a live proposal.
+        vm.logSet(reps: 5, rir: 4)
+        XCTAssertNotNil(vm.currentProposal, "overshoot must seed a proposal")
+
+        vm.acceptAutoreg()
+
+        let accepted = telemetry.events.filter {
+            $0.name == "execution.autoreg_accepted"
+        }
+        XCTAssertEqual(
+            accepted.count, 1,
+            "accept must emit exactly one autoreg_accepted event"
+        )
+        let event = try XCTUnwrap(accepted.first)
+        XCTAssertEqual(event.workoutID, ctx.workout.id)
+        // The emit helper (`emitAutoreg`) ships a kind=state event without
+        // a dataJSON payload — the proposal shape is captured by the
+        // upstream `execution.autoreg_proposed` event. Pin that contract
+        // so a future refactor doesn't accidentally start stuffing fields
+        // into a payload the analytics queries don't expect.
+        XCTAssertEqual(event.kind, "state")
+        XCTAssertNil(
+            event.dataJSON,
+            "autoreg_accepted is a dismiss signal; the payload belongs on autoreg_proposed"
+        )
+        // Accept clears the proposal — without this, a follow-up tap
+        // would emit a second event.
+        XCTAssertNil(vm.currentProposal)
+    }
+
     // MARK: - Fixtures
 
     /// Straight-sets context sized to trigger the overshoot path on

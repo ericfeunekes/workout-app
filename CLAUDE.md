@@ -127,6 +127,6 @@ This repo has one user (Eric) and one prod deployment (also Eric). There is no "
 - **Boundaries are enforced at lint time, not at review time.** Python server boundaries are checked by `import-linter` contracts in `pyproject.toml` (run `uv run lint-imports`). Contracts run in pre-push and CI.
 - **New architectural boundaries require new contracts.** Adding a module or package? Add an import-linter contract in the same commit. If reaching for an import that would violate an existing contract, extract the shared logic into the right layer — do not loosen the contract. See `docs/WORKFLOW.md` § "Architectural enforcement".
 
-## Agent harness (local, untracked)
+## Agent harness
 
-`.codex/`, `.xskills/`, `.claude/settings.local.json` are agent-local and gitignored. `scratch/` is for ephemeral multi-unit work.
+`.claude/` and `.codex/` are checked in so agent harness config (MCP wiring, enabled plugins, project overlays) stays in sync across machines. `.xskills/` and `.claude/settings.local.json` are agent-local and gitignored. `scratch/` is for ephemeral multi-unit work.

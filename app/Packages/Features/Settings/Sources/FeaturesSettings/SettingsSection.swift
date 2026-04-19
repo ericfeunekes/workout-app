@@ -10,7 +10,7 @@
 // (which row has which default, which destructive confirm to wire) and
 // keeps `SettingsView` a dumb renderer.
 //
-// Equality: `SettingsRow` carries trailing closures (`onChange`, `onTap`).
+// Equality: `SettingsRow` carries trailing closures (`onPick`, `onTap`).
 // Swift cannot synthesize `Equatable` for closures, so we mark the type
 // `@unchecked Sendable` and define identity via the row's `id` — tests and
 // snapshot comparisons should assert on `id` ordering + the public value
@@ -44,20 +44,11 @@ public struct SettingsSection: Identifiable, Sendable {
 /// owns the closures so the view never reaches into persistence or sync.
 ///
 /// Equality / diffing note: identity is the row `id`. The value fields
-/// (`label`, `value`, `isOn`, `selected`) are comparable; the closures are
-/// not. See `equalsIgnoringCallbacks(_:)` for a test-friendly comparison.
+/// (`label`, `value`, `selected`) are comparable; the closures are not.
+/// See `equalsIgnoringCallbacks(_:)` for a test-friendly comparison.
 public enum SettingsRow: Identifiable, Sendable {
     /// Read-only `label · value` row (e.g. "synced · 4 min ago").
     case info(id: String, label: String, value: String)
-    /// On/off switch — currently unused in the shipped sections but kept
-    /// for parity with the brief so a future "quiet mode" toggle can be
-    /// appended without touching the renderer.
-    case toggle(
-        id: String,
-        label: String,
-        isOn: Bool,
-        onChange: @Sendable (Bool) -> Void
-    )
     /// Segmented picker (e.g. units kg / lb).
     case picker(
         id: String,
@@ -74,23 +65,12 @@ public enum SettingsRow: Identifiable, Sendable {
         destructive: Bool,
         onTap: @Sendable () -> Void
     )
-    /// Navigation row — label on the left, chevron-style `value` on the
-    /// right, onTap presents the next surface. Unused in the shipped
-    /// sections; kept for parity with the brief.
-    case navigation(
-        id: String,
-        label: String,
-        value: String?,
-        onTap: @Sendable () -> Void
-    )
 
     public var id: String {
         switch self {
         case .info(let id, _, _),
-             .toggle(let id, _, _, _),
              .picker(let id, _, _, _, _),
-             .action(let id, _, _, _),
-             .navigation(let id, _, _, _):
+             .action(let id, _, _, _):
             return id
         }
     }
@@ -100,10 +80,8 @@ public enum SettingsRow: Identifiable, Sendable {
     public var label: String {
         switch self {
         case .info(_, let label, _),
-             .toggle(_, let label, _, _),
              .picker(_, let label, _, _, _),
-             .action(_, let label, _, _),
-             .navigation(_, let label, _, _):
+             .action(_, let label, _, _):
             return label
         }
     }
@@ -114,18 +92,12 @@ public enum SettingsRow: Identifiable, Sendable {
         switch (self, other) {
         case (.info(let a, let la, let va), .info(let b, let lb, let vb)):
             return a == b && la == lb && va == vb
-        case (.toggle(let a, let la, let on1, _),
-              .toggle(let b, let lb, let on2, _)):
-            return a == b && la == lb && on1 == on2
         case (.picker(let a, let la, let o1, let s1, _),
               .picker(let b, let lb, let o2, let s2, _)):
             return a == b && la == lb && o1 == o2 && s1 == s2
         case (.action(let a, let la, let d1, _),
               .action(let b, let lb, let d2, _)):
             return a == b && la == lb && d1 == d2
-        case (.navigation(let a, let la, let v1, _),
-              .navigation(let b, let lb, let v2, _)):
-            return a == b && la == lb && v1 == v2
         default:
             return false
         }

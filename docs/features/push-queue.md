@@ -150,5 +150,4 @@ Durable SwiftData-backed FIFO queue for outbound writes. Three payload shapes: `
 ### S18. Queue item for a deleted workout
 - **setup:** status_update enqueued for workout X, server deletes workout X before flush (shouldn't happen in v1 but hypothetical)
 - **steps:** flush
-- **expected:** 404 from server → treated as `networkFailed` (non-401 4xx path, `PushQueue.swift:190-197`) → attempts bumps, item retries forever.
-- **notes:** not built: dead-letter path
+- **expected:** 404 from server → treated as `networkFailed` (non-401 4xx path) → attempts bumps, and after 5 consecutive non-401 4xx rejections the item dead-letters (`execution.push_item_dead_lettered` with correlation id) instead of retrying forever (bug-060).

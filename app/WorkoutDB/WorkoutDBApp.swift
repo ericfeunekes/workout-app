@@ -36,9 +36,11 @@
 // the shell) that presents SettingsView in a `.sheet`. Wire `onSyncNow`
 // to `AppBootstrap.pull`, `onResetCache` to `WorkoutCache.clear`, and
 // `onChangeServer` to `TokenStore.clear` + cache clear + flip hasConnection
-// back to false so FirstRun re-renders. Wire `lastSyncProvider` via
-// `SyncMetadataStore.getLastSyncAt`. Deferred until sync-integration
-// lands so this slice doesn't collide with its RootView rewrite.
+// back to false so FirstRun re-renders. Pass
+// `PersistenceFactory.syncMetadataStore` in as `syncMetadata:` — the view
+// model reads it on `.task` via `refreshAsync()`. Deferred until
+// sync-integration lands so this slice doesn't collide with its RootView
+// rewrite.
 
 import SwiftUI
 import CoreDomain

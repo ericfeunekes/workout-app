@@ -149,7 +149,7 @@ Once `SessionState.route` flips out of `.today`, `ExecutionView` renders the act
 ### S17. Swap mid-item
 - **setup:** item A on block 1; valid alternative exercise.
 - **steps:** dispatch `.swap(itemID, toExerciseID)` mid-set.
-- **expected:** exercise name updates via `performedExerciseID`; logged sets preserved; `autoregHeld` NOT reset. UI entry for swap is not built in v0; mutation path is wired.
+- **expected:** exercise name updates via `performedExerciseID`; logged sets preserved; `autoregHeld` NOT reset. UI entry for swap is wired via `ActiveView+Swap` long-press → `SwapSheet`; see `exercise-swap.md` for the full scenario set.
 
 ### S18. Same exercise twice in one workout
 - **setup:** two items with the same `exerciseID`.

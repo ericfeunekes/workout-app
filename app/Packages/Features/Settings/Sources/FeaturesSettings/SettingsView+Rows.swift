@@ -15,14 +15,10 @@ extension SettingsView {
         switch row {
         case .info(_, let label, let value):
             infoRow(label: label, value: value)
-        case .toggle(_, let label, let isOn, let onChange):
-            toggleRow(label: label, isOn: isOn, onChange: onChange)
         case .picker(_, let label, let options, let selected, let onPick):
             pickerRow(label: label, options: options, selected: selected, onPick: onPick)
         case .action(_, let label, let destructive, let onTap):
             actionRow(label: label, destructive: destructive, onTap: onTap)
-        case .navigation(_, let label, let value, let onTap):
-            navigationRow(label: label, value: value, onTap: onTap)
         }
     }
 
@@ -38,30 +34,6 @@ extension SettingsView {
                 .foregroundStyle(DSColors.foregroundMuted)
         }
         .padding(.vertical, DSSpacing.lg)
-        .padding(.horizontal, DSSpacing.xl)
-    }
-
-    func toggleRow(
-        label: String,
-        isOn: Bool,
-        onChange: @escaping @Sendable (Bool) -> Void
-    ) -> some View {
-        HStack(alignment: .center, spacing: DSSpacing.md) {
-            Text(label)
-                .font(DSTypography.body)
-                .foregroundStyle(DSColors.foreground)
-                .frame(maxWidth: .infinity, alignment: .leading)
-            Toggle(
-                "",
-                isOn: Binding(
-                    get: { isOn },
-                    set: { newValue in onChange(newValue) }
-                )
-            )
-            .labelsHidden()
-            .tint(DSColors.accent)
-        }
-        .padding(.vertical, DSSpacing.md)
         .padding(.horizontal, DSSpacing.xl)
     }
 
@@ -107,33 +79,6 @@ extension SettingsView {
                     .font(DSTypography.body)
                     .foregroundStyle(destructive ? DSColors.accent : DSColors.foreground)
                     .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(.vertical, DSSpacing.lg)
-            .padding(.horizontal, DSSpacing.xl)
-            .contentShape(Rectangle())
-        })
-        .buttonStyle(.plain)
-    }
-
-    func navigationRow(
-        label: String,
-        value: String?,
-        onTap: @escaping @Sendable () -> Void
-    ) -> some View {
-        Button(action: { onTap() }, label: {
-            HStack(alignment: .firstTextBaseline, spacing: DSSpacing.md) {
-                Text(label)
-                    .font(DSTypography.body)
-                    .foregroundStyle(DSColors.foreground)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                if let value {
-                    Text(value)
-                        .font(DSTypography.mono)
-                        .foregroundStyle(DSColors.foregroundMuted)
-                }
-                Text("›")
-                    .font(DSTypography.body)
-                    .foregroundStyle(DSColors.foregroundFaint)
             }
             .padding(.vertical, DSSpacing.lg)
             .padding(.horizontal, DSSpacing.xl)

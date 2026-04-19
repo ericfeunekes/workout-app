@@ -48,11 +48,18 @@ import Persistence
 
 // MARK: - Pipeline op
 
-/// A single persistence operation. Save carries the encoded payload;
-/// clear wipes the store. The revision rides with the op so the actor
-/// can reject stale writes without a second hop.
+/// A single persistence operation. `save` carries the raw (unencoded)
+/// snapshot so the pipeline can drop superseded saves WITHOUT paying the
+/// JSON encode cost. `clear` wipes the store. The revision rides with
+/// the op so the actor can reject stale writes without a second hop.
+///
+/// Deferring the encode into the pipeline is the load-bearing part of
+/// perf-001's fix: N rapid `apply()` calls used to trigger N encodes +
+/// N disk writes even though the pipeline already serialized them. Now
+/// only the single save whose revision equals the pipeline's latest
+/// observed save revision actually encodes and writes.
 enum SessionPersistenceOp: Sendable {
-    case save(Data)
+    case save(SessionStateCodable)
     case clear
 }
 
@@ -78,6 +85,22 @@ enum SessionPersistenceOp: Sendable {
 actor SessionPersistencePipeline {
     private let store: SessionStore
     private var ackRevision: UInt64 = 0
+    /// Highest `.save` revision the pipeline has accepted at enqueue
+    /// time. When a chained task wakes up to process a `.save`, it
+    /// drops its op if its revision is below this — a newer save has
+    /// been queued meanwhile and will overwrite the bytes anyway, so
+    /// the older encode + disk write are wasted work.
+    ///
+    /// Clears do NOT bump this. The relationship between save and clear
+    /// is pure FIFO ordering, not coalescing — a clear after a save
+    /// still needs to run even if the save is current.
+    private var latestSaveRevision: UInt64 = 0
+    /// Test-visible counter of saves that actually reached `store.save`
+    /// (i.e. were not coalesced away). Exposed via `encodeCount()` for
+    /// the burst-coalesce regression in
+    /// `ExecutionViewModelPersistencePipelineTests`. Not used outside
+    /// tests.
+    private var performedSaveCount: Int = 0
     /// Handle to the most recently enqueued op. The next enqueue awaits
     /// this handle before running, giving us strict FIFO execution even
     /// across the async `await store.save(…)` suspension points.
@@ -92,11 +115,30 @@ actor SessionPersistencePipeline {
     /// Chained to the previous submission so ordering is preserved even
     /// when `store.save` / `store.clear` suspend.
     ///
+    /// Coalescing: `.save` ops carry the raw snapshot, not encoded
+    /// bytes. Before the chained task encodes + writes, it checks
+    /// whether a newer save has been enqueued in the meantime. If so,
+    /// this op is dropped without encoding — the newer save will
+    /// encode+write the authoritative bytes. This is the perf-001 fix:
+    /// rapid `apply()` bursts no longer translate into one JSON encode
+    /// + one disk write per tap.
+    ///
     /// Swallows errors. Persistence failure is never user-fatal — the
     /// in-memory state is authoritative for this session; the next tick
     /// retries.
     @discardableResult
     func enqueue(op: SessionPersistenceOp, revision: UInt64) -> Task<Void, Never> {
+        // Update the latest-save watermark synchronously on the actor at
+        // enqueue time. The chained task reads this later to decide
+        // whether to drop itself as superseded. Must happen BEFORE the
+        // Task is constructed so a subsequent enqueue that bumps the
+        // watermark can still cause an already-chained (but not yet
+        // running) task to skip its work.
+        if case .save = op {
+            if revision > latestSaveRevision {
+                latestSaveRevision = revision
+            }
+        }
         let previous = tail
         let store = self.store
         let task = Task { [weak self] in
@@ -108,10 +150,15 @@ actor SessionPersistencePipeline {
             // deciding whether to run. Using a nested `await self?.…`
             // hop keeps the ackRevision read/write serialized.
             guard let self else { return }
-            if await self.shouldRun(revision: revision) == false { return }
+            if await self.shouldRun(op: op, revision: revision) == false { return }
             do {
                 switch op {
-                case .save(let data):
+                case .save(let snapshot):
+                    // Encode inside the pipeline — if a newer save has
+                    // since been enqueued, `shouldRun` already dropped
+                    // us before getting here, so we only pay the
+                    // encode cost for writes that actually land.
+                    let data = try JSONEncoder().encode(snapshot)
                     try await store.save(data)
                 case .clear:
                     try await store.clear()
@@ -125,12 +172,33 @@ actor SessionPersistencePipeline {
     }
 
     /// Gate helper run on the actor: advance `ackRevision` iff the
-    /// incoming op is fresh. Separated so the `Task` in `enqueue(op:…)`
-    /// can decide-and-update atomically while holding the actor.
-    private func shouldRun(revision: UInt64) -> Bool {
+    /// incoming op is fresh AND, for saves, the op has not been
+    /// superseded by a newer save enqueued after this one. Separated so
+    /// the `Task` in `enqueue(op:…)` can decide-and-update atomically
+    /// while holding the actor.
+    private func shouldRun(op: SessionPersistenceOp, revision: UInt64) -> Bool {
+        // Explicit stale-rejection (e.g. a test enqueueing a
+        // hand-crafted older revision): drop if below the acked peak.
         guard revision >= ackRevision else { return false }
+        // Coalesce saves: a save is superseded when a newer save has
+        // been enqueued after it. The newer save will write the
+        // authoritative bytes; this one would be immediately overwritten
+        // and only burns CPU + I/O.
+        if case .save = op {
+            if revision < latestSaveRevision { return false }
+        }
         ackRevision = revision
+        if case .save = op {
+            performedSaveCount &+= 1
+        }
         return true
+    }
+
+    /// Test-only readout of the number of saves that actually reached
+    /// `store.save`. Used to prove perf-001's coalescing: a burst of N
+    /// `apply()` calls should yield a performed-save count ≪ N, not N.
+    func performedSaveCountForTesting() -> Int {
+        performedSaveCount
     }
 }
 

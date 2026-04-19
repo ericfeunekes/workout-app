@@ -20,8 +20,6 @@ import PackageDescription
 //   • DATA — reset local data (destructive), build + commit footer.
 //
 // Dependencies per docs/architecture/swift-packages.md row "Features/*":
-//   - WorkoutCoreFoundation : small helpers (kept for consistency with
-//                             sibling Feature packages)
 //   - DesignSystem          : DSButton, DSCard, DSColors, DSTypography
 //   - Persistence           : TokenStore + SyncMetadataStore protocols.
 //                             SyncMetadataStore is what drives the
@@ -55,7 +53,6 @@ let package = Package(
         ),
     ],
     dependencies: [
-        .package(path: "../../Core/Foundation"),
         .package(path: "../../DesignSystem"),
         .package(path: "../../Persistence"),
     ],
@@ -63,7 +60,6 @@ let package = Package(
         .target(
             name: "FeaturesSettings",
             dependencies: [
-                .product(name: "WorkoutCoreFoundation", package: "Foundation"),
                 .product(name: "DesignSystem", package: "DesignSystem"),
                 .product(name: "Persistence", package: "Persistence"),
             ],

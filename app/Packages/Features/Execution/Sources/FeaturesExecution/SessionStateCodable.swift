@@ -19,7 +19,7 @@ import CorePrescription
 import CoreSession
 import WorkoutCoreFoundation
 
-struct SessionStateCodable: Codable {
+struct SessionStateCodable: Codable, Sendable {
     let state: SessionState
 
     init(state: SessionState) {

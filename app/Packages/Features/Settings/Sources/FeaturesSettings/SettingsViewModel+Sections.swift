@@ -152,11 +152,11 @@ extension SettingsViewModel {
     }
 
     func currentSyncedValue() -> String {
-        // Prefer the cached async-read value; fall back to the
-        // synchronous closure; last resort is the placeholder per the
-        // design reference ("—").
-        let resolved = cachedLastSyncAt ?? lastSyncProvider()
-        guard let lastSync = resolved else {
+        // `cachedLastSyncAt` is populated by `refreshAsync()` from the
+        // injected `SyncMetadataStore`. Until the first async refresh
+        // completes (or when no pull has ever succeeded) we render the
+        // placeholder per the design reference ("—").
+        guard let lastSync = cachedLastSyncAt else {
             return "—"
         }
         let elapsed = now().timeIntervalSince(lastSync)

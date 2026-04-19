@@ -181,11 +181,10 @@ final class ExecutionViewModelPersistencePipelineTests: XCTestCase {
         // and assert the pipeline rejects it.
         let pipeline = try XCTUnwrap(vm.persistencePipelineHandle())
         let staleSnapshot = SessionStateCodable(state: stateA)
-        let staleData = try JSONEncoder().encode(staleSnapshot)
         // Revision 1 is well below the counter's current value (bumped
         // twice by the two persist() calls above and once by start's
         // helper). The pipeline must drop this op without writing.
-        await pipeline.enqueue(op: .save(staleData), revision: 1)
+        await pipeline.enqueue(op: .save(staleSnapshot), revision: 1)
 
         let afterStaleEnqueue = try await store.load()
         let decodedAfter = try JSONDecoder().decode(
@@ -401,6 +400,124 @@ final class ExecutionViewModelPersistencePipelineTests: XCTestCase {
         )
         // Block cap also stamped (defensive: 8 × 30s = 240s).
         XCTAssertNotNil(vm.state.blockEndsAt)
+    }
+
+    // MARK: - perf-001 · save coalescing
+
+    /// Ten rapid `apply()` calls used to produce ten JSON encodes and
+    /// ten `store.save` round-trips — one per tap. The coalescing fix
+    /// means only the save whose revision is still the pipeline's
+    /// latest-observed save revision actually encodes + writes. In
+    /// practice the first enqueued save is already running when the
+    /// burst continues (so it finishes for real), a few more may
+    /// already be chained and waiting, and the rest skip the encode +
+    /// write entirely.
+    ///
+    /// Contract: the bytes on disk at the end must decode to the final
+    /// in-memory state, AND the performed-save count must be strictly
+    /// less than the burst size. We allow a generous upper bound of 3
+    /// performed saves: one that's in-flight when the burst starts,
+    /// one that landed in the tail slot just before the final revision
+    /// bump, and the final revision itself. Ten performed saves would
+    /// mean no coalescing happened.
+    func testCoalesceDropsIntermediateSnapshotsUnderBurst() async throws {
+        // Slow store so at least one save is genuinely in-flight while
+        // the burst continues. Without the delay everything resolves
+        // synchronously and the test can't distinguish "coalesced" from
+        // "happened to be fast".
+        let store = SlowSessionStore(delayNanos: 10_000_000)
+        let ctx = makeStraightSetsContext(sets: 10, restSec: 0)
+        let vm = ExecutionViewModel(context: ctx, sessionStore: store)
+        defer { vm.resetPersistencePipelineForTesting() }
+
+        vm.start()
+        // Ten rapid logs. `restSec: 0` keeps the VM advancing through
+        // the single item's set list without entering `.rest`, so every
+        // apply goes through `persist()`.
+        for _ in 0..<10 {
+            vm.logSet(reps: 5, rir: 2)
+        }
+        let finalState = vm.state
+
+        // Drain everything: 10 enqueues × 10ms each worst case + some
+        // slack. 500ms is comfortably more than enough.
+        try await Task.sleep(nanoseconds: 500_000_000)
+
+        // Disk holds the latest snapshot.
+        let loaded = try await store.load()
+        let decoded = try JSONDecoder().decode(
+            SessionStateCodable.self, from: XCTUnwrap(loaded)
+        )
+        XCTAssertEqual(decoded.state.route, finalState.route)
+        XCTAssertEqual(
+            decoded.state.items.first?.sets.filter(\.done).count,
+            finalState.items.first?.sets.filter(\.done).count
+        )
+
+        // And the coalescing fired: far fewer than 10 actual writes
+        // landed on the store. start() + 10 logSets = 11 enqueues; we
+        // assert at most 3 ran. Anything higher means we regressed.
+        let pipeline = try XCTUnwrap(vm.persistencePipelineHandle())
+        let performed = await pipeline.performedSaveCountForTesting()
+        XCTAssertLessThanOrEqual(
+            performed, 3,
+            "Expected coalescing to drop intermediate saves; only \(performed) of 11 should have reached the store"
+        )
+        XCTAssertGreaterThanOrEqual(
+            performed, 1,
+            "At least one save must land — otherwise the store would be empty"
+        )
+    }
+
+    /// Drives the pipeline's coalescing gate directly: enqueue save A
+    /// at a low revision, then save B at a higher revision, then a
+    /// hand-crafted stale save at a revision below both. The final
+    /// bytes on disk must decode to B — the stale late arrival must
+    /// not clobber it.
+    ///
+    /// This covers the "latest wins" contract independently of the
+    /// burst shape in `testCoalesceDropsIntermediateSnapshotsUnderBurst`.
+    /// Without the coalescing fix the stale save would still run
+    /// (ackRevision gate is `>=`, so an explicitly-lower revision is
+    /// the only thing that fires it) and silently overwrite B.
+    func testMonotonicRevisionGuaranteesLatestWins() async throws {
+        let store = SlowSessionStore(delayNanos: 5_000_000)
+        let ctx = makeStraightSetsContext(sets: 2)
+        let vm = ExecutionViewModel(context: ctx, sessionStore: store)
+        defer { vm.resetPersistencePipelineForTesting() }
+
+        // Drive enough real state transitions to give us two distinct
+        // SessionStates with distinct routes.
+        vm.start()
+        let stateA = vm.state  // .active, no sets done
+        vm.logSet(reps: 5, rir: 2)
+        let stateB = vm.state  // .rest (or advanced), first set done
+        XCTAssertNotEqual(stateA.route, stateB.route)
+
+        // Let the real persists drain — they're naturally FIFO and B
+        // writes after A, so the store should hold B.
+        try await Task.sleep(nanoseconds: 200_000_000)
+
+        let pipeline = try XCTUnwrap(vm.persistencePipelineHandle())
+
+        // Now submit A's encoded bytes at a stale revision (1). Two
+        // real persists have already acked (plus the start-helper's),
+        // so ackRevision is well above 1 — the pipeline must drop
+        // this enqueue without touching the store.
+        let staleSnapshot = SessionStateCodable(state: stateA)
+        await pipeline.enqueue(op: .save(staleSnapshot), revision: 1)
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let loaded = try await store.load()
+        let decoded = try JSONDecoder().decode(
+            SessionStateCodable.self, from: XCTUnwrap(loaded)
+        )
+        XCTAssertEqual(decoded.state.route, stateB.route)
+        XCTAssertEqual(
+            decoded.state.items.first?.sets.filter(\.done).count,
+            stateB.items.first?.sets.filter(\.done).count
+        )
     }
 }
 

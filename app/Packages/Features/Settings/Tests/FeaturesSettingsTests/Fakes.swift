@@ -73,3 +73,22 @@ final class FakeUnitsStore: @unchecked Sendable, UnitsPreferenceStore {
         current = units
     }
 }
+
+/// In-memory sync metadata store. Holds a single `lastSyncAt` value so
+/// tests can pin what the "last synced" row renders without touching
+/// UserDefaults.
+final class FakeSyncMetadataStore: @unchecked Sendable, SyncMetadataStore {
+    var lastSyncAt: Date?
+    private(set) var setCount = 0
+
+    init(lastSyncAt: Date? = nil) {
+        self.lastSyncAt = lastSyncAt
+    }
+
+    func getLastSyncAt() async -> Date? { lastSyncAt }
+
+    func setLastSyncAt(_ date: Date) async {
+        setCount += 1
+        lastSyncAt = date
+    }
+}

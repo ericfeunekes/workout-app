@@ -115,12 +115,38 @@ final class SettingsViewModelTests: XCTestCase {
         XCTAssertEqual(synced, "—")
     }
 
-    func testSyncedRowShowsMinutesAgoWhenRecent() {
+    func testSyncedRowShowsMinutesAgoWhenRecent() async {
         let now = Date(timeIntervalSince1970: 10_000)
         let lastSync = now.addingTimeInterval(-240) // 4 minutes ago
         let vm = makeViewModel(lastSync: lastSync, now: now)
+        await vm.refreshAsync()
         let synced = firstInfoValue(in: vm, rowID: "server.synced")
         XCTAssertEqual(synced, "4 min ago")
+    }
+
+    /// Pins the imp-003 contract: `currentSyncedValue()` reads from the
+    /// injected `SyncMetadataStore` only. There is no second
+    /// provider-closure source to fall back on.
+    func testLastSyncReadsFromMetadataStoreOnly() async {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let stored = now.addingTimeInterval(-3_600) // 1 h ago
+        let syncStore = FakeSyncMetadataStore(lastSyncAt: stored)
+        let vm = makeViewModel(syncStore: syncStore, now: now)
+
+        // Before refreshAsync fires, the cached value is nil and the row
+        // renders the placeholder.
+        XCTAssertEqual(firstInfoValue(in: vm, rowID: "server.synced"), "—")
+
+        await vm.refreshAsync()
+
+        // Now the row reflects the store-backed value.
+        XCTAssertEqual(firstInfoValue(in: vm, rowID: "server.synced"), "1 h ago")
+
+        // Mutate the store and re-read — the viewModel always routes
+        // through the store, never a captured closure snapshot.
+        syncStore.lastSyncAt = now.addingTimeInterval(-60) // 1 min ago
+        await vm.refreshAsync()
+        XCTAssertEqual(firstInfoValue(in: vm, rowID: "server.synced"), "1 min ago")
     }
 
     // MARK: - Change-server destructive flow
@@ -314,6 +340,7 @@ final class SettingsViewModelTests: XCTestCase {
         ),
         autoregStore: FakeAutoregStore = FakeAutoregStore(),
         unitsStore: FakeUnitsStore = FakeUnitsStore(),
+        syncStore: FakeSyncMetadataStore? = nil,
         buildInfo: BuildInfo = BuildInfo(version: "0.0.1", build: "1", commit: "dev"),
         lastSync: Date? = nil,
         pairedWatch: String? = nil,
@@ -322,12 +349,15 @@ final class SettingsViewModelTests: XCTestCase {
         onChangeServer: @escaping @Sendable () async -> Void = {},
         now: Date = Date(timeIntervalSince1970: 10_000)
     ) -> SettingsViewModel {
-        SettingsViewModel(
+        // Tests can either pass in a prepared `syncStore` or supply the
+        // convenience `lastSync:` date and let this helper wrap it.
+        let store = syncStore ?? FakeSyncMetadataStore(lastSyncAt: lastSync)
+        return SettingsViewModel(
             tokenStore: tokenStore,
             autoregStore: autoregStore,
             unitsStore: unitsStore,
+            syncMetadata: store,
             buildInfo: buildInfo,
-            lastSyncProvider: { lastSync },
             pairedWatchProvider: { pairedWatch },
             onSyncNow: onSyncNow,
             onResetCache: onResetCache,

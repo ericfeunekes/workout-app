@@ -94,9 +94,9 @@ public struct SettingsView: View {
 
 }
 
-// Row-building helpers (`rowView`, `infoRow`, `toggleRow`, `pickerRow`,
-// `actionRow`, `navigationRow`) live in `SettingsView+Rows.swift` so the
-// main struct body stays under SwiftLint's `type_body_length` cap.
+// Row-building helpers (`rowView`, `infoRow`, `pickerRow`, `actionRow`)
+// live in `SettingsView+Rows.swift` so the main struct body stays under
+// SwiftLint's `type_body_length` cap.
 
 // MARK: - Previews
 
@@ -106,8 +106,10 @@ public struct SettingsView: View {
         tokenStore: PreviewTokenStore(),
         autoregStore: PreviewAutoregStore(),
         unitsStore: PreviewUnitsStore(),
+        syncMetadata: PreviewSyncMetadataStore(
+            lastSyncAt: Date().addingTimeInterval(-240)
+        ),
         buildInfo: BuildInfo(version: "0.0.1", build: "1", commit: "dev"),
-        lastSyncProvider: { Date().addingTimeInterval(-240) },
         pairedWatchProvider: { nil }
     ))
     .preferredColorScheme(.dark)
@@ -132,6 +134,12 @@ private final class PreviewUnitsStore: UnitsPreferenceStore, @unchecked Sendable
     private var value: UnitsPreference = .kg
     func load() -> UnitsPreference { value }
     func save(_ units: UnitsPreference) { value = units }
+}
+
+private struct PreviewSyncMetadataStore: Persistence.SyncMetadataStore {
+    let lastSyncAt: Date?
+    func getLastSyncAt() async -> Date? { lastSyncAt }
+    func setLastSyncAt(_ date: Date) async {}
 }
 
 // Previews import Persistence implicitly via the TokenStore protocol;

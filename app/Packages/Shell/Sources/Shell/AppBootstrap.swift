@@ -121,8 +121,12 @@ public enum AppBootstrap {
         guard let todayContext = try await loader.load(
             sessionStateBinding: sessionStateBinding
         ) else {
-            emitBootstrap(telemetryEmitter, name: "bootstrap.empty")
-            return .empty
+            return try await resolveNoPlannedWorkout(
+                persistence: persistence, syncAPI: syncAPI,
+                telemetry: telemetryEmitter,
+                sessionStateBinding: sessionStateBinding,
+                executionHolder: executionHolder
+            )
         }
         return try await assembleReady(AssembleInputs(
             todayContext: todayContext,
@@ -164,7 +168,7 @@ public enum AppBootstrap {
             name: "bootstrap.ready",
             workoutID: inputs.todayContext.workout.id
         )
-        return buildReady(ReadyInputs(
+        return await buildReady(ReadyInputs(
             todayContext: inputs.todayContext,
             workoutContext: workoutContext,
             todayLoader: inputs.todayLoader,
@@ -234,16 +238,14 @@ public enum AppBootstrap {
     }
 
     /// One-liner for bootstrap.* state events. Keeps the call sites tight.
-    private static func emitBootstrap(
-        _ emitter: TelemetryEmitter,
-        name: String,
-        workoutID: UUID? = nil
+    /// Not `private` so `+Hooks.swift` can call it for the qa-027
+    /// `.ready_empty_today` event without duplicating the stanza.
+    static func emitBootstrap(
+        _ emitter: TelemetryEmitter, name: String, workoutID: UUID? = nil
     ) {
         emitter.emit(Event(
-            sessionID: TelemetrySession.id,
-            kind: "state",
-            name: name,
-            workoutID: workoutID
+            sessionID: TelemetrySession.id, kind: "state",
+            name: name, workoutID: workoutID
         ))
     }
 

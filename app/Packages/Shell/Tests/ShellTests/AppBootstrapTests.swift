@@ -16,12 +16,13 @@
 
 import XCTest
 import CoreDomain
+import CoreSession
 import CoreTelemetry
-import FeaturesExecution
 import FeaturesToday
 import Persistence
 import Sync
 import WorkoutCoreFoundation
+@testable import FeaturesExecution
 @testable import Shell
 
 @MainActor
@@ -116,6 +117,121 @@ final class AppBootstrapTests: XCTestCase {
             transportBuilder: { _ in transport }
         )
         XCTAssertEqual(result, .empty)
+    }
+
+    /// Regression guard for qa-027: the same `.empty` path above still
+    /// fires when the cache has no workouts of any status. Truly-empty
+    /// caches are the only condition that justifies the full-screen
+    /// "No workouts yet" shell prompt that hides History.
+    func testColdLaunchWithTrulyEmptyCacheGoesToEmpty() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        // No seed, no pull — cache stays empty.
+        let transport = ScriptedTransport(
+            getOutcomes: [.error(.network("dns"))]
+        )
+
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: Date(),
+            transportBuilder: { _ in transport }
+        )
+        XCTAssertEqual(result, .empty)
+
+        // Belt + braces: confirm the cache really had nothing in it at the
+        // time of the decision. If this starts failing, a seed leaked in.
+        let anyWorkouts = try await factory.workoutCache.loadWorkouts(
+            status: nil, since: nil
+        )
+        XCTAssertTrue(anyWorkouts.isEmpty)
+    }
+
+    // MARK: - qa-027 · completed-only cache stays in .ready
+
+    /// qa-027: cold-launch after the user has completed all planned
+    /// workouts (cache has completed rows but no planned ones) must
+    /// resolve to `.ready` with an empty-glance TodayViewModel — not
+    /// `.empty`. The full-screen `.empty` shell hides the History tab
+    /// entirely, which stranded the user from their own logged sessions.
+    /// Contract: shell stays on the tabbed root; Today renders
+    /// `isEmpty == true` (the qa-008 empty-glance path); History
+    /// resolves via its own load path.
+    func testColdLaunchWithCompletedOnlyWorkoutsStaysInReady() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+
+        // Seed the cache with a single COMPLETED workout (no planned
+        // rows). Mirrors the post-"save & done all" end-state the qa-027
+        // repro describes: every planned workout has been finished and
+        // persisted locally.
+        let userID = UUID()
+        let workoutID = UUID()
+        let completedAt = ISO8601DateFormatter().date(from: "2026-04-17T09:00:00Z")!
+        let completedWorkout = Workout(
+            id: workoutID,
+            userID: userID,
+            name: "Push A (completed)",
+            scheduledDate: completedAt,
+            status: .completed,
+            source: .claude,
+            notes: nil,
+            createdAt: completedAt,
+            updatedAt: completedAt,
+            completedAt: completedAt,
+            tagsJSON: nil
+        )
+        try await factory.workoutCache.saveWorkout(completedWorkout)
+
+        // Bootstrap with a failing transport so the pull can't refill the
+        // cache with a planned row. TodayLoader then returns nil
+        // (`.planned` filter hits no rows), and the fix path must still
+        // land in `.ready`.
+        let transport = ScriptedTransport(
+            getOutcomes: [.error(.network("dns"))]
+        )
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: completedAt,
+            transportBuilder: { _ in transport }
+        )
+
+        guard case let .ready(todayVM, executionHolder, _) = result else {
+            return XCTFail("expected .ready for completed-only cache, got \(result)")
+        }
+
+        // Today is in its empty-glance state — the qa-008 contract guards
+        // the start button so there's no nil-VM dispatch risk.
+        XCTAssertTrue(
+            todayVM.isEmpty,
+            "empty-glance VM must have isEmpty == true"
+        )
+        XCTAssertFalse(
+            todayVM.showsStartButton,
+            "empty-glance VM must hide the start button (qa-008)"
+        )
+        XCTAssertNil(todayVM.workoutID)
+        XCTAssertTrue(todayVM.exercises.isEmpty)
+
+        // `RootTabView` reads `holder.vm` — nil routes to `TodayView`
+        // which renders the empty glance. No ExecutionViewModel is built
+        // here because there's no WorkoutContext to anchor one to.
+        XCTAssertNil(
+            executionHolder.vm,
+            "no planned workout → no execution VM; History is still reachable"
+        )
+
+        // Confirm the cache actually holds the completed workout — this
+        // is the whole signal that drove us into `.ready` instead of
+        // `.empty`.
+        let completed = try await factory.workoutCache.loadCompletedWorkouts(
+            limit: 10, offset: 0
+        )
+        XCTAssertEqual(completed.count, 1)
+        XCTAssertEqual(completed.first?.id, workoutID)
     }
 
     // MARK: - Push path wired through the bootstrap
@@ -309,6 +425,97 @@ final class AppBootstrapTests: XCTestCase {
             vmB.activeContent,
             "new VM must produce non-nil activeContent — nil is the qa-002 symptom"
         )
+    }
+
+    /// qa-030 root-cause regression: after the post-save VM rebuild, the
+    /// newly-installed `ExecutionViewModel` must still carry the
+    /// `onUserParameterChanged` hook so a bodyweight typed on workout
+    /// B's Complete screen lands in `user_parameters`. Fix-it L
+    /// introduced the rebuild path (`rebuildExecutionVMForNextWorkout`)
+    /// and the hazard was that the hook wire-up only lived on the initial
+    /// VM; the rebuild factory needs to capture every field of
+    /// `ExecutionPushHooks`, not just the set-log hook.
+    ///
+    /// Methodology: drive workout A to completion, save, wait for the
+    /// rebuild, then save workout B with a bodyweight. The test's
+    /// `onUserParameterChanged` recorder must see the push — if the hook
+    /// got dropped on rebuild, the recorder stays empty.
+    func testRebuildExecutionVMRetainsOnUserParameterChangedHook() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let (workoutA, workoutB) = Fixtures.twoPlannedWorkouts()
+        try await factory.workoutCache.save(
+            PulledDataset(
+                workouts: [workoutA.workout, workoutB.workout],
+                blocks: workoutA.blocks + workoutB.blocks,
+                items: workoutA.items + workoutB.items,
+                alternatives: [],
+                exercises: workoutA.exercises + workoutB.exercises,
+                userParameters: []
+            )
+        )
+
+        let transport = ScriptedTransport(getOutcomes: [.error(.network("dns"))])
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: workoutA.workout.scheduledDate!,
+            transportBuilder: { _ in transport }
+        )
+        guard case let .ready(_, holder, _) = result else {
+            return XCTFail("expected .ready, got \(result)")
+        }
+
+        // Drive A to completion and save. Bodyweight omitted — that's
+        // the pre-rebuild push path, which already has dedicated
+        // coverage in `testSaveAndDoneEnqueuesBodyweightUserParameter`.
+        let vmA = try XCTUnwrap(holder.vm)
+        vmA.start()
+        vmA.logSet(reps: 5, rir: 2)
+        vmA.saveAndDone()
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        let vmB = try XCTUnwrap(holder.vm, "holder must carry the rebuilt VM for workout B")
+        XCTAssertFalse(vmB === vmA, "precondition: rebuild produced a new VM")
+        XCTAssertNotNil(
+            vmB.push.onUserParameterChanged,
+            "rebuilt VM must retain the onUserParameterChanged hook — " +
+            "dropping it is the qa-030 regression hazard"
+        )
+        XCTAssertNotNil(
+            vmB.push.onSetLogged,
+            "rebuilt VM must retain onSetLogged (sanity: the whole hooks " +
+            "bundle must survive the rebuild, not just one field)"
+        )
+        XCTAssertNotNil(
+            vmB.push.onStatusChanged,
+            "rebuilt VM must retain onStatusChanged"
+        )
+        XCTAssertNotNil(
+            vmB.push.onPushKick,
+            "rebuilt VM must retain onPushKick so post-save flush still fires"
+        )
+
+        // Behavior check: drive B through completion with a bodyweight,
+        // then assert a bodyweight row landed in the local cache. The
+        // shell-wired `onUserParameterChanged` writes to WorkoutCache
+        // before enqueuing the push — the cache is the ground truth for
+        // "the hook fired".
+        vmB.start()
+        vmB.logSet(reps: 5, rir: 2)
+        vmB.saveAndDone(bodyweightKg: 82.5)
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        let cachedRows = try await factory.workoutCache.loadUserParameters(
+            key: "bodyweight_kg"
+        )
+        XCTAssertEqual(
+            cachedRows.count, 1,
+            "bodyweight on the rebuilt VM must reach the cache via the " +
+            "retained onUserParameterChanged hook"
+        )
+        XCTAssertEqual(cachedRows.first?.value, "82.5")
     }
 
     /// Regression test for the terminal "no more planned workouts" path.
@@ -568,6 +775,301 @@ final class AppBootstrapTests: XCTestCase {
             executionVM.context.lastPerformed[benchID],
             "4×5 @ 100 kg · RIR 2"
         )
+    }
+
+    // MARK: - qa-024 · cold-relaunch session restore
+
+    /// Cold-launch with a persisted snapshot whose `route == .active` must
+    /// land the user directly on the Execution surface for the restored
+    /// cursor, NOT on Today. Pre-fix: `AppBootstrap.buildReady` constructed
+    /// a fresh `ExecutionViewModel` and returned it without ever calling
+    /// `restoreIfPossible`, so the seeded-from-context state always won
+    /// and tapping Start on Today overwrote the snapshot. See
+    /// `scratch/qa-runs/_investigations/qa-002-crash.md` § "Hypothesis 4".
+    func testColdRelaunchRestoresActiveRoute() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let fixture = Fixtures.sampleWorkoutPayload()
+
+        // Prime the cache so the offline bootstrap has a workout to
+        // build its context around — same path as a prior successful
+        // pull would have populated.
+        try await factory.workoutCache.save(
+            PulledDataset(
+                workouts: [fixture.domainWorkout],
+                blocks: fixture.domainBlocks,
+                items: fixture.domainItems,
+                alternatives: [],
+                exercises: fixture.domainExercises,
+                userParameters: []
+            )
+        )
+
+        // Handcraft a mid-workout snapshot: route=.active, cursor on the
+        // second set of the first item (user has logged set 1, is back in
+        // .active for set 2). The structure mirrors the fixture: one
+        // block, two items (4 sets + 3 sets).
+        let snapshotState = SessionState(
+            workoutID: fixture.domainWorkout.id,
+            route: .active,
+            cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 2),
+            items: [],
+            structure: SessionState.Structure(
+                itemsPerBlock: [2],
+                setsPerItem: [[4, 3]]
+            )
+        )
+        let bytes = try JSONEncoder().encode(SessionStateCodable(state: snapshotState))
+        try await factory.sessionStore.save(bytes)
+
+        // Bootstrap with a failing transport so the cache fallback path
+        // kicks in (pull isn't the subject here — restore is).
+        let transport = ScriptedTransport(
+            getOutcomes: [.error(.network("dns"))]
+        )
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in transport }
+        )
+        guard case let .ready(_, executionHolder, _) = result else {
+            return XCTFail("expected .ready, got \(result)")
+        }
+
+        let executionVM = try XCTUnwrap(executionHolder.vm)
+        // Route is the restored `.active` — RootTabView routes off this
+        // directly to ExecutionView, skipping Today.
+        XCTAssertEqual(executionVM.state.route, .active)
+        // Cursor reflects the persisted mid-workout position, NOT the
+        // seeded `(0, 0, 1)` an unrestored VM would carry.
+        XCTAssertEqual(executionVM.state.cursor.blockIndex, 0)
+        XCTAssertEqual(executionVM.state.cursor.itemIndex, 0)
+        XCTAssertEqual(executionVM.state.cursor.setIndex, 2)
+        // WorkoutID matches — the restore applied the correct snapshot.
+        XCTAssertEqual(executionVM.state.workoutID, fixture.domainWorkout.id)
+    }
+
+    /// Cold-launch with a persisted snapshot whose `route == .rest` and
+    /// an absolute `restEndsAt` must preserve the anchor — no "recompute
+    /// from now - then" drift. The ring's remaining time derives from
+    /// `restEndsAt - clock.now` at render time (per
+    /// `docs/features/persistence.md` § S2). Here we only assert the
+    /// absolute anchor survives the round-trip unchanged.
+    func testColdRelaunchRestoresRestRouteWithRestEndsAt() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let fixture = Fixtures.sampleWorkoutPayload()
+        try await factory.workoutCache.save(
+            PulledDataset(
+                workouts: [fixture.domainWorkout],
+                blocks: fixture.domainBlocks,
+                items: fixture.domainItems,
+                alternatives: [],
+                exercises: fixture.domainExercises,
+                userParameters: []
+            )
+        )
+
+        // Snapshot: mid-rest. `restEndsAt` is an absolute Date ~60s in
+        // the future relative to some fixed reference; the bootstrap
+        // path does NOT recompute it — the view reads it as-is and
+        // renders `restEndsAt - now()`.
+        let restEndsAt = Date(timeIntervalSince1970: 1_800_000_000 + 60)
+        let snapshotState = SessionState(
+            workoutID: fixture.domainWorkout.id,
+            route: .rest,
+            cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1),
+            items: [],
+            restEndsAt: restEndsAt,
+            structure: SessionState.Structure(
+                itemsPerBlock: [2],
+                setsPerItem: [[4, 3]]
+            )
+        )
+        let bytes = try JSONEncoder().encode(SessionStateCodable(state: snapshotState))
+        try await factory.sessionStore.save(bytes)
+
+        let transport = ScriptedTransport(
+            getOutcomes: [.error(.network("dns"))]
+        )
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in transport }
+        )
+        guard case let .ready(_, executionHolder, _) = result else {
+            return XCTFail("expected .ready, got \(result)")
+        }
+
+        let executionVM = try XCTUnwrap(executionHolder.vm)
+        XCTAssertEqual(executionVM.state.route, .rest)
+        XCTAssertEqual(
+            executionVM.state.restEndsAt?.timeIntervalSince1970,
+            restEndsAt.timeIntervalSince1970,
+            "absolute restEndsAt must survive restore unchanged — " +
+            "no 'recompute from now - then' drift per persistence.md § S2"
+        )
+    }
+
+    /// Regression guard: cold-launch with NO persisted snapshot must
+    /// behave like a first launch — route is `.today`, seeded cursor,
+    /// no crash. The restore call is a silent no-op when `SessionStore.load()`
+    /// returns nil.
+    func testColdRelaunchWithNoSnapshotBehavesNormally() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let fixture = Fixtures.sampleWorkoutPayload()
+        let transport = ScriptedTransport(
+            getOutcomes: [.ok(fixture.json)]
+        )
+
+        // No snapshot seeded — SessionStore.load() returns nil.
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in transport }
+        )
+        guard case let .ready(_, executionHolder, _) = result else {
+            return XCTFail("expected .ready, got \(result)")
+        }
+
+        let executionVM = try XCTUnwrap(executionHolder.vm)
+        XCTAssertEqual(
+            executionVM.state.route, .today,
+            "no snapshot → seeded state stands → route .today"
+        )
+        XCTAssertEqual(executionVM.state.workoutID, fixture.domainWorkout.id)
+    }
+
+    /// Cold-launch with a post-save snapshot (the state written by the
+    /// reducer's `.save`: route=.today, items=[], structure=empty,
+    /// workoutID preserved) must land on Today — not crash, not resurrect
+    /// a bogus session. This is the race covered by
+    /// `docs/features/persistence.md` § S16: save+clear are both in
+    /// flight and the snapshot MAY reflect the emptied post-save state
+    /// if the clear hasn't landed yet.
+    ///
+    /// The normalization guard in `normalizeRestoredState` short-circuits
+    /// on route=.today — so the restored state is applied verbatim and
+    /// RootTabView routes to Today.
+    func testColdRelaunchWithPostSaveSnapshotLandsOnToday() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let fixture = Fixtures.sampleWorkoutPayload()
+        try await factory.workoutCache.save(
+            PulledDataset(
+                workouts: [fixture.domainWorkout],
+                blocks: fixture.domainBlocks,
+                items: fixture.domainItems,
+                alternatives: [],
+                exercises: fixture.domainExercises,
+                userParameters: []
+            )
+        )
+
+        // Post-save snapshot: exactly what the reducer's `.save`
+        // handler writes — route=.today, items=[], empty structure,
+        // workoutID preserved for the completed workout.
+        let postSaveState = SessionState(
+            workoutID: fixture.domainWorkout.id,
+            route: .today,
+            cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1),
+            items: [],
+            structure: SessionState.Structure(
+                itemsPerBlock: [],
+                setsPerItem: []
+            )
+        )
+        let bytes = try JSONEncoder().encode(SessionStateCodable(state: postSaveState))
+        try await factory.sessionStore.save(bytes)
+
+        let transport = ScriptedTransport(
+            getOutcomes: [.error(.network("dns"))]
+        )
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in transport }
+        )
+        guard case let .ready(_, executionHolder, _) = result else {
+            return XCTFail("expected .ready, got \(result)")
+        }
+
+        let executionVM = try XCTUnwrap(executionHolder.vm)
+        XCTAssertEqual(
+            executionVM.state.route, .today,
+            "post-save snapshot has route=.today — restore lands on Today"
+        )
+    }
+
+    /// Guard against a stale snapshot whose `workoutID` doesn't match the
+    /// TodayLoader-selected workout (e.g. cross-day relaunch where the
+    /// in-flight workout was yesterday's but today's `.planned` row now
+    /// outranks it). Applying such a snapshot onto a different workout's
+    /// context would index `state.structure` into the wrong block shape
+    /// and corrupt timer anchors. The guard in `restoreIfPossible`
+    /// discards the mismatched snapshot and the freshly-seeded state for
+    /// the selected workout stands.
+    func testColdRelaunchDiscardsSnapshotForDifferentWorkout() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let fixture = Fixtures.sampleWorkoutPayload()
+        try await factory.workoutCache.save(
+            PulledDataset(
+                workouts: [fixture.domainWorkout],
+                blocks: fixture.domainBlocks,
+                items: fixture.domainItems,
+                alternatives: [],
+                exercises: fixture.domainExercises,
+                userParameters: []
+            )
+        )
+
+        // Snapshot for a COMPLETELY DIFFERENT workoutID — the TodayLoader
+        // will pick the fixture's workout, but the snapshot claims a
+        // different one. The guard must discard.
+        let strangerID = UUID()
+        let snapshotState = SessionState(
+            workoutID: strangerID,
+            route: .active,
+            cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 2),
+            items: [],
+            structure: SessionState.Structure(
+                itemsPerBlock: [1],
+                setsPerItem: [[5]]
+            )
+        )
+        let bytes = try JSONEncoder().encode(SessionStateCodable(state: snapshotState))
+        try await factory.sessionStore.save(bytes)
+
+        let transport = ScriptedTransport(
+            getOutcomes: [.error(.network("dns"))]
+        )
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in transport }
+        )
+        guard case let .ready(_, executionHolder, _) = result else {
+            return XCTFail("expected .ready, got \(result)")
+        }
+
+        let executionVM = try XCTUnwrap(executionHolder.vm)
+        // Freshly-seeded state stands: route=.today, workoutID matches
+        // the TodayLoader-selected workout, NOT the stranger ID.
+        XCTAssertEqual(executionVM.state.route, .today)
+        XCTAssertEqual(executionVM.state.workoutID, fixture.domainWorkout.id)
+        XCTAssertNotEqual(executionVM.state.workoutID, strangerID)
     }
 
     // MARK: - Helpers

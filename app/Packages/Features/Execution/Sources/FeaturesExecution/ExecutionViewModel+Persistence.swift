@@ -38,6 +38,17 @@ extension ExecutionViewModel {
     /// (e.g. a Tabata block without `workEndsAt`). The normalization is
     /// idempotent — re-entering a block with existing anchors is a no-op
     /// — so running it every restore is safe even for clean states.
+    ///
+    /// Workout-ID guard (qa-024): a persisted snapshot whose `workoutID`
+    /// doesn't match the current `context.workout.id` is discarded. The
+    /// normalization pass reads block/item data off `context`; applying
+    /// it to a state whose cursor indexes into a DIFFERENT workout's
+    /// structure would corrupt timer anchors and routing. Mismatch can
+    /// happen when the shell's `TodayLoader` picks a workout different
+    /// from the one the snapshot captured (e.g. cross-day relaunch where
+    /// a newer scheduled `.planned` row outranks the in-flight one).
+    /// Discarding is the safe cutover — a fresh seeded state for the
+    /// TodayLoader-selected workout is better than a corrupted restore.
     public func restoreIfPossible() async {
         guard let store = sessionStore else { return }
         do {
@@ -47,6 +58,7 @@ extension ExecutionViewModel {
             ) else {
                 return
             }
+            guard restored.state.workoutID == context.workout.id else { return }
             self.state = restored.state
             normalizeRestoredState()
         } catch {

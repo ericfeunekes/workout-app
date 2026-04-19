@@ -32,6 +32,11 @@ struct ActiveView: View {
     // can toggle the binding.
     @State var showSwapSheet = false
 
+    // qa-028: End confirmation alert. Tapping the nav-bar End button
+    // surfaces the alert instead of firing `complete()` directly so a
+    // stray tap mid-workout doesn't silently skip remaining sets.
+    @State private var showEndConfirm = false
+
     // Time-cap tick source (bug-042). `TimelineView` is a render-time
     // construct; we need the tick to fire `viewModel.tickBlockTimer()` as
     // a side effect, so we drive it via a `Timer.publish` + `.onReceive`
@@ -47,6 +52,7 @@ struct ActiveView: View {
 
             if let content = viewModel.activeContent {
                 VStack(spacing: 0) {
+                    navBar
                     ScrollView {
                         VStack(alignment: .leading, spacing: DSSpacing.xl) {
                             header(content: content)
@@ -59,7 +65,7 @@ struct ActiveView: View {
                             }
                         }
                         .padding(.horizontal, DSSpacing.xl)
-                        .padding(.top, DSSpacing.xxl)
+                        .padding(.top, DSSpacing.lg)
                         // The whole card is the long-press zone so a sweaty
                         // finger landing anywhere near the exercise name or
                         // hero value triggers the swap menu. See
@@ -123,6 +129,47 @@ struct ActiveView: View {
         .sheet(isPresented: $showSwapSheet) {
             swapSheet
         }
+        // qa-028: confirm before force-completing. Ending mid-workout is
+        // destructive (unlogged sets vanish), so a stray tap or sweaty
+        // finger mis-press shouldn't skip the rest of the session without
+        // a beat of intent. Confirm → `viewModel.complete()` flips the
+        // route to `.complete`; user can still Save & Done from there.
+        .alert("End workout?", isPresented: $showEndConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("End", role: .destructive) {
+                viewModel.complete()
+            }
+        } message: {
+            Text("Unlogged sets won't be recorded. You can still save & done.")
+        }
+    }
+
+    // MARK: - Nav bar
+
+    /// qa-028: top-of-screen End control. No `NavigationStack` wraps
+    /// `ExecutionView`, so we render the nav bar inline — a single trailing
+    /// ghost button matching the `docs/design/src/hifi.jsx` § Active hint
+    /// ("nav bar: Back → Today · title · End"). Tap surfaces the alert in
+    /// `showEndConfirm` rather than firing `complete()` directly.
+    private var navBar: some View {
+        HStack {
+            Spacer()
+            Button {
+                showEndConfirm = true
+            } label: {
+                Text("end")
+                    .font(DSTypography.subLabel)
+                    .tracking(0.5)
+                    .foregroundStyle(DSColors.foregroundMuted)
+                    .padding(.horizontal, DSSpacing.md)
+                    .padding(.vertical, DSSpacing.sm)
+            }
+            .buttonStyle(.plain)
+            .accessibilityIdentifier("execution.active.end")
+            .accessibilityLabel("End workout")
+        }
+        .padding(.horizontal, DSSpacing.xl)
+        .padding(.top, DSSpacing.md)
     }
 
     // MARK: - Sections

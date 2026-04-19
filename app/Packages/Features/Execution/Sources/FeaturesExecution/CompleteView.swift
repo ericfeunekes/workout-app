@@ -37,12 +37,49 @@ struct CompleteView: View {
     /// Workout-level note text. Bound to a multi-line TextField so the
     /// user can jot a sentence ("felt strong"). Empty is the default and
     /// collapses to `nil` on save.
-    @State private var noteText: String = ""
+    @State private var noteText: String
 
     /// Body weight in kg as the user types it. Parsed to Double on save;
     /// an unparseable / empty value means "no capture, skip the
     /// user_parameters push."
-    @State private var bodyweightText: String = ""
+    @State private var bodyweightText: String
+
+    /// qa-030: the initial bodyweight text is explicitly empty. Prior
+    /// layouts used `@State private var bodyweightText: String = ""` with
+    /// `prompt: Text("82.5")` as placeholder — users read "82.5" as a
+    /// prefilled value. The fix removed the numeric prompt; this
+    /// constant locks the empty-start contract so a future edit can't
+    /// silently reintroduce a prefill (e.g. by reading the latest
+    /// `user_parameters.bodyweight_kg` at init time). Exposed `static`
+    /// for unit tests to pin the contract.
+    static let initialBodyweightText: String = ""
+
+    /// Mirror of `initialBodyweightText` for the note field. Currently
+    /// the same empty string, exposed separately so a future "seed last
+    /// session's note" feature (not planned) would land with a visible
+    /// contract change rather than flipping the default silently.
+    static let initialNoteText: String = ""
+
+    init(viewModel: ExecutionViewModel) {
+        self.viewModel = viewModel
+        self._noteText = State(initialValue: Self.initialNoteText)
+        self._bodyweightText = State(initialValue: Self.initialBodyweightText)
+    }
+
+    #if DEBUG
+    /// qa-029 preview initializer — seeds the note / bodyweight fields
+    /// so SwiftUI previews can exercise the "500-char note" worst case
+    /// without a stateful host. Gated on `#if DEBUG` so it never ships.
+    init(
+        viewModel: ExecutionViewModel,
+        previewNote: String,
+        previewBodyweight: String = ""
+    ) {
+        self.viewModel = viewModel
+        self._noteText = State(initialValue: previewNote)
+        self._bodyweightText = State(initialValue: previewBodyweight)
+    }
+    #endif
 
     var body: some View {
         ZStack {
@@ -117,7 +154,21 @@ struct CompleteView: View {
                     Text("body weight (kg)")
                         .font(DSTypography.caption)
                         .foregroundStyle(DSColors.foregroundMuted)
-                    TextField("", text: $bodyweightText, prompt: Text("82.5"))
+                    // qa-030: the prior prompt read `Text("82.5")`, which
+                    // SwiftUI renders as a grayed-out placeholder but
+                    // visually reads as a prefilled numeric value. Users
+                    // saw "82.5" in the empty field, assumed it was
+                    // captured, and walked away without typing — so
+                    // `parsedBodyweightKg` returned nil and the
+                    // `enqueueBodyweight` path never fired. Swap to a
+                    // non-numeric "optional" hint so the empty state is
+                    // unambiguous: no number on screen → no bodyweight
+                    // logged yet.
+                    TextField(
+                        "",
+                        text: $bodyweightText,
+                        prompt: Text("optional")
+                    )
                         .font(DSTypography.mono)
                         .monospacedDigit()
                         .foregroundStyle(DSColors.foreground)
@@ -132,6 +183,16 @@ struct CompleteView: View {
                     Text("note")
                         .font(DSTypography.caption)
                         .foregroundStyle(DSColors.foregroundMuted)
+                    // qa-029: prior `.lineLimit(2...4)` capped the field
+                    // at four lines, so a ~500-char note (about 10 lines
+                    // at body type) spilled past the visible edit area
+                    // and broke the card's vertical rhythm while typing.
+                    // Widen the range to 1...8 so short notes keep the
+                    // tight single-line shape, long notes grow in-place
+                    // up to a bounded cap, and anything beyond the cap
+                    // scrolls within the field rather than pushing the
+                    // save button off-screen. Fixed-size vertical
+                    // prevents horizontal clipping of long words.
                     TextField(
                         "",
                         text: $noteText,
@@ -140,8 +201,9 @@ struct CompleteView: View {
                     )
                     .font(DSTypography.body)
                     .foregroundStyle(DSColors.foreground)
-                    .lineLimit(2...4)
+                    .lineLimit(1...8)
                     .textFieldStyle(.plain)
+                    .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("complete.note")
                 }
             }
@@ -189,3 +251,27 @@ struct CompleteView: View {
         }
     }
 }
+
+#if DEBUG
+// qa-029: visual regression preview. A ~500-character note is the QA
+// report's worst-case input; this preview seeds exactly that so visual
+// QA can confirm the field grows cleanly up to its bounded cap, the
+// save button stays reachable, and the card padding doesn't collapse.
+// Shares `ExecutionPreviewSeed.pushA` with the other execution previews
+// so the ledger underneath renders realistic entries.
+#Preview("Complete — 500-char note (qa-029)") {
+    let context = ExecutionPreviewSeed.pushA()
+    let vm = ExecutionViewModel(context: context)
+    // Flip the VM to `.complete` so the Complete screen renders — the
+    // default seeded state is `.today`. No log calls needed; the ledger
+    // just shows "no sets logged" per-item.
+    vm.apply([.start, .complete])
+    // 512 characters — matches the QA report's 500-char worst case.
+    let longNote = String(
+        repeating: "felt strong today, bench speed was clean and lockout solid. ",
+        count: 8
+    )
+    return CompleteView(viewModel: vm, previewNote: longNote)
+        .preferredColorScheme(.dark)
+}
+#endif

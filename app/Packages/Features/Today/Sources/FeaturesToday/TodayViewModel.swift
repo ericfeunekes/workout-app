@@ -108,6 +108,45 @@ public final class TodayViewModel {
         self.telemetry = telemetry
     }
 
+    /// Build a VM that starts in the empty-glance state — no planned
+    /// workout is available, but the app is otherwise live (the cache
+    /// has completed history, or the user is about to receive a pull).
+    /// `showsStartButton` is `false` so Today renders its "no workout
+    /// today" prompt; History still resolves via its own load path.
+    ///
+    /// qa-027 fix: cold-launch with completed workouts in cache but no
+    /// planned rows must land on `.ready` with this VM (so the History
+    /// tab stays reachable), not on the full-screen `.empty` shell
+    /// state that hides History entirely.
+    public static func empty(
+        telemetry: TelemetryEmitter = NoopTelemetryEmitter(),
+        sessionStateBinding: (@Sendable (SessionMutation) -> Void)? = nil
+    ) -> TodayViewModel {
+        TodayViewModel(
+            emptyTelemetry: telemetry,
+            sessionStateBinding: sessionStateBinding
+        )
+    }
+
+    /// Private empty-state initializer. Mirrors the fields the public
+    /// context init sets, but seeded with the same "nothing scheduled"
+    /// shape `apply(nil)` flips to on reload. Kept private so callers
+    /// go through `TodayViewModel.empty(...)` — the factory name makes
+    /// the intent obvious at the call site.
+    private init(
+        emptyTelemetry: TelemetryEmitter,
+        sessionStateBinding: (@Sendable (SessionMutation) -> Void)?
+    ) {
+        self.programName = ""
+        self.programTags = []
+        self.lastSessionSummary = nil
+        self.exercises = []
+        self.isEmpty = true
+        self.workoutID = nil
+        self.sessionStateBinding = sessionStateBinding
+        self.telemetry = emptyTelemetry
+    }
+
     /// Flip session route to `.active`. No-op when the binding is absent
     /// (previews, tests).
     public func start() {

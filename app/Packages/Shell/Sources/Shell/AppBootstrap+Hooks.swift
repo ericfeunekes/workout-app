@@ -17,6 +17,53 @@ import Sync
 
 extension AppBootstrap {
 
+    /// qa-027: no planned workout selected. Before returning `.empty`
+    /// (which drops the app into the full-screen "No workouts yet" shell
+    /// and hides the History tab), check whether the local cache has
+    /// ANY workout at all — including completed ones. When it does,
+    /// stay in `.ready` with an empty-glance TodayVM so the user can
+    /// still reach their History tab. Only truly-empty caches (first
+    /// launch that failed to pull, or server-scrubbed user) warrant
+    /// `.empty`.
+    ///
+    /// Lives in `+Hooks.swift` so the main enum body in
+    /// `AppBootstrap.swift` stays under SwiftLint's `type_body_length`
+    /// cap. Marked `static` (not `private static`) so the parent file's
+    /// `bootstrap(...)` can call it across the extension boundary.
+    static func resolveNoPlannedWorkout(
+        persistence: PersistenceFactory,
+        syncAPI: SyncAPI,
+        telemetry: TelemetryEmitter,
+        sessionStateBinding: (@Sendable (SessionMutation) -> Void)?,
+        executionHolder: ExecutionVMHolder?
+    ) async throws -> BootstrapResult {
+        let anyCached = try await persistence.workoutCache.loadWorkouts(
+            status: nil, since: nil
+        )
+        if anyCached.isEmpty {
+            emitBootstrap(telemetry, name: "bootstrap.empty")
+            return .empty
+        }
+        emitBootstrap(telemetry, name: "bootstrap.ready_empty_today")
+        let todayVM = TodayViewModel.empty(
+            telemetry: telemetry,
+            sessionStateBinding: sessionStateBinding
+        )
+        // Leave `executionHolder.vm` as-is (typically nil from the
+        // ExecutionVMHolder initializer). No per-workout rebuild path
+        // fires here because the completion writer needs a starting VM
+        // to hook into — the next workout's VM is assembled the next
+        // time the user pulls or restarts the app with a planned row.
+        return .ready(
+            todayVM: todayVM,
+            executionHolder: executionHolder ?? ExecutionVMHolder(),
+            pushFlusher: PushFlusher(api: syncAPI)
+        )
+    }
+}
+
+extension AppBootstrap {
+
     /// Grouped args for `buildReady`. Keeps the function under SwiftLint's
     /// `function_parameter_count` cap.
     struct ReadyInputs {
@@ -74,7 +121,17 @@ extension AppBootstrap {
     /// push hooks, same completion writer for the subsequent workout),
     /// and installs it on the holder. `RootTabView` observes
     /// `holder.vm` so the swap flips the rendered VM without a relaunch.
-    static func buildReady(_ inputs: ReadyInputs) -> BootstrapResult {
+    ///
+    /// Cold-launch session restore (qa-024 fix): after the initial VM is
+    /// constructed, we `await vm.restoreIfPossible()` to rehydrate any
+    /// persisted mid-workout state off disk (absolute `restEndsAt`,
+    /// logged sets, current cursor). Restore is cold-launch-only; the
+    /// per-workout rebuild path MUST NOT call it (the newly-built VM
+    /// for the NEXT workout after save-and-done should be a clean
+    /// slate). Route-based UI routing in `RootTabView` picks up the
+    /// restored state automatically — a snapshot with route `.active`
+    /// or `.rest` lands directly on `ExecutionView`, not Today.
+    static func buildReady(_ inputs: ReadyInputs) async -> BootstrapResult {
         let todayVM = TodayViewModel(
             context: inputs.todayContext,
             telemetry: inputs.telemetry
@@ -101,7 +158,15 @@ extension AppBootstrap {
                 rebuild: rebuildVM.factory
             )
         )
-        inputs.executionHolder.vm = rebuildVM.factory(inputs.workoutContext)
+        let initialVM = rebuildVM.factory(inputs.workoutContext)
+        // Cold-launch restore: hydrate any persisted mid-workout state
+        // (route / cursor / restEndsAt / logged sets) before publishing
+        // the VM. If no snapshot exists, the decoder fails, or the
+        // stored workoutID doesn't match the context, this is a silent
+        // no-op and the freshly-seeded state stands (see
+        // `ExecutionViewModel+Persistence.swift` for the guards).
+        await initialVM.restoreIfPossible()
+        inputs.executionHolder.vm = initialVM
         return .ready(
             todayVM: todayVM,
             executionHolder: inputs.executionHolder,

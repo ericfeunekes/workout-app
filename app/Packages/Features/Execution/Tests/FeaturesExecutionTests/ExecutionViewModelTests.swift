@@ -920,6 +920,69 @@ final class ExecutionViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state.route, .today)
     }
 
+    // MARK: - qa-030: bodyweight field starts empty
+
+    /// qa-030 root-cause regression: the Complete screen's bodyweight
+    /// field must start truly empty. The QA report described users seeing
+    /// "82.5" on the field before typing; investigation traced that to
+    /// the `prompt: Text("82.5")` placeholder, which SwiftUI renders
+    /// grayed-out but visually reads as a prefilled value. Users walked
+    /// away without typing, `parsedBodyweightKg` returned nil, and the
+    /// `enqueueBodyweight` push never fired.
+    ///
+    /// The fix (a) removed the numeric prompt and (b) pinned the initial
+    /// value via `CompleteView.initialBodyweightText`. This test locks
+    /// that static so a future edit can't silently reintroduce a prefill
+    /// (e.g. seeding from `user_parameters.bodyweight_kg` latest).
+    func testCompleteViewBodyweightFieldStartsEmpty() {
+        XCTAssertEqual(
+            CompleteView.initialBodyweightText, "",
+            "bodyweight text must start empty — any prefill breaks the qa-030 contract"
+        )
+        XCTAssertEqual(
+            CompleteView.initialNoteText, "",
+            "note text must start empty; a future seed would need an explicit contract change"
+        )
+    }
+
+    // MARK: - qa-028: End button
+
+    /// qa-028: the nav-bar End button on Active/Rest calls
+    /// `viewModel.complete()` and flips the route to `.complete` WITHOUT
+    /// requiring the user to log every remaining set. This pins the
+    /// contract for the End affordance — the view layer's alert confirms
+    /// before firing, and this test covers the underlying VM entry point
+    /// the confirm button calls.
+    func testEndButtonCallsCompleteAndFlipsToCompleteRoute() {
+        // 4 prescribed sets — only the first is logged. End mid-workout
+        // should still land on `.complete` without forcing the remaining
+        // three logs.
+        let (ctx, itemID) = makeContext(sets: 4, restSec: 60)
+        let vm = ExecutionViewModel(context: ctx)
+        vm.start()
+        vm.logSet(reps: 5, rir: 2)
+        // Advance out of rest into set 2's active screen so the "End from
+        // any screen" contract is exercised — the docs call out End on
+        // both Active and Rest.
+        vm.advance()
+        XCTAssertEqual(
+            vm.state.route, .active,
+            "precondition: cursor should be on set 2's Active screen"
+        )
+
+        vm.complete()
+
+        XCTAssertEqual(
+            vm.state.route, .complete,
+            "complete() must flip the route to .complete"
+        )
+        // The one logged set is preserved — End is destructive of
+        // unlogged sets, not of the log so far.
+        let itemLog = vm.state.items.first(where: { $0.itemID == itemID })
+        let doneCount = itemLog?.sets.filter(\.done).count ?? 0
+        XCTAssertEqual(doneCount, 1, "existing logged sets must survive End")
+    }
+
     // MARK: - Time-capped + round-based integration
 
     /// Shared builder for a single-block workout in a given timing mode

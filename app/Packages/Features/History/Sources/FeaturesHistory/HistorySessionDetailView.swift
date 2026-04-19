@@ -174,9 +174,20 @@ struct HistorySessionDetailView: View {
                     .font(DSTypography.caption)
                     .tracking(1.5)
                     .foregroundStyle(DSColors.foregroundDim)
+                // qa-029: long (~500 char) notes previously clipped on
+                // the read side — the `Text` inherited the ScrollView's
+                // default sizing, which capped its vertical extent and
+                // truncated mid-word. `fixedSize(horizontal: false,
+                // vertical: true)` lets the text wrap across as many
+                // lines as the content needs while keeping the card's
+                // horizontal bounds. `frame(maxWidth: .infinity,
+                // alignment: .leading)` stops short notes from centering
+                // oddly inside a wide card.
                 Text(note)
                     .font(DSTypography.body)
                     .foregroundStyle(DSColors.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }

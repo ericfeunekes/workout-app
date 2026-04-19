@@ -99,6 +99,38 @@ final class PostLogUnitDisplayTests: XCTestCase {
         XCTAssertNil(RestView.loadPillCaption(for: kgSet))
     }
 
+    func testRestPillRowHidesLoadPillForBWSet() {
+        // qa-026: when the just-logged set is bodyweight (`loadKg == nil`),
+        // RestView's "JUST LOGGED" row must drop the load pill entirely.
+        // The previous behaviour rendered an editable "BW" pill whose tap
+        // opened a numpad at 0 with a ±2.5 step and (lb) suffix; saving
+        // wrote a non-nil loadKg, silently converting the BW entry into a
+        // "0 lb" log and corrupting the bug-053 bodyweight contract.
+        // Contract: the load pill is hidden for BW-logged rows; reps and
+        // RIR pills are still rendered (both can legitimately be corrected
+        // on a BW set).
+        let bwLbSet = makeSet(load: nil, unit: .lb, reps: 10, rir: nil)
+        XCTAssertFalse(RestView.shouldRenderLoadPill(for: bwLbSet))
+
+        let bwKgSet = makeSet(load: nil, unit: .kg, reps: 10, rir: nil)
+        XCTAssertFalse(RestView.shouldRenderLoadPill(for: bwKgSet))
+
+        // Regression guard 1: a genuine 0-load set (explicit 0 kg / 0 lb
+        // warm-up) is still a numeric load — the pill renders and is
+        // editable. ONLY `nil` hides the pill, matching the bug-053 rule
+        // that `loadKg == nil` is the sole bodyweight signal.
+        let zeroLbSet = makeSet(load: 0, unit: .lb, reps: 5, rir: 2)
+        XCTAssertTrue(RestView.shouldRenderLoadPill(for: zeroLbSet))
+        let zeroKgSet = makeSet(load: 0, unit: .kg, reps: 5, rir: 2)
+        XCTAssertTrue(RestView.shouldRenderLoadPill(for: zeroKgSet))
+
+        // Regression guard 2: the dash-state (no set logged yet) still
+        // renders the pill — the pill reads "—" and is non-editable
+        // because `onTap == nil` when `set == nil`. Hiding it in this
+        // branch would collapse the row before the user logs anything.
+        XCTAssertTrue(RestView.shouldRenderLoadPill(for: nil))
+    }
+
     func testZeroLoadSetStillRendersUnitCaption() {
         // Regression guard: a genuine 0-load set (explicit 0 kg / 0 lb
         // warm-up) renders as "0 KG" / "0 LB" per the bug-053 contract —

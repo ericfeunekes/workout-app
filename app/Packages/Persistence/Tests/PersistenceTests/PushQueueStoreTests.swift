@@ -278,7 +278,9 @@ final class PushQueueStoreTests: XCTestCase {
             id: UUID(),
             enqueuedAt: Date(timeIntervalSince1970: 2_000),
             attempts: 0,
-            payloadJSON: Data(#"{"kind":"futureCaseWeDoNotKnow","extra":42}"#.utf8)
+            payloadJSON: Data(#"{"kind":"futureCaseWeDoNotKnow","extra":42}"#.utf8),
+            priority: 0,
+            dedupKey: nil
         )
         let bootstrapContext = ModelContext(factory.container)
         bootstrapContext.insert(badRow)
@@ -331,7 +333,9 @@ final class PushQueueStoreTests: XCTestCase {
             id: UUID(),
             enqueuedAt: Date(timeIntervalSince1970: 2_000),
             attempts: 0,
-            payloadJSON: Data(#"{"kind":"futureCaseWeDoNotKnow","extra":42}"#.utf8)
+            payloadJSON: Data(#"{"kind":"futureCaseWeDoNotKnow","extra":42}"#.utf8),
+            priority: 0,
+            dedupKey: nil
         )
         let bootstrapContext = ModelContext(factory.container)
         bootstrapContext.insert(badRow)
@@ -378,6 +382,236 @@ final class PushQueueStoreTests: XCTestCase {
             XCTFail("unexpected POST \(path)")
             return HTTPResponse(status: 599, body: Data())
         }
+    }
+
+    /// perf-002 regression guard. The production `peek` path must use
+    /// SwiftData's native `(priority, enqueuedAt)` sort on the persisted
+    /// columns and a `fetchLimit` cap — it must NOT decode every row in
+    /// the queue only to throw most of them away. We can't reach into the
+    /// SQLite driver from Swift, so we approximate by asserting the
+    /// functional behavior the fix guarantees: rows come back in
+    /// `(priority, enqueuedAt)` order with `priority` persisted on each
+    /// underlying `PushItemModel` row, and the cap is honoured.
+    func testPeekOrdersByPriorityThenEnqueuedAt() async throws {
+        let factory = try makeFactory()
+        let store = factory.pushQueueStore
+
+        // Interleave priorities and enqueue times:
+        //   t=1500, priority=1 (event)
+        //   t=1000, priority=1 (event)  ← older event
+        //   t=2000, priority=0 (set log)  ← newest but must land first
+        //   t=1800, priority=0 (status)
+        let evNew = PushItem(
+            id: UUID(),
+            payload: .events([CoreTelemetry.Event(
+                sessionID: UUID(), kind: "state", name: "ev.new"
+            )]),
+            enqueuedAt: Date(timeIntervalSince1970: 1_500),
+            attempts: 0
+        )
+        let evOld = PushItem(
+            id: UUID(),
+            payload: .events([CoreTelemetry.Event(
+                sessionID: UUID(), kind: "state", name: "ev.old"
+            )]),
+            enqueuedAt: Date(timeIntervalSince1970: 1_000),
+            attempts: 0
+        )
+        let resultSetLog = PushItem(
+            id: UUID(),
+            payload: .setLogs([Fixtures.sampleSetLog(setIndex: 42)]),
+            enqueuedAt: Date(timeIntervalSince1970: 2_000),
+            attempts: 0
+        )
+        let resultStatus = PushItem(
+            id: UUID(),
+            payload: .statusUpdate(
+                workoutID: UUID(),
+                status: .completed,
+                completedAt: Date(timeIntervalSince1970: 1_800),
+                notes: nil
+            ),
+            enqueuedAt: Date(timeIntervalSince1970: 1_800),
+            attempts: 0
+        )
+        try await store.enqueue(evNew)
+        try await store.enqueue(evOld)
+        try await store.enqueue(resultSetLog)
+        try await store.enqueue(resultStatus)
+
+        // peek(max: 4) must return priority-0 rows first (FIFO by
+        // enqueuedAt), then priority-1 rows.
+        let peekedAll = try await store.peek(max: 4)
+        XCTAssertEqual(peekedAll.count, 4)
+        XCTAssertEqual(
+            peekedAll.map(\.id),
+            [resultStatus.id, resultSetLog.id, evOld.id, evNew.id],
+            "sort is (priority asc, enqueuedAt asc) — results before telemetry, FIFO within class"
+        )
+
+        // peek(max: 2) must honour `fetchLimit` — exactly two rows, and
+        // both must be priority-0. A broken impl that fetched everything
+        // and sliced in memory would still match this; but combined with
+        // the column check below, the union proves the column is the one
+        // SwiftData is sorting on.
+        let peekedTop = try await store.peek(max: 2)
+        XCTAssertEqual(peekedTop.count, 2)
+        XCTAssertEqual(peekedTop.map(\.id), [resultStatus.id, resultSetLog.id])
+
+        // Priority is persisted on the underlying row — direct fetch
+        // against the container confirms the column isn't a decode-time
+        // derivation any more.
+        let bootstrapContext = ModelContext(factory.container)
+        let rows = try bootstrapContext.fetch(FetchDescriptor<PushItemModel>())
+        let priorityByID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0.priority) })
+        XCTAssertEqual(priorityByID[resultSetLog.id], 0)
+        XCTAssertEqual(priorityByID[resultStatus.id], 0)
+        XCTAssertEqual(priorityByID[evOld.id], 1)
+        XCTAssertEqual(priorityByID[evNew.id], 1)
+    }
+
+    /// perf-002 regression guard: a dedup pass must persist a
+    /// `dedupKey` on each row so the scoped predicate fetch in
+    /// `removeMatchingDedupKey` can land on it without touching rows
+    /// that don't share the logical identity. Checks both directions:
+    /// the column is set to the expected string shape for each payload
+    /// kind, and the scoped remove drops ONLY matching rows.
+    func testDedupKeyPersistedAndScopedRemoveIsolatesMatches() async throws {
+        let factory = try makeFactory()
+        let store = factory.pushQueueStore
+
+        let setLogID = UUID()
+        let otherSetLogID = UUID()
+        let workoutID = UUID()
+        let userParamID = UUID()
+
+        let setLogItem = PushItem(
+            id: UUID(),
+            payload: .setLogs([CoreDomain.SetLog(
+                id: setLogID,
+                workoutItemID: UUID(),
+                performedExerciseID: nil,
+                setIndex: 1,
+                reps: 5,
+                weight: 100,
+                weightUnit: .lb,
+                rir: 2,
+                completedAt: Date(timeIntervalSince1970: 1_000)
+            )]),
+            enqueuedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        let otherSetLogItem = PushItem(
+            id: UUID(),
+            payload: .setLogs([CoreDomain.SetLog(
+                id: otherSetLogID,
+                workoutItemID: UUID(),
+                performedExerciseID: nil,
+                setIndex: 2,
+                reps: 5,
+                weight: 100,
+                weightUnit: .lb,
+                rir: 2,
+                completedAt: Date(timeIntervalSince1970: 1_050)
+            )]),
+            enqueuedAt: Date(timeIntervalSince1970: 1_050)
+        )
+        let statusItem = PushItem(
+            id: UUID(),
+            payload: .statusUpdate(
+                workoutID: workoutID,
+                status: .completed,
+                completedAt: Date(timeIntervalSince1970: 2_000),
+                notes: nil
+            ),
+            enqueuedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        let userParamItem = PushItem(
+            id: UUID(),
+            payload: .userParameter(CoreDomain.UserParameter(
+                id: userParamID,
+                userID: UUID(),
+                key: "bodyweight_lb",
+                value: "185.0",
+                updatedAt: Date(timeIntervalSince1970: 3_000),
+                source: .appLog
+            )),
+            enqueuedAt: Date(timeIntervalSince1970: 3_000)
+        )
+        try await store.enqueue(setLogItem)
+        try await store.enqueue(otherSetLogItem)
+        try await store.enqueue(statusItem)
+        try await store.enqueue(userParamItem)
+
+        // Persisted dedup keys follow the `<kind>:<identity>` shape —
+        // matches `PushItem.Payload.dedupKey` in Sync.
+        let bootstrapContext = ModelContext(factory.container)
+        let rows = try bootstrapContext.fetch(FetchDescriptor<PushItemModel>())
+        let dedupByID = Dictionary(
+            uniqueKeysWithValues: rows.map { ($0.id, $0.dedupKey) }
+        )
+        XCTAssertEqual(
+            dedupByID[setLogItem.id],
+            "setLog:\(setLogID.uuidString.lowercased())"
+        )
+        XCTAssertEqual(
+            dedupByID[statusItem.id],
+            "status:\(workoutID.uuidString.lowercased()):completed"
+        )
+        XCTAssertEqual(
+            dedupByID[userParamItem.id],
+            "userParam:\(userParamID.uuidString.lowercased())"
+        )
+
+        // Scoped remove drops only the matching row; siblings untouched.
+        let removed = try await store.removeMatchingDedupKey(
+            "setLog:\(setLogID.uuidString.lowercased())"
+        )
+        XCTAssertEqual(removed, 1, "exactly one row matched")
+        let after = try await store.peek(max: 10)
+        XCTAssertEqual(after.count, 3)
+        XCTAssertFalse(after.contains { $0.id == setLogItem.id })
+        XCTAssertTrue(after.contains { $0.id == otherSetLogItem.id })
+        XCTAssertTrue(after.contains { $0.id == statusItem.id })
+        XCTAssertTrue(after.contains { $0.id == userParamItem.id })
+
+        // A dedup key with no matches is a clean no-op — not a throw.
+        let missRemoved = try await store.removeMatchingDedupKey(
+            "setLog:00000000-0000-0000-0000-000000000000"
+        )
+        XCTAssertEqual(missRemoved, 0)
+    }
+
+    /// Batch `.setLogs` (multi-log) and `.events` payloads must NOT
+    /// participate in dedup — their `dedupKey` column must stay nil so
+    /// a later scoped remove for some other logical identity cannot
+    /// accidentally knock them out of the queue.
+    func testBatchAndEventsHaveNilDedupKey() async throws {
+        let factory = try makeFactory()
+        let store = factory.pushQueueStore
+
+        let batch = PushItem(
+            id: UUID(),
+            payload: .setLogs([
+                Fixtures.sampleSetLog(setIndex: 1),
+                Fixtures.sampleSetLog(setIndex: 2),
+            ]),
+            enqueuedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        let telemetry = PushItem(
+            id: UUID(),
+            payload: .events([CoreTelemetry.Event(
+                sessionID: UUID(), kind: "state", name: "ev"
+            )]),
+            enqueuedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        try await store.enqueue(batch)
+        try await store.enqueue(telemetry)
+
+        let bootstrapContext = ModelContext(factory.container)
+        let rows = try bootstrapContext.fetch(FetchDescriptor<PushItemModel>())
+        let rowByID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+        XCTAssertNil(try XCTUnwrap(rowByID[batch.id]).dedupKey)
+        XCTAssertNil(try XCTUnwrap(rowByID[telemetry.id]).dedupKey)
     }
 
     func testStatusUpdatePayloadRoundTrip() async throws {

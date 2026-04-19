@@ -10,6 +10,19 @@
 // the Sync package — Sync encodes payloads on the fly for the HTTP body.
 // The envelope shape lives in `PushQueuePayloadCoding.swift`; this actor
 // just calls into it.
+//
+// Performance (perf-002): `peek(max:)` asks SwiftData for the first `max`
+// rows using a sorted `FetchDescriptor` with `fetchLimit` set — the old
+// implementation fetched every row, decoded every payload, sorted in
+// memory, and prefixed. That scaled linearly with queue depth on every
+// flush and every dedup pass. Ordering uses the persisted `priority`
+// column added in V4 so SwiftData handles the sort server-side (SQLite
+// index) rather than us re-deriving it from the decoded payload.
+//
+// Dedup: `removeMatchingDedupKey` uses a scoped `FetchDescriptor`
+// predicate against the persisted `dedupKey` column. One scoped fetch
+// per enqueue instead of a full-table peek + decode. See
+// `PushQueue+Dedup.swift` for the caller side.
 
 import Foundation
 import SwiftData
@@ -32,31 +45,32 @@ public actor PushQueueStoreImpl: PushQueueStore {
             existing.enqueuedAt = item.enqueuedAt
             existing.attempts = item.attempts
             existing.payloadJSON = encoded
+            existing.priority = item.priority
+            existing.dedupKey = item.dedupKey
         } else {
             modelContext.insert(PushItemModel(
                 id: item.id,
                 enqueuedAt: item.enqueuedAt,
                 attempts: item.attempts,
-                payloadJSON: encoded
+                payloadJSON: encoded,
+                priority: item.priority,
+                dedupKey: item.dedupKey
             ))
         }
         try modelContext.save()
     }
 
     public func peek(max: Int) async throws -> [PushItem] {
-        // Priority is not persisted — it is derived from the decoded
-        // payload (see `PushItem.init`). We pull *all* rows sorted by
-        // `enqueuedAt`, decode, then sort by priority+enqueuedAt and cap
-        // at `max`. That keeps the schema stable (no V4 migration for a
-        // derived field) at the cost of decoding rows we might not ship
-        // this cycle. The queue caps at thousands of rows in the worst
-        // case (typical steady state is single digits), so the decode
-        // overhead is negligible against the flush round-trip.
+        // Ask SwiftData for `max` rows sorted by (priority, enqueuedAt)
+        // directly — no in-memory sort or whole-table decode. Priority
+        // ascending (results=0 before events=1), enqueuedAt ascending
+        // (FIFO within priority class). `priority` is persisted on the
+        // row (V4 column) so the sort resolves against SQLite rather
+        // than re-derivation from the decoded envelope.
         //
-        // Ordering rule: priority ascending (results=0 before events=1),
-        // then enqueuedAt ascending (FIFO within priority class). This
-        // prevents a verbose-mode telemetry burst from shoving a freshly-
-        // logged set behind a long chronological tail.
+        // `fetchLimit: max` caps the decode pass at the batch size
+        // regardless of queue depth — the perf-002 fix. The prior code
+        // decoded the whole queue before prefixing.
         //
         // Unknown-envelope tolerance: each row's decode is wrapped in
         // `try?` and skipped on failure. A forward-versioned row (written
@@ -66,11 +80,16 @@ public actor PushQueueStoreImpl: PushQueueStore {
         // The row stays in the table; a future build that knows how to
         // decode it can pick it up. A persistent poison row keeps trying
         // every peek, but the steady-state cost is a single failed decode
-        // per peek per row, which is negligible.
+        // per peek per row, which is negligible. `pruneUndecodableRows`
+        // is the hygiene sweep that eventually removes them.
         var descriptor = FetchDescriptor<PushItemModel>()
-        descriptor.sortBy = [SortDescriptor(\PushItemModel.enqueuedAt)]
+        descriptor.sortBy = [
+            SortDescriptor(\PushItemModel.priority),
+            SortDescriptor(\PushItemModel.enqueuedAt),
+        ]
+        descriptor.fetchLimit = max
         let rows = try modelContext.fetch(descriptor)
-        let decoded: [PushItem] = rows.compactMap { row in
+        return rows.compactMap { row in
             guard let payload = try? PushQueuePayloadCoding.decode(row.payloadJSON) else {
                 return nil
             }
@@ -81,21 +100,16 @@ public actor PushQueueStoreImpl: PushQueueStore {
                 attempts: row.attempts
             )
         }
-        let sorted = decoded.sorted { lhs, rhs in
-            if lhs.priority != rhs.priority {
-                return lhs.priority < rhs.priority
-            }
-            return lhs.enqueuedAt < rhs.enqueuedAt
-        }
-        return Array(sorted.prefix(max))
     }
 
     public func remove(ids: [PushItemID]) async throws {
-        let idSet = Set(ids)
-        let descriptor = FetchDescriptor<PushItemModel>()
-        let rows = try modelContext.fetch(descriptor)
-        for row in rows where idSet.contains(row.id) {
-            modelContext.delete(row)
+        for id in ids {
+            let descriptor = FetchDescriptor<PushItemModel>(
+                predicate: #Predicate<PushItemModel> { $0.id == id }
+            )
+            if let row = try modelContext.fetch(descriptor).first {
+                modelContext.delete(row)
+            }
         }
         try modelContext.save()
     }
@@ -112,7 +126,27 @@ public actor PushQueueStoreImpl: PushQueueStore {
         existing.enqueuedAt = item.enqueuedAt
         existing.attempts = item.attempts
         existing.payloadJSON = try PushQueuePayloadCoding.encode(item.payload)
+        existing.priority = item.priority
+        existing.dedupKey = item.dedupKey
         try modelContext.save()
+    }
+
+    public func removeMatchingDedupKey(_ key: String) async throws -> Int {
+        // Scoped predicate fetch: SwiftData narrows to rows with the
+        // matching `dedupKey` column — it does NOT decode every
+        // `payloadJSON`. This is the perf-002 dedup fix. Prior behaviour
+        // was a full-table peek that decoded every row and matched on
+        // the decoded payload.
+        let descriptor = FetchDescriptor<PushItemModel>(
+            predicate: #Predicate<PushItemModel> { $0.dedupKey == key }
+        )
+        let rows = try modelContext.fetch(descriptor)
+        guard !rows.isEmpty else { return 0 }
+        for row in rows {
+            modelContext.delete(row)
+        }
+        try modelContext.save()
+        return rows.count
     }
 
     public func isEmpty() async throws -> Bool {

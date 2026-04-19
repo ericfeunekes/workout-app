@@ -52,14 +52,14 @@ public struct PersistenceFactory {
     public static func makeDefault(
         tokenServiceName: String = "com.ericfeunekes.WorkoutDB.token"
     ) throws -> PersistenceFactory {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV3.self)
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV4.self)
         let configuration = ModelConfiguration(schema: schema)
         let container = try ModelContainer(
             for: schema,
             migrationPlan: WorkoutDBMigrationPlan.self,
             configurations: [configuration]
         )
-        try runSetLogBackfill(on: container)
+        try runPostMigrationBackfills(on: container)
         return PersistenceFactory(
             container: container,
             tokenStore: TokenStoreImpl(serviceName: tokenServiceName),
@@ -71,14 +71,14 @@ public struct PersistenceFactory {
     public static func makeInMemory(
         tokenServiceName: String = "com.ericfeunekes.WorkoutDB.token.test"
     ) throws -> PersistenceFactory {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV3.self)
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV4.self)
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(
             for: schema,
             migrationPlan: WorkoutDBMigrationPlan.self,
             configurations: [configuration]
         )
-        try runSetLogBackfill(on: container)
+        try runPostMigrationBackfills(on: container)
         // Use a unique defaults suite so tests don't share the lastSyncAt
         // key with the process-wide UserDefaults.
         let suiteName = "com.ericfeunekes.WorkoutDB.test.\(UUID().uuidString)"
@@ -90,14 +90,21 @@ public struct PersistenceFactory {
         )
     }
 
-    /// Run the V2→V3 SetLog denormalization backfill once on container
-    /// open. Idempotent: rows that already have `workoutID` populated
-    /// are skipped. Called from both `makeDefault` and `makeInMemory`
-    /// so a production store and a test container behave identically
-    /// at the moment `PersistenceFactory` hands out actors.
-    private static func runSetLogBackfill(on container: ModelContainer) throws {
+    /// Run the post-migration backfills once on container open. Both
+    /// helpers are idempotent — rows that already carry the new columns
+    /// are skipped — so calling on every launch is safe.
+    ///
+    /// Backfills that run here:
+    ///   • V2→V3 SetLog denormalization (`workoutID`, `plannedExerciseID`).
+    ///   • V3→V4 PushItem drain priority + dedup key (perf-002).
+    ///
+    /// Called from both `makeDefault` and `makeInMemory` so a production
+    /// store and a test container behave identically at the moment
+    /// `PersistenceFactory` hands out actors.
+    private static func runPostMigrationBackfills(on container: ModelContainer) throws {
         let context = ModelContext(container)
         try backfillSetLogDenormalization(context: context)
+        try backfillPushItemPriorityAndDedupKey(context: context)
     }
 
     public init(

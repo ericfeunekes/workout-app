@@ -21,13 +21,14 @@
 //     overwrites on UUID); we do not want those overwrites to cascade into
 //     historical set_logs. Keep the link loose.
 //
-// These file-scope classes are the `WorkoutDBSchemaV3` shape (post-R1.4
-// SetLog denormalization). The V1 (pre-006) and V2 (post-006, pre-R1.4)
-// shapes are preserved as shadow @Model types inside `WorkoutDBSchemaV1`
-// and `WorkoutDBSchemaV2` in their dedicated models files so SwiftData
-// can diff and migrate an older store in place. Future schema bumps add
-// a `WorkoutDBSchemaV4` snapshot there and register a `MigrationPlan`
-// stage.
+// These file-scope classes are the `WorkoutDBSchemaV4` shape
+// (post-perf-002 PushItem `priority` + `dedupKey` columns). The V1
+// (pre-006), V2 (post-006, pre-R1.4), and V3 (R1.4, pre-perf-002)
+// shapes are preserved as shadow @Model types inside their respective
+// `WorkoutDBSchemaVN` enums in their dedicated models files so
+// SwiftData can diff and migrate an older store in place. Future
+// schema bumps add a `WorkoutDBSchemaV5` snapshot there and register a
+// `MigrationPlan` stage.
 
 import Foundation
 import SwiftData
@@ -403,6 +404,19 @@ public final class SessionSnapshotModel {
 // as a small JSON envelope (see `PushQueueStoreImpl`) so the PushItem shape
 // can evolve without schema churn. `id` is the PushItem's UUID so enqueue is
 // idempotent on retry.
+//
+// V4 columns (added in perf-002):
+//   • `priority` — drain-order weighting. `0` for results (setLogs,
+//     statusUpdate, userParameter), `1` for telemetry events. Stored so
+//     `peek` can resolve the `(priority, enqueuedAt)` sort inside
+//     SwiftData / SQLite instead of decoding every row's envelope in
+//     memory on every flush.
+//   • `dedupKey` — stable logical-identity string (see
+//     `PushItem.Payload.dedupKey` for the shape contract). Nil for
+//     payloads that do not participate in dedup (batch setLogs and
+//     telemetry events). Persisted so `PushQueue+Dedup.swift` can drop
+//     prior matching rows via a scoped `FetchDescriptor` predicate
+//     instead of a full-table peek + decode.
 
 @Model
 public final class PushItemModel {
@@ -410,12 +424,31 @@ public final class PushItemModel {
     public var enqueuedAt: Date
     public var attempts: Int
     public var payloadJSON: Data
+    /// Drain priority. Non-optional at the Swift level, but declared
+    /// with a stored default of `0` so SwiftData's lightweight
+    /// migration can add the column to a pre-perf-002 (V3) store
+    /// without a custom stage — Core Data uses the declared default
+    /// when the column materializes on existing rows. The post-open
+    /// `backfillPushItemPriorityAndDedupKey` then rewrites the real
+    /// value from each row's decoded envelope. See the V4 migration
+    /// header in `SchemaVersions.swift`.
+    public var priority: Int = 0
+    public var dedupKey: String?
 
-    public init(id: UUID, enqueuedAt: Date, attempts: Int, payloadJSON: Data) {
+    public init(
+        id: UUID,
+        enqueuedAt: Date,
+        attempts: Int,
+        payloadJSON: Data,
+        priority: Int,
+        dedupKey: String?
+    ) {
         self.id = id
         self.enqueuedAt = enqueuedAt
         self.attempts = attempts
         self.payloadJSON = payloadJSON
+        self.priority = priority
+        self.dedupKey = dedupKey
     }
 }
 

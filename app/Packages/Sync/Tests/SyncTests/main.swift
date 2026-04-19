@@ -1334,4 +1334,93 @@ runAsyncCase("PushQueue replace-in-place — does NOT touch telemetry events") {
     try expectEqual(all.count, 2, "events are not deduped — two enqueues produce two rows")
 }
 
+// MARK: - perf-002: dedup uses a scoped predicate, not a full peek
+
+runAsyncCase("PushQueue dedup uses scoped removeMatchingDedupKey — no full-table peek on enqueue") {
+    // perf-002 regression: the pre-fix code's dedup pass called
+    // `store.peek(max: 10_000)` before every enqueue, decoded every
+    // row, and matched in memory. The fix routes dedup through
+    // `removeMatchingDedupKey` which the production SwiftData store
+    // resolves via a scoped FetchDescriptor predicate on a persisted
+    // column — zero full-table peeks per enqueue.
+    //
+    // We prove this by wiring the FakePushQueueStore's instrumentation
+    // counters (`peekCallCount` / `removeMatchingDedupKeyCallCount`)
+    // and counting what dedup-shaped enqueues trigger. The Fake
+    // mirrors the production behaviour: dedup ⇒ scoped remove, no
+    // incidental peek.
+    let store = FakePushQueueStore()
+    let queue = PushQueue(
+        store: store,
+        transport: FakeTransport(outcomes: []),
+        clock: SystemClock()
+    )
+
+    // One single-log setLog, one statusUpdate, one userParameter —
+    // these are the three payload shapes that dedup. Each should
+    // generate exactly one scoped dedup call and zero full-table peeks.
+    let setLog = CoreDomain.SetLog(
+        id: uuid("abcdef01-2345-6789-abcd-ef0123456700"),
+        workoutItemID: uuid("44444444-4444-4444-4444-444444444444"),
+        performedExerciseID: nil,
+        setIndex: 1,
+        reps: 5,
+        weight: 100,
+        weightUnit: .lb,
+        rir: 2,
+        completedAt: iso8601("2026-04-17T08:00:00Z")
+    )
+    try await queue.enqueueSetLogs([setLog])
+    try await queue.enqueueStatusUpdate(
+        workoutID: uuid("11111111-2222-3333-4444-555555555555"),
+        status: .completed,
+        completedAt: iso8601("2026-04-17T08:00:00Z")
+    )
+    let param = CoreDomain.UserParameter(
+        id: uuid("99999999-aaaa-bbbb-cccc-dddddddddddd"),
+        userID: uuid("22222222-2222-2222-2222-222222222222"),
+        key: "bodyweight_lb",
+        value: "185.0",
+        updatedAt: iso8601("2026-04-17T08:00:00Z"),
+        source: .appLog
+    )
+    try await queue.enqueueUserParameter(param)
+
+    let peekCount = await store.peekCallCount
+    let dedupCalls = await store.removeMatchingDedupKeyCalls
+    try expectEqual(
+        peekCount,
+        0,
+        "no full-table peek fired on any of the three dedup-shaped enqueues"
+    )
+    try expectEqual(
+        dedupCalls.count,
+        3,
+        "one scoped dedup call per dedup-shaped enqueue (setLog, status, userParam)"
+    )
+    try expect(
+        dedupCalls.contains("setLog:abcdef01-2345-6789-abcd-ef0123456700"),
+        "setLog dedup key shape uses lowercase UUID"
+    )
+    try expect(
+        dedupCalls.contains("status:11111111-2222-3333-4444-555555555555:completed"),
+        "status dedup key shape uses lowercase UUID + statusRaw"
+    )
+    try expect(
+        dedupCalls.contains("userParam:99999999-aaaa-bbbb-cccc-dddddddddddd"),
+        "userParameter dedup key shape uses lowercase UUID"
+    )
+
+    // Batch setLogs and events are explicitly NOT deduped — no scoped
+    // call fires for them either.
+    try await queue.enqueueSetLogs([setLog, setLog])
+    try await queue.enqueueEvents([CoreTelemetry.Event(
+        sessionID: UUID(), kind: "state", name: "nope"
+    )])
+    let peekAfterNonDedup = await store.peekCallCount
+    let dedupAfterNonDedup = await store.removeMatchingDedupKeyCallCount
+    try expectEqual(peekAfterNonDedup, 0, "batch + events do not peek")
+    try expectEqual(dedupAfterNonDedup, 3, "batch + events do not issue scoped dedup calls")
+}
+
 reportAndExit()

@@ -342,22 +342,39 @@ extension ExecutionViewModel {
     }
 
     /// Called from the ActiveView + RestView `.onReceive(tickTimer)` every
-    /// second (bug-042). Checks `workEndsAt` and `blockEndsAt` against
-    /// `clock.now`. If the Tabata work window elapsed, auto-logs a
-    /// placeholder 0-rep set and enters the 10s rest. If the block cap
-    /// elapsed, dispatches `.complete`.
+    /// second (bug-042). Three responsibilities, in order:
+    ///
+    ///   1. **Tabata work window.** If `workEndsAt` elapsed while the user
+    ///      is on `.active`, auto-log a placeholder 0-rep set and enter
+    ///      the 10s rest.
+    ///   2. **EMOM boundary catchup.** Walk the cursor through every
+    ///      overdue EMOM minute boundary in a single tick (qa-047) —
+    ///      one tick per boundary is wrong because iOS suspends
+    ///      `Timer.publish` while backgrounded, so on foreground the
+    ///      publisher fires a single tick regardless of elapsed time.
+    ///   3. **Block cap.** If `blockEndsAt` elapsed, route out of the
+    ///      capped block via `routeOutOfCappedBlock` — advance to the
+    ///      next block when one exists, else `.complete`.
     ///
     /// Ordering (regression: "Tabata placeholder log dropped after long
     /// suspend past block cap"): the Tabata work-window auto-log MUST run
-    /// BEFORE the block-cap complete check. A long suspend (phone locked
-    /// through both the 8th work window and the full 240s block cap)
-    /// lands here with both anchors overdue. If we early-returned on the
-    /// cap first, the final placeholder log never got written — the user
-    /// ended the tabata with 7 logged rounds instead of 8. Running the
-    /// work-window path first preserves the 8th-round log; the block-cap
-    /// check then still dispatches `.complete` on the same tick (the
-    /// auto-log flips the route to `.rest` — complete still fires, since
-    /// the guard excludes only `.complete` / `.today`).
+    /// BEFORE the block-cap path. A long suspend (phone locked through
+    /// both the 8th work window and the full 240s block cap) lands here
+    /// with both anchors overdue. If we early-returned on the cap first,
+    /// the final placeholder log never got written — the user ended the
+    /// tabata with 7 logged rounds instead of 8. Running the work-window
+    /// path first preserves the 8th-round log; the block-cap path then
+    /// still routes out on the same tick (the auto-log flips the route
+    /// to `.rest` — the cap guard excludes only `.complete` / `.today`).
+    ///
+    /// Ordering (qa-047): the EMOM catchup loop runs BEFORE the cap path
+    /// so the final interval's placeholder lands while the cursor is
+    /// still inside the authored window. A cap that lands exactly at the
+    /// final boundary is consumed by the catchup loop; the cap path then
+    /// handles the routing-out. A cap with no pending boundary (e.g. a
+    /// late-log inline-advance that walked the cursor past the authored
+    /// window) still needs the cap path to terminate the block — hence
+    /// the separate post-catchup guard.
     ///
     /// Safe to call at any tempo — no-ops when nothing is due. The view-
     /// side guard on `state.blockEndsAt != nil` is an optimization (don't
@@ -367,7 +384,7 @@ extension ExecutionViewModel {
         tickCallCount &+= 1
         let now = clock.now
         // Tabata work window expired → log placeholder + enter rest.
-        // Run BEFORE the block-cap complete check so a suspend-past-cap
+        // Run BEFORE the EMOM catchup / block-cap paths so a suspend-past-cap
         // scenario still writes the final round's placeholder.
         if let workEnds = state.workEndsAt, now >= workEnds, state.route == .active {
             autoLogAndRestForTabata()
@@ -376,61 +393,125 @@ extension ExecutionViewModel {
             // `.complete`, and the auto-log path just flipped us to
             // `.rest` which the cap guard allows.
         }
-        // EMOM block cap: if the user is still on `.active` for the final
-        // interval when the cap hits, auto-log a placeholder so interval N
-        // doesn't silently drop. Without this, an 8-minute EMOM where the
-        // user reaches interval 8 via boundary advance at t=420 but fails
-        // to log before t=480 completes with 7 logs, not 8 (qa-005). The
-        // pattern mirrors Tabata's work-window auto-log above — run BEFORE
-        // the block-cap complete check so the final log is already in
-        // state before we flip to `.complete`. Guarded on `.active` and
-        // EMOM mode so it doesn't re-log when the user already sat the
-        // interval out in `.rest` (skipped log); also guarded on "cursor
-        // is within authored intervals" so a late log that inline-advanced
-        // the cursor PAST the final interval doesn't double-commit.
-        if let ends = state.blockEndsAt, now >= ends, state.route == .active,
-           let block = context.block(at: state.cursor.blockIndex),
-           block.timingMode == .emom,
-           emomCursorIsWithinAuthoredIntervals() {
-            autoLogPlaceholderForEMOM()
-        }
-        // Block cap expired → route to complete. Checked AFTER the work
-        // window path so the final placeholder log is already in state
-        // before we flip to `.complete`.
+        // EMOM boundary catchup. iOS suspends `Timer.publish` while the app
+        // is backgrounded; on foreground return the publisher fires ONCE,
+        // regardless of how many minute boundaries have elapsed. Without a
+        // catchup loop, a 90-second background on a 2-item EMOM advances
+        // the cursor exactly once — leaving the user staring at interval 2
+        // when the wall clock is already deep inside interval 2's next
+        // boundary (qa-047). The loop walks every overdue boundary in one
+        // tick: `.rest` → `advance()` (user's log is already committed);
+        // `.active` → `autoLogPlaceholderForEMOM()` + `advance()` (skipped
+        // interval still produces a server-visible row, matching the
+        // "capture the most user data" contract in timing-modes.md). Runs
+        // BEFORE the block-cap path so the final interval's placeholder
+        // lands while the cursor is still inside the authored window; the
+        // cap path then routes out of the block.
+        catchUpEMOMBoundaries(now: now)
+        // Block cap expired → advance out of the time-capped block. Before
+        // routing, capture the final EMOM interval's log if the user is
+        // still on `.active` inside the authored window (qa-005). Running
+        // the autolog here as well as inside the catchup loop is necessary
+        // because a cap that lands exactly at the FINAL boundary is
+        // consumed by the catchup loop (ordinal = N, boundary passed), but
+        // a cap with no pending boundary (e.g. late-log inline-advance that
+        // walked the cursor to the next sentinel row) still needs to
+        // terminate the block.
         if let ends = state.blockEndsAt, now >= ends,
            state.route != .complete, state.route != .today {
+            if state.route == .active,
+               let block = context.block(at: state.cursor.blockIndex),
+               block.timingMode == .emom,
+               emomCursorIsWithinAuthoredIntervals() {
+                autoLogPlaceholderForEMOM()
+            }
+            routeOutOfCappedBlock()
+        }
+    }
+
+    /// Walk the cursor through every EMOM minute boundary that has elapsed
+    /// since the last tick. The loop terminates when the cursor either
+    /// catches up to `now` (next boundary still in the future) OR walks
+    /// past the block's authored intervals (sentinel seed row). Each
+    /// iteration either advances on a live `.rest` or auto-logs +
+    /// advances on `.active`; no other route reaches this helper (the
+    /// guard excludes `.today` / `.complete`).
+    ///
+    /// qa-047: pre-fix, `tickBlockTimer` handled a single boundary per
+    /// call. `Timer.publish` is suspended while the app is backgrounded,
+    /// so a 90s background fired exactly one tick on resume — walking
+    /// the cursor by one interval while the wall clock had already moved
+    /// past two. The user saw the cursor lag behind the clock and the
+    /// block cap would then dispatch `.complete`, dropping every
+    /// subsequent block in the workout.
+    ///
+    /// Defensive iteration cap: `unboundedRoundsSentinel * 4` — the
+    /// seeder's 100-row cap times a safety factor. Under normal inputs
+    /// the loop exits via `emomCursorIsWithinAuthoredIntervals == false`
+    /// (ordinal past authored) long before this cap; the guard exists
+    /// only to prevent a buggy reducer from spinning. No-op when the
+    /// current block isn't EMOM — `emomBoundaryReached` returns false.
+    private func catchUpEMOMBoundaries(now: Date) {
+        let maxIterations = SessionSeeder.unboundedRoundsSentinel * 4
+        var guardCount = 0
+        while emomBoundaryReached(now: now),
+              emomCursorIsWithinAuthoredIntervals(),
+              state.route == .active || state.route == .rest {
+            if state.route == .active {
+                autoLogPlaceholderForEMOM()
+            }
+            advance()
+            guardCount += 1
+            if guardCount > maxIterations { break }
+        }
+    }
+
+    /// Called when a time-capped block's `blockEndsAt` has elapsed. If
+    /// there is a subsequent block, jump the cursor to its first
+    /// position, clear the capped-block's timer anchors, and re-enter
+    /// via the normal block-entry helpers (`enterRestIfZeroItemBlock`,
+    /// `enterTabataWorkWindowIfNeeded`, `enterBlockTimerIfNeeded`). If
+    /// there is no next block, dispatch `.complete` — the workout is
+    /// done.
+    ///
+    /// qa-047: pre-fix, `tickBlockTimer` unconditionally dispatched
+    /// `.complete` when the cap elapsed. That's correct for a
+    /// single-block workout (AMRAP finisher, solo Tabata) but drops
+    /// every remaining block when the capped block sits in the middle
+    /// of a longer session. A 10-minute EMOM as block 3 of 12 would
+    /// terminate the whole workout at block 3's cap; the user never saw
+    /// blocks 4-11. The cursor-walk-to-next-block shape here mirrors the
+    /// reducer's `advanceCursor` end-of-block behavior — same exit, same
+    /// cleanup, just dispatched from the VM because the sentinel-seeded
+    /// round-robin cursor (AMRAP / EMOM) never naturally reaches its
+    /// block's last position.
+    ///
+    /// `workStartedAt` is re-stamped so the first log in the new block
+    /// carries "when this block started" as its `startedAt` anchor —
+    /// matching the semantics of `.advanceFromRest` / `.start` via
+    /// `apply(_:)`.
+    private func routeOutOfCappedBlock() {
+        let currentBlock = state.cursor.blockIndex
+        let nextBlock = currentBlock + 1
+        guard nextBlock < state.structure.itemsPerBlock.count else {
             apply([.complete])
             return
         }
-        // EMOM interval boundary elapsed → auto-advance to next interval.
-        // The boundary is fixed by `intervalAnchorAt + cursor.setIndex *
-        // interval_sec`; log-time does NOT re-anchor. This is the
-        // minute-boundary semantic EMOM requires — drift-free regardless of
-        // how early or late inside the minute the user logged.
-        //
-        // Two entry paths:
-        // * `.rest` — user logged inside the interval, rest ring is
-        //   counting down to the boundary. At the boundary, advance the
-        //   cursor (the user's log is already in state).
-        // * `.active` — user never logged this interval (qa-018 root
-        //   cause). Auto-log a `(reps: 0, rir: nil)` placeholder so the
-        //   skipped interval still produces a server-visible row, then
-        //   advance. Mirrors `autoLogAndRestForTabata` / the cap-edge
-        //   `autoLogPlaceholderForEMOM` — "capture the most user data"
-        //   per `docs/features/timing-modes.md`.
-        //
-        // Run AFTER the cap-complete path so a final interval at the cap
-        // edge doesn't double-advance (the cap-complete branch returns
-        // before this point).
-        if emomBoundaryReached(now: now) {
-            if state.route == .rest {
-                advance()
-            } else if state.route == .active,
-                      emomCursorIsWithinAuthoredIntervals() {
-                autoLogPlaceholderForEMOM()
-                advance()
-            }
-        }
+        state.restEndsAt = nil
+        state.blockEndsAt = nil
+        state.workEndsAt = nil
+        state.intervalAnchorAt = nil
+        state.cursor = SessionState.Cursor(
+            blockIndex: nextBlock,
+            itemIndex: 0,
+            setIndex: 1
+        )
+        state.route = .active
+        state.workStartedAt = clock.now
+        persist()
+        enterRestIfZeroItemBlock()
+        enterTabataWorkWindowIfNeeded()
+        enterBlockTimerIfNeeded()
     }
 
     /// Helper invoked from `tickBlockTimer` when the Tabata work window

@@ -39,16 +39,24 @@ See `docs/WORKFLOW.md` for the full lifecycle (idea → spec → plan → implem
 - Re-read this file, `docs/WORKFLOW.md`, and `docs/specs/v2-architecture.md`.
 - Check `docs/plans/active/` (if any) for in-flight work.
 
-## Review workflow — Codex is the reviewer, not a sibling subagent
+## Review workflow — Codex is the investigator/sweeper/reviewer, lead Claude synthesizes
 
-**Reviews are done by Codex (a different model), not by another Claude subagent.** The lead Claude agent orchestrates; Claude subagents implement; **Codex reviews**. Same-model review misses the same blind spots that produced the bug.
+**Reviews, sweeps, and investigations are done by Codex (a different model), not by another Claude subagent.** The three roles are fixed:
+
+- **Implementation = Claude subagent** (dispatched from the main thread).
+- **Review / sweep / investigation = Codex** (via `cxd task --sandbox read-only --detach`).
+- **Synthesis = the lead Claude agent in the main conversation.** Synthesis is NOT delegated to a spawned subagent — the lead reads Codex findings directly, filters false-positives, and dispatches the next fix-it round from the main thread.
+
+Same-model review misses the same blind spots that produced the bug. That's the load-bearing reason for the split.
 
 The loop for every non-trivial unit of work:
 
 1. Claude implementer subagent writes the fix.
 2. Codex review fires via `cxd task --sandbox read-only --detach --cwd $PWD --service-name review-<domain> --effort medium -f <prompt-file>`.
-3. Lead Claude reads Codex findings, filters false-positives, dispatches a Claude fix-it subagent with the real findings inline.
+3. **Lead Claude synthesizes in the main thread** — reads Codex findings, filters false-positives, dispatches a Claude fix-it subagent with the real findings inline.
 4. Repeat step 2. Loop until Codex returns clean.
+
+**Sweeping the codebase state to find new issues uses Codex, not Claude subagents.** Same goes for hypothesis-driven bug investigations and adversarial reviews — different-model + read-only sandbox is the pattern. Synthesis of Codex findings always happens in the main conversation.
 
 Working template in `scratch/codex-reviews/`: `_template-header.md` + `_session-context.md` are the methodology baseline; per-domain prompts cite focus files + questions + hazards; `_dispatch.sh` fires N in parallel; `_monitor.sh` polls. Pull findings via `cxd thread read <id> --include-turns --json`.
 

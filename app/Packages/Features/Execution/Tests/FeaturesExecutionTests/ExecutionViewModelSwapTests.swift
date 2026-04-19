@@ -151,8 +151,33 @@ final class ExecutionViewModelSwapTests: XCTestCase {
 
     // MARK: - Telemetry
 
-    func testSwapEmitsTelemetry() {
-        let fixture = makeContext(overridesJSON: #"{"load_kg":72.5}"#)
+    func testSwapEmitsTelemetry() throws {
+        // Pin known-lowercase fixture UUIDs so the assertions below can
+        // substring-match the exact lowercase form in the payload. Swift
+        // `UUID().uuidString` returns UPPERCASE, so a test that just
+        // searched for `fixture.originalExerciseID.uuidString` would pass
+        // regardless of whether the emitter honoured the "ids on the wire
+        // are lowercase" invariant (Codex R1.3). This version seeds a
+        // specific lowercase id and asserts it appears verbatim — an
+        // uppercased regression would flip the casing and fail.
+        // swiftlint:disable:next force_unwrapping
+        let seededAltExerciseID = UUID(uuidString: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee")!
+        // swiftlint:disable:next force_unwrapping
+        let seededOriginalExerciseID = UUID(uuidString: "11111111-2222-4333-8444-555555555555")!
+        // swiftlint:disable:next force_unwrapping
+        let seededItemID = UUID(uuidString: "99999999-8888-4777-8666-555555555555")!
+        let fixture = SwapFixtureBuilder.build(
+            sets: 4,
+            reps: 5,
+            loadKg: 100,
+            targetRir: 2,
+            overridesJSON: #"{"load_kg":72.5}"#,
+            seededIDs: .init(
+                exerciseID: seededOriginalExerciseID,
+                altExerciseID: seededAltExerciseID,
+                itemID: seededItemID
+            )
+        )
         let recorder = SwapTelemetryRecorder()
         let vm = ExecutionViewModel(context: fixture.context, telemetry: recorder)
         vm.start()
@@ -161,12 +186,43 @@ final class ExecutionViewModelSwapTests: XCTestCase {
 
         let swapEvents = recorder.events.filter { $0.name == "execution.exercise_swap" }
         XCTAssertEqual(swapEvents.count, 1)
-        let event = try? XCTUnwrap(swapEvents.first)
-        XCTAssertEqual(event?.workoutID, fixture.context.workout.id)
-        let data = event?.dataJSON ?? ""
-        XCTAssertTrue(data.contains(fixture.originalExerciseID.uuidString), "from id in payload")
-        XCTAssertTrue(data.contains(fixture.altExerciseID.uuidString), "to id in payload")
+        let event = try XCTUnwrap(swapEvents.first)
+        XCTAssertEqual(event.workoutID, fixture.context.workout.id)
+        let data = event.dataJSON ?? ""
+        // Assert EXACTLY the snake_case keys + lowercase id substrings the
+        // wire invariant promises. Use substring matches on the keyed
+        // fragments (not on raw `.uuidString`, which would be uppercase).
+        XCTAssertTrue(
+            data.contains(#""from_exercise_id":"11111111-2222-4333-8444-555555555555""#),
+            "from_exercise_id must be exact lowercase — got \(data)"
+        )
+        XCTAssertTrue(
+            data.contains(#""to_exercise_id":"aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee""#),
+            "to_exercise_id must be exact lowercase — got \(data)"
+        )
+        XCTAssertTrue(
+            data.contains(#""item_id":"99999999-8888-4777-8666-555555555555""#),
+            "item_id must be exact lowercase — got \(data)"
+        )
         XCTAssertTrue(data.contains("\"had_overrides\":true"))
+        // Belt-and-suspenders: any UUID-shaped substring in the payload
+        // must be all-lowercase. Extract every UUID match, then assert
+        // each one equals its own `.lowercased()`. This catches a
+        // regression that sneaks a partial lowercase + partial uppercase
+        // UUID in through a code path we didn't seed with digits-only.
+        let uuidShape = try NSRegularExpression(
+            pattern: "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+        )
+        let hits = uuidShape.matches(in: data, range: NSRange(data.startIndex..., in: data))
+        for hit in hits {
+            // swiftlint:disable:next force_unwrapping
+            let range = Range(hit.range, in: data)!
+            let substr = String(data[range])
+            XCTAssertEqual(
+                substr, substr.lowercased(),
+                "payload leaked an uppercase UUID: \(substr) in \(data)"
+            )
+        }
     }
 
     func testSwapWithoutOverridesReportsHadOverridesFalse() {
@@ -211,6 +267,77 @@ final class ExecutionViewModelSwapTests: XCTestCase {
         vm.swap(itemID: fixture.itemID, alternativeID: UUID())
         XCTAssertEqual(vm.state, before, "unknown alternative → silent no-op")
     }
+
+    // MARK: - Widened override parser
+
+    func testSwapAppliesSetsOverrideExtendingSetPlanTail() {
+        // Override bumps sets from 4 → 5. The non-done tail extends by
+        // one row; structure.setsPerItem picks up the new count so the
+        // reducer's cursor advances through all five sets.
+        let fixture = makeContext(sets: 4, overridesJSON: #"{"sets":5,"load_kg":80}"#)
+        let vm = ExecutionViewModel(context: fixture.context)
+        vm.start()
+
+        vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
+
+        let itemLog = vm.state.items.first { $0.itemID == fixture.itemID }
+        XCTAssertEqual(itemLog?.sets.count, 5)
+        XCTAssertEqual(itemLog?.overrides?.sets, 5)
+        XCTAssertEqual(vm.state.structure.setsPerItem[0][0], 5)
+        // Every pending set picks up the override load.
+        XCTAssertTrue(itemLog?.sets.allSatisfy { $0.loadKg == 80 } ?? false)
+    }
+
+    func testSwapAppliesSetsOverrideTruncatingNonDoneTail() {
+        // Override drops sets from 4 → 2. The two non-done trailing rows
+        // are dropped; structure updates; logged sets would still be
+        // preserved (not exercised here — zero logs yet).
+        let fixture = makeContext(sets: 4, overridesJSON: #"{"sets":2}"#)
+        let vm = ExecutionViewModel(context: fixture.context)
+        vm.start()
+
+        vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
+
+        let itemLog = vm.state.items.first { $0.itemID == fixture.itemID }
+        XCTAssertEqual(itemLog?.sets.count, 2)
+        XCTAssertEqual(vm.state.structure.setsPerItem[0][0], 2)
+    }
+
+    func testSwapParsesPerSideAndAutoregOverrides() {
+        // Per-side and autoreg overrides land on ItemLog.overrides even
+        // though no driver reads them yet — the wire contract is preserved
+        // for the follow-up driver slice.
+        let overridesJSON = #"""
+        {"per_side":true,"autoreg":{"overshoot_step_kg":1.25,"apply_to":"remaining"}}
+        """#
+        let fixture = makeContext(overridesJSON: overridesJSON)
+        let vm = ExecutionViewModel(context: fixture.context)
+        vm.start()
+        vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
+
+        let itemLog = vm.state.items.first { $0.itemID == fixture.itemID }
+        XCTAssertEqual(itemLog?.overrides?.perSide, true)
+        XCTAssertEqual(itemLog?.overrides?.autoreg?.overshootStepKg, 1.25)
+        XCTAssertEqual(itemLog?.overrides?.autoreg?.applyTo, .remaining)
+    }
+
+    func testSwapDropsOverridesOnParseFailure() {
+        // A malformed override (bad `reps` type) is rejected wholesale —
+        // the swap still happens (exercise id flips) but `overrides` is
+        // nil. We do NOT silently keep the valid keys; partial accept
+        // would leave the user in a half-swapped state.
+        let fixture = makeContext(overridesJSON: #"{"reps":"many","load_kg":80}"#)
+        let vm = ExecutionViewModel(context: fixture.context)
+        vm.start()
+
+        vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
+
+        let itemLog = vm.state.items.first { $0.itemID == fixture.itemID }
+        XCTAssertEqual(itemLog?.performedExerciseID, fixture.altExerciseID, "swap still happens")
+        XCTAssertNil(itemLog?.overrides, "malformed override dropped wholesale")
+        // Original prescription values survive.
+        XCTAssertTrue(itemLog?.sets.allSatisfy { $0.loadKg == 100 } ?? false)
+    }
 }
 
 // MARK: - Helpers
@@ -246,15 +373,31 @@ extension ExecutionViewModelSwapTests {
     }
 }
 
-private enum SwapFixtureBuilder {
+fileprivate enum SwapFixtureBuilder {
     struct IDs {
         let userID = UUID()
         let workoutID = UUID()
         let blockID = UUID()
-        let exerciseID = UUID()
-        let altExerciseID = UUID()
-        let itemID = UUID()
+        var exerciseID = UUID()
+        var altExerciseID = UUID()
+        var itemID = UUID()
         let altID = UUID()
+    }
+
+    /// Optional overrides for specific fixture UUIDs. Tests that need to
+    /// assert exact lowercase substrings in telemetry payloads seed the
+    /// fixture with known lowercase ids; everything else relies on
+    /// `UUID()` defaults (which return uppercase `.uuidString` — fine for
+    /// tests that don't poke at the wire format).
+    struct SeededIDs {
+        var exerciseID: UUID?
+        var altExerciseID: UUID?
+        var itemID: UUID?
+        init(exerciseID: UUID? = nil, altExerciseID: UUID? = nil, itemID: UUID? = nil) {
+            self.exerciseID = exerciseID
+            self.altExerciseID = altExerciseID
+            self.itemID = itemID
+        }
     }
 
     static func build(
@@ -262,9 +405,13 @@ private enum SwapFixtureBuilder {
         reps: Int,
         loadKg: Double,
         targetRir: Int,
-        overridesJSON: String?
+        overridesJSON: String?,
+        seededIDs: SeededIDs = SeededIDs()
     ) -> SwapFixture {
-        let ids = IDs()
+        var ids = IDs()
+        if let override = seededIDs.exerciseID { ids.exerciseID = override }
+        if let override = seededIDs.altExerciseID { ids.altExerciseID = override }
+        if let override = seededIDs.itemID { ids.itemID = override }
         let prescription = #"{"sets":\#(sets),"reps":\#(reps),"load_kg":\#(loadKg),"target_rir":\#(targetRir),"autoreg":{}}"#
         let ctx = context(ids: ids, prescription: prescription, overridesJSON: overridesJSON)
         return SwapFixture(

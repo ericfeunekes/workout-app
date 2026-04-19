@@ -14,19 +14,18 @@ This is the list of things that must happen outside the codebase before the syst
 
 ## Current state (as of this doc)
 
-- iOS app builds for iOS Simulator, renders Today / Active / Rest / Complete / FirstRun / History / Settings end-to-end.
+- iOS app builds for iOS Simulator, renders Today / Active / Rest / Complete / FirstRun / History / Settings end-to-end. Xcode build for iPhone 17 Pro: BUILD SUCCEEDED as of the 2026-04-18 cutover.
 - watchOS target builds and shows three stub faces (further watch work on hold per `docs/open-questions.md`).
-- Server builds, 120 tests pass, migrations idempotent, push + pull protocols fully specified and tested.
+- Server builds, 183 tests pass, migrations idempotent (through `006_exercise_defaults`), push + pull + telemetry + user-parameters protocols fully specified and tested.
 - Architecture enforcement live: ruff, import-linter, SwiftLint strict, fitness-function structural tests.
 - Deployment runbook drafted; `make deploy` stubbed with the intended flow; `make db-backup` + `make server-status` + `make server-logs` functional today.
+- **Ready-to-QA assessment (post-R1+R2+P2 cutover):** all 18 bug waves landed, >800 Swift cases + 183 server cases green. Active bug tracker has zero open P0/P1/P2 rows. Closed this session: session-persistence pipeline (bug-043), deterministic-wire-UUID sweep (bug-044 / bug-045), SwiftData V2+V3 migration with reconcile (bug-046 / bug-047), cardio logging contract (bug-049), EMOM minute-boundary (bug-050), push queue backoff + dead-letter + priority + dedup (bug-055 / bug-056 / bug-060), pound-default trunk refactor (bug-059). Ship bar met for Eric's first gym session — remaining work is credentials + device install.
 
 ## Remaining gates between now and first real workout
 
-### 0. Push-queue wiring (Claude-action, in flight)
+### 0. Push-queue wiring (Claude-action) — DONE
 
-The last v1 functional gap. Completed logs currently stay in-memory; after this slice lands, logging a set enqueues it to `PushQueue` and the flusher drains to the server.
-
-**Blocks:** everything below. You cannot complete a real workout without it.
+Closed 2026-04-18. `SetLog`, `status_update`, `user_parameter`, and `telemetry.events` all route through `PushQueue` with deterministic client-owned UUIDs, exponential backoff `[10,30,60,120,300]`s, dead-letter after 5 consecutive non-401 4xx, priority-weighted FIFO (results before telemetry), logical dedup. See `docs/features/push-queue.md`.
 
 ### 1. Systemd unit scope decision (Eric-action, ~1 minute)
 
@@ -125,10 +124,10 @@ Eric, before the first real workout:
 
 Claude, in between:
 
-- [ ] Finish push-queue wiring (step 0, in flight).
+- [x] Finish push-queue wiring (step 0) — closed 2026-04-18.
 - [ ] Flesh out `make deploy` after step 1 decided (step 3).
-- [ ] Drive end-to-end simulator verification of the tap-through path (still pending — will run after push-queue slice lands).
-- [ ] Final cross-link sweep of docs after the last wave of changes.
+- [x] Drive end-to-end simulator verification of the tap-through path — MCP-validated 2026-04-18: Push A hypertrophy + metcon AMRAP + Tabata round advance + exercise-swap (see `docs/spec.md` § "Feature status matrix").
+- [x] Final cross-link sweep of docs after the last wave of changes — closeout pass 2026-04-18.
 - [ ] Stage a commit that groups the four waves sensibly so git history reflects the delivery cadence.
 
 ---

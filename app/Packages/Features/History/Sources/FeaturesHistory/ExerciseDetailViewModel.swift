@@ -89,37 +89,68 @@ public final class ExerciseDetailViewModel {
 
     // MARK: - Pure helpers
 
-    /// Bucket set_logs by day, summarize each day as "N × weight × reps ·
-    /// RIR mean", newest first.
+    /// Bucket set_logs by workout-session and summarize each session
+    /// as "N × weight × reps · RIR mean", newest first.
+    ///
+    /// Session key is `workoutItemID` — two workouts logged on the same
+    /// calendar day have different WorkoutItems for the same exercise,
+    /// so grouping by item keeps them as distinct rows. Previous
+    /// implementation collapsed on `startOfDay`, which merged same-day
+    /// sessions into one row and silently dropped a workout from the
+    /// list.
+    ///
+    /// Within a session we pick the top set by weight, comparing only
+    /// within the session's own unit (a session is single-unit by
+    /// construction — a user doesn't mid-workout swap lb for kg). So
+    /// cross-unit numerical comparison never happens inside this
+    /// helper even if upstream data somehow mixed units.
     static func buildRecentRows(
         setLogs: [SetLog],
         calendar: Calendar
     ) -> [SessionRow] {
-        // Group by calendar day so one session collapses to one row.
-        var buckets: [Date: [SetLog]] = [:]
+        // Order sessions by their latest set's completedAt. Using the
+        // first-seen ordering preserves the input's newest-first layout
+        // cleanly.
+        var order: [UUID] = []
+        var buckets: [UUID: [SetLog]] = [:]
         for log in setLogs {
-            let day = calendar.startOfDay(for: log.completedAt)
-            buckets[day, default: []].append(log)
+            let key = log.workoutItemID
+            if buckets[key] == nil {
+                order.append(key)
+            }
+            buckets[key, default: []].append(log)
         }
 
-        let sortedDays = buckets.keys.sorted(by: >)
-        return sortedDays.compactMap { day in
-            let logs = buckets[day] ?? []
-            guard !logs.isEmpty else { return nil }
-            let display = formatRecentRow(day: day, logs: logs, calendar: calendar)
-            let id = ISO8601DateFormatter().string(from: day)
-            return SessionRow(id: id, display: display)
+        // Sort sessions newest-first by their latest completedAt —
+        // which matches the cache's reverse-chrono delivery order but
+        // is also resilient if the caller reorders.
+        let sortedKeys = order.sorted { lhs, rhs in
+            let lhsLatest = buckets[lhs]?.map(\.completedAt).max() ?? .distantPast
+            let rhsLatest = buckets[rhs]?.map(\.completedAt).max() ?? .distantPast
+            return lhsLatest > rhsLatest
+        }
+
+        return sortedKeys.compactMap { key in
+            let logs = buckets[key] ?? []
+            guard !logs.isEmpty, let latest = logs.map(\.completedAt).max() else {
+                return nil
+            }
+            let display = formatRecentRow(latestAt: latest, logs: logs, calendar: calendar)
+            // Row id uniquely identifies the session on screen —
+            // workoutItemID is stable across reloads.
+            return SessionRow(id: key.uuidString, display: display)
         }
     }
 
     /// "MON APR 14 · 4 × 100 kg × 5 · RIR 1.5".
-    /// - Count is number of non-warmup sets on that day.
-    /// - Weight + reps are the most common across the day's working
-    ///   sets; if they vary we show the top set's values (same rule as
-    ///   TrendComputation).
+    /// - Count is number of non-warmup sets in the session.
+    /// - Weight + reps are the top set's values (heaviest weight,
+    ///   tie-break by reps; same rule as TrendComputation).
+    /// - Weight unit comes from the top set's own `weightUnit`,
+    ///   defaulting to `.kg` when legacy rows don't carry one.
     /// - RIR is mean across sets that logged one.
     static func formatRecentRow(
-        day: Date,
+        latestAt: Date,
         logs: [SetLog],
         calendar: Calendar
     ) -> String {
@@ -127,17 +158,26 @@ public final class ExerciseDetailViewModel {
         formatter.calendar = calendar
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "EEE MMM d"
-        let dateStr = formatter.string(from: day).uppercased()
+        let dateStr = formatter.string(from: latestAt).uppercased()
 
         let workingSets = logs.filter { !$0.isWarmup }
         let count = workingSets.count
-        let topSet = workingSets.max { lhs, rhs in
-            (lhs.weight ?? 0) < (rhs.weight ?? 0)
-        }
+        // Restrict the top-set search to the session's dominant unit.
+        // Single-unit sessions (the 100% common case) reduce to the
+        // same max-by-weight as before.
+        let sessionUnit: WeightUnit = workingSets
+            .compactMap { $0.weightUnit }
+            .first ?? .kg
+        let topSet = workingSets
+            .filter { ($0.weightUnit ?? .kg) == sessionUnit }
+            .max { lhs, rhs in
+                (lhs.weight ?? 0) < (rhs.weight ?? 0)
+            }
 
         var parts: [String] = [dateStr]
         if let top = topSet, let weight = top.weight, let reps = top.reps {
-            parts.append("\(count) × \(formatKilograms(weight)) × \(reps)")
+            let unitLabel = sessionUnit == .kg ? "kg" : "lb"
+            parts.append("\(count) × \(formatKilograms(weight)) \(unitLabel) × \(reps)")
         } else if let reps = topSet?.reps {
             parts.append("\(count) × BW × \(reps)")
         }

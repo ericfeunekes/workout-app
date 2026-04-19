@@ -111,6 +111,37 @@ final class IntervalsDriverTests: XCTestCase {
         XCTAssertEqual(driver.restDuration(state: f.state, context: f.context), 30)
     }
 
+    func testRestDurationIsZeroOnFinalInterval() {
+        // Cursor on the last interval (10 of 10) must surface rest=0
+        // so `buildLogMutations` emits `.advanceFromRest` → the cursor
+        // falls off the end of the block → route lands on `.complete`.
+        // This is the R2.11 "no trailing rest after final interval" fix:
+        // before the driver returned the authored rest_sec on every
+        // interval, so the final log put the user on a rest screen that
+        // counted down to a complete route anyway.
+        let f = makeFixture(
+            configJSON: #"""
+            {"work_sec":30,"rest_sec":30,"interval_count":10,"target_pace_sec_per_km":270}
+            """#,
+            cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 10)
+        )
+        let driver = IntervalsDriver()
+        XCTAssertEqual(driver.restDuration(state: f.state, context: f.context), 0)
+    }
+
+    func testRestDurationStillPositiveOnNonFinalInterval() {
+        // Guard: the short-circuit fires only on the last interval —
+        // every earlier interval still reads the authored rest.
+        let f = makeFixture(
+            configJSON: #"""
+            {"work_sec":30,"rest_sec":30,"interval_count":10,"target_pace_sec_per_km":270}
+            """#,
+            cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 9)
+        )
+        let driver = IntervalsDriver()
+        XCTAssertEqual(driver.restDuration(state: f.state, context: f.context), 30)
+    }
+
     func testRestDurationDerivesFromDistanceAndPace() {
         // 200 m rest at 270 s / km → 200 / 1000 * 270 = 54 s.
         let f = canonicalFixture()

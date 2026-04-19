@@ -55,35 +55,77 @@ public struct CustomDriver: TimingDriver {
         guard let itemLog = state.items.first(where: { $0.itemID == item.id }) else {
             return nil
         }
+        // Don't fabricate a "1 of 1" display when there are no SetPlan
+        // rows underneath — the user's logSet dispatch would find no
+        // matching row and the log would vanish. The seeder normally
+        // produces a 1-row placeholder for `.empty` / `.amrapToken`
+        // (see SessionSeeder.manualPlaceholder); this guard keeps the
+        // driver honest if state is ever handed to it inconsistently
+        // (e.g. legacy persisted state seeded before the fix).
+        guard !itemLog.sets.isEmpty else {
+            return nil
+        }
 
-        let parsed = parser.parse(prescriptionJSON: item.prescriptionJSON)
-        let (reps, loadKg, totalSets) = resolve(parsed: parsed, itemLog: itemLog)
-
-        let exerciseName = context.exerciseName(
-            for: item,
-            performedExerciseID: itemLog.performedExerciseID
+        let resolved = resolveActive(item: item, itemLog: itemLog, cursor: c)
+        return ActiveContent(
+            exerciseName: context.exerciseName(
+                for: item,
+                performedExerciseID: itemLog.performedExerciseID
+            ),
+            setIndex: c.setIndex,
+            totalSets: resolved.totalSets,
+            loadDisplay: resolved.loadDisplay,
+            repsDisplay: String(resolved.reps),
+            loadKg: resolved.heroLoadKg,
+            reps: resolved.reps,
+            adjustGlyph: nil,
+            lastTime: context.lastPerformed[item.exerciseID]
         )
+    }
 
+    /// Bundle of renderable numeric state at the cursor — everything the
+    /// view-level `ActiveContent` needs that is NOT the exercise name or
+    /// cursor-derived (setIndex, lastTime).
+    private struct ResolvedActive {
+        let totalSets: Int
+        let loadDisplay: String
+        let heroLoadKg: Double?
+        let reps: Int
+    }
+
+    /// Resolve the renderable numeric state at the cursor. Prefer the live
+    /// SetPlan row — the reducer mirrors swap `reps` / `load_kg` /
+    /// `weight_unit` overrides onto non-done rows so reading the SetPlan
+    /// reflects post-swap state. The prescription parse drives `totalSets`
+    /// only; the loadless-ness of a row is carried on the SetPlan itself
+    /// (`loadKg == nil`), no separate discriminator needed.
+    private func resolveActive(
+        item: WorkoutItem,
+        itemLog: SessionState.ItemLog,
+        cursor: SessionState.Cursor
+    ) -> ResolvedActive {
+        let parsed = parser.parse(prescriptionJSON: item.prescriptionJSON)
+        let totalSets = totalSets(parsed: parsed, itemLog: itemLog)
+        let (reps, loadKg, unit) = resolveRepsAndLoad(
+            for: item,
+            parsed: parsed,
+            itemLog: itemLog,
+            cursor: cursor
+        )
         let loadDisplay: String
         let heroLoadKg: Double?
         if let kg = loadKg {
-            loadDisplay = formatLoad(kg: kg)
+            loadDisplay = formatLoad(weight: kg, unit: LoadUnit(setPlanUnit: unit))
             heroLoadKg = kg
         } else {
             loadDisplay = "BW"
             heroLoadKg = nil
         }
-
-        return ActiveContent(
-            exerciseName: exerciseName,
-            setIndex: c.setIndex,
+        return ResolvedActive(
             totalSets: totalSets,
             loadDisplay: loadDisplay,
-            repsDisplay: String(reps),
-            loadKg: heroLoadKg,
-            reps: reps,
-            adjustGlyph: nil,
-            lastTime: context.lastPerformed[item.exerciseID]
+            heroLoadKg: heroLoadKg,
+            reps: reps
         )
     }
 
@@ -113,38 +155,89 @@ public struct CustomDriver: TimingDriver {
 
     // MARK: - Helpers
 
-    /// Pull reps, optional load, and total-sets-for-this-item out of the
-    /// parsed prescription. Falls back to the seeded `itemLog.sets.count`
-    /// for the total so the Active screen renders something sensible even
-    /// when the item ships as `{}` (empty prescription — common in custom
-    /// blocks where the segment describes the work).
-    private func resolve(
+    /// Resolve `(reps, loadKg, unit)` at the cursor. The SetPlan row is
+    /// the source of truth for live numeric values (reps / loadKg / unit)
+    /// — the reducer mirrors swap overrides onto non-done rows so reading
+    /// the SetPlan reflects the post-swap plan. `set.loadKg == nil` is
+    /// the loadless sentinel (BW, loadless AMRAP token, `.empty`) — it
+    /// passes straight through so the display renders "BW".
+    private func resolveRepsAndLoad(
+        for item: WorkoutItem,
+        parsed: Result<Prescription, ParseError>,
+        itemLog: SessionState.ItemLog,
+        cursor: SessionState.Cursor
+    ) -> (reps: Int, loadKg: Double?, unit: WeightUnit) {
+        if let set = itemLog.sets.first(where: { $0.setIndex == cursor.setIndex }) {
+            return (set.reps, set.loadKg, set.unit)
+        }
+        // Fallback when no SetPlan row matches the cursor (defensive).
+        switch parsed {
+        case .success(let p):
+            return repsAndLoadFromPrescription(p)
+        case .failure:
+            return (0, nil, .lb)
+        }
+    }
+
+    /// Extract reps, load, and unit from a prescription for the fallback
+    /// path. Normal reads go through `resolveRepsAndLoad`.
+    private func repsAndLoadFromPrescription(
+        _ prescription: Prescription
+    ) -> (reps: Int, loadKg: Double?, unit: WeightUnit) {
+        switch prescription {
+        case .straightSets(_, let reps, let loadKg, let unit, _, _, _, _):
+            return (intReps(from: reps), loadKg, unit)
+        case .bodyweight(_, let reps, _):
+            return (reps, nil, .lb)
+        case .repRange(_, _, let repsMax, let loadKg, let unit, _, _):
+            return (repsMax, loadKg, unit)
+        case .cluster(_, let reps, let loadKg, let unit, _, _, _):
+            return (reps, loadKg, unit)
+        case .warmup(_, let reps, let loadKg, let unit):
+            return (reps, loadKg, unit)
+        case .setsDetail:
+            return (0, nil, .lb)
+        case .percentOf1RM(_, let reps, _, _):
+            return (reps, nil, .lb)
+        case .amrapToken(let loadKg, let unit, _):
+            // AMRAP token renders "reps = 0" (open entry) with the
+            // authored load if present.
+            return (0, loadKg, unit)
+        case .empty:
+            return (0, nil, .lb)
+        }
+    }
+
+    /// Total sets for the item. Drives the "N of M" counter on the Active
+    /// screen; falls back to the seeded row count when the prescription
+    /// carries no structural set count (`.amrapToken`, `.empty`).
+    private func totalSets(
         parsed: Result<Prescription, ParseError>,
         itemLog: SessionState.ItemLog
-    ) -> (reps: Int, loadKg: Double?, totalSets: Int) {
+    ) -> Int {
         let fallbackTotal = max(itemLog.sets.count, 1)
         switch parsed {
         case .success(let p):
             switch p {
-            case .straightSets(let sets, let reps, let loadKg, _, _, _, _):
-                return (intReps(from: reps), loadKg, sets ?? fallbackTotal)
-            case .bodyweight(let sets, let reps, _):
-                return (reps, nil, sets)
-            case .repRange(let sets, _, let repsMax, let loadKg, _, _):
-                return (repsMax, loadKg, sets)
-            case .cluster(let sets, let reps, let loadKg, _, _, _):
-                return (reps, loadKg, sets)
-            case .warmup(let sets, let reps, let loadKg):
-                return (reps, loadKg, sets)
-            case .setsDetail(let details, _, _):
-                return (0, nil, max(details.count, 1))
-            case .percentOf1RM(let sets, let reps, _, _):
-                return (reps, nil, sets)
+            case .straightSets(let sets, _, _, _, _, _, _, _):
+                return sets ?? fallbackTotal
+            case .bodyweight(let sets, _, _):
+                return sets
+            case .repRange(let sets, _, _, _, _, _, _):
+                return sets
+            case .cluster(let sets, _, _, _, _, _, _):
+                return sets
+            case .warmup(let sets, _, _, _):
+                return sets
+            case .setsDetail(let details, _, _, _):
+                return max(details.count, 1)
+            case .percentOf1RM(let sets, _, _, _):
+                return sets
             case .amrapToken, .empty:
-                return (0, nil, fallbackTotal)
+                return fallbackTotal
             }
         case .failure:
-            return (0, nil, fallbackTotal)
+            return fallbackTotal
         }
     }
 

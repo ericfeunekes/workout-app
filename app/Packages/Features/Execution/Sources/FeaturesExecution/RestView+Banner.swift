@@ -25,13 +25,25 @@ extension RestView {
                     // routes through `DSWeightLabel` so "kg" shares
                     // the same mono family + weight as the digits
                     // (bug-027). The leading "next set:" stays sans.
+                    //
+                    // R2.10 unit-thread: `AutoregProposal` has no unit
+                    // field (the proposal is a pure delta-direction +
+                    // new-load-scalar). Inherit the unit from the
+                    // SetPlan the proposal targets — which is the same
+                    // item as the just-logged set, so `lastLoggedSet`
+                    // is the correct source. Default to "kg" only as
+                    // a defensive fallback (nil is unreachable —
+                    // proposals can only fire AFTER a set logs on the
+                    // item).
                     HStack(alignment: .firstTextBaseline, spacing: DSSpacing.sm) {
                         Text("next set:")
                             .font(DSTypography.body)
                             .foregroundStyle(DSColors.foreground)
                         DSWeightLabel(
                             number: formatKilograms(proposal.newLoadKg),
-                            unit: "kg",
+                            unit: RestView.proposalBannerUnit(
+                                for: viewModel.lastLoggedSet
+                            ),
                             size: 15,
                             weight: .medium,
                             color: DSColors.foreground

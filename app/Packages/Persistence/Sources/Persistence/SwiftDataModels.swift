@@ -21,8 +21,13 @@
 //     overwrites on UUID); we do not want those overwrites to cascade into
 //     historical set_logs. Keep the link loose.
 //
-// This module is `WorkoutDBSchemaV1`. Future schema bumps add a
-// `WorkoutDBSchemaV2` beside it and register a `MigrationPlan` stage.
+// These file-scope classes are the `WorkoutDBSchemaV3` shape (post-R1.4
+// SetLog denormalization). The V1 (pre-006) and V2 (post-006, pre-R1.4)
+// shapes are preserved as shadow @Model types inside `WorkoutDBSchemaV1`
+// and `WorkoutDBSchemaV2` in their dedicated models files so SwiftData
+// can diff and migrate an older store in place. Future schema bumps add
+// a `WorkoutDBSchemaV4` snapshot there and register a `MigrationPlan`
+// stage.
 
 import Foundation
 import SwiftData
@@ -136,8 +141,8 @@ public final class WorkoutItemModel {
     public var prescriptionJSON: String
     /// Optional snapshot of the sparse payload the client originally sent.
     /// Nil when the resolved prescription equals what was sent. See
-    /// `ADR-2026-04-18-smart-defaults.md`. Lightweight-compatible addition
-    /// to `WorkoutDBSchemaV1` — optional, no default, no data-transform.
+    /// `ADR-2026-04-18-smart-defaults.md`. Added in V2 as a lightweight
+    /// migration from V1 — optional, no default, no data-transform.
     public var prescriptionJSONRaw: String?
 
     public var block: BlockModel?
@@ -173,8 +178,8 @@ public final class ExerciseModel {
     public var name: String
     public var notes: String?
     public var demoURLString: String?
-    /// Library-level prescription defaults. Lightweight-compatible addition
-    /// to `WorkoutDBSchemaV1`. The app does not read this at runtime — the
+    /// Library-level prescription defaults. Added in V2 as a lightweight
+    /// migration from V1. The app does not read this at runtime — the
     /// server merges it into each workout_item's prescription_json before
     /// the app ever sees it. See `ADR-2026-04-18-smart-defaults.md`.
     public var defaultPrescriptionJSON: String?
@@ -235,6 +240,25 @@ public final class ExerciseAlternativeModel {
 public final class SetLogModel {
     @Attribute(.unique) public var id: UUID
     public var workoutItemID: UUID
+    /// Denormalized copy of the parent Workout's id, stamped at log
+    /// time so `loadSetLogs(workoutID:)` can resolve via a direct
+    /// `FetchDescriptor` predicate without walking blocks → items.
+    /// This lets logs survive reconcile (see
+    /// `WorkoutCache+Reconcile.swift`'s `detachSetLogs` dance) while
+    /// still being visible to History via the public API — the R1.3
+    /// fix preserved rows on disk but the block→item walk still lost
+    /// them because the parent item was gone. Nullable on disk to
+    /// tolerate the V2→V3 lightweight migration + best-effort
+    /// backfill; new writes always populate it.
+    public var workoutID: UUID?
+    /// Denormalized copy of the parent WorkoutItem's planned
+    /// `exerciseID`, stamped at log time. Lets `loadSetLogs(exerciseID:)`
+    /// resolve planned-exercise matches with a direct predicate (no
+    /// WorkoutItem fetch required), so History keeps surfacing logged
+    /// sets even after the parent item has been reconciled away.
+    /// `performedExerciseID` (above) still captures mid-workout swaps
+    /// separately; the History query ORs the two.
+    public var plannedExerciseID: UUID?
     /// Nil unless the user swapped mid-workout. Stored as a raw UUID — no
     /// SwiftData relationship, per file header.
     public var performedExerciseID: UUID?
@@ -259,6 +283,8 @@ public final class SetLogModel {
     public init(
         id: UUID,
         workoutItemID: UUID,
+        workoutID: UUID?,
+        plannedExerciseID: UUID?,
         performedExerciseID: UUID?,
         setIndex: Int,
         reps: Int?,
@@ -278,6 +304,8 @@ public final class SetLogModel {
     ) {
         self.id = id
         self.workoutItemID = workoutItemID
+        self.workoutID = workoutID
+        self.plannedExerciseID = plannedExerciseID
         self.performedExerciseID = performedExerciseID
         self.setIndex = setIndex
         self.reps = reps

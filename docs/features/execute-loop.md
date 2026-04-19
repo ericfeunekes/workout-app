@@ -23,7 +23,7 @@ Once `SessionState.route` flips out of `.today`, `ExecutionView` renders the act
 
 ## State surface
 - **Inputs:** `WorkoutContext` (workout + blocks + itemsByBlock + exercise catalog + lastPerformed); `SessionStore`; `DriverRegistry`; `ExecutionPushHooks` (`onSetLogged`, `onStatusChanged`, `onPushKick`); `LocalCompletionWriter`; `TelemetryEmitter`; `Clock`.
-- **Outputs / side effects:** (1) reducer-driven `SessionState`; (2) `sessionStore.save(data)` JSON bytes on every mutation; (3) enqueue one `SetLog` per `logSet`; (4) enqueue one terminal `status_update(completed, completedAt)` on `complete` and again on `saveAndDone`; (5) kick push flush after completion; (6) local-cache `Workout` + `[SetLog]` write on `saveAndDone`; (7) telemetry events per intent.
+- **Outputs / side effects:** (1) reducer-driven `SessionState`; (2) `sessionStore.save(data)` JSON bytes on every mutation; (3) enqueue one `SetLog` per `logSet`; (4) enqueue one terminal `status_update(completed, completedAt)` on `saveAndDone` (`complete()` only flips route; the terminal enqueue is owned exclusively by `saveAndDone`); (5) kick push flush after completion; (6) local-cache `Workout` + `[SetLog]` write on `saveAndDone`; (7) telemetry events per intent.
 - **State transitions (`SessionState.Route`):** `.today → .active` (start); `.active → .rest` (logSet with rest > 0); `.active → .active next set` (logSet with rest == 0 — `advanceFromRest` fires directly — see `ExecutionViewModel.swift:262-268`); `.rest → .active` (advance); `.rest → .complete` (advance past last set); `.active → .complete` (explicit End button); `.complete → .today` (saveAndDone clears state).
 
 ## What it deliberately doesn't do
@@ -50,11 +50,14 @@ Once `SessionState.route` flips out of `.today`, `ExecutionView` renders the act
 - `.complete` reachable via `.advanceFromRest` (auto-advance) without going through explicit `complete()` (`SessionReducer+Handlers.swift:200-213`).
 
 ## Known issues / gaps
-- Session detail displays set indexes "2..N" instead of "1..N" — downstream formatter bug, not execute-loop's (`docs/open-questions.md` § "Session detail renders 2..N").
-- `holdAutoreg` uses a workaround in `undoAutoreg` — revert path uses `editPendingSet` which tags sets `.manual` (`ExecutionViewModel.swift:314-322`). Cosmetic: hold flag makes this moot for the session.
-- `percent_1rm` prescriptions seed with `loadKg = 0` in v0 (`SessionSeeder.swift:105-109`); resolver deferred.
-- Only `straight_sets` driver is wired in `DriverRegistry.init` default (`ExecutionViewModel.swift:430-438`); all other modes fall back to it silently. See `timing-modes.md`.
-- `amrapToken` / `empty` prescriptions seed zero sets — `[]` returned from `SessionSeeder.setsFor` (`SessionSeeder.swift:114-118`).
+- Set-index render (bug-020) closed — `formatSetRow` uses `setIndex` as-is; pipeline is 1-based throughout.
+- `SetPlan.loadKg` is now `Double?` (nil means bodyweight / loadless — bug-053). Drivers, formatters, and CompleteView+Ledger render "BW" on nil; only nil (not 0) is treated as BW so a genuine 0 lb / 0 kg authored row renders with the unit.
+- Default weight unit is `.lb` (bug-059). All 9 drivers render via the centralized `formatLoad(weight:unit:)`; autoreg step defaults per unit (5 lb / 1.25 kg); server prescription merge defaults to `.lb`.
+- Cardio blocks route through `logCurrentSet()` → `.logCardioSet` with elapsed-wins duration (bug-049); IntervalsDriver suppresses trailing rest on the final interval.
+- `holdAutoreg` uses a workaround in `undoAutoreg` — revert path uses `editPendingSet` which tags sets `.manual`. Cosmetic: hold flag makes this moot for the session.
+- `percent_1rm` prescriptions seed with `loadKg = nil` in v0; resolver deferred.
+- All 11 timing modes are wired in `DriverRegistry.init` default: `straightSets`, `superset`, `circuit`, `emom`, `amrap`, `forTime`, `intervals`, `tabata`, `continuous`, `custom`, `rest`. Unknown / unregistered modes fall back to `StraightSetsDriver()`. See `timing-modes.md`.
+- `amrapToken` / `empty` prescriptions seed a single manual-placeholder SetPlan (bug-058) instead of `[]`, so Straight doesn't dead-end and Custom doesn't fabricate a phantom row.
 - `docs/open-questions.md` § "Multiple active workouts" — starting workout B while A is `active` is not handled.
 
 ## QA scenarios
@@ -126,7 +129,7 @@ Once `SessionState.route` flips out of `.today`, `ExecutionView` renders the act
 ### S13. Force-complete mid-workout
 - **setup:** 3-set workout, on set 2.
 - **steps:** tap "End" (navbar).
-- **expected:** route = `.complete`, ledger shows the one logged set; `status_update(completed)` enqueued (`ExecutionViewModel.swift:344-348`); tapping save & done enqueues status again (redundant but tolerated per push semantics).
+- **expected:** route = `.complete`, ledger shows the one logged set; `complete()` only transitions state — NO `status_update` enqueue here. Tapping save & done enqueues the single terminal `status_update(completed)` (ownership moved to `saveAndDone` exclusively — see `save-and-done.md` S2).
 
 ### S14. Save & done — auto-advance path (regression watch)
 - **setup:** last set logged → rest → tap next → `.complete` reached via `.advanceFromRest` (NOT via End button).

@@ -94,6 +94,62 @@ final class ExecutionViewModelTickBlockTimerTests: XCTestCase {
         XCTAssertNil(vm.state.blockEndsAt)
     }
 
+    /// Regression for "Tabata placeholder log dropped after long suspend
+    /// past block cap". When the phone wakes with BOTH `workEndsAt`
+    /// (per-round work window) and `blockEndsAt` (total 240s cap) overdue,
+    /// the tick must still write the 8th round's placeholder log BEFORE
+    /// flipping the route to `.complete`. The prior ordering returned on
+    /// the block-cap path first and the final log was lost.
+    func testTabataWorkWindowAutoLogsEvenIfBlockCapElapsed() {
+        // Fix the clock at T0; start the Tabata block so workEndsAt and
+        // blockEndsAt are both set. Then jump the clock past both anchors
+        // and tick once.
+        let start = Date(timeIntervalSince1970: 1_000_000)
+        let clock = MutableTickClock(now: start)
+        let ctx = makeTabataContext()
+        let vm = ExecutionViewModel(context: ctx, clock: clock)
+        vm.start()
+        XCTAssertEqual(vm.state.route, .active)
+        // Anchors are set: workEndsAt at T0+20s, blockEndsAt at T0+240s.
+        XCTAssertEqual(
+            vm.state.workEndsAt?.timeIntervalSince1970,
+            start.timeIntervalSince1970 + TabataDriver.workSec
+        )
+        XCTAssertEqual(
+            vm.state.blockEndsAt?.timeIntervalSince1970,
+            start.timeIntervalSince1970
+                + Double(TabataDriver.rounds)
+                    * (TabataDriver.workSec + TabataDriver.restSec)
+        )
+
+        // Prior sets logged so we can assert the TICK adds one more.
+        let itemID = ctx.itemsByBlock[0][0].id
+        let doneBefore = vm.state.items
+            .first(where: { $0.itemID == itemID })?
+            .sets.filter(\.done).count ?? -1
+        XCTAssertEqual(doneBefore, 0, "no rounds logged before the long suspend")
+
+        // Jump past BOTH anchors — simulate the phone waking up a long
+        // time after the Tabata block should have ended.
+        clock.now = start.addingTimeInterval(10_000)
+        vm.tickBlockTimer()
+
+        // Must have auto-logged the placeholder BEFORE completing, so the
+        // item's logged-set count bumps to 1.
+        let doneAfter = vm.state.items
+            .first(where: { $0.itemID == itemID })?
+            .sets.filter(\.done).count ?? -1
+        XCTAssertEqual(
+            doneAfter, 1,
+            "work-window placeholder log must run BEFORE the block-cap complete path"
+        )
+        // And the block cap still fires — route is .complete after this tick.
+        XCTAssertEqual(
+            vm.state.route, .complete,
+            "block cap still dispatches .complete in the same tick"
+        )
+    }
+
     // MARK: - View wiring (source inspection)
 
     func testActiveViewWiresTickBlockTimerViaPeriodicTimer() throws {
@@ -177,6 +233,40 @@ final class ExecutionViewModelTickBlockTimerTests: XCTestCase {
             exercises: [exerciseID: Exercise(id: exerciseID, name: "Pull-ups")]
         )
         return (ctx, itemID)
+    }
+
+    /// Single-item tabata context for the long-suspend regression test.
+    /// Matches the shape `ExecutionViewModelPersistencePipelineTests`
+    /// uses for its Tabata restore coverage.
+    private func makeTabataContext() -> WorkoutContext {
+        let userID = UUID()
+        let workoutID = UUID()
+        let blockID = UUID()
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let now = Date()
+        let workout = Workout(
+            id: workoutID, userID: userID, name: "Tabata",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil, createdAt: now, updatedAt: now,
+            completedAt: nil, tagsJSON: nil
+        )
+        let block = Block(
+            id: blockID, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: nil, timingMode: .tabata,
+            timingConfigJSON: "{}",
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let item = WorkoutItem(
+            id: itemID, blockID: blockID, position: 0,
+            exerciseID: exerciseID,
+            prescriptionJSON: #"{"reps":20}"#
+        )
+        return WorkoutContext(
+            workout: workout, blocks: [block],
+            itemsByBlock: [[item]],
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Air Squats")]
+        )
     }
 
     private func makeStraightSetsContext() -> (WorkoutContext, UUID) {

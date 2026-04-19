@@ -42,12 +42,14 @@ Client-side load adjustment computed per set-log against **per-item** prescripti
 - Undo's revert-then-hold: reverting sets uses `editPendingSet` which stamps `.manual`. Comment acknowledges the tag is a side-effect made moot by the hold (`ExecutionViewModel.swift:283-291`).
 
 ## Known issues / gaps
-- **No load floor.** Negative prescribed-minus-step loads are emitted as-is. Not in `docs/open-questions.md` yet.
+- Negative-load floor closed (bug-013): `max(0.0, newLoad)` clamp in `Autoreg.propose`. Regression tests: "clamp · undershoot on prescribed=2.5" + "clamp · hit-failure on prescribed=4.0".
+- Autoreg step defaults per unit: `5.0` for `.lb`, `1.25` for `.kg` (bug-059). The legacy "default 2.5" is gone.
+- `apply_to` parse failure no longer degrades the whole item to `0 kg / 0 reps` — `parseTolerantOfAutoreg` isolates autoreg parse errors from the base prescription, and the server rejects unknown `apply_to` values at ingest (bug-052).
+- `execution.autoreg_proposed` telemetry carries a typed `Encodable` payload with `step_kg` + canonical reason tokens (bug-060).
 - **Settings vs prescription precedence unresolved** (`docs/open-questions.md` § "Autoreg defaults — Settings vs prescription"). Current assumption: per-item wins; Settings are display-only.
-- **Pyramid / cluster / tempo ambiguity** (`docs/open-questions.md` § "Autoreg on `sets_detail` pyramids", "Autoreg in cluster sets", "Autoreg on tempo reps"). In practice those prescription shapes all return `(nil, nil)` from `autoregAndTarget` so no proposal ever fires — ambiguity is latent, not live.
-- Undo's `.manual` stamp on reverted sets means a subsequent hold-lift wouldn't re-enable autoreg on those rows. Documented trade-off (`ExecutionViewModel.swift:283-291`).
+- **Pyramid / cluster / tempo ambiguity** — those prescription shapes return `(nil, nil)` from `autoregAndTarget` so no proposal fires; ambiguity is latent, not live.
+- Undo's `.manual` stamp on reverted sets means a subsequent hold-lift wouldn't re-enable autoreg on those rows. Documented trade-off.
 - No per-item proposal history / audit trail. `currentProposal` clears on advance/accept/undo; prior proposals leave no evidence beyond the `adjust` glyph.
-- `SetPlan.rir` is stored but `Autoreg.propose` does not read it — Features layer re-passes `loggedRir` (`SetPlan.swift:60-64`).
 
 ## QA scenarios
 
@@ -129,7 +131,7 @@ Client-side load adjustment computed per set-log against **per-item** prescripti
 ### S16. Autoreg + swap interaction
 - **setup:** Bench item swapped mid-workout to DB Bench (via `.swap` mutation). Bench's own `autoreg` config is on the **item**, not the exercise.
 - **steps:** after the swap, log next bench set with RIR 4.
-- **expected:** proposal fires using the **original item's** autoreg config — `performedExerciseID` overrides display only; `StraightSetsDriver` reads `item.prescriptionJSON` which is unchanged by `.swap` (`SessionReducer+Handlers.swift:118-131`). Alternative's `parameter_overrides_json` is **not applied** by the current code (no wiring exists — see exercise-swap.md).
+- **expected:** proposal fires using the **original item's** autoreg config — `performedExerciseID` overrides display only; `StraightSetsDriver` reads `item.prescriptionJSON` which is unchanged by `.swap` (`SessionReducer+Handlers.swift:216-275`). If the chosen alternative carries a non-empty `parameter_overrides_json`, R2.8 applies those reps / load / unit overrides to remaining non-done `SetPlan` rows AND stashes the full overrides on `ItemLog.overrides` for drivers that read per-side / `target_rir` / nested `autoreg`. R2.8b narrowed the `sets` sub-override: it is only honored on **set-major** blocks (straight sets). Round-robin blocks (superset / circuit / AMRAP / EMOM / Tabata / forTime) drop the `sets` portion and apply the rest of the override — rewriting one item's row count in a round-robin structure would skew the cursor walk or silently collapse peer items (`SessionReducer+Handlers.swift:236-268`, `SessionReducer+SwapOverrides.swift`). The dropped `sets` override emits telemetry event `execution.swap_sets_override_rejected` (NOT `swap.sets_override_rejected` — the event is scoped under the `execution.` family; see `ExecutionViewModel+Swap.swift:138`).
 
 ### S17. Autoreg only in StraightSetsDriver
 - **setup:** workout with a block whose `timing_mode` is something other than `straight_sets`.

@@ -35,8 +35,13 @@ extension AppBootstrap {
             onSetLogged: { [syncAPI] log in
                 try? await syncAPI.pushLog([log])
             },
-            onStatusChanged: { [syncAPI] id, status, at in
-                try? await syncAPI.pushStatus(workoutID: id, status: status, completedAt: at)
+            onStatusChanged: { [syncAPI] id, status, at, notes in
+                try? await syncAPI.pushStatus(
+                    workoutID: id,
+                    status: status,
+                    completedAt: at,
+                    notes: notes
+                )
             },
             onPushKick: { [pushFlusher] in
                 await pushFlusher.flushNow()
@@ -71,7 +76,12 @@ extension AppBootstrap {
     ) -> LocalCompletionWriter {
         { [workoutCache, todayViewModel, todayLoader, afterLocalCompletion] workout, setLogs in
             try? await workoutCache.saveWorkout(workout)
-            try? await workoutCache.saveSetLogs(setLogs)
+            // `workoutID` stamps each log's denormalized column so
+            // History's `loadSetLogs(workoutID:)` resolves via a direct
+            // predicate even after a future reconcile removes the
+            // parent WorkoutItem (R1.4 SetLog denormalization). The
+            // completed workout we just wrote carries the id.
+            try? await workoutCache.saveSetLogs(setLogs, workoutID: workout.id)
             await todayViewModel.reload(using: todayLoader)
             await afterLocalCompletion?()
         }

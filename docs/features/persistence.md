@@ -39,10 +39,12 @@ The persisted snapshot captures everything needed to resume: `workoutID`, `route
 - Rapid `logSet` calls each fire their own persist `Task` — the in-memory state is authoritative; disk may lag by a few writes but the LATEST encoded snapshot is always the LATEST in-memory state (`ExecutionViewModel+Persistence.swift:38-54`).
 
 ## Known issues / gaps
-- `docs/architecture/hotspots.md:167-187` SwiftData transaction caveat — documented, enforced by convention + `WorkoutCacheTests::testSaveRollsBackOnThrowMidLoop`, but not lint-enforced. A new Persistence mutator that reaches for `transaction { }` will silently leak partial inserts.
-- No explicit schema version for `SessionStateCodable` bytes — if the shape changes we rely on decode failure + fresh session; data loss is bounded to the one live session (`SessionStateCodable.swift:10-13`).
-- Persist is fire-and-forget with no retry. A repeatedly failing encode/save would silently drop every snapshot until the issue clears; the in-memory state wins.
-- `ExecutionViewModel.apply` ALWAYS persists (`ExecutionViewModel+Persistence.swift:34`); there's no debounce across rapid mutations. Fine today; watch disk I/O under a long EMOM.
+- `docs/architecture/hotspots.md` SwiftData transaction caveat — documented, enforced by convention + `WorkoutCacheTests`, but not lint-enforced.
+- No explicit schema version for `SessionStateCodable` bytes — if the shape changes we rely on decode failure + fresh session; data loss is bounded to the one live session.
+- **SwiftData schema is versioned** (bug-047): `WorkoutDBSchemaV1` → `V2` (exercise defaults) → `V3` (`SetLog.workoutID` + `plannedExerciseID` denormalization). V2→V3 uses a lightweight stage with a backfill that walks the surviving-items map so logs keep their workoutID reference. Pinned by `SchemaMigrationTests`.
+- **Subtree reconcile** (bug-046): `WorkoutCache.save` reconciles per workout id — diff incoming vs cached blocks/items/alternatives, detach children before deleting the orphan, re-upsert. SetLogs explicitly preserved via detach-before-delete. New `loadOrphanedSetLogs()` API returns logs whose item was removed so History can still surface them.
+- **Session-persistence pipeline** (bug-043): every `apply(_:)` enqueues a monotonic-revision snapshot on a VM-owned `SessionPersistencePipeline` handle (replaced the `Task {}` + `ObjectIdentifier` static table). FIFO preserved; restore applies a normalization pass that re-runs `enterRestIfZeroItemBlock` / `enterBlockTimerIfNeeded` / `enterTabataWorkWindowIfNeeded` so a timer-midflight kill can't restore malformed.
+- Persist pipeline swallows encode/save errors. In-memory state wins; bounded loss ≤ 1 mutation.
 
 ## QA scenarios
 

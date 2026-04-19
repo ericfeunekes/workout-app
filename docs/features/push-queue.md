@@ -21,13 +21,17 @@ Durable SwiftData-backed FIFO queue for outbound writes. Three payload shapes: `
 - **State transitions:** per-item `attempts` counter bumps on each non-2xx outcome (`PushQueue.swift:173, 179, 188, 195`). Items removed only on 2xx (`:185`)
 
 ## What it deliberately doesn't do
-- No exponential backoff — fixed 60s foreground cadence (`PushFlusher.swift`, `docs/sync.md` § "Cadence")
-- No background flushing — loop runs only while `Task` is alive; app backgrounding eventually kills it
-- No dead-letter queue — items retry forever until 2xx or user action (`open-questions.md` has no entry for this; not built)
-- No retention cap on local queue (`PushQueueStoreImpl` — no pruning)
-- No priority ordering — strict FIFO by `enqueuedAt` (`PushQueueStoreImpl.swift:48`). Telemetry and set_logs interleave by insert time.
-- Does not delete telemetry events after successful push from the `EventModel` store — see `open-questions.md` § "Telemetry ring buffer is durable but un-pruned beyond the cap"
-- PushFlusher does NOT fire an immediate flush on `start()` — sleeps first (`PushFlusher.swift:52-61`)
+- No background flushing — loop runs only while `Task` is alive; app backgrounding eventually kills it.
+- No retention cap on local queue beyond dead-letter. `PushQueueStoreImpl` prunes undecodable rows on startup (bug-055) but doesn't trim by age.
+- Does not delete telemetry events after successful push from the `EventModel` store — see `open-questions.md` § "Telemetry ring buffer is durable but un-pruned beyond the cap".
+- PushFlusher does NOT fire an immediate flush on `start()` — sleeps first.
+
+## What it does have now (bug-060)
+- **Exponential backoff** via `PushBackoff.schedule = [10, 30, 60, 120, 300]`s. `PushFlusher` consults the schedule against the consecutive-failure counter.
+- **Dead-letter after 5 consecutive non-401 4xx.** Drops the item and emits `execution.push_item_dead_lettered` with `setLogID` / `workoutID` / `userParameterID` correlation id so the event can be joined to the dropped payload.
+- **Priority-weighted FIFO** (bug-056): `peek` sorts by `(priority, enqueuedAt)`. `results` (SetLog / status / UserParameter) are priority 0; `telemetry` is priority 1. Telemetry backlog can't starve set_log pushes.
+- **Logical dedup** (bug-055): dedup on `SetLog.id` / `(workoutID, status)` / `UserParameter.id`. Idempotent enqueue also still replaces by `PushItemID`.
+- **Tolerant peek**: one unknown envelope kind (forward-versioned row) is skipped instead of throwing. Startup sweep via `pruneUndecodableRows()` removes anything the decoder consistently rejects.
 
 ## Edge cases handled in code
 - 2xx → remove item, return `.pushed` (`PushQueue.swift:184-186`)
@@ -43,9 +47,10 @@ Durable SwiftData-backed FIFO queue for outbound writes. Three payload shapes: `
 - Telemetry events UUID-lowercased at encode time (`PushQueue.swift:243, :245, :249, :250`)
 
 ## Known issues / gaps
-- Fixed this session: `/api/sync/results` rejected all set_log pushes with 404 "workout_item not found" due to UUID case mismatch (Swift emits UPPERCASE, server stored lowercase). Fixed via `_UuidNormalizingBase` Pydantic mixin lowercasing all `id`/`*_id` fields. See `open-questions.md` § "Server FK lookup was UUID-case-sensitive".
-- Fixed this session: `saveAndDone()` did NOT enqueue the workout `status_update` on the auto-advance-to-complete path — server workout stayed `planned` forever. Fixed: `saveAndDone()` now calls `enqueueStatusCompleted(at:)` before `.save` wipes local state. Needs regression test. See `open-questions.md` § "Save & done didn't enqueue status_update".
-- Telemetry pipeline added this session — routes through this queue via `enqueueEvents`. In-flight work; narrow emit surface documented in `open-questions.md` § "Telemetry emit surface is narrow by design".
+- Closed: `/api/sync/results` UUID case mismatch (bug-004 / bug-030 / bug-031 / bug-045). Every outbound UUID routes through `UUID.wireID` (lowercase); server accepts only lowercase on input.
+- Closed: saveAndDone status_update (bug-005 / bug-006) with re-entrancy guard (bug-044).
+- Closed: unbounded retry / no priority ordering / no dedup / no backoff — all shipped in bug-060 + bug-056 + bug-055 + bug-044. See "What it does have now" above.
+- Closed: `.userParameter` idempotency (bug-044) — client-owned deterministic id (MD5 of `userID|key|observedAt`); server enforces tenant guard (403 on duplicate id from different user).
 - Open: `docs/sync.md` § "Offline completion atomicity" — set_logs and status_update are separate items; partial flush can leave server in "logs against active workout" state.
 - Open: no background-push — if user logs a set, locks phone, set never gets pushed until next foreground.
 

@@ -38,8 +38,16 @@ public typealias SetLogEnqueuer = @Sendable (SetLog) async -> Void
 
 /// Fire-and-forget hook invoked when the workout completes. Shell supplies
 /// this so the terminal `status_update` (and its `completed_at`) is enqueued
-/// alongside the final set_logs.
-public typealias StatusEnqueuer = @Sendable (WorkoutID, WorkoutStatus, Date?) async -> Void
+/// alongside the final set_logs. The trailing `String?` carries the user-
+/// authored post-workout note so the server becomes authoritative for the
+/// value — without it the next `sync/pull` overwrote the freshly-typed note
+/// with the server's stale value.
+public typealias StatusEnqueuer = @Sendable (
+    WorkoutID,
+    WorkoutStatus,
+    Date?,
+    String?
+) async -> Void
 
 /// Fire-and-forget hook invoked after `.complete` is dispatched. Shell
 /// supplies this so the push queue drains immediately rather than waiting
@@ -104,12 +112,14 @@ public final class ExecutionViewModel {
 
     /// The current autoreg proposal, if any. Set by `logSet` when the
     /// driver returns one; cleared by `acceptAutoreg` / `undoAutoreg` /
-    /// `advance`.
-    public private(set) var currentProposal: AutoregProposal?
+    /// `advance`. `internal(set)` so the `+LogCardioSet.swift` extension
+    /// can clear a stale proposal when a cardio log fires — cardio
+    /// drivers never surface a new one, so the cleanup is unconditional.
+    public internal(set) var currentProposal: AutoregProposal?
 
     /// Item the current proposal targets. Kept alongside the proposal
     /// so `acceptAutoreg`/`undoAutoreg` operate on the right item.
-    public private(set) var currentProposalItemID: UUID?
+    public internal(set) var currentProposalItemID: UUID?
 
     /// Test-observable counter incremented every time `tickBlockTimer()`
     /// fires. Used by bug-042 regression tests to prove the view's
@@ -117,6 +127,19 @@ public final class ExecutionViewModel {
     /// read it synchronously after driving the timer publisher; regular
     /// view rendering shouldn't depend on it.
     internal(set) public var tickCallCount: Int = 0
+
+    /// Wall-clock stamp of the most recent `.enterRest` mutation dispatched
+    /// through `apply(_:)`. Used by `restDurationSeconds` in the EMOM case
+    /// to compute the ring's TOTAL as `restEndsAt - restWindowStartedAt`
+    /// (the real rest window between log-time and the next minute boundary)
+    /// rather than the raw `interval_sec`, which would start the ring
+    /// visually depleted for any non-zero log offset inside the minute.
+    ///
+    /// Intentionally NOT persisted (lives only on the VM). A kill-then-
+    /// relaunch that lands mid-EMOM-rest has no log-time to recover; the
+    /// getter falls back to `interval_sec` so the ring still renders,
+    /// matching pre-fix behavior for that rare path.
+    var restWindowStartedAt: Date?
 
     public let context: WorkoutContext
 
@@ -137,8 +160,30 @@ public final class ExecutionViewModel {
     /// Rest duration for the current cursor (in seconds). Used by the
     /// view model itself to fire `.enterRest`; exposed here so the view
     /// can render the ring's total.
+    ///
+    /// EMOM branch: the REAL rest window for an EMOM log is
+    /// `restEndsAt - log_time` — not the raw `interval_sec` the driver
+    /// returns. A log at 0:15 has a 45s window, not 60s; using the driver's
+    /// `interval_sec` for the ring total makes the ring render already-
+    /// partially-depleted at log-time (elapsed = total - remaining = 60 -
+    /// 45 = 15 → 25% at t=0). Branching here keeps the fix narrow — the
+    /// VM's internal use of `driver.restDuration` for non-EMOM modes is
+    /// untouched, and other modes fall through to the driver's native value.
+    ///
+    /// Fallback: when `restWindowStartedAt` is nil (no rest has been
+    /// entered in this VM's lifetime, or the VM was just restored from
+    /// disk), the EMOM path falls through to the driver's `interval_sec`.
+    /// This preserves pre-fix rendering for the restored-mid-rest case
+    /// where we can't recover the real log-time.
     public var restDurationSeconds: TimeInterval {
-        driver.restDuration(state: state, context: context)
+        let b = state.cursor.blockIndex
+        if let block = context.block(at: b),
+           block.timingMode == .emom,
+           let endsAt = state.restEndsAt,
+           let startedAt = restWindowStartedAt {
+            return max(0, endsAt.timeIntervalSince(startedAt))
+        }
+        return driver.restDuration(state: state, context: context)
     }
 
     /// The last-logged SetPlan for the current cursor (used by the Rest
@@ -183,6 +228,28 @@ public final class ExecutionViewModel {
     /// default so tests and previews don't need to wire one.
     let telemetry: TelemetryEmitter
 
+    // MARK: - Persistence pipeline (owned by +PersistencePipeline.swift)
+    //
+    // These stored properties are owned and driven exclusively by the
+    // `+PersistencePipeline.swift` extension. They live on the VM instead
+    // of in a module-level `[ObjectIdentifier: …]` side-table so a
+    // deallocated VM can't strand entries keyed on an address that the
+    // allocator later reuses for a different VM (which would bind a
+    // fresh VM to a destroyed `SessionStore` and inherit a stale
+    // revision counter). `internal` matches the access level of the
+    // other dependency-ish properties above so the extension can read
+    // and write them.
+
+    /// Lazy-built serial channel for `SessionStore` writes. Nil until
+    /// `persistencePipelineHandle()` materializes it on first use; stays nil
+    /// forever for VMs constructed without a `sessionStore` (test path).
+    var persistencePipeline: SessionPersistencePipeline?
+
+    /// Monotonic revision stamped on every enqueued persistence op.
+    /// Read/written on the main actor only (the VM is `@MainActor`),
+    /// so increments are race-free without a lock.
+    var persistenceRevision: UInt64 = 0
+
     // MARK: - Init
 
     public init(
@@ -201,7 +268,14 @@ public final class ExecutionViewModel {
         self.push = push
         self.localCompletionWriter = localCompletionWriter
         self.telemetry = telemetry
-        self.state = SessionSeeder.seed(context: context)
+        // Seed through the normalization-aware path so any seed-time drops
+        // (tabata multi-item collapse today) surface as telemetry. The
+        // pure `SessionSeeder.seed(context:)` stays side-effect-free for
+        // tests that exercise the seeder directly; the telemetry emit
+        // runs after all stored props are set, on `+Push.swift`.
+        let seed = SessionSeeder.seedWithNormalization(context: context)
+        self.state = seed.state
+        emitSeedNormalizationTelemetry(seed.tabataCollapses)
     }
 
     // MARK: - Intents
@@ -214,6 +288,9 @@ public final class ExecutionViewModel {
     /// duration. See `RestBlockDriver` for the cursor-model rationale.
     public func start() {
         emitSessionMutation("start")
+        // `apply(_:)` stamps `state.workStartedAt = clock.now` on the
+        // `.start` mutation — so the FIRST set's `startedAt` anchor is
+        // the session-start instant, not nil. See `SessionState.workStartedAt`.
         apply([.start])
         enterRestIfZeroItemBlock()
         enterBlockTimerIfNeeded()
@@ -233,25 +310,24 @@ public final class ExecutionViewModel {
         guard let item = context.item(at: c.blockIndex, itemIndex: c.itemIndex) else {
             return
         }
-        let logMutation: SessionMutation = .logSet(
+        let event = SetLogEvent(
             itemID: item.id,
             setIndex: c.setIndex,
             loggedReps: reps,
             loggedRir: rir
         )
+        let logMutation: SessionMutation = .logSet(
+            itemID: item.id,
+            setIndex: c.setIndex,
+            loggedReps: reps,
+            loggedRir: rir,
+            now: clock.now
+        )
+        let prescribedLoadKg = prescribedLoadForLog(itemID: item.id, setIndex: c.setIndex)
         // Compute autoreg proposal against the *pre-log* state so the
         // driver sees the prescribed reps/load (the log mutation
         // overwrites those with the observed values).
-        let outcome = driver.onSetLogged(
-            state: state,
-            context: context,
-            event: SetLogEvent(
-                itemID: item.id,
-                setIndex: c.setIndex,
-                loggedReps: reps,
-                loggedRir: rir
-            )
-        )
+        let outcome = driver.onSetLogged(state: state, context: context, event: event)
         let postLogState = SessionReducer.reduce(state, logMutation)
         apply(buildLogMutations(
             logMutation: logMutation,
@@ -259,20 +335,12 @@ public final class ExecutionViewModel {
             item: item,
             postLogState: postLogState
         ))
-        currentProposal = outcome.proposal
-        currentProposalItemID = outcome.proposal == nil ? nil : item.id
-        emitSessionMutation("logSet")
-        if outcome.proposal != nil {
-            emitAutoreg("execution.autoreg_proposed")
-        }
-        enqueueLoggedSet(item: item, setIndex: c.setIndex, reps: reps, rir: rir)
-        // After a log, the cursor may have auto-advanced (restDuration=0
-        // → buildLogMutations appended `.advanceFromRest`). Re-derive
-        // block / Tabata timers so crossing a block boundary via a
-        // zero-rest mode (AMRAP / ForTime / Continuous) refreshes them.
-        enterRestIfZeroItemBlock()
-        enterTabataWorkWindowIfNeeded()
-        enterBlockTimerIfNeeded()
+        handleLogSetSideEffects(
+            item: item,
+            event: event,
+            outcome: outcome,
+            prescribedLoadKg: prescribedLoadKg
+        )
     }
 
     /// Accept the current proposal. The apply has already happened in
@@ -288,51 +356,10 @@ public final class ExecutionViewModel {
     /// Undo the current proposal: revert the applied load on remaining
     /// sets and set `autoregHeld` on the item so subsequent logs don't
     /// re-propose. Per `docs/prescription.md` § "Autoreg + manual edit".
+    /// The reversal body lives in `ExecutionViewModel+Autoreg.swift` so
+    /// the class stays under SwiftLint's `type_body_length` cap.
     public func undoAutoreg() {
-        guard let proposal = currentProposal,
-              let itemID = currentProposalItemID else { return }
-        emitAutoreg("execution.autoreg_undo")
-
-        // To revert, apply the inverse proposal — flip direction and
-        // restore the prescribed loads. We derive the original load per
-        // set from the prescription seed: anything that was touched by
-        // this proposal's apply had `adjust` set to the proposal's
-        // direction. We rebuild those sets from the seeded plan.
-        guard let itemLog = state.items.first(where: { $0.itemID == itemID }),
-              let item = findItem(id: itemID, in: context) else {
-            currentProposal = nil
-            currentProposalItemID = nil
-            return
-        }
-
-        let originals = SessionSeeder.seedSets(for: item)
-        var revertMutations: [SessionMutation] = []
-
-        let proposalDirection: SetPlan.Adjust = proposal.direction == .up ? .up : .down
-        for set in itemLog.sets where !set.done && set.adjust == proposalDirection {
-            if let original = originals.first(where: { $0.setIndex == set.setIndex }) {
-                // Use editPendingSet to restore load+reps on the
-                // non-done rows. Note that editPendingSet marks the set
-                // as `.manual` — but we want the revert to look pristine
-                // so autoreg can re-trigger later if the hold is ever
-                // lifted. We work around this by writing a custom
-                // revert via the reducer's direct update path. For now
-                // we accept the `.manual` tag as a side-effect: the
-                // hold flag makes it moot since no further proposals
-                // will fire this session.
-                revertMutations.append(.editPendingSet(
-                    itemID: itemID,
-                    setIndex: set.setIndex,
-                    loadKg: original.loadKg,
-                    reps: nil
-                ))
-            }
-        }
-        revertMutations.append(.holdAutoreg(itemID: itemID))
-        apply(revertMutations)
-
-        currentProposal = nil
-        currentProposalItemID = nil
+        runAutoregUndo()
     }
 
     /// Advance the cursor: rest → active (next set) or rest → complete.
@@ -343,6 +370,10 @@ public final class ExecutionViewModel {
     /// the cursor-model rationale.
     public func advance() {
         emitSessionMutation("advance")
+        // `apply(_:)` stamps `state.workStartedAt = clock.now` on the
+        // `.advanceFromRest` mutation — next set's `startedAt` reflects
+        // "when rest ended", NOT "when prior set completed". See
+        // `SessionState.workStartedAt`.
         apply([.advanceFromRest])
         // Any lingering proposal is moot on advance — the next set is a
         // fresh log.
@@ -370,43 +401,11 @@ public final class ExecutionViewModel {
         apply([.complete])
     }
 
-    /// Save & done. Clears the persisted session and returns to Today.
-    ///
-    /// Before the reducer's `.save` wipes the in-memory log, we hand the
-    /// completed workout + set_logs to `localCompletionWriter` (if wired).
-    /// That writes them into the local `WorkoutCache` so the History tab
-    /// sees the workout immediately — the push queue is the authoritative
-    /// server-side path, but the user shouldn't have to wait for a pull
-    /// to see their own just-completed workout. See
-    /// `docs/open-questions.md` § "Execution `save & done` doesn't persist
-    /// the completed workout to local cache".
-    ///
-    /// Capture inputs from the Complete screen (bug-011 / bug-012):
-    ///   - `note`: workout-level note. Trimmed + empty-collapsed; when
-    ///     present it replaces the in-memory state's `note` and lands on
-    ///     the completed `Workout.notes` in the local cache.
-    ///   - `bodyweightKg`: optional body weight captured at completion.
-    ///     When present, a fresh `UserParameter` is fired through the
-    ///     `onUserParameterChanged` push hook (the push queue routes it
-    ///     to `POST /api/user-parameters`). Nil means no capture, no
-    ///     enqueue.
-    ///
-    /// Defaulted parameters preserve the existing call-sites in tests
-    /// that predate the capture inputs.
-    ///
-    /// TODO(open-question): dictation-mic capture for the note is a
-    /// deferred polish item; the TextField is the minimum UI that
-    /// unblocks bug-011 / bug-012. See `docs/open-questions.md` and
-    /// `docs/features/save-and-done.md` § S11 / S12.
-    public func saveAndDone(
-        note: String? = nil,
-        bodyweightKg: Double? = nil
-    ) {
-        // Emit the terminal status_update BEFORE writing + wiping the
-        // session — see `performSaveAndDone` for the ordering rationale.
-        // Split out so the class body stays under SwiftLint's cap.
-        performSaveAndDone(note: note, bodyweightKg: bodyweightKg)
-    }
+    // `saveAndDone` lives in `ExecutionViewModel+SaveAndDone.swift`.
+    // Extracting the public entry point there lets the re-entrancy guard
+    // (bug: double-tap on End enqueues bodyweight twice) sit next to the
+    // function it protects without bloating this class body or colliding
+    // with the persistence-ordering work in `+Persistence.swift`.
 
     /// Correctively edit a past (logged) set. Does NOT retrigger autoreg.
     /// After the reducer mutation applies, pushes the updated `SetLog`

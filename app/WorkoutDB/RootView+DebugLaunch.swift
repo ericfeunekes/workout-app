@@ -57,7 +57,7 @@ extension RootView {
             context: context,
             localCompletionWriter: { [cache, historyVM, todayVM, todayLoader] workout, setLogs in
                 try? await cache.saveWorkout(workout)
-                try? await cache.saveSetLogs(setLogs)
+                try? await cache.saveSetLogs(setLogs, workoutID: workout.id)
                 await todayVM.reload(using: todayLoader)
                 await historyVM.load()
             },

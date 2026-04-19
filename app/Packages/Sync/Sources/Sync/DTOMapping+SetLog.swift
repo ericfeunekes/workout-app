@@ -69,9 +69,9 @@ extension DTOMapping {
         // swiftlint:disable:next force_unwrapping
         let wireUnit = log.weightUnit.map { WorkoutDBSchema.WeightUnit(rawValue: $0.rawValue)! }
         return WorkoutDBSchema.SetLog(
-            id: log.id.uuidString,
-            workoutItemId: log.workoutItemID.uuidString,
-            performedExerciseId: log.performedExerciseID?.uuidString,
+            id: log.id.wireID,
+            workoutItemId: log.workoutItemID.wireID,
+            performedExerciseId: log.performedExerciseID?.wireID,
             setIndex: log.setIndex,
             reps: log.reps,
             weight: log.weight,

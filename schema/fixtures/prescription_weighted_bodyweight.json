@@ -2,6 +2,7 @@
   "sets": 4,
   "reps": 6,
   "load_kg": 20,
+  "weight_unit": "kg",
   "target_rir": 2,
   "autoreg": {
     "overshoot_at": 2,

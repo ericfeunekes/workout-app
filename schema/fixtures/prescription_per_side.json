@@ -2,5 +2,6 @@
   "sets": 3,
   "reps": 10,
   "per_side": true,
-  "load_kg": 20
+  "load_kg": 20,
+  "weight_unit": "kg"
 }

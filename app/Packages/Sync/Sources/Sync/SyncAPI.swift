@@ -43,7 +43,11 @@ public final class SyncAPI: Sendable {
     }
 
     /// One convenience init: build a `PullService` + `PushQueue` over the
-    /// same transport, and a fresh `ConnectionManager`.
+    /// same transport, and a fresh `ConnectionManager`. The telemetry
+    /// emitter is threaded into `PushQueue` so the dead-letter path (see
+    /// `PushQueue.handlePersistent4xx`) can record
+    /// `execution.push_item_dead_lettered` events without needing its own
+    /// emitter injection point at the call site.
     public convenience init(
         transport: HTTPTransport,
         store: PushQueueStore,
@@ -53,7 +57,12 @@ public final class SyncAPI: Sendable {
     ) {
         self.init(
             pull: PullService(transport: transport),
-            push: PushQueue(store: store, transport: transport, clock: clock),
+            push: PushQueue(
+                store: store,
+                transport: transport,
+                clock: clock,
+                telemetry: telemetry
+            ),
             connection: ConnectionManager(),
             tokenProvider: tokenProvider,
             telemetry: telemetry
@@ -107,15 +116,22 @@ public final class SyncAPI: Sendable {
     }
 
     /// Enqueue a workout status change. See `docs/sync.md` § "Push protocol".
+    ///
+    /// `notes` rides on the terminal status push so the server is
+    /// authoritative for the user-authored post-workout note (without
+    /// this the next `sync/pull` would overwrite a freshly-typed note
+    /// with the server's stale value). Non-terminal flips pass nil.
     public func pushStatus(
         workoutID: WorkoutID,
         status: CoreDomain.WorkoutStatus,
-        completedAt: Date?
+        completedAt: Date?,
+        notes: String? = nil
     ) async throws {
         try await push.enqueueStatusUpdate(
             workoutID: workoutID,
             status: status,
-            completedAt: completedAt
+            completedAt: completedAt,
+            notes: notes
         )
     }
 

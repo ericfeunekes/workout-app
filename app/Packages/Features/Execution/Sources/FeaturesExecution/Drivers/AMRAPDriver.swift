@@ -79,7 +79,7 @@ public struct AMRAPDriver: TimingDriver {
         // Reps and load come from the authored prescription — AMRAP items
         // typically seed as a single SetPlan row (setIndex=1) regardless
         // of how many rounds the user ends up completing.
-        let (reps, loadKg) = prescribedRepsAndLoad(for: item)
+        let (reps, loadKg, unit) = prescribedRepsAndLoad(for: item)
 
         let exerciseName = context.exerciseName(
             for: item,
@@ -87,12 +87,12 @@ public struct AMRAPDriver: TimingDriver {
         )
 
         // Bodyweight (no load authored) renders as "BW"; anything else
-        // formats via the shared helper so fractional plates and kg units
-        // match the straight-sets display.
+        // formats via the shared helper so fractional plates and unit
+        // suffix match the straight-sets display.
         let loadDisplay: String
         let heroLoadKg: Double?
         if let kg = loadKg {
-            loadDisplay = formatLoad(kg: kg)
+            loadDisplay = formatLoad(weight: kg, unit: LoadUnit(setPlanUnit: unit))
             heroLoadKg = kg
         } else {
             loadDisplay = "BW"
@@ -147,31 +147,31 @@ public struct AMRAPDriver: TimingDriver {
     /// blow up. Unknown shapes collapse to (0, nil).
     private func prescribedRepsAndLoad(
         for item: WorkoutItem
-    ) -> (reps: Int, loadKg: Double?) {
+    ) -> (reps: Int, loadKg: Double?, unit: WeightUnit) {
         switch parser.parse(prescriptionJSON: item.prescriptionJSON) {
         case .success(let p):
             return repsAndLoad(from: p)
         case .failure:
-            return (0, nil)
+            return (0, nil, .lb)
         }
     }
 
     private func repsAndLoad(
         from prescription: Prescription
-    ) -> (reps: Int, loadKg: Double?) {
+    ) -> (reps: Int, loadKg: Double?, unit: WeightUnit) {
         switch prescription {
-        case .straightSets(_, let reps, let loadKg, _, _, _, _):
-            return (intReps(from: reps), loadKg)
+        case .straightSets(_, let reps, let loadKg, let unit, _, _, _, _):
+            return (intReps(from: reps), loadKg, unit)
         case .bodyweight(_, let reps, _):
-            return (reps, nil)
-        case .cluster(_, let reps, let loadKg, _, _, _):
-            return (reps, loadKg)
-        case .repRange(_, _, let repsMax, let loadKg, _, _):
-            return (repsMax, loadKg)
-        case .warmup(_, let reps, let loadKg):
-            return (reps, loadKg)
+            return (reps, nil, .lb)
+        case .cluster(_, let reps, let loadKg, let unit, _, _, _):
+            return (reps, loadKg, unit)
+        case .repRange(_, _, let repsMax, let loadKg, let unit, _, _):
+            return (repsMax, loadKg, unit)
+        case .warmup(_, let reps, let loadKg, let unit):
+            return (reps, loadKg, unit)
         case .setsDetail, .percentOf1RM, .amrapToken, .empty:
-            return (0, nil)
+            return (0, nil, .lb)
         }
     }
 

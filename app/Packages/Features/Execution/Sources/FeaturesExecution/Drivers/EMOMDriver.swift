@@ -71,10 +71,10 @@ public struct EMOMDriver: TimingDriver {
             performedExerciseID: itemLog.performedExerciseID
         )
 
-        let (reps, loadKg) = prescribed(for: item)
+        let (reps, loadKg, unit) = prescribed(for: item)
         let intervalCount = resolveIntervalCount(state: state, context: context)
 
-        let loadDisplay = formatLoad(kg: loadKg)
+        let loadDisplay = formatLoad(weight: loadKg, unit: LoadUnit(setPlanUnit: unit))
         let repsDisplay = reps.map { String($0) } ?? "—"
 
         return ActiveContent(
@@ -137,25 +137,25 @@ public struct EMOMDriver: TimingDriver {
     /// them to `.straightSets(sets: nil, reps: .count(n), loadKg: kg, ...)`.
     /// Defensive fallbacks on other shapes keep the driver from
     /// crashing on unexpected authoring.
-    private func prescribed(for item: WorkoutItem) -> (reps: Int?, loadKg: Double?) {
+    private func prescribed(for item: WorkoutItem) -> (reps: Int?, loadKg: Double?, unit: WeightUnit) {
         switch parser.parse(prescriptionJSON: item.prescriptionJSON) {
         case .success(let p):
             switch p {
-            case .straightSets(_, let reps, let loadKg, _, _, _, _):
+            case .straightSets(_, let reps, let loadKg, let unit, _, _, _, _):
                 let repCount: Int? = {
                     guard let rc = reps, case .count(let n) = rc else { return nil }
                     return n
                 }()
-                return (repCount, loadKg)
+                return (repCount, loadKg, unit)
             case .bodyweight(_, let reps, _):
-                return (reps, nil)
-            case .amrapToken(let loadKg, _):
-                return (nil, loadKg)
+                return (reps, nil, .lb)
+            case .amrapToken(let loadKg, let unit, _):
+                return (nil, loadKg, unit)
             default:
-                return (nil, nil)
+                return (nil, nil, .lb)
             }
         case .failure:
-            return (nil, nil)
+            return (nil, nil, .lb)
         }
     }
 

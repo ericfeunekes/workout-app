@@ -173,6 +173,111 @@ def test_push_set_logs_and_status(client, test_engine, test_user_id) -> None:
     assert detail["status"] == "completed"
 
 
+def test_workout_status_update_persists_notes(client, test_engine, test_user_id) -> None:
+    """Terminal status push must persist `notes` so the server is authoritative.
+
+    Regression: the iOS Complete screen's note used to land ONLY in the
+    local cache. The workout's `updated_at` still bumped (status flipped to
+    completed), so the next incremental sync_pull re-materialized the
+    Workout with the server's nil `notes` and DomainMapping overwrote the
+    cache's freshly-typed note. Fix: carry `notes` on WorkoutStatusUpdate
+    so the server stores it, which keeps the next pull aligned with what
+    the user typed.
+    """
+    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
+    future_id = _create_future_workout(client, exercise_id)
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "set_logs": [],
+            "status_updates": [
+                {
+                    "workout_id": future_id,
+                    "status": "completed",
+                    "completed_at": "2026-04-20T08:00:00Z",
+                    "notes": "leg day PR!",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+    detail = client.get(f"/api/workouts/{future_id}").json()
+    assert detail["status"] == "completed"
+    assert detail["notes"] == "leg day PR!"
+
+    # A second pull of the same workout must still carry the note —
+    # previous bug was the pull overwriting the local cache's value.
+    pulled = client.get("/api/sync/pull").json()
+    pulled_workout = next(w for w in pulled["workouts"] if w["id"] == future_id)
+    assert pulled_workout["notes"] == "leg day PR!"
+
+
+def test_workout_status_update_none_notes_leaves_existing_alone(
+    client, test_engine, test_user_id
+) -> None:
+    """Status push without `notes` (or with `notes=null`) MUST NOT clobber
+    an existing server-side note. Non-terminal flips (e.g. `active`) pass
+    nil; those must be no-ops on the notes column.
+    """
+    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
+    future_id = _create_future_workout(client, exercise_id)
+
+    # First push: record a note via the completed push.
+    client.post(
+        "/api/sync/results",
+        json={
+            "set_logs": [],
+            "status_updates": [
+                {
+                    "workout_id": future_id,
+                    "status": "completed",
+                    "completed_at": "2026-04-20T08:00:00Z",
+                    "notes": "felt strong",
+                }
+            ],
+        },
+    )
+    assert client.get(f"/api/workouts/{future_id}").json()["notes"] == "felt strong"
+
+    # Second push without `notes` in the body — server keeps the existing value.
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "set_logs": [],
+            "status_updates": [
+                {
+                    "workout_id": future_id,
+                    "status": "completed",
+                    "completed_at": "2026-04-20T08:05:00Z",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    assert client.get(f"/api/workouts/{future_id}").json()["notes"] == "felt strong"
+
+    # Explicit null behaves the same — "not provided" and "null" both mean
+    # "don't touch the existing value".
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "set_logs": [],
+            "status_updates": [
+                {
+                    "workout_id": future_id,
+                    "status": "completed",
+                    "completed_at": "2026-04-20T08:06:00Z",
+                    "notes": None,
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+    assert client.get(f"/api/workouts/{future_id}").json()["notes"] == "felt strong"
+
+
 def test_pull_since_skips_user_parameters_already_seen(client, test_engine, test_user_id) -> None:
     """user_parameters sync must respect `since` — the app already has older rows."""
     with Session(test_engine) as session:
@@ -308,6 +413,78 @@ def test_push_set_logs_is_idempotent_by_id(client, test_engine, test_user_id) ->
         assert len(rows) == 1
         assert rows[0].id == log_id
         assert rows[0].weight == 102.5
+
+
+def test_set_log_round_trips_duration_distance_hr_cadence(
+    client, test_engine, test_user_id
+) -> None:
+    """Cardio fields (`duration_sec`, `distance_m`, `hr_avg_bpm`, `cadence_avg_spm`,
+    `started_at`) must round-trip cleanly through /api/sync/results and
+    /api/sync/pull. These are the columns the iOS `IntervalsDriver` /
+    `ContinuousDriver` now populate via `.logCardioSet`.
+    """
+    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
+    future_id = _create_future_workout(client, exercise_id)
+    item_id = client.get(f"/api/workouts/{future_id}").json()["blocks"][0][
+        "workout_items"
+    ][0]["id"]
+
+    log_id = "cadec1a0-0000-4000-8000-000000000001"
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "set_logs": [
+                {
+                    "id": log_id,
+                    "workout_item_id": item_id,
+                    "set_index": 1,
+                    # No reps / weight / rir — cardio row.
+                    "duration_sec": 96.5,
+                    "distance_m": 400.0,
+                    "hr_avg_bpm": 165,
+                    "cadence_avg_spm": 184,
+                    "started_at": "2026-04-20T07:29:00Z",
+                    "completed_at": "2026-04-20T07:30:36Z",
+                }
+            ],
+            "status_updates": [
+                {
+                    "workout_id": future_id,
+                    "status": "completed",
+                    "completed_at": "2026-04-20T08:00:00Z",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+    with Session(test_engine) as session:
+        row = session.query(SetLog).filter_by(id=log_id).one()
+        assert row.duration_sec == 96.5
+        assert row.distance_m == 400.0
+        assert row.hr_avg_bpm == 165
+        assert row.cadence_avg_spm == 184
+        assert row.reps is None
+        assert row.weight is None
+        assert row.rir is None
+        assert row.started_at is not None
+
+    # The pull path must surface every cardio column. `last_performed`
+    # is the path the iOS `LastPerformed` UI reads — if cardio columns
+    # dropped anywhere between ORM and wire this test would fail on
+    # the Read-side schema.
+    body = client.get("/api/sync/pull").json()
+    last = next(
+        lp for lp in body["last_performed"] if lp["exercise_id"] == exercise_id
+    )
+    log = next(sl for sl in last["last_set_logs"] if sl["id"] == log_id)
+    assert log["duration_sec"] == 96.5
+    assert log["distance_m"] == 400.0
+    assert log["hr_avg_bpm"] == 165
+    assert log["cadence_avg_spm"] == 184
+    assert log["reps"] is None
+    assert log["weight"] is None
+    assert log["started_at"] == "2026-04-20T07:29:00Z"
 
 
 def test_pull_last_performed_covers_alternatives(client, test_engine, test_user_id) -> None:

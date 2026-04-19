@@ -17,21 +17,30 @@ enum ScriptedOutcome: Sendable {
 actor ScriptedTransportStore {
     private var getOutcomes: [ScriptedOutcome]
     private var postOutcomes: [ScriptedOutcome]
+    /// Paths requested via GET, in order. Tests use this to assert that
+    /// e.g. AppBootstrap fires exactly one `/api/sync/pull` per run —
+    /// the invariant that FirstRun's scope-boundary fix preserves.
+    private(set) var getPaths: [String] = []
+    private(set) var postPaths: [String] = []
 
     init(getOutcomes: [ScriptedOutcome], postOutcomes: [ScriptedOutcome]) {
         self.getOutcomes = getOutcomes
         self.postOutcomes = postOutcomes
     }
 
-    func nextGet() -> ScriptedOutcome {
+    func nextGet(path: String) -> ScriptedOutcome {
+        getPaths.append(path)
         guard !getOutcomes.isEmpty else { return .ok(Data()) }
         return getOutcomes.removeFirst()
     }
 
-    func nextPost() -> ScriptedOutcome {
+    func nextPost(path: String) -> ScriptedOutcome {
+        postPaths.append(path)
         guard !postOutcomes.isEmpty else { return .ok(Data()) }
         return postOutcomes.removeFirst()
     }
+
+    func snapshotGetPaths() -> [String] { getPaths }
 }
 
 struct ScriptedTransport: HTTPTransport {
@@ -49,7 +58,7 @@ struct ScriptedTransport: HTTPTransport {
         query: [(String, String)],
         bearerToken: String
     ) async throws -> HTTPResponse {
-        try resolve(await store.nextGet())
+        try resolve(await store.nextGet(path: path))
     }
 
     func post(
@@ -57,7 +66,7 @@ struct ScriptedTransport: HTTPTransport {
         body: Data,
         bearerToken: String
     ) async throws -> HTTPResponse {
-        try resolve(await store.nextPost())
+        try resolve(await store.nextPost(path: path))
     }
 
     private func resolve(_ outcome: ScriptedOutcome) throws -> HTTPResponse {

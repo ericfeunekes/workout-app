@@ -39,18 +39,19 @@ On the `.complete` route the user sees a per-exercise ledger, an optional body-w
 - Does NOT write the note back up to the server yet — it lands on the local-cache workout row only. The server's `Workout.notes` column already exists; the push path will be wired when we revisit the workout-completion sync protocol.
 
 ## Edge cases handled in code
-- Auto-advance path vs explicit End button both route through `saveAndDone` for the server status update (fixed this session — `ExecutionViewModel.swift:341`, and `docs/open-questions.md:282`). Before the fix, the auto-advance path left the server's workout row `planned` forever.
+- Auto-advance path vs explicit End button both route through `saveAndDone` for the server status update (R2.5, `docs/open-questions.md:282`). Before the fix, the auto-advance path left the server's workout row `planned` forever. `complete()` itself no longer enqueues — the terminal push is owned exclusively by `saveAndDone` so force-complete + save-and-done no longer double-pushes (`ExecutionViewModel.swift:393-405`).
+- Re-entrancy guard on `saveAndDone` (R2.11 — `ExecutionViewModel+SaveAndDone.swift`): a rapid double-tap or a SwiftUI re-render that fires the tap action twice is dropped on the floor. First call sets an `@MainActor`-isolated in-flight marker (weak-to-strong `NSMapTable`); subsequent calls see the marker and return silently. Without this, a duplicate bodyweight `UserParameter` row would land in the append-only `user_parameters` table forever. Views also bind `.disabled(viewModel.saveAndDoneInFlight)` as belt-and-suspenders.
 - `localCompletionWriter` is `nil` in the pure-offline test path (`ExecutionViewModel.swift:163`) — `writeCompletionToLocalCache` returns early (`ExecutionViewModel+Push.swift:109`).
 - `SetLog` is only emitted for sets with `set.done == true` (`ExecutionViewModel+Push.swift:127`).
-- Each cache-write SetLog gets a fresh `UUID()` (`ExecutionViewModel+Push.swift:129`) — note this means local-cache ids do NOT match push-queue ids enqueued earlier per-set (`ExecutionViewModel+Push.swift:60`).
+- Each cache-write SetLog is stamped with the deterministic `setLogID(itemID:setIndex:)` UUID (`ExecutionViewModel+Push.swift:584`) — same derivation used by the per-set push enqueue, so local-cache ids MATCH push-queue ids for the same `(itemID, setIndex)` (R1.3b-v2 — see `ExecutionViewModel+Push.swift:45`).
 - Push enqueuer (`syncAPI.pushStatus`) is wrapped in `try?` (`AppBootstrap.swift:196`) — network errors are swallowed; the persistent push queue will retry.
 - Local cache writes are wrapped in `try?` (`AppBootstrap.swift:207-208`) — a failed local write just means History waits for the next pull.
 
 ## Known issues / gaps
-- `docs/open-questions.md:282` "Save & done didn't enqueue status_update on the auto-advance path" — fixed this session; needs a regression test asserting the enqueuer is called exactly once from `saveAndDone()`.
-- **Body-weight capture** (`app/README.md:142`): not built. Open question whether the `user_parameters` push is meant to land on Complete screen, during FirstRun, in Settings, or from HealthKit.
-- **Workout note**: not built on Complete screen. `SessionState.note` would need a TextField + a mutation to populate it.
-- SetLog id divergence between per-set push enqueue and batch local-cache write is not obviously wrong (push queue is authoritative server-side) but deserves a test pin.
+- **Body-weight capture**: wired on the Complete screen (S11). Client-owned deterministic id (MD5 of `userID|key|observedAt`) + server tenant guard (403 on duplicate id across users) close the replay-idempotency hole (bug-044). Re-entrancy guard on `saveAndDone` collapses double-tap into a single pipeline run.
+- **Workout note server push**: now wired. The `.statusUpdate` push payload carries the trimmed workout note; server persists it on `Workout.notes` (previously pulls overwrote it with the planned-template note). Regression covered by server status-push note-persistence test.
+- **Dictation-mic on the note TextField**: deferred (polish item, documented in the `saveAndDone` TODO comment).
+- SetLog id divergence between per-set push enqueue and batch local-cache write is **closed** — both paths derive the id deterministically from `(itemID, setIndex)` via `setLogID(...)` (R1.3b-v2 / bug-040). Pinned by `ExecutionViewModelTests` § local-cache-deterministic-setLogID assertions.
 
 ## QA scenarios
 
@@ -63,8 +64,8 @@ On the `.complete` route the user sees a per-exercise ledger, an optional body-w
 ### S2. Happy path — explicit End button → save & done
 - **setup:** Mid-workout (some sets logged, some not), push stack available.
 - **steps:** Tap End from the nav bar to force `.complete`; tap save & done.
-- **expected:** Both `complete()` AND `saveAndDone()` fire. Ledger reflects only the logged sets. `status_update` is NOT duplicated — review: `complete()` calls `enqueueStatusCompleted` once, `saveAndDone` calls it again.
-- **notes:** Double-enqueue is a known behavior on this path. Needs a pin test.
+- **expected:** `complete()` flips the route to `.complete` but does NOT enqueue a `status_update` (that responsibility moved to `saveAndDone` exclusively — `ExecutionViewModel.swift:393-405`). `saveAndDone()` then enqueues the single terminal `status_update`. Ledger reflects only the logged sets.
+- **notes:** Prior to R2.5, both `complete()` and `saveAndDone()` enqueued on the End path — double-push. The current invariant is "exactly one `status_update` per completed workout, sourced from `saveAndDone`."
 
 ### S3. Save & done with zero sets logged
 - **setup:** User taps Start, never logs a set, reaches `.complete` via the End button.
@@ -78,11 +79,11 @@ On the `.complete` route the user sees a per-exercise ledger, an optional body-w
 - **expected:** Route flips instantly. `status_update` enqueues to the persistent push queue. `onPushKick` fires but the flusher fails silently. Local cache write succeeds. History tab shows the workout.
 - **notes:** Next time connectivity returns, `PushFlusher` drains and server catches up.
 
-### S5. Rapid double-tap on save & done
+### S5. Rapid double-tap on save & done (R2.11)
 - **setup:** Normal completion.
 - **steps:** Tap save & done twice within ~100ms.
-- **expected:** First tap begins `.save`; second tap is either absorbed by the route flip (button no longer visible) or operates on a wiped state. No crash. **Unclear from code:** there is no explicit debounce; race depends on SwiftUI rendering cadence.
-- **notes:** Worth an instrumented test; `status_update` being enqueued twice is benign server-side (same workoutID + same status), but two fresh-UUID SetLog batches in local cache would double-render History — check.
+- **expected:** First tap flips `saveAndDoneInFlight` to `true` and runs the full path; the second tap hits the re-entrancy guard (`ExecutionViewModel+SaveAndDone.swift:104-108`) and returns silently. Exactly one `status_update`, exactly one bodyweight `UserParameter`, exactly one local-cache write.
+- **notes:** The guard is the correctness check; `.disabled(viewModel.saveAndDoneInFlight)` on the button is belt-and-suspenders. The `@MainActor`-isolated `NSMapTable` with weak VM keys auto-evicts so recycled `ObjectIdentifier`s can't leak a stale `true` across VM instances.
 
 ### S6. Server returns 404 on status_update (stale workoutID)
 - **setup:** Force the server to 404 the status push.

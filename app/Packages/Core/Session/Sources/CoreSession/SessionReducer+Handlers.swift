@@ -31,6 +31,7 @@ extension SessionReducer {
             restEndsAt: nil,
             blockEndsAt: nil,
             workEndsAt: nil,
+            intervalAnchorAt: nil,
             note: "",
             structure: freshStructure
         )
@@ -38,24 +39,100 @@ extension SessionReducer {
 
     static func applyLogSet(
         state: SessionState,
-        itemID: WorkoutItemID,
-        setIndex: Int,
-        loggedReps: Int,
-        loggedRir: Int?
+        input: LogSetInput
     ) -> SessionState {
-        updateSet(in: state, itemID: itemID, setIndex: setIndex) { old in
+        // `startedAt` is the working-set start instant: when the previous
+        // rest ended (or when the session started, for the very first
+        // set). We read it from `state.workStartedAt` — set by the view
+        // model on `.start` and rest-end via direct state mutation.
+        // Falling back to the existing `old.startedAt` preserves previously-
+        // stamped values (important for cardio drivers that stamp it on
+        // `.logCardioSet` and for defensive re-logs); nil in the rare
+        // pathological case where no anchor is available (better than
+        // folding rest into set time — see file header).
+        let resolvedStart = state.workStartedAt
+        var next = updateSet(in: state, itemID: input.itemID, setIndex: input.setIndex) { old in
             // `logSet` is always marked done, regardless of prior state.
             // rir may be nil (user skipped the picker); reps overwrites
-            // the prescribed value with the observed.
+            // the prescribed value with the observed. `completedAt` is
+            // stamped with the caller's `now` — the Features layer passes
+            // its injected clock. Subsequent corrective edits (editPastSet)
+            // preserve the original timestamp rather than overwriting it;
+            // fixing the time would rewrite the workout timeline, which
+            // corrective edits must not do.
+            //
+            // `startedAt` is stamped from `state.workStartedAt` — the
+            // wall-clock instant the previous rest ended. Chaining via the
+            // previous set's `completedAt` would fold rest time INTO the
+            // set's duration (a 10s bench press with 90s rest would look
+            // like a 100s set), which is semantically wrong for working-
+            // time analysis. See `SessionState.workStartedAt`.
+            //
+            // Cardio fields are carried through unchanged — the strength
+            // log path leaves them nil. Cardio drivers dispatch
+            // `.logCardioSet` instead, which stamps those columns.
             SetPlan(
                 setIndex: old.setIndex,
                 loadKg: old.loadKg,
-                reps: loggedReps,
+                unit: old.unit,
+                reps: input.loggedReps,
                 done: true,
                 adjust: old.adjust,
-                rir: loggedRir
+                rir: input.loggedRir,
+                completedAt: input.now,
+                durationSec: old.durationSec,
+                distanceM: old.distanceM,
+                hrAvgBpm: old.hrAvgBpm,
+                cadenceAvgSpm: old.cadenceAvgSpm,
+                startedAt: resolvedStart ?? old.startedAt
             )
         }
+        // Consume the anchor: the set has been logged, so the next set's
+        // `startedAt` must be freshly stamped by `.advanceFromRest` (or
+        // the VM's equivalent entry helper). Clearing here makes "missing
+        // anchor" visible instead of silently reusing a stale one across
+        // sets.
+        next.workStartedAt = nil
+        return next
+    }
+
+    static func applyLogCardioSet(
+        state: SessionState,
+        input: LogCardioSetInput
+    ) -> SessionState {
+        var next = updateSet(in: state, itemID: input.itemID, setIndex: input.setIndex) { old in
+            // Cardio log path. Stamps duration / distance / HR / cadence
+            // on the SetPlan plus `done=true` and `completedAt=now`.
+            // `reps` is set to 0 — cardio intervals carry no reps, but
+            // SetPlan.reps is non-optional (it's load-bearing for
+            // strength logging). The push path reads 0 and emits a
+            // SetLog with reps=nil when the driver is cardio (see the
+            // +Push extension's `enqueueLoggedCardioSet`).
+            //
+            // `startedAt` is passed through explicitly so cardio logs
+            // carry the real start instant for the interval (cardio
+            // drivers know it at log time). Falls back to
+            // `state.workStartedAt` when the driver omits it, so cardio
+            // paths inherit the same rest-end anchor strength uses.
+            SetPlan(
+                setIndex: old.setIndex,
+                loadKg: old.loadKg,
+                unit: old.unit,
+                reps: 0,
+                done: true,
+                adjust: old.adjust,
+                rir: nil,
+                completedAt: input.now,
+                durationSec: input.durationSec,
+                distanceM: input.distanceM,
+                hrAvgBpm: input.hrAvgBpm,
+                cadenceAvgSpm: input.cadenceAvgSpm,
+                startedAt: input.startedAt ?? state.workStartedAt
+            )
+        }
+        // Consume the anchor — same rationale as applyLogSet.
+        next.workStartedAt = nil
+        return next
     }
 
     static func applyEditPendingSet(
@@ -73,10 +150,16 @@ extension SessionReducer {
             return SetPlan(
                 setIndex: old.setIndex,
                 loadKg: loadKg ?? old.loadKg,
+                unit: old.unit,
                 reps: reps ?? old.reps,
                 done: old.done,
                 adjust: .manual,
-                rir: old.rir
+                rir: old.rir,
+                durationSec: old.durationSec,
+                distanceM: old.distanceM,
+                hrAvgBpm: old.hrAvgBpm,
+                cadenceAvgSpm: old.cadenceAvgSpm,
+                startedAt: old.startedAt
             )
         }
     }
@@ -92,13 +175,25 @@ extension SessionReducer {
             // Adjust precedence: a past-set edit always produces `.manual`.
             // Matches docs/prescription.md § "Edits don't retrigger" and
             // § "Autoreg + manual edit · per-set adjust precedence".
+            // `completedAt` is preserved — a corrective edit fixes
+            // reps/rir/load, not the wall-clock time the set happened.
+            // Cardio fields are carried through unchanged — past-set edit
+            // is the strength corrective path and doesn't mutate cardio
+            // measurements.
             return SetPlan(
                 setIndex: old.setIndex,
                 loadKg: edit.loadKg ?? old.loadKg,
+                unit: old.unit,
                 reps: edit.reps ?? old.reps,
                 done: old.done,
                 adjust: .manual,
-                rir: edit.rir ?? old.rir
+                rir: edit.rir ?? old.rir,
+                completedAt: old.completedAt,
+                durationSec: old.durationSec,
+                distanceM: old.distanceM,
+                hrAvgBpm: old.hrAvgBpm,
+                cadenceAvgSpm: old.cadenceAvgSpm,
+                startedAt: old.startedAt
             )
         }
     }
@@ -129,16 +224,48 @@ extension SessionReducer {
         }
         var next = state
         next.items[idx].performedExerciseID = toExerciseID
-        // Store overrides on the ItemLog. `target_rir` cannot live on
-        // SetPlan and is read by drivers from here; reps/load also live
-        // here (for history / persistence) and are mirrored onto remaining
-        // non-done SetPlan rows below so the Active screen renders them.
+        // Store overrides on the ItemLog. `target_rir` / `per_side` /
+        // `autoreg` cannot live on SetPlan and are read by drivers from
+        // here; reps/load also live here (for history / persistence) and
+        // are mirrored onto remaining non-done SetPlan rows below so the
+        // Active screen renders them. A `sets` override adjusts the non-
+        // done tail — extending seeds new rows at the override values,
+        // truncating drops pending rows that would otherwise sit past the
+        // new end of the item.
+        //
+        // `sets`-override scope: ONLY set-major blocks honor the override.
+        // Round-robin blocks (superset / circuit / AMRAP / EMOM / Tabata /
+        // forTime) replicate a single `rounds` count across every item;
+        // rewriting one item's row count would either skew the cursor walk
+        // (rows past the block's rounds never run) or implicitly collapse
+        // every item to the new count (silently corrupting the other
+        // items' plans). The semantics are ambiguous, so we drop the
+        // `sets` portion and apply the rest of the override. Documented
+        // in `docs/prescription.md` § "Alternative prescription (overrides)"
+        // and `docs/features/exercise-swap.md` § "Known issues / gaps".
         if let overrides, !overrides.isEmpty {
+            let position = findBlockItemPosition(flatIndex: idx, in: state.structure)
+            let blockAdvancement = position.flatMap { pos -> SessionState.BlockAdvancement? in
+                guard pos.blockIndex < state.structure.advancementByBlock.count else { return nil }
+                return state.structure.advancementByBlock[pos.blockIndex]
+            }
+            let allowSetsResize = (blockAdvancement ?? .setMajor) == .setMajor
             next.items[idx].overrides = overrides
             next.items[idx].sets = applyOverridesToSetPlans(
                 next.items[idx].sets,
-                overrides: overrides
+                overrides: overrides,
+                allowSetsResize: allowSetsResize
             )
+            if allowSetsResize,
+               let newSetsCount = overrides.sets,
+               let (blockIndex, itemInBlock) = position {
+                next.structure = updatingSetsPerItem(
+                    state.structure,
+                    blockIndex: blockIndex,
+                    itemInBlock: itemInBlock,
+                    newCount: max(newSetsCount, next.items[idx].sets.count)
+                )
+            }
         } else {
             next.items[idx].overrides = nil
         }
@@ -147,33 +274,10 @@ extension SessionReducer {
         return next
     }
 
-    /// Mirror `reps` / `load_kg` from `AlternativeOverrides` onto every
-    /// non-done, non-manual SetPlan row. A `.manual` row has been
-    /// explicitly edited by the user before the swap — we preserve that
-    /// choice so the swap doesn't silently undo manual work. Done rows
-    /// are history and never touched. `adjust` is left unchanged for the
-    /// overridden rows — autoreg is still free to propose against them
-    /// in subsequent logs.
-    static func applyOverridesToSetPlans(
-        _ sets: [SetPlan],
-        overrides: AlternativeOverrides
-    ) -> [SetPlan] {
-        sets.map { set in
-            if set.done { return set }
-            if set.adjust == .manual { return set }
-            let newLoad = overrides.loadKg ?? set.loadKg
-            let newReps = overrides.reps ?? set.reps
-            if newLoad == set.loadKg && newReps == set.reps { return set }
-            return SetPlan(
-                setIndex: set.setIndex,
-                loadKg: newLoad,
-                reps: newReps,
-                done: set.done,
-                adjust: set.adjust,
-                rir: set.rir
-            )
-        }
-    }
+    // swap-related helpers (applyOverridesToSetPlans, resizedSetPlans,
+    // findBlockItemPosition, updatingSetsPerItem) live in
+    // `SessionReducer+SwapOverrides.swift` so neither this file nor the
+    // swap helpers exceed SwiftLint's `file_length` cap.
 
     static func applyHoldAutoreg(
         state: SessionState,
@@ -250,6 +354,7 @@ extension SessionReducer {
             if nextCursor.blockIndex != state.cursor.blockIndex {
                 next.blockEndsAt = nil
                 next.workEndsAt = nil
+                next.intervalAnchorAt = nil
             }
             next.cursor = nextCursor
             next.route = .active
@@ -259,6 +364,7 @@ extension SessionReducer {
         // Last set of last item of last block → complete.
         next.blockEndsAt = nil
         next.workEndsAt = nil
+        next.intervalAnchorAt = nil
         next.route = .complete
         return next
     }

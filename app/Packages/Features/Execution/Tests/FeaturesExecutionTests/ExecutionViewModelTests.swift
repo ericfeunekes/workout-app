@@ -538,6 +538,12 @@ final class ExecutionViewModelTests: XCTestCase {
         XCTAssertTrue(call.setLogs.allSatisfy { $0.workoutItemID == itemID })
         XCTAssertEqual(Set(call.setLogs.map(\.setIndex)), [1, 2])
         XCTAssertTrue(call.setLogs.allSatisfy { $0.reps == 5 })
+        // With `FixedClock`, `clock.now` never advances between log
+        // events, so every set's `completedAt` matches the fixed stamp
+        // (same clock value at every `.logSet`). The "sets can carry
+        // distinct stamps" coverage lives in
+        // `testCompletionWriteStampsPerSetTimestamps`, which drives a
+        // mutable clock across logSet calls.
         XCTAssertTrue(call.setLogs.allSatisfy { $0.completedAt == fixed.now })
     }
 
@@ -584,6 +590,202 @@ final class ExecutionViewModelTests: XCTestCase {
                 + "pushes a mismatched id and the server inserts a duplicate row"
             )
         }
+    }
+
+    func testCompletionWriteStampsPerSetTimestamps() async throws {
+        // Regression: prior to the reducer-side `completedAt` stamp,
+        // `writeCompletionToLocalCache` stamped every SetLog with the
+        // single `clock.now` captured at `saveAndDone` entry — so all
+        // sets appeared to finish on the same instant and rest-time
+        // analysis was impossible. Post-fix: each SetPlan carries its
+        // own `completedAt` (stamped by the reducer's `.logSet` handler).
+        //
+        // `startedAt` semantics (R2.5 v2 — Codex review fix): the anchor
+        // is "when the previous rest ended" (or session-start for set 1),
+        // NOT "previous set's completedAt". Chaining via completedAt
+        // would FOLD rest time INTO set duration — a 10s bench press
+        // with a 90s rest would show as a 100s set. The reducer reads
+        // `state.workStartedAt` at log time (stamped by the VM on
+        // `.start` and every `.advanceFromRest`) and writes it onto the
+        // SetPlan.
+        //
+        // Drive three sets across three distinct clock values (T, T+30s,
+        // T+90s) with `.advance()` between them. Each advance() stamps
+        // `workStartedAt = clock.now`, so set N's startedAt == the advance
+        // time that preceded its log.
+        let t0 = Date(timeIntervalSince1970: 1_700_000_300)
+        let clock = MutableClock(now: t0)
+        let (ctx, _) = makeContext(sets: 3, restSec: 60)
+        let recorder = CompletionRecorder()
+        let vm = ExecutionViewModel(
+            context: ctx,
+            clock: clock,
+            localCompletionWriter: { [recorder] workout, setLogs in
+                await recorder.record(workout: workout, setLogs: setLogs)
+            }
+        )
+        // `start()` stamps workStartedAt = t0. Set 1 logs at t0 → its
+        // startedAt == t0 (session-start anchor, zero-duration set).
+        vm.start()
+        vm.logSet(reps: 5, rir: 2)
+        // advance() at T stamps workStartedAt = T. But next log moves
+        // clock forward, so we'll bump the clock FIRST, then advance
+        // at the desired rest-ended instant, then log.
+        //
+        // Timeline (post-fix):
+        //   set 1: startedAt = T     (from start), completedAt = T
+        //   advance at T+20s         → workStartedAt = T+20s
+        //   set 2: startedAt = T+20s, completedAt = T+30s   (10s working)
+        //   advance at T+80s         → workStartedAt = T+80s
+        //   set 3: startedAt = T+80s, completedAt = T+90s   (10s working)
+        clock.now = t0.addingTimeInterval(20)
+        vm.advance()
+        clock.now = t0.addingTimeInterval(30)
+        vm.logSet(reps: 5, rir: 2)
+        clock.now = t0.addingTimeInterval(80)
+        vm.advance()
+        clock.now = t0.addingTimeInterval(90)
+        vm.logSet(reps: 5, rir: 1)
+        vm.advance()
+        XCTAssertEqual(vm.state.route, .complete)
+
+        // `saveAndDone` runs at T + 120s — the completion writer's own
+        // workout `completedAt` picks this up, but per-set timestamps
+        // must stay on the log moments, not this final instant.
+        clock.now = t0.addingTimeInterval(120)
+        vm.saveAndDone()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let calls = await recorder.calls
+        XCTAssertEqual(calls.count, 1)
+        let call = try XCTUnwrap(calls.first)
+        XCTAssertEqual(call.setLogs.count, 3)
+        let sorted = call.setLogs.sorted(by: { $0.setIndex < $1.setIndex })
+        XCTAssertEqual(sorted[0].completedAt, t0)
+        XCTAssertEqual(sorted[1].completedAt, t0.addingTimeInterval(30))
+        XCTAssertEqual(sorted[2].completedAt, t0.addingTimeInterval(90))
+        // Distinct per-set stamps — catches a regression where all sets
+        // collapse onto `clock.now` at `saveAndDone`.
+        let stamps = Set(sorted.map(\.completedAt))
+        XCTAssertEqual(stamps.count, 3, "every set carries its own completedAt")
+        // `startedAt` = rest-ended instant (session-start for set 1).
+        // This proves rest time is NOT folded into set duration. Set 2's
+        // working time = 30-20 = 10s, not 30-0 = 30s. See
+        // `SessionState.workStartedAt`.
+        XCTAssertEqual(sorted[0].startedAt, t0, "set 1 uses session-start anchor")
+        XCTAssertEqual(sorted[1].startedAt, t0.addingTimeInterval(20),
+                       "set 2 startedAt = advance-time (rest-ended), NOT set 1 completedAt")
+        XCTAssertEqual(sorted[2].startedAt, t0.addingTimeInterval(80),
+                       "set 3 startedAt = advance-time (rest-ended), NOT set 2 completedAt")
+        // Working-time sanity check: each set's working duration is
+        // completedAt - startedAt, and must exclude rest.
+        XCTAssertEqual(sorted[1].completedAt.timeIntervalSince(sorted[1].startedAt!), 10,
+                       "set 2 working time = 10s; the 20s rest must NOT be folded in")
+        XCTAssertEqual(sorted[2].completedAt.timeIntervalSince(sorted[2].startedAt!), 10,
+                       "set 3 working time = 10s; the 50s rest must NOT be folded in")
+        // Workout-level completedAt reflects `saveAndDone` entry, not
+        // any individual set's log moment.
+        XCTAssertEqual(call.workout.completedAt, t0.addingTimeInterval(120))
+    }
+
+    func testSetLogStartedAtIsRestEndedAtNotPriorLoggedAt() async throws {
+        // Codex R2.5 review fix: set N's startedAt must reflect "when
+        // rest ended / work began", NOT "set N-1's completedAt".
+        // Chaining via completedAt folds rest time into set duration.
+        //
+        // Scenario: log set 1 at T+10, advance (rest-ended) at T+100,
+        // log set 2 at T+110. Set 2's startedAt must be T+100
+        // (rest-ended), NOT T+10 (set 1 completedAt). Set 2's working
+        // duration = 10s, not 100s.
+        let t0 = Date(timeIntervalSince1970: 1_700_000_400)
+        let clock = MutableClock(now: t0)
+        let (ctx, _) = makeContext(sets: 2, restSec: 60)
+        let recorder = CompletionRecorder()
+        let vm = ExecutionViewModel(
+            context: ctx,
+            clock: clock,
+            localCompletionWriter: { [recorder] workout, setLogs in
+                await recorder.record(workout: workout, setLogs: setLogs)
+            }
+        )
+        // start() stamps workStartedAt = t0. Advance clock, then log
+        // set 1 at t0+10. Set 1's startedAt = t0, completedAt = t0+10.
+        vm.start()
+        clock.now = t0.addingTimeInterval(10)
+        vm.logSet(reps: 5, rir: 2)
+        // Rest ends at t0+100; advance stamps workStartedAt = t0+100.
+        clock.now = t0.addingTimeInterval(100)
+        vm.advance()
+        // Set 2 logs at t0+110. Set 2's startedAt should be t0+100
+        // (NOT t0+10, set 1's completedAt).
+        clock.now = t0.addingTimeInterval(110)
+        vm.logSet(reps: 5, rir: 1)
+        vm.advance()
+        XCTAssertEqual(vm.state.route, .complete)
+
+        clock.now = t0.addingTimeInterval(200)
+        vm.saveAndDone()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let calls = await recorder.calls
+        let call = try XCTUnwrap(calls.first)
+        let sorted = call.setLogs.sorted(by: { $0.setIndex < $1.setIndex })
+        XCTAssertEqual(sorted.count, 2)
+
+        // Set 2's startedAt is the rest-ended stamp, not the prior
+        // completedAt. This is the whole point of the fix.
+        XCTAssertEqual(
+            sorted[1].startedAt, t0.addingTimeInterval(100),
+            "set 2 startedAt must equal rest-ended time (t0+100), NOT set 1 completedAt (t0+10)"
+        )
+        XCTAssertNotEqual(
+            sorted[1].startedAt, t0.addingTimeInterval(10),
+            "set 2 startedAt must NOT equal set 1 completedAt — that folds rest into set duration"
+        )
+        // Working duration = completedAt - startedAt.
+        let set2Working = sorted[1].completedAt.timeIntervalSince(sorted[1].startedAt!)
+        XCTAssertEqual(set2Working, 10, "set 2 working time = 10s, not 100s")
+    }
+
+    func testFirstSetHasSessionStartStartedAt() async throws {
+        // Codex R2.5 review fix: the FIRST set of a workout uses the
+        // session-start instant as its startedAt anchor — stamped by
+        // `start()` via `state.workStartedAt = clock.now`. Prior
+        // behavior left set 1 with `startedAt = nil` (derived from the
+        // missing "previous set" in the chain).
+        let t0 = Date(timeIntervalSince1970: 1_700_000_500)
+        let clock = MutableClock(now: t0)
+        let (ctx, _) = makeContext(sets: 1, restSec: 60)
+        let recorder = CompletionRecorder()
+        let vm = ExecutionViewModel(
+            context: ctx,
+            clock: clock,
+            localCompletionWriter: { [recorder] workout, setLogs in
+                await recorder.record(workout: workout, setLogs: setLogs)
+            }
+        )
+        // start() stamps workStartedAt = t0. User logs at t0+15.
+        vm.start()
+        clock.now = t0.addingTimeInterval(15)
+        vm.logSet(reps: 5, rir: 2)
+        vm.advance()
+        XCTAssertEqual(vm.state.route, .complete)
+
+        clock.now = t0.addingTimeInterval(60)
+        vm.saveAndDone()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let calls = await recorder.calls
+        let call = try XCTUnwrap(calls.first)
+        let set1 = try XCTUnwrap(call.setLogs.first)
+        // First set's startedAt = session-start (NOT nil, NOT the log
+        // moment). Work window = completedAt - startedAt = 15s.
+        XCTAssertEqual(set1.startedAt, t0, "first set carries session-start as startedAt")
+        XCTAssertEqual(set1.completedAt, t0.addingTimeInterval(15))
+        XCTAssertEqual(
+            set1.completedAt.timeIntervalSince(set1.startedAt!), 15,
+            "first set's working time = 15s (log moment minus session start)"
+        )
     }
 
     func testSaveAndDoneWritesNoteToCompletedWorkout() async throws {
@@ -1120,8 +1322,44 @@ final class StraightSetsDriverTests: XCTestCase {
         XCTAssertEqual(content?.exerciseName, "Bench")
         XCTAssertEqual(content?.setIndex, 1)
         XCTAssertEqual(content?.totalSets, 4)
-        XCTAssertEqual(content?.loadDisplay, "102.5 kg")
+        // R2.10: JSON fixture omits `weight_unit` → defaults to .lb suffix.
+        XCTAssertEqual(content?.loadDisplay, "102.5 lb")
         XCTAssertEqual(content?.repsDisplay, "5")
+    }
+
+    func testActiveContentShowsKgSuffixWhenPrescribedKg() {
+        // R2.10: an explicit `weight_unit: "kg"` on the prescription
+        // still renders as "kg" — the cutover didn't remove kg support,
+        // it changed the default. Locks that behavior.
+        let blockID = UUID()
+        let itemID = UUID()
+        let exerciseID = UUID()
+        let workoutID = UUID()
+        let userID = UUID()
+        let now = Date()
+        let block = Block(
+            id: blockID, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: nil, timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":180}"#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let item = WorkoutItem(
+            id: itemID, blockID: blockID, position: 0,
+            exerciseID: exerciseID,
+            prescriptionJSON: #"{"sets":4,"reps":5,"load_kg":102.5,"weight_unit":"kg"}"#
+        )
+        let ctx = WorkoutContext(
+            workout: Workout(id: workoutID, userID: userID, name: "x",
+                             scheduledDate: now, status: .planned, source: .claude,
+                             notes: nil, createdAt: now, updatedAt: now,
+                             completedAt: nil, tagsJSON: nil),
+            blocks: [block],
+            itemsByBlock: [[item]],
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Bench")]
+        )
+        let state = SessionSeeder.seed(context: ctx).withRoute(.active)
+        let content = StraightSetsDriver().activeContent(state: state, context: ctx)
+        XCTAssertEqual(content?.loadDisplay, "102.5 kg")
     }
 }
 

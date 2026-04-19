@@ -83,6 +83,16 @@ public enum AppBootstrap {
         afterLocalCompletion: (@Sendable () async -> Void)? = nil,
         historyViewModel: HistoryViewModel? = nil
     ) async throws -> BootstrapResult {
+        // Complete the telemetry emitter → push queue wire-up BEFORE the
+        // first emit. `PersistenceFactory.prepareTelemetry()` is idempotent
+        // and cheap after the first call; without this call, the very
+        // first `bootstrap.start` event landed in the local EventModel row
+        // but lost the race against the emitter's fire-and-forget attach
+        // Task and never reached the push queue. Callers that somehow
+        // bypass `bootstrap(...)` (DEBUG seeds, previews) stay on the old
+        // "attach best-effort" behavior — no correctness cost because they
+        // never hit a real server anyway.
+        await persistence.prepareTelemetry()
         emitBootstrap(telemetryEmitter, name: "bootstrap.start")
         let syncAPI = SyncAPI(
             transport: transportBuilder(connection.url),

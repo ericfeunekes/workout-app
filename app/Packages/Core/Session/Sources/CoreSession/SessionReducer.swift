@@ -38,7 +38,7 @@ public enum SessionReducer {
         switch mutation {
         case .start, .enterRest, .advanceFromRest, .complete:
             return reduceRouteMutation(state, mutation)
-        case .save, .logSet, .editPendingSet, .editPastSet, .applyAutoregProposal:
+        case .save, .logSet, .logCardioSet, .editPendingSet, .editPastSet, .applyAutoregProposal:
             return reduceSetMutation(state, mutation)
         case .swap, .holdAutoreg, .appendNote:
             return reduceItemOrNoteMutation(state, mutation)
@@ -84,14 +84,17 @@ public enum SessionReducer {
         switch mutation {
         case .save(let freshItems, let freshStructure):
             return applySave(state: state, freshItems: freshItems, freshStructure: freshStructure)
-        case .logSet(let itemID, let setIndex, let loggedReps, let loggedRir):
-            return applyLogSet(
-                state: state,
+        case .logSet(let itemID, let setIndex, let loggedReps, let loggedRir, let now):
+            let log = LogSetInput(
                 itemID: itemID,
                 setIndex: setIndex,
                 loggedReps: loggedReps,
-                loggedRir: loggedRir
+                loggedRir: loggedRir,
+                now: now
             )
+            return applyLogSet(state: state, input: log)
+        case .logCardioSet:
+            return reduceLogCardioSet(state: state, mutation: mutation)
         case .editPendingSet(let itemID, let setIndex, let loadKg, let reps):
             return applyEditPendingSet(
                 state: state,
@@ -114,6 +117,37 @@ public enum SessionReducer {
         default:
             return state
         }
+    }
+
+    /// Unpack a `.logCardioSet` mutation into `LogCardioSetInput` and
+    /// hand it to the handler. Split out so `reduceSetMutation` stays
+    /// under SwiftLint's `function_body_length` cap — the 8-field
+    /// cardio tuple alone pushes the switch body past 40 lines.
+    private static func reduceLogCardioSet(
+        state: SessionState,
+        mutation: SessionMutation
+    ) -> SessionState {
+        guard case let .logCardioSet(
+            itemID,
+            setIndex,
+            durationSec,
+            distanceM,
+            hrAvgBpm,
+            cadenceAvgSpm,
+            startedAt,
+            now
+        ) = mutation else { return state }
+        let log = LogCardioSetInput(
+            itemID: itemID,
+            setIndex: setIndex,
+            durationSec: durationSec,
+            distanceM: distanceM,
+            hrAvgBpm: hrAvgBpm,
+            cadenceAvgSpm: cadenceAvgSpm,
+            startedAt: startedAt,
+            now: now
+        )
+        return applyLogCardioSet(state: state, input: log)
     }
 
     /// Handle item-level and note-level mutations.
@@ -146,6 +180,32 @@ public enum SessionReducer {
         let loadKg: Double?
         let reps: Int?
         let rir: Int?
+    }
+
+    /// A bundle of the fields that identify a log-set action. Keeps
+    /// `applyLogSet` under the `function_parameter_count` cap and
+    /// mirrors the `PastSetEdit` pattern already in use here.
+    struct LogSetInput {
+        let itemID: WorkoutItemID
+        let setIndex: Int
+        let loggedReps: Int
+        let loggedRir: Int?
+        let now: Date
+    }
+
+    /// Sibling of `LogSetInput` for the cardio path. Every metric is
+    /// optional — a time-only interval carries only `durationSec`;
+    /// a distance-only piece carries only `distanceM`; HR and cadence
+    /// are populated when a sensor is connected.
+    struct LogCardioSetInput {
+        let itemID: WorkoutItemID
+        let setIndex: Int
+        let durationSec: Double?
+        let distanceM: Double?
+        let hrAvgBpm: Int?
+        let cadenceAvgSpm: Int?
+        let startedAt: Date?
+        let now: Date
     }
 
 }

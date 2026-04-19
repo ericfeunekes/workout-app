@@ -2,5 +2,6 @@
   "sets": 4,
   "reps": 5,
   "load_kg": 80,
+  "weight_unit": "kg",
   "tempo": "3-0-1-0"
 }

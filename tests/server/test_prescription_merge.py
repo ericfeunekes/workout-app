@@ -44,15 +44,18 @@ def test_library_only_fills_in_missing_keys() -> None:
     assert resolved["target_rir"] == 2
     assert resolved["autoreg"]["overshoot_step_kg"] == 2.5
     assert resolved["autoreg"]["apply_to"] == "remaining"
+    # R2.10: neither side declared a unit → server stamps the pound
+    # default so the client sees a canonical shape.
+    assert resolved["weight_unit"] == "lb"
 
 
 def test_item_only_when_library_null() -> None:
-    """No library default → item is returned unchanged (re-serialized)."""
+    """No library default → item is returned with R2.10 `weight_unit` default."""
     item = json.dumps({"sets": 3, "reps": 10, "load_kg": 20})
 
     resolved = _parse(merge_prescriptions(None, item))
 
-    assert resolved == {"sets": 3, "reps": 10, "load_kg": 20}
+    assert resolved == {"sets": 3, "reps": 10, "load_kg": 20, "weight_unit": "lb"}
 
 
 def test_item_scalar_wins_on_conflict() -> None:
@@ -124,7 +127,38 @@ def test_output_is_stable_sorted() -> None:
     resolved = merge_prescriptions(library, item)
 
     # Keys appear in alphabetical order — stable across invocations.
-    assert resolved == '{"a":2,"m":3,"z":1}'
+    # R2.10: `weight_unit: "lb"` also lands here because the merge didn't
+    # see one from either side.
+    assert resolved == '{"a":2,"m":3,"weight_unit":"lb","z":1}'
+
+
+def test_merge_defaults_weight_unit_to_lb() -> None:
+    """R2.10: neither side declares weight_unit → server stamps "lb"."""
+    resolved = _parse(merge_prescriptions(None, json.dumps({"sets": 3, "reps": 5, "load_kg": 100})))
+    assert resolved["weight_unit"] == "lb"
+
+
+def test_merge_respects_explicit_weight_unit_on_item() -> None:
+    """R2.10: explicit weight_unit on the item wins over the default."""
+    resolved = _parse(
+        merge_prescriptions(
+            None, json.dumps({"sets": 3, "reps": 5, "load_kg": 100, "weight_unit": "kg"})
+        )
+    )
+    assert resolved["weight_unit"] == "kg"
+
+
+def test_merge_respects_explicit_weight_unit_on_library_default() -> None:
+    """R2.10: library default carries weight_unit → item inherits (no override)."""
+    library = json.dumps({"weight_unit": "kg", "target_rir": 2})
+    item = json.dumps({"sets": 3, "reps": 5, "load_kg": 100})
+    resolved = _parse(merge_prescriptions(library, item))
+    assert resolved["weight_unit"] == "kg"
+
+
+def test_merge_empty_item_with_empty_library_stays_empty() -> None:
+    """Empty `{}` is preserved — conditioning items don't need a unit."""
+    assert merge_prescriptions(None, "{}") == "{}"
 
 
 def test_malformed_library_raises() -> None:
@@ -163,6 +197,31 @@ def test_alternatives_both_empty_yields_empty_list() -> None:
 def test_alternatives_malformed_library_raises() -> None:
     with pytest.raises(ValueError):
         merge_alternatives(json.dumps({"not": "a list"}), [])
+
+
+def test_alternatives_library_default_id_is_stripped() -> None:
+    """bug-034: library defaults are templates. Any `id` on the library blob
+    is stripped when the default falls through to an item with no alternatives,
+    so the caller can mint a fresh UUID per materialization. Without this,
+    two workouts pulling the same library default UNIQUE-crash on
+    `exercise_alternatives.id`.
+    """
+    library = json.dumps(
+        [
+            {
+                "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                "exercise_id": "xyz",
+                "reason": "bar taken",
+                "parameter_overrides_json": None,
+            }
+        ]
+    )
+    resolved = merge_alternatives(library, [])
+
+    assert len(resolved) == 1
+    assert "id" not in resolved[0]
+    assert resolved[0]["exercise_id"] == "xyz"
+    assert resolved[0]["reason"] == "bar taken"
 
 
 # ---------- canonicalize ----------

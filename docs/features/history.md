@@ -42,9 +42,12 @@ covers:
 - Session detail card order is "first set_log appears" order — cache returns in (block position, item position, setIndex) so deterministic per pull (`SessionDetailViewModel.swift:99`).
 
 ## Known issues / gaps
-- `docs/open-questions.md:285` **Session detail renders "2..N" set numbers instead of "1..N"** (cosmetic watchlist). `SessionDetailViewModel.formatSetRow` does `log.setIndex + 1` assuming 0-based storage, but the execution pipeline emits 1-based indexes — double-increment. Fix likely belongs in `ExecutionViewModel.logSet` (emit 0-based).
-- `SessionDetail.bodyweightKg` is hardcoded `nil` (`SessionDetail.swift:134`) — the join to `user_parameters` is not wired. Body-weight chip in session detail never renders.
-- Post-pull/post-save refresh: no observer wiring — History only reloads when `.task` re-fires, `load()` is called explicitly, or `editPastSet` runs (which calls `load()` itself). A new completed workout written by `save-and-done` relies on view re-appearance + the bug-016 `afterLocalCompletion` hook.
+- Set-index render bug (bug-020) closed — `formatSetRow` now uses `setIndex` as-is; runtime pipeline is 1-based throughout.
+- `SessionDetail.bodyweightKg` now hydrates from `WorkoutCache.loadUserParameters(key: "bodyweight_kg")` with a ±2min window around `completedAt` (bug-060). HistoryPreviewSeed includes a bodyweight sample so the chip exercises in previews too.
+- `EditSetSheet` is unit-aware (bug-051): labels per source `weightUnit`, carries the unit through the write path via `formatLoad(weight:unit:)`, caps reps at 999, and exposes RIR clear via an explicit enum state instead of a nil-sentinel.
+- Recent-sessions grouping keys off `workoutID` (the R1.3b-v2 denormalized column on `SetLogModel`) rather than `workoutItemID`, so same-day workouts no longer collapse into one session.
+- By-exercise detail no longer mixes `lb` and `kg` numerically — top-set and trend deltas render in the source unit (bug-051 / bug-059).
+- Post-save refresh is wired end-to-end. The shell's `afterLocalCompletion` closure calls `historyViewModel.load()` after the local cache write + today-loader rerun (ordering: cache write → TodayLoader reload → History reload). Post-pull refresh still relies on `.task` on `HistoryView` re-firing.
 
 ## QA scenarios
 
@@ -112,11 +115,11 @@ covers:
 - **expected:** Row flashes accent highlight; `EditSetSheet` slides up. Sheet has two numpad tiles (REPS / LOAD KG) prefilled with the row's current values, a RIR row, and a "save" commit key on the keypad. Commit calls `HistoryViewModel.editPastSet(...)`, which (1) writes the updated SetLog via `WorkoutCache.saveSetLogs([edited])` with the SAME UUID as the original (server-side upsert-in-place), (2) emits `history.past_set_edited` telemetry, (3) fires the shell-wired `onSetLogEdited` hook → `SyncAPI.pushLog([edited])`, (4) calls `load()` so the detail view re-renders with the corrected row. Dismissing without commit leaves the row untouched.
 - **notes:** Fields left untouched by the user (empty numpad buffer, no RIR tap) are passed as `nil` and `editPastSet` preserves the existing value. Edits do NOT retrigger autoreg (completed workouts have no live SessionState).
 
-### S13. Post-save refresh
+### S13. Post-save refresh (R1.6 / R1.3b)
 - **setup:** Complete a workout via save & done.
 - **steps:** Switch to History tab.
-- **expected:** **Unclear from code** — whether `.task` re-fires `load()` on tab switch depends on SwiftUI lifecycle. The local-cache write IS done (save-and-done.md S8) but History may show stale `groups` until `load()` runs.
-- **notes:** Needs a pin; likely a real bug.
+- **expected:** The just-completed workout appears at the top of "THIS WEEK" without a manual pull-to-refresh. The `afterLocalCompletion` hook wired in `AppBootstrap+Hooks.swift:66-83` calls `historyViewModel.load()` after the local-cache write and the today-loader rerun, so `groups` re-derives before the user can navigate.
+- **notes:** Ordering guarantee: cache write → TodayLoader reload → History reload. If the hook is ever unwired, this scenario degrades to the pre-R1.6 "stale until .task re-fires" behaviour — keep the hook in `AppBootstrap` plumbed.
 
 ### S14. Very long exercise name + long note layout
 - **setup:** Seed a workout with a 120-char exercise name and a 500-char workout note.
@@ -134,9 +137,9 @@ covers:
 - **expected:** `isLoading = true` during the refetch; shapes re-derive atomically; no duplicate rows (`HistoryViewModel+Load.swift:17`).
 
 ### S17. Body-weight chip in session detail
-- **setup:** Any completed session.
+- **setup:** Any completed session with a `bodyweight_kg` `UserParameter` logged within ±2 minutes of `completedAt`.
 - **steps:** Open session detail, look at header meta line.
-- **expected:** **Bodyweight text never renders** — `SessionDetail.bodyweightKg` is hardcoded nil (`SessionDetail.swift:134`). Flag for product review.
+- **expected:** Bodyweight renders (e.g. "BW 82.5 KG"). The loader pulls the nearest `user_parameters` row for `key = "bodyweight_kg"` via `WorkoutCache.loadUserParameters(key:)` with a ±2min window around `completedAt` (bug-060). If no match exists, the chip is omitted. HistoryPreviewSeed seeds a sample so SwiftUI previews exercise the branch.
 
 ### S18. Week boundaries + year rollover
 - **setup:** Workouts today, 8 days ago (across week boundary), Dec 30 prior year + Jan 2 current year.

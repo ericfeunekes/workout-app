@@ -6,6 +6,7 @@
   "rounds": 3,
   "rounds_rep_scheme": [21, 15, 9],
   "prescription_json": {
-    "load_kg": 43
+    "load_kg": 43,
+    "weight_unit": "kg"
   }
 }

@@ -170,7 +170,7 @@
           "user_parameters"
         ],
         "summary": "Append Parameters",
-        "description": "Always inserts. Never updates. That's the contract.",
+        "description": "Insert-or-upsert per row.\n\nThe append-only contract is on (user_id, key) \u2014 multiple rows for the same\nkey over time is the design. Idempotency is on PK: when the caller supplies\nan `id`, a replay of the same payload UPSERTS on that id rather than\ninserting a second row. This keeps app-side retries safe \u2014 the iOS push\nqueue may replay a commit after a crash-between-commit-and-queue-remove,\nand without id-level idempotency that replay would double-write the row\n(and since append-only reads never delete, the duplicate would live\nforever). When `id` is omitted (Claude's bulk imports), the server\ngenerates a fresh UUID via the ORM default.",
         "operationId": "append_parameters_api_user_parameters_post",
         "security": [
           {
@@ -1737,6 +1737,17 @@
       },
       "UserParameterIn": {
         "properties": {
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
           "key": {
             "type": "string",
             "title": "Key"
@@ -1774,7 +1785,7 @@
           "value"
         ],
         "title": "UserParameterIn",
-        "description": "user_id is resolved from the bearer token (ADR-2026-04-17)."
+        "description": "user_id is resolved from the bearer token (ADR-2026-04-17).\n\n`id` is client-owned when the caller is the iOS app: the app derives\na deterministic UUID from `(userID, key, updated_at)` so a replayed\npush (crash between commit and queue-remove) upserts on id instead\nof inserting a duplicate row. `user_parameters` is append-only on\nread, so a duplicate row would live forever. When `id` is omitted\n(Claude's bulk imports), the server falls back to generating a\nfresh UUID \u2014 Claude's pushes aren't retried client-side."
       },
       "UserParameterRead": {
         "properties": {
@@ -2185,6 +2196,17 @@
               }
             ],
             "title": "Completed At"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
           }
         },
         "type": "object",
@@ -2193,7 +2215,7 @@
           "status"
         ],
         "title": "WorkoutStatusUpdate",
-        "description": "App tells server 'this workout transitioned to status X at time Y.'"
+        "description": "App tells server 'this workout transitioned to status X at time Y.'\n\n`notes` is optional: the app carries the user's post-workout note as\npart of the terminal status push so the server is authoritative for\nthe value. Without this, the local cache held the note but the next\n`sync/pull` overwrote it with the server's stale value (bug: post-\ncompletion notes disappeared on next pull). Sending `None` leaves\nthe existing server-side `notes` untouched \u2014 only a non-None value\nupdates the row."
       },
       "WorkoutUpdate": {
         "properties": {

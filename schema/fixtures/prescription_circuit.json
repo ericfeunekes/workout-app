@@ -7,6 +7,7 @@
   "rounds": 4,
   "prescription_json": {
     "reps": 12,
-    "load_kg": 20
+    "load_kg": 20,
+    "weight_unit": "kg"
   }
 }

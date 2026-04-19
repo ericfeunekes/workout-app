@@ -42,6 +42,13 @@ def _dumps(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
+#: R2.10 default for ``weight_unit`` when neither library nor item
+#: specify one. Eric trains primarily in pounds, so pound-first is the
+#: new default (see ``docs/prescription.md`` § "Units" and
+#: ``scratch/codex-reviews/fix-briefs/r2-10-lb-default.md``).
+DEFAULT_WEIGHT_UNIT = "lb"
+
+
 def merge_prescriptions(library_default: str | None, item_prescription: str) -> str:
     """Deep-merge an exercise's library default onto a workout_item's payload.
 
@@ -54,6 +61,11 @@ def merge_prescriptions(library_default: str | None, item_prescription: str) -> 
     at the top level is scalar-win-item. Deeper nesting inside `autoreg` is
     not merged — the ADR calls out `autoreg` specifically and no other
     known sub-object needs per-field inheritance today.
+
+    R2.10: when the resolved prescription is non-empty and has no
+    ``weight_unit`` key, ``DEFAULT_WEIGHT_UNIT`` is stamped. The empty
+    object ``{}`` stays empty — it commonly represents an item inside a
+    conditioning block where the work lives on the block, not the item.
     """
     lib = _load_or_empty(library_default)
     item = _load_or_empty(item_prescription)
@@ -72,6 +84,13 @@ def merge_prescriptions(library_default: str | None, item_prescription: str) -> 
         resolved["autoreg"] = merged_autoreg
     # else: whichever of the two was a dict (or neither) is already correct
     # from the top-level scalar-win pass above.
+
+    # R2.10: default `weight_unit` to "lb" for non-empty prescriptions
+    # that didn't declare one on either side. Empty `{}` payloads are
+    # preserved verbatim — those items live under conditioning blocks
+    # whose work lives on the block, not the item.
+    if resolved and "weight_unit" not in resolved:
+        resolved["weight_unit"] = DEFAULT_WEIGHT_UNIT
 
     return _dumps(resolved)
 
@@ -94,6 +113,12 @@ def merge_alternatives(
     The return is a list of parsed dicts. Callers materialize them into
     `ExerciseAlternative` ORM rows; any `id` needed for a new row is
     assigned at insert time.
+
+    bug-034: library-default alternatives are a *template*, not rows. Any
+    `id` on the library blob is stripped before the dict leaves this
+    function — callers mint a fresh UUID per materialization. Otherwise
+    the same library default embedded in two workouts collides on the
+    UNIQUE primary key of `exercise_alternatives.id`.
     """
     if item_alternatives:
         return list(item_alternatives)
@@ -105,7 +130,9 @@ def merge_alternatives(
         raise ValueError(
             f"default_alternatives_json must be a JSON array, got {type(parsed).__name__}"
         )
-    return parsed
+    # Strip any `id` from library defaults so each materialization gets a
+    # fresh UUID assigned downstream. The library entry is a template.
+    return [{k: v for k, v in alt.items() if k != "id"} for alt in parsed]
 
 
 def canonicalize(raw: str) -> str:

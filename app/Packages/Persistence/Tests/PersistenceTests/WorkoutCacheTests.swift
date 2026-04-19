@@ -196,6 +196,9 @@ final class WorkoutCacheTests: XCTestCase {
         )
     }
 
+    // Reconcile tests (orphaned-child deletion, set-log preservation) live
+    // in `WorkoutCacheReconcileTests.swift`.
+
     func testClearRemovesEverything() async throws {
         let factory = try makeFactory()
         let cache = factory.workoutCache

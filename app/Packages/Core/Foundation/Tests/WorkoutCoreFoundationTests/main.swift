@@ -64,6 +64,85 @@ runCase("formatKilograms is exposed") {
     try expectEqual(formatKilograms(102.5), "102.5")
 }
 
+// ---- LoadFormatting · unit-aware ------------------------------------------
+
+runCase("formatLoadUnitAwareKg renders kg suffix") {
+    // The legacy call was `formatLoad(kg:)` which hardcoded "kg". The
+    // unit-aware variant renders whatever unit the caller passes so a
+    // History row logged in kg still reads "100 kg" end-to-end.
+    try expectEqual(formatLoad(weight: 100.0, unit: .kg), "100 kg")
+    try expectEqual(formatLoad(weight: 102.5, unit: .kg), "102.5 kg")
+}
+
+runCase("formatLoadUnitAwareLb renders lb suffix") {
+    // Bug being fixed: SessionDetailViewModel.formatSetRow used to call
+    // `formatLoad(kg: log.weight)` regardless of `log.weightUnit`, so a
+    // set logged as "225 lb" rendered as "225 kg" in the detail row.
+    // The unit-aware formatter is the first half of that fix.
+    try expectEqual(formatLoad(weight: 225.0, unit: .lb), "225 lb")
+    try expectEqual(formatLoad(weight: 45.5, unit: .lb), "45.5 lb")
+}
+
+runCase("formatLoadNilIsDash") {
+    // Naming: the function returns "BW" (bodyweight), not "—" or blank.
+    // The spec in this subagent brief called it "—"; "BW" is the
+    // established convention across Core/Foundation and the existing
+    // test suite (see the non-unit-aware tests above). Preserving it
+    // here keeps one string for "no external load" across legacy and
+    // unit-aware callers.
+    try expectEqual(formatLoad(weight: nil, unit: .kg), "BW")
+    try expectEqual(formatLoad(weight: nil, unit: .lb), "BW")
+}
+
+runCase("formatLoad unit-aware with bodyweightAdded") {
+    // Weighted dip / chin-up rendered in lb: "BW + 25 lb". Mirror of the
+    // kg variant a few cases up.
+    try expectEqual(
+        formatLoad(weight: 25, unit: .lb, bodyweightAdded: true),
+        "BW + 25 lb"
+    )
+    try expectEqual(
+        formatLoad(weight: 12.5, unit: .kg, bodyweightAdded: true),
+        "BW + 12.5 kg"
+    )
+}
+
+runCase("LoadUnit raw values match Domain.WeightUnit") {
+    // Contract: the Domain `WeightUnit` enum (in CoreDomain, which we
+    // can't import here — Core/Foundation has no deps) uses raw values
+    // "kg" and "lb". `LoadUnit` must mirror those so callers can bridge
+    // with `LoadUnit(rawValue: weightUnit.rawValue)` and the wire label
+    // matches the DB-stored label.
+    try expectEqual(LoadUnit.kg.rawValue, "kg")
+    try expectEqual(LoadUnit.lb.rawValue, "lb")
+}
+
+runCase("formatLoadNumber is exposed (rename of formatKilograms)") {
+    // `formatLoadNumber` is the unit-agnostic replacement; `formatKilograms`
+    // stays as a call-through alias for callers that haven't migrated.
+    try expectEqual(formatLoadNumber(100), "100")
+    try expectEqual(formatLoadNumber(102.5), "102.5")
+}
+
+runCase("formatLoad preserves 1.25 kg autoreg steps") {
+    // Regression guard for the 1.25 kg equipment step (fractional plates).
+    // Autoreg on a 100 kg lift can compute 101.25 as the next-set prescription;
+    // under the old `%.1f` formatter that rendered as "101.2 kg" — the state
+    // was correct, only the display lost the trailing 5.
+    try expectEqual(formatLoad(weight: 101.25, unit: .kg), "101.25 kg")
+    try expectEqual(formatLoad(weight: 98.75, unit: .kg), "98.75 kg")
+    try expectEqual(formatLoadNumber(101.25), "101.25")
+}
+
+runCase("formatLoad drops trailing zero beyond two decimals") {
+    // Two-decimal render with trailing-zero trim: "102.50" collapses to
+    // "102.5"; "100.00" collapses to the integer form "100".
+    try expectEqual(formatLoad(weight: 102.50, unit: .kg), "102.5 kg")
+    try expectEqual(formatLoad(weight: 100.0, unit: .lb), "100 lb")
+    try expectEqual(formatLoadNumber(102.50), "102.5")
+    try expectEqual(formatLoadNumber(100.0), "100")
+}
+
 // ---- DurationFormatting ---------------------------------------------------
 
 runCase("formatDuration(0) is 0:00") {
@@ -100,6 +179,23 @@ runCase("ID typealiases are UUID") {
     let id: WorkoutID = UUID()
     let same: UUID = id
     try expectEqual(id, same)
+}
+
+runCase("wireID lowercases an uppercase UUID") {
+    // Apple's `UUID.uuidString` returns uppercase; the server invariant
+    // is lowercase on the wire. `wireID` centralizes the downcase so one
+    // grep catches drift.
+    let uuid = UUID(uuidString: "AABBCCDD-EEFF-0011-2233-445566778899")!
+    try expectEqual(uuid.uuidString, "AABBCCDD-EEFF-0011-2233-445566778899")
+    try expectEqual(uuid.wireID, "aabbccdd-eeff-0011-2233-445566778899")
+}
+
+runCase("wireID is idempotent on an already-lowercase UUID") {
+    let lower = UUID(uuidString: "11111111-2222-3333-4444-555555555555")!
+    try expectEqual(lower.wireID, "11111111-2222-3333-4444-555555555555")
+    // Round-tripping a wireID through UUID parse and back stays lowercase.
+    let reparsed = UUID(uuidString: lower.wireID)!
+    try expectEqual(reparsed.wireID, lower.wireID)
 }
 
 reportAndExit()

@@ -76,6 +76,14 @@ public protocol WorkoutCache: Sendable {
     /// `GET /api/user-parameters?latest=true` shape.
     func loadUserParametersLatest() async throws -> [String: UserParameter]
 
+    /// All `user_parameter` rows for `key`, sorted newest-first by
+    /// `updatedAt`. Used by the History surface to find the bodyweight
+    /// captured for a specific workout — latest-per-key is not enough
+    /// when a later push (a subsequent workout's BW) shadows the row
+    /// captured during the workout the user is viewing. Returns `[]`
+    /// when no row has been captured under `key`.
+    func loadUserParameters(key: String) async throws -> [UserParameter]
+
     /// Completed workouts in reverse-chronological order (newest first).
     /// Used by the History feature.
     ///
@@ -103,13 +111,38 @@ public protocol WorkoutCache: Sendable {
     /// by-exercise view currently shows ~10 recent rows).
     func loadSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [SetLog]
 
+    /// Set_logs whose `workoutID` is nil after the V2→V3 backfill has
+    /// run — i.e. rows the backfill could not map to any surviving
+    /// WorkoutItem. In practice this is the pre-R1.3-reconcile detach
+    /// shadow: a SetLog whose parent WorkoutItem was reconciled away
+    /// *before* the V3 upgrade shipped, so neither the original
+    /// block→item walk nor the new map-scan backfill can resolve the
+    /// chain. They stay on disk (local set_logs are the only
+    /// authoritative client data per `CLAUDE.md`) and this API is how
+    /// Settings / recovery surfaces can still show them to the user.
+    ///
+    /// Sorted newest first by `completedAt`. Not wired into the main
+    /// History list — orphans would render without a containing
+    /// workout — but exposed so a debug / recovery surface can surface
+    /// them on demand.
+    func loadOrphanedSetLogs() async throws -> [SetLog]
+
     /// Insert or upsert a batch of set_logs. Used by Execution on workout
-    /// completion so the History feature can read them back without a
-    /// round-trip to the server.
+    /// completion (and by History for corrective past-set edits) so the
+    /// History feature can read them back without a round-trip to the
+    /// server.
+    ///
+    /// `workoutID` stamps every row's denormalized column at insert time
+    /// so `loadSetLogs(workoutID:)` can resolve via a direct predicate
+    /// that survives reconcile (the parent WorkoutItem may have been
+    /// deleted by a Claude-side plan edit; the SetLog stays on disk and
+    /// must still be reachable through the public API). On upsert the
+    /// column is preserved — an edit never re-bases a log to a different
+    /// workout.
     ///
     /// Idempotent on `SetLog.id` — re-persisting the same set replaces in
     /// place (matches the cache's upsert-on-UUID contract).
-    func saveSetLogs(_ setLogs: [SetLog]) async throws
+    func saveSetLogs(_ setLogs: [SetLog], workoutID: WorkoutID) async throws
 
     /// Upsert a single workout row. Used by Execution on `save & done`
     /// so the just-completed workout (with `status == .completed` and
@@ -150,6 +183,22 @@ public actor WorkoutCacheImpl: WorkoutCache {
     /// `@ModelActor` bounds everything to one context per actor).
     public func save(_ dataset: PulledDataset) async throws {
         do {
+            // 1. Reconcile the workout subtree BEFORE upserting the new shape.
+            //    For every incoming Workout we load its existing Block / Item
+            //    / Alternative descendants and delete any that aren't in the
+            //    incoming payload. Without this step, a Claude-side edit that
+            //    removes an item or alternative leaves the old row stranded
+            //    in the local cache — Execution then renders a workout that
+            //    doesn't match what the server says.
+            //
+            //    Scope is deliberately the workout tree (blocks → items →
+            //    alternatives). Exercises (the catalog) and UserParameters
+            //    (append-only history) are upsert-only — Claude owns the
+            //    exercise UUID space and we never want to drop old user-
+            //    parameter rows. SetLogs belong to Execution, not to the
+            //    pulled workout tree; they survive reconcile by design.
+            try reconcileWorkoutSubtrees(dataset: dataset)
+
             for w in dataset.workouts {
                 try upsertWorkout(w)
             }
@@ -176,6 +225,9 @@ public actor WorkoutCacheImpl: WorkoutCache {
             throw error
         }
     }
+
+    // Reconcile helpers (orphan-delete for the workout subtree) live in
+    // `WorkoutCache+Reconcile.swift`.
 
     public func loadWorkouts(status: WorkoutStatus?, since: Date?) async throws -> [Workout] {
         let statusRaw = status?.rawValue
@@ -249,6 +301,15 @@ public actor WorkoutCacheImpl: WorkoutCache {
         return latest.mapValues { $0.toDomain() }
     }
 
+    public func loadUserParameters(key: String) async throws -> [UserParameter] {
+        var descriptor = FetchDescriptor<UserParameterModel>(
+            predicate: #Predicate<UserParameterModel> { $0.key == key }
+        )
+        descriptor.sortBy = [SortDescriptor(\UserParameterModel.updatedAt, order: .reverse)]
+        let rows = try modelContext.fetch(descriptor)
+        return rows.map { $0.toDomain() }
+    }
+
     public func clear() async throws {
         try modelContext.delete(model: WorkoutModel.self)
         try modelContext.delete(model: BlockModel.self)
@@ -289,5 +350,6 @@ public actor WorkoutCacheImpl: WorkoutCache {
             throw error
         }
     }
+
     #endif
 }

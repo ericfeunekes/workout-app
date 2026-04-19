@@ -19,6 +19,11 @@ let itemB = UUID()
 let workoutID = UUID()
 let exerciseAlt = UUID()
 
+/// Fixed stamp for reducer `logSet` calls in tests. Most cases don't care
+/// about the timestamp; those that do override inline. Hard-coded (not
+/// `Date()`) so repeated runs produce identical state snapshots.
+let logSetStamp = Date(timeIntervalSince1970: 1_700_000_000)
+
 func pristineSets(loadKg: Double = 100.0, reps: Int = 5, count: Int = 3) -> [SetPlan] {
     (1...count).map { i in
         SetPlan(setIndex: i, loadKg: loadKg, reps: reps, done: false, adjust: nil, rir: nil)
@@ -66,7 +71,7 @@ runCase("logSet · target set done=true, reps+rir set; other sets unchanged") {
     let s0 = SessionReducer.reduce(makeBaselineState(), .start)
     let s1 = SessionReducer.reduce(
         s0,
-        .logSet(itemID: itemA, setIndex: 2, loggedReps: 4, loggedRir: 1)
+        .logSet(itemID: itemA, setIndex: 2, loggedReps: 4, loggedRir: 1, now: logSetStamp)
     )
 
     let setsA = s1.items.first(where: { $0.itemID == itemA })!.sets
@@ -88,7 +93,7 @@ runCase("logSet · rir nil is preserved (user skipped picker)") {
     let s0 = SessionReducer.reduce(makeBaselineState(), .start)
     let s1 = SessionReducer.reduce(
         s0,
-        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: nil)
+        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: nil, now: logSetStamp)
     )
     let setsA = s1.items.first(where: { $0.itemID == itemA })!.sets
     try expectEqual(setsA[0].done, true)
@@ -104,7 +109,7 @@ runCase("editPastSet · done=true preserved, fields updated, adjust=.manual") {
     s = SessionReducer.reduce(s, .start)
     s = SessionReducer.reduce(
         s,
-        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: 2)
+        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: 2, now: logSetStamp)
     )
     s = SessionReducer.reduce(
         s,
@@ -132,7 +137,7 @@ runCase("editPastSet · adjust stays .manual when already .manual") {
     s = SessionReducer.reduce(s, .start)
     s = SessionReducer.reduce(
         s,
-        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: 2)
+        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: 2, now: logSetStamp)
     )
     // First edit stamps .manual
     s = SessionReducer.reduce(
@@ -253,7 +258,7 @@ runCase("swap · target item gets performedExerciseID; other untouched; held pre
     s = SessionReducer.reduce(s, .holdAutoreg(itemID: itemA))
     s = SessionReducer.reduce(
         s,
-        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: 2)
+        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: 2, now: logSetStamp)
     )
 
     let s1 = SessionReducer.reduce(s, .swap(itemID: itemA, toExerciseID: exerciseAlt))
@@ -274,7 +279,7 @@ runCase("swap+overrides · remaining sets updated; logged set preserved; target_
     s = SessionReducer.reduce(s, .start)
     s = SessionReducer.reduce(
         s,
-        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: 2)
+        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: 2, now: logSetStamp)
     )
     let overrides = AlternativeOverrides(reps: 8, loadKg: 70, targetRir: 3)
     let s1 = SessionReducer.reduce(
@@ -336,6 +341,136 @@ runCase("swap+overrides · manual set preserved, other remaining sets overridden
     try expectEqual(s1.items[0].sets[1].adjust, .manual)
     // Set 3: non-manual, non-done → overridden.
     try expectEqual(s1.items[0].sets[2].loadKg, 70.0)
+}
+
+// 8e. swap+overrides · sets override on a STRAIGHT-SETS block IS applied.
+//     Sanity: the existing `sets` resize path still works for set-major
+//     blocks — we didn't regress straight-sets by narrowing the contract
+//     for round-robin. This is the baseline the rejection cases contrast
+//     against.
+runCase("swap+overrides · sets override applied on straight-sets (set-major) block") {
+    // Baseline structure defaults to .setMajor via `itemsPerBlock.map`.
+    var s = SessionReducer.reduce(makeBaselineState(), .start)
+    // Override bumps the target to 5; non-done tail extends by two rows.
+    let overrides = AlternativeOverrides(sets: 5, reps: 8, loadKg: 70)
+    s = SessionReducer.reduce(
+        s,
+        .swap(itemID: itemA, toExerciseID: exerciseAlt, overrides: overrides)
+    )
+    try expectEqual(s.items[0].sets.count, 5, "set-major block honors sets override")
+    try expectEqual(s.items[0].overrides?.sets, 5)
+    try expectEqual(s.structure.setsPerItem[0][0], 5, "structure tracks new count")
+    // Every pending set carries the override load/reps.
+    try expect(s.items[0].sets.allSatisfy { $0.loadKg == 70 && $0.reps == 8 })
+}
+
+// 8f. swap+overrides · sets override on a ROUND-ROBIN block (superset) is
+//     REJECTED. Reps / load still apply; the block's rows and structure
+//     are untouched. Round-robin blocks replicate a shared `rounds` count
+//     across every item, so rewriting one item's count would either skew
+//     the cursor walk or silently collapse every item — we narrow the
+//     contract to set-major only (Path A).
+runCase("swap+overrides · sets override REJECTED on superset (round-robin); other fields apply") {
+    // 2-item superset × 3 rounds. Cursor at (0, 0, 1).
+    let s0 = SessionState(
+        workoutID: workoutID,
+        route: .active,
+        cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1),
+        items: [
+            SessionState.ItemLog(itemID: itemA, sets: pristineSets(count: 3)),
+            SessionState.ItemLog(itemID: itemB, sets: pristineSets(count: 3)),
+        ],
+        restEndsAt: nil,
+        note: "",
+        structure: SessionState.Structure(
+            itemsPerBlock: [2],
+            setsPerItem: [[3, 3]],
+            advancementByBlock: [.roundRobin]
+        )
+    )
+    let overrides = AlternativeOverrides(sets: 6, reps: 10, loadKg: 60)
+    let s1 = SessionReducer.reduce(
+        s0,
+        .swap(itemID: itemA, toExerciseID: exerciseAlt, overrides: overrides)
+    )
+    // Sets count is UNCHANGED — the round-robin invariant wins.
+    try expectEqual(s1.items[0].sets.count, 3, "round-robin sets count preserved")
+    try expectEqual(s1.structure.setsPerItem[0][0], 3, "structure row count preserved")
+    try expectEqual(s1.structure.setsPerItem[0][1], 3, "peer item untouched")
+    // Other fields DO apply — reps / load mirror onto non-done rows.
+    try expect(s1.items[0].sets.allSatisfy { $0.reps == 10 && $0.loadKg == 60 })
+    // `overrides` is stored verbatim — the rejection is a runtime
+    // interpretation call, not a parser mutation. Drivers reading
+    // `overrides?.sets` still see the authored value; they just don't
+    // get row-count enforcement behind them.
+    try expectEqual(s1.items[0].overrides?.sets, 6)
+    try expectEqual(s1.items[0].performedExerciseID, exerciseAlt)
+}
+
+// 8g. swap+overrides · sets override on a CIRCUIT block is REJECTED.
+runCase("swap+overrides · sets override REJECTED on circuit (round-robin)") {
+    // 3-item circuit × 4 rounds.
+    let itemC = UUID()
+    let s0 = SessionState(
+        workoutID: workoutID,
+        route: .active,
+        cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1),
+        items: [
+            SessionState.ItemLog(itemID: itemA, sets: pristineSets(count: 4)),
+            SessionState.ItemLog(itemID: itemB, sets: pristineSets(count: 4)),
+            SessionState.ItemLog(itemID: itemC, sets: pristineSets(count: 4)),
+        ],
+        restEndsAt: nil,
+        note: "",
+        structure: SessionState.Structure(
+            itemsPerBlock: [3],
+            setsPerItem: [[4, 4, 4]],
+            advancementByBlock: [.roundRobin]
+        )
+    )
+    let overrides = AlternativeOverrides(sets: 2)
+    let s1 = SessionReducer.reduce(
+        s0,
+        .swap(itemID: itemB, toExerciseID: exerciseAlt, overrides: overrides)
+    )
+    // All three items keep their 4 rounds — no collapse to 2.
+    try expectEqual(s1.items[0].sets.count, 4)
+    try expectEqual(s1.items[1].sets.count, 4)
+    try expectEqual(s1.items[2].sets.count, 4)
+    try expectEqual(s1.structure.setsPerItem[0], [4, 4, 4])
+}
+
+// 8h. swap+overrides · sets override on a TABATA block (8 rounds round-robin)
+//     is REJECTED.
+runCase("swap+overrides · sets override REJECTED on tabata (round-robin, 8 rounds)") {
+    // Tabata: 2 items × 8 rounds. Bumping sets to 4 on one item must NOT
+    // truncate it — the 8-round drive loop would overrun the SetPlan array.
+    let s0 = SessionState(
+        workoutID: workoutID,
+        route: .active,
+        cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1),
+        items: [
+            SessionState.ItemLog(itemID: itemA, sets: pristineSets(count: 8)),
+            SessionState.ItemLog(itemID: itemB, sets: pristineSets(count: 8)),
+        ],
+        restEndsAt: nil,
+        note: "",
+        structure: SessionState.Structure(
+            itemsPerBlock: [2],
+            setsPerItem: [[8, 8]],
+            advancementByBlock: [.roundRobin]
+        )
+    )
+    let overrides = AlternativeOverrides(sets: 4, loadKg: 20)
+    let s1 = SessionReducer.reduce(
+        s0,
+        .swap(itemID: itemA, toExerciseID: exerciseAlt, overrides: overrides)
+    )
+    // Row count stays at 8 — tabata's 8-round cursor walk must find every row.
+    try expectEqual(s1.items[0].sets.count, 8, "tabata row count preserved")
+    try expectEqual(s1.structure.setsPerItem[0][0], 8)
+    // The loadKg override still lands.
+    try expect(s1.items[0].sets.allSatisfy { $0.loadKg == 20 })
 }
 
 // ---------------------------------------------------------------------------
@@ -416,7 +551,7 @@ runCase("save · returns pristine state with route=.today, note cleared, sets fr
     s = SessionReducer.reduce(s, .start)
     s = SessionReducer.reduce(
         s,
-        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: 2)
+        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: 2, now: logSetStamp)
     )
     s = SessionReducer.reduce(s, .appendNote("felt good"))
     s = SessionReducer.reduce(s, .holdAutoreg(itemID: itemA))
@@ -472,7 +607,7 @@ runCase("no-op · logSet with unknown itemID leaves state unchanged") {
     let s0 = SessionReducer.reduce(makeBaselineState(), .start)
     let s1 = SessionReducer.reduce(
         s0,
-        .logSet(itemID: unknown, setIndex: 1, loggedReps: 5, loggedRir: 2)
+        .logSet(itemID: unknown, setIndex: 1, loggedReps: 5, loggedRir: 2, now: logSetStamp)
     )
     try expectEqual(s0, s1)
 }
@@ -481,7 +616,7 @@ runCase("no-op · logSet with unknown setIndex leaves state unchanged") {
     let s0 = SessionReducer.reduce(makeBaselineState(), .start)
     let s1 = SessionReducer.reduce(
         s0,
-        .logSet(itemID: itemA, setIndex: 99, loggedReps: 5, loggedRir: 2)
+        .logSet(itemID: itemA, setIndex: 99, loggedReps: 5, loggedRir: 2, now: logSetStamp)
     )
     try expectEqual(s0, s1)
 }
@@ -517,7 +652,7 @@ runCase("no-op · editPendingSet on done set unchanged") {
     var s = SessionReducer.reduce(makeBaselineState(), .start)
     s = SessionReducer.reduce(
         s,
-        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: 2)
+        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: 2, now: logSetStamp)
     )
     let s1 = SessionReducer.reduce(
         s,
@@ -534,7 +669,7 @@ runCase("complete · route flips to .complete, log preserved") {
     s = SessionReducer.reduce(s, .start)
     s = SessionReducer.reduce(
         s,
-        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: 2)
+        .logSet(itemID: itemA, setIndex: 1, loggedReps: 5, loggedRir: 2, now: logSetStamp)
     )
     let s1 = SessionReducer.reduce(s, .complete)
     try expectEqual(s1.route, .complete)
@@ -806,6 +941,103 @@ runCase("enterRest · clears workEndsAt") {
     s = SessionReducer.reduce(s, .enterRest(durationSec: 10, now: now))
     try expectEqual(s.workEndsAt, nil)
     try expectEqual(s.restEndsAt, now.addingTimeInterval(10))
+}
+
+// ---------------------------------------------------------------------------
+// 25. advanceFromRest · intervalAnchorAt cleared on block change. The EMOM
+//     interval grid is a per-block anchor — crossing a block boundary must
+//     clear it so the next block's `enterBlockTimerIfNeeded` can re-stamp
+//     a fresh anchor (or leave it nil for non-EMOM blocks).
+// ---------------------------------------------------------------------------
+runCase("advanceFromRest · intervalAnchorAt cleared on block change") {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let s0 = SessionState(
+        workoutID: workoutID,
+        route: .rest,
+        cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1),
+        items: [
+            SessionState.ItemLog(
+                itemID: itemA,
+                sets: [SetPlan(setIndex: 1, loadKg: 0, reps: 0, done: true, adjust: nil, rir: nil)]
+            ),
+            SessionState.ItemLog(
+                itemID: itemB,
+                sets: [SetPlan(setIndex: 1, loadKg: 0, reps: 0, done: false, adjust: nil, rir: nil)]
+            ),
+        ],
+        restEndsAt: now.addingTimeInterval(30),
+        blockEndsAt: now.addingTimeInterval(600),
+        workEndsAt: nil,
+        intervalAnchorAt: now,
+        note: "",
+        structure: SessionState.Structure(
+            itemsPerBlock: [1, 1],
+            setsPerItem: [[1], [1]]
+        )
+    )
+    let s1 = SessionReducer.reduce(s0, .advanceFromRest)
+    try expectEqual(s1.cursor.blockIndex, 1, "landed on next block")
+    try expectEqual(s1.intervalAnchorAt, nil, "intervalAnchorAt cleared on block change")
+}
+
+// ---------------------------------------------------------------------------
+// 26. advanceFromRest · intervalAnchorAt preserved WITHIN a block. A round-
+//     robin EMOM walks items/rounds in the same block — the anchor must
+//     survive all those intra-block advances so boundaries stay pinned to
+//     the original block-start instant. Only a block CHANGE clears it.
+// ---------------------------------------------------------------------------
+runCase("advanceFromRest · intervalAnchorAt preserved on intra-block advance") {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let anchor = now
+    let s0 = SessionState(
+        workoutID: workoutID,
+        route: .rest,
+        cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1),
+        items: [
+            SessionState.ItemLog(itemID: itemA, sets: pristineSets(count: 3)),
+            SessionState.ItemLog(itemID: itemB, sets: pristineSets(count: 3)),
+        ],
+        restEndsAt: now.addingTimeInterval(30),
+        blockEndsAt: now.addingTimeInterval(600),
+        workEndsAt: nil,
+        intervalAnchorAt: anchor,
+        note: "",
+        structure: SessionState.Structure(
+            itemsPerBlock: [2],
+            setsPerItem: [[3, 3]],
+            advancementByBlock: [.roundRobin]
+        )
+    )
+    let s1 = SessionReducer.reduce(s0, .advanceFromRest)
+    try expectEqual(s1.cursor.itemIndex, 1, "moved to next item in same round")
+    try expectEqual(s1.intervalAnchorAt, anchor, "anchor preserved inside a block")
+    try expectEqual(s1.blockEndsAt, now.addingTimeInterval(600), "blockEndsAt preserved inside a block")
+}
+
+// ---------------------------------------------------------------------------
+// 27. save · clears intervalAnchorAt alongside blockEndsAt / workEndsAt.
+// ---------------------------------------------------------------------------
+runCase("save · clears intervalAnchorAt") {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    var s = makeBaselineState()
+    s = SessionReducer.reduce(s, .start)
+    s.intervalAnchorAt = now
+    s.blockEndsAt = now.addingTimeInterval(600)
+    let freshItems = [
+        SessionState.ItemLog(itemID: itemA, autoregHeld: false, sets: pristineSets()),
+        SessionState.ItemLog(itemID: itemB, autoregHeld: false, sets: pristineSets()),
+    ]
+    let freshStructure = SessionState.Structure(
+        itemsPerBlock: [2],
+        setsPerItem: [[3, 3]]
+    )
+    let s1 = SessionReducer.reduce(
+        s,
+        .save(freshItems: freshItems, freshStructure: freshStructure)
+    )
+    try expectEqual(s1.intervalAnchorAt, nil)
+    try expectEqual(s1.blockEndsAt, nil)
+    try expectEqual(s1.workEndsAt, nil)
 }
 
 reportAndExit()

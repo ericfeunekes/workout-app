@@ -579,15 +579,17 @@ runAsyncCase("PushQueue — set_logs still route to /api/sync/results after even
 runAsyncCase("PushQueue — userParameter routes to /api/user-parameters") {
     // Mirrors the `.events` routing test: an enqueued .userParameter
     // must POST to /api/user-parameters with the server's UserParameterIn
-    // body shape (no id, no user_id — server derives both).
+    // body shape. The client owns `id` end-to-end so retries upsert on
+    // id; `user_id` still stays server-derived (from the bearer token).
     let store = FakePushQueueStore()
     let transport = FakeTransport(outcomes: [
         .response(HTTPResponse(status: 200, body: Data())),
     ])
     let queue = PushQueue(store: store, transport: transport)
 
+    let paramID = uuid("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
     let param = CoreDomain.UserParameter(
-        id: UUID(),
+        id: paramID,
         userID: uuid("22222222-2222-2222-2222-222222222222"),
         key: "bodyweight_kg",
         value: "82.5",
@@ -606,29 +608,313 @@ runAsyncCase("PushQueue — userParameter routes to /api/user-parameters") {
     try expectEqual(calls[0].path, "/api/user-parameters")
     try expectEqual(calls[0].bearerToken, "tok")
 
-    // Body must be an array of `{key, value, source, updated_at}` — no
-    // id (server generates), no user_id (server derives from bearer).
+    // Body must be an array of `{id, key, value, source, updated_at}` —
+    // the client-owned id is REQUIRED (retry idempotency); no user_id
+    // (server derives from bearer).
     guard let body = calls[0].body else {
         try expect(false, "expected body on POST")
         return
     }
     let decoder = JSONDecoder.workoutDB()
     struct WireIn: Decodable {
+        let id: String
         let key: String
         let value: String
         let source: String
         let updatedAt: Date?
         enum CodingKeys: String, CodingKey {
-            case key, value, source
+            case id, key, value, source
             case updatedAt = "updated_at"
         }
     }
     let wire = try decoder.decode([WireIn].self, from: body)
     try expectEqual(wire.count, 1)
+    try expectEqual(wire[0].id, paramID.uuidString.lowercased())
     try expectEqual(wire[0].key, "bodyweight_kg")
     try expectEqual(wire[0].value, "82.5")
     try expectEqual(wire[0].source, "app_log")
     try expectEqual(wire[0].updatedAt, iso8601("2026-04-17T08:00:00Z"))
+}
+
+// MARK: - User parameter push idempotency
+
+runAsyncCase("UserParameter push is idempotent — same id ships twice across independent flush cycles") {
+    // Replay scenario: the app commits a bodyweight row to the push
+    // queue, the server responds 2xx, but the process dies before the
+    // queue-remove is persisted. On next launch the queue replays the
+    // same row. The DTO shipped on both calls MUST carry the same id
+    // so the server's upsert-on-id path collapses the replay into a
+    // no-op. Without this, the append-only `user_parameters` table
+    // would carry a duplicate row forever.
+    //
+    // Shape of the test: enqueue → flush (succeeds, row removed) →
+    // re-enqueue → flush again. Two independent flush cycles, same
+    // logical id on the wire both times. This mirrors the real
+    // dies-before-remove flow; two back-to-back enqueues without a flush
+    // in between now collapse via the in-queue dedup (see
+    // `PushQueue replace-in-place — userParameter dedup on id`), which
+    // is a separate, complementary invariant.
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 200, body: Data())),
+        .response(HTTPResponse(status: 200, body: Data())),
+    ])
+    let queue = PushQueue(store: store, transport: transport)
+
+    let paramID = uuid("99999999-8888-7777-6666-555555555555")
+    let param = CoreDomain.UserParameter(
+        id: paramID,
+        userID: uuid("22222222-2222-2222-2222-222222222222"),
+        key: "bodyweight_kg",
+        value: "82.5",
+        updatedAt: iso8601("2026-04-17T08:00:00Z"),
+        source: .appLog
+    )
+    // Cycle 1: enqueue → flush → server 2xx → row removed from queue.
+    try await queue.enqueueUserParameter(param)
+    _ = try await queue.flush(bearerToken: "tok")
+    let afterFirstFlush = try await store.isEmpty()
+    try expect(afterFirstFlush, "first flush drains the queue")
+
+    // Cycle 2: the "process died before remove was persisted" replay —
+    // the server already accepted this id once, but the client's queue
+    // didn't know, so it re-enqueues on next launch.
+    try await queue.enqueueUserParameter(param)
+    _ = try await queue.flush(bearerToken: "tok")
+
+    let calls = await transport.store.recordedCalls()
+    try expectEqual(calls.count, 2, "both flush cycles must push")
+
+    let decoder = JSONDecoder.workoutDB()
+    struct WireIn: Decodable {
+        let id: String
+        let key: String
+    }
+    let first = try decoder.decode([WireIn].self, from: calls[0].body ?? Data())
+    let second = try decoder.decode([WireIn].self, from: calls[1].body ?? Data())
+    try expectEqual(first.count, 1)
+    try expectEqual(second.count, 1)
+    try expectEqual(first[0].id, second[0].id, "both pushes must carry same id")
+    try expectEqual(first[0].id, paramID.uuidString.lowercased())
+}
+
+// MARK: - SetLog wire-id lowercasing
+
+runAsyncCase("SetLog DTO wireID is lowercase even when Swift UUID is uppercase") {
+    // Swift's `UUID.uuidString` returns UPPERCASE by default. The
+    // project invariant is lowercase on the wire (server accepts either
+    // via `_UuidInputBase` but the app must not drift). Regression guard
+    // for bug: `DTOMapping+SetLog.swift` previously used `.uuidString`
+    // directly, so outbound SetLog pushes shipped uppercase ids — the
+    // class of drift that produced prior 404s on /api/telemetry before
+    // `.lowercased()` was added there.
+    let upperID = UUID(uuidString: "AABBCCDD-EEFF-0011-2233-445566778899")!
+    try expectEqual(upperID.uuidString, "AABBCCDD-EEFF-0011-2233-445566778899")
+
+    let log = CoreDomain.SetLog(
+        id: upperID,
+        workoutItemID: UUID(uuidString: "FFEEDDCC-BBAA-9988-7766-554433221100")!,
+        performedExerciseID: UUID(uuidString: "11112222-3333-4444-5555-666677778888")!,
+        setIndex: 1,
+        reps: 5,
+        weight: 100,
+        weightUnit: .kg,
+        rir: 2,
+        completedAt: iso8601("2026-04-17T08:00:00Z")
+    )
+    let dto = DTOMapping.toDTO(log)
+    try expectEqual(dto.id, "aabbccdd-eeff-0011-2233-445566778899")
+    try expectEqual(dto.workoutItemId, "ffeeddcc-bbaa-9988-7766-554433221100")
+    try expectEqual(dto.performedExerciseId, "11112222-3333-4444-5555-666677778888")
+
+    // Also round-trip the DTO through JSON encode so any future codec
+    // re-casing layer would be caught. The encoded body's `id` field
+    // must be lowercase.
+    let encoder = JSONEncoder.workoutDB()
+    let payload = WorkoutDBSchema.SyncResultsPayload(setLogs: [dto], statusUpdates: [])
+    let data = try encoder.encode(payload)
+    guard let json = String(data: data, encoding: .utf8) else {
+        try expect(false, "expected utf8-decodable body")
+        return
+    }
+    try expect(
+        !json.contains("AABBCCDD"),
+        "encoded JSON must not carry uppercase id substring: \(json)"
+    )
+    try expect(
+        json.contains("aabbccdd-eeff-0011-2233-445566778899"),
+        "encoded JSON should carry the lowercase id: \(json)"
+    )
+}
+
+// MARK: - Status update wire-id lowercasing
+
+runAsyncCase("Status update DTO workoutId is lowercase") {
+    // Same invariant check as SetLog — status updates were the other
+    // outbound site that emitted uppercase. Drive it through the queue
+    // so we also verify the encode-for-push path routes correctly.
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 200, body: Data())),
+    ])
+    let queue = PushQueue(store: store, transport: transport)
+
+    let upperID = UUID(uuidString: "DEADBEEF-1234-5678-9ABC-DEF012345678")!
+    try await queue.enqueueStatusUpdate(
+        workoutID: upperID,
+        status: .completed,
+        completedAt: iso8601("2026-04-17T08:30:00Z")
+    )
+    _ = try await queue.flush(bearerToken: "tok")
+
+    let calls = await transport.store.recordedCalls()
+    try expectEqual(calls.count, 1)
+    guard let body = calls[0].body,
+          let json = String(data: body, encoding: .utf8) else {
+        try expect(false, "expected body on POST")
+        return
+    }
+    try expect(
+        !json.contains("DEADBEEF"),
+        "status update must not carry uppercase id: \(json)"
+    )
+    try expect(
+        json.contains("deadbeef-1234-5678-9abc-def012345678"),
+        "status update must carry lowercase id: \(json)"
+    )
+}
+
+runAsyncCase("Status update carries notes on the wire so the server persists them") {
+    // Regression: the terminal status push previously dropped the user's
+    // post-workout note. The local cache held it, but the workout's
+    // `updated_at` bumped (status flipped), so the next sync/pull
+    // overwrote the note with the server's stale nil value. The fix
+    // rides `notes` on `WorkoutStatusUpdate` so the server persists.
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 200, body: Data())),
+    ])
+    let queue = PushQueue(store: store, transport: transport)
+
+    try await queue.enqueueStatusUpdate(
+        workoutID: uuid("11111111-2222-3333-4444-555555555555"),
+        status: .completed,
+        completedAt: iso8601("2026-04-17T08:30:00Z"),
+        notes: "leg day PR!"
+    )
+    _ = try await queue.flush(bearerToken: "tok")
+
+    let calls = await transport.store.recordedCalls()
+    try expectEqual(calls.count, 1)
+    guard let body = calls[0].body else {
+        try expect(false, "expected body on POST")
+        return
+    }
+    let decoder = JSONDecoder.workoutDB()
+    let payload = try decoder.decode(WorkoutDBSchema.SyncResultsPayload.self, from: body)
+    try expectEqual(payload.statusUpdates.count, 1)
+    try expectEqual(payload.statusUpdates[0].notes, "leg day PR!")
+}
+
+// MARK: - Priority ordering (telemetry ≻ results isolation)
+
+runAsyncCase("PushQueue drains results (priority 0) before telemetry (priority 1) in one flush") {
+    // Regression guard: a verbose-mode telemetry burst enqueued BEFORE
+    // a set log used to shove the log behind a long chronological tail.
+    // The PushItem `priority` field + sort-by-priority-then-enqueuedAt
+    // in `peek` now guarantees result payloads flush first. Telemetry
+    // still ships the same cycle — just after every queued result.
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: Array(
+        repeating: FakeOutcome.response(HTTPResponse(status: 200, body: Data())),
+        count: 4
+    ))
+    let queue = PushQueue(store: store, transport: transport)
+
+    // Order-of-enqueue: two old telemetry events, then one fresh set
+    // log, then one more telemetry event. If we sorted by enqueuedAt
+    // alone, the set log would land third. Priority weighting must
+    // pull it to position one.
+    try await queue.enqueueEvents([
+        CoreTelemetry.Event(
+            timestamp: iso8601("2026-04-17T07:00:00Z"),
+            sessionID: UUID(),
+            kind: "state",
+            name: "debug.verbose.1"
+        )
+    ])
+    try await queue.enqueueEvents([
+        CoreTelemetry.Event(
+            timestamp: iso8601("2026-04-17T07:00:01Z"),
+            sessionID: UUID(),
+            kind: "state",
+            name: "debug.verbose.2"
+        )
+    ])
+    try await queue.enqueueSetLogs([makeLog(setIndex: 1)])
+    try await queue.enqueueEvents([
+        CoreTelemetry.Event(
+            timestamp: iso8601("2026-04-17T07:00:02Z"),
+            sessionID: UUID(),
+            kind: "state",
+            name: "debug.verbose.3"
+        )
+    ])
+
+    _ = try await queue.flush(bearerToken: "tok")
+
+    let calls = await transport.store.recordedCalls()
+    try expectEqual(calls.count, 4, "all four items must flush")
+
+    // First call MUST be the set_log results endpoint. Prior to the
+    // priority fix this was position 3 (chronological after the two
+    // older telemetry events).
+    try expectEqual(calls[0].path, "/api/sync/results", "result pushed first")
+    // The remaining three calls are all telemetry — they trail in
+    // enqueuedAt order among themselves (FIFO within a priority class).
+    try expectEqual(calls[1].path, "/api/telemetry/events")
+    try expectEqual(calls[2].path, "/api/telemetry/events")
+    try expectEqual(calls[3].path, "/api/telemetry/events")
+}
+
+runAsyncCase("PushItem.priority derived from payload case") {
+    // Shape check: every results-class payload is priority 0; telemetry
+    // is priority 1. Codifies the contract so a future payload case
+    // added without touching `PushItem.Payload.priority` would fail
+    // loudly here — the switch is exhaustive.
+    let log = makeLog()
+    let results = PushItem(payload: .setLogs([log]), enqueuedAt: Date())
+    try expectEqual(results.priority, 0)
+
+    let status = PushItem(
+        payload: .statusUpdate(
+            workoutID: UUID(),
+            status: .completed,
+            completedAt: nil,
+            notes: nil
+        ),
+        enqueuedAt: Date()
+    )
+    try expectEqual(status.priority, 0)
+
+    let param = PushItem(
+        payload: .userParameter(CoreDomain.UserParameter(
+            id: UUID(),
+            userID: UUID(),
+            key: "k",
+            value: "v",
+            updatedAt: Date(),
+            source: .appLog
+        )),
+        enqueuedAt: Date()
+    )
+    try expectEqual(param.priority, 0)
+
+    let event = PushItem(
+        payload: .events([CoreTelemetry.Event(sessionID: UUID(), kind: "x", name: "y")]),
+        enqueuedAt: Date()
+    )
+    try expectEqual(event.priority, 1)
 }
 
 runAsyncCase("PushQueue — telemetry body decodes as TelemetryEventsPayload with events in it") {
@@ -660,6 +946,392 @@ runAsyncCase("PushQueue — telemetry body decodes as TelemetryEventsPayload wit
     try expectEqual(payload.events[0].kind, "state")
     try expectEqual(payload.events[0].sessionId, sessionID.uuidString.lowercased())
     try expectEqual(payload.events[0].dataJson, #"{"mutation":"start"}"#)
+}
+
+// MARK: - Replace-in-place on enqueue (logical dedup)
+
+runAsyncCase("PushQueue replace-in-place — enqueueing same SetLog id twice collapses to one entry with latest payload") {
+    // Regression for "no logical dedup; unknown envelope kind stalls the
+    // whole queue" — the dedup half. Without this, a just-logged set
+    // edited a second later before the queue flushes would leave two
+    // `.setLogs` rows queued: the stale first push and the fresh second.
+    // On flush the stale one lands first and transiently overwrites the
+    // corrected bytes on the server until the fresh one resolves.
+    let store = FakePushQueueStore()
+    let queue = PushQueue(
+        store: store,
+        transport: FakeTransport(outcomes: []),
+        clock: SystemClock()
+    )
+
+    let setLogID = uuid("abcdef01-2345-6789-abcd-ef0123456789")
+    let first = CoreDomain.SetLog(
+        id: setLogID,
+        workoutItemID: uuid("44444444-4444-4444-4444-444444444444"),
+        performedExerciseID: nil,
+        setIndex: 3,
+        reps: 5,
+        weight: 100,
+        weightUnit: .kg,
+        rir: 2,
+        completedAt: iso8601("2026-04-17T08:00:00Z")
+    )
+    let corrected = CoreDomain.SetLog(
+        id: setLogID,  // SAME id — logical identity
+        workoutItemID: first.workoutItemID,
+        performedExerciseID: nil,
+        setIndex: 3,
+        reps: 8,       // corrected rep count
+        weight: 102.5, // corrected load
+        weightUnit: .kg,
+        rir: 1,
+        completedAt: iso8601("2026-04-17T08:00:30Z")
+    )
+
+    try await queue.enqueueSetLogs([first])
+    try await queue.enqueueSetLogs([corrected])
+
+    let all = await store.all()
+    try expectEqual(all.count, 1, "logical dedup by SetLog id must collapse to one entry")
+    if case .setLogs(let logs) = all[0].payload {
+        try expectEqual(logs.count, 1)
+        try expectEqual(logs[0].id, setLogID)
+        try expectEqual(logs[0].reps, 8, "latest payload wins")
+        try expectEqual(logs[0].weight, 102.5)
+        try expectEqual(logs[0].rir, 1)
+    } else {
+        try expect(false, "expected setLogs payload")
+    }
+}
+
+runAsyncCase("PushQueue replace-in-place — statusUpdate dedup on (workoutID, status)") {
+    let store = FakePushQueueStore()
+    let queue = PushQueue(
+        store: store,
+        transport: FakeTransport(outcomes: []),
+        clock: SystemClock()
+    )
+
+    let workoutID = uuid("11111111-2222-3333-4444-555555555555")
+    try await queue.enqueueStatusUpdate(
+        workoutID: workoutID, status: .completed,
+        completedAt: iso8601("2026-04-17T08:00:00Z")
+    )
+    try await queue.enqueueStatusUpdate(
+        workoutID: workoutID, status: .completed,
+        completedAt: iso8601("2026-04-17T08:01:00Z")  // newer completedAt
+    )
+
+    let all = await store.all()
+    try expectEqual(all.count, 1, "status update dedup must collapse to one entry")
+    if case .statusUpdate(_, let status, let completedAt, _) = all[0].payload {
+        try expectEqual(status, .completed)
+        try expectEqual(completedAt, iso8601("2026-04-17T08:01:00Z"))
+    } else {
+        try expect(false, "expected statusUpdate payload")
+    }
+}
+
+runAsyncCase("PushQueue replace-in-place — userParameter dedup on id") {
+    let store = FakePushQueueStore()
+    let queue = PushQueue(
+        store: store,
+        transport: FakeTransport(outcomes: []),
+        clock: SystemClock()
+    )
+
+    let paramID = uuid("99999999-aaaa-bbbb-cccc-dddddddddddd")
+    let v1 = CoreDomain.UserParameter(
+        id: paramID,
+        userID: uuid("22222222-2222-2222-2222-222222222222"),
+        key: "bodyweight_kg",
+        value: "81.0",
+        updatedAt: iso8601("2026-04-17T08:00:00Z"),
+        source: .appLog
+    )
+    let v2 = CoreDomain.UserParameter(
+        id: paramID,  // SAME id
+        userID: v1.userID,
+        key: "bodyweight_kg",
+        value: "82.5",  // updated value
+        updatedAt: iso8601("2026-04-17T08:05:00Z"),
+        source: .appLog
+    )
+
+    try await queue.enqueueUserParameter(v1)
+    try await queue.enqueueUserParameter(v2)
+
+    let all = await store.all()
+    try expectEqual(all.count, 1, "userParameter dedup must collapse to one entry")
+    if case .userParameter(let param) = all[0].payload {
+        try expectEqual(param.value, "82.5", "latest payload wins")
+    } else {
+        try expect(false, "expected userParameter payload")
+    }
+}
+
+// MARK: - PushFlusher / PushQueue backoff + dead-letter (2026-04-18 P2)
+
+/// Test-only emitter that captures every event synchronously. Backed by a
+/// `DispatchQueue` lock because `TelemetryEmitter.emit` is non-async.
+final class RecordingTelemetryEmitter: TelemetryEmitter, @unchecked Sendable {
+    private let lock = NSLock()
+    private var captured: [CoreTelemetry.Event] = []
+
+    func emit(_ event: CoreTelemetry.Event) {
+        lock.lock()
+        defer { lock.unlock() }
+        captured.append(event)
+    }
+
+    func events() -> [CoreTelemetry.Event] {
+        lock.lock()
+        defer { lock.unlock() }
+        return captured
+    }
+}
+
+runCase("PushBackoff.nextDelay — scheduled backoff, plateau at 300s") {
+    // Regression for "PushFlusher fixed 60s cadence": each retry must
+    // wait longer than the last until the plateau. This is the unit-level
+    // shape of the fix that `testPushFlusherBackoffAfterTransientFailure`
+    // leans on: the flusher's loop reads these values to size its sleep.
+    try expectEqual(PushBackoff.nextDelay(forAttempts: 0), 10)
+    try expectEqual(PushBackoff.nextDelay(forAttempts: 1), 30)
+    try expectEqual(PushBackoff.nextDelay(forAttempts: 2), 60)
+    try expectEqual(PushBackoff.nextDelay(forAttempts: 3), 120)
+    try expectEqual(PushBackoff.nextDelay(forAttempts: 4), 300)
+    try expectEqual(PushBackoff.nextDelay(forAttempts: 5), 300, "plateau")
+    try expectEqual(PushBackoff.nextDelay(forAttempts: 100), 300, "plateau holds")
+    // Strict monotonic until the plateau.
+    try expect(
+        PushBackoff.nextDelay(forAttempts: 1) > PushBackoff.nextDelay(forAttempts: 0),
+        "second attempt must wait longer than first"
+    )
+    try expect(
+        PushBackoff.nextDelay(forAttempts: 2) > PushBackoff.nextDelay(forAttempts: 1),
+        "third attempt must wait longer than second"
+    )
+}
+
+runAsyncCase("PushFlusherBackoffAfterTransientFailure — 503 extends the next sleep") {
+    // Scripted transport returns 503. Drive two flush cycles with the
+    // same enqueued item and read the counter-driven next-sleep off
+    // `PushBackoff`: it must strictly grow from attempt 1 to attempt 2.
+    // This is the queue-wide backoff lever the loop reads.
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 503, body: Data())),
+        .response(HTTPResponse(status: 503, body: Data())),
+    ])
+    let api = SyncAPI(
+        transport: transport,
+        store: store,
+        tokenProvider: { "tok" }
+    )
+    try await api.pushLog([makeLog(setIndex: 1)])
+
+    let first = try await api.flushPushQueue()
+    try expect(first.networkFailed, "first 503 must flag networkFailed")
+    let delayAfterFirst = PushBackoff.nextDelay(forAttempts: 1)
+
+    let second = try await api.flushPushQueue()
+    try expect(second.networkFailed, "second 503 must also fail")
+    let delayAfterSecond = PushBackoff.nextDelay(forAttempts: 2)
+
+    try expect(
+        delayAfterSecond > delayAfterFirst,
+        "second attempt must wait longer than first: \(delayAfterFirst) vs \(delayAfterSecond)"
+    )
+}
+
+runAsyncCase("PushFlusherDeadLettersPersistent4xxAfter5Attempts — 422 drops + telemetry fires") {
+    // The core of the fix: a persistent 4xx (e.g. 422 validation) must
+    // not park the item forever. After `PushBackoff.deadLetterThreshold`
+    // consecutive 422s the queue drops the row and emits a
+    // `execution.push_item_dead_lettered` event. This guards the "head
+    // of queue stuck on a bad body" failure mode.
+    //
+    // The event must also carry a correlation id (`set_log_id` here)
+    // so an operator can trace the dropped row back to the specific
+    // SetLog; `payload_kind` + `http_status` + `attempts` alone aren't
+    // enough to find the body that broke.
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: Array(
+        repeating: FakeOutcome.response(HTTPResponse(status: 422, body: Data())),
+        count: 6
+    ))
+    let recorder = RecordingTelemetryEmitter()
+    let queue = PushQueue(
+        store: store,
+        transport: transport,
+        telemetry: recorder
+    )
+    let logID = uuid("cafe0001-0000-4000-8000-000000000001")
+    let log = makeLog(id: logID, setIndex: 1)
+    try await queue.enqueueSetLogs([log])
+
+    // Flush N times — the queue retries the same item each call because
+    // the fake transport keeps feeding 422s. After 5 attempts the row
+    // must be gone.
+    for _ in 0..<5 {
+        _ = try await queue.flush(bearerToken: "tok")
+    }
+
+    let isEmpty = try await store.isEmpty()
+    try expect(isEmpty, "dead-lettered item must be dropped from the store")
+
+    let events = recorder.events()
+    let deadLetters = events.filter { $0.name == "execution.push_item_dead_lettered" }
+    try expectEqual(deadLetters.count, 1, "exactly one dead-letter event")
+    let deadLetter = deadLetters[0]
+    try expectEqual(deadLetter.kind, "state")
+    guard let json = deadLetter.dataJSON else {
+        try expect(false, "dead-letter event must carry dataJSON")
+        return
+    }
+    try expect(
+        json.contains("\"payload_kind\":\"set_logs\""),
+        "dead-letter data must name the payload kind: \(json)"
+    )
+    try expect(
+        json.contains("\"http_status\":422"),
+        "dead-letter data must record the HTTP status: \(json)"
+    )
+    try expect(
+        json.contains("\"attempts\":5"),
+        "dead-letter data must record the attempt count: \(json)"
+    )
+    try expect(
+        json.contains("\"set_log_id\":\"\(logID.wireID)\""),
+        "dead-letter data must carry set_log_id for correlation: \(json)"
+    )
+}
+
+runAsyncCase("PushFlusherResetsBackoffOnFreshEnqueue — new item starts with a fresh counter") {
+    // After several 422s on one item, enqueue a fresh item. The new item
+    // has its own PushItem.id, so its dead-letter counter starts at 0 —
+    // a stuck bad body must not poison the first try of a new log.
+    //
+    // Tested via behavior (not by peeking internal state): after the
+    // first item dead-letters at attempt 5, a subsequently enqueued
+    // second item that also gets a 422 must NOT dead-letter on its
+    // first flush — which would be the observable symptom of a shared /
+    // queue-wide counter. The second dead-letter (if any) must be a
+    // distinct event for a distinct item.
+    let store = FakePushQueueStore()
+    // Enough 422s to burn through one full dead-letter cycle on the
+    // first item (5 attempts) plus one attempt on the second item.
+    let transport = FakeTransport(outcomes: Array(
+        repeating: FakeOutcome.response(HTTPResponse(status: 422, body: Data())),
+        count: 6
+    ))
+    let recorder = RecordingTelemetryEmitter()
+    let queue = PushQueue(
+        store: store,
+        transport: transport,
+        telemetry: recorder
+    )
+    let firstLog = makeLog(setIndex: 1)
+    try await queue.enqueueSetLogs([firstLog])
+
+    // Burn through the full dead-letter cycle on the first item.
+    for _ in 0..<PushBackoff.deadLetterThreshold {
+        _ = try await queue.flush(bearerToken: "tok")
+    }
+
+    // First item should have dead-lettered and been removed.
+    let isEmptyAfterFirst = try await store.isEmpty()
+    try expect(isEmptyAfterFirst, "first item dead-lettered out of the queue")
+    let firstDeadLetters = recorder.events().filter {
+        $0.name == "execution.push_item_dead_lettered"
+    }
+    try expectEqual(firstDeadLetters.count, 1, "one dead-letter so far")
+
+    // Fresh enqueue with a new SetLog id — this gets a new PushItem.id.
+    let secondLog = makeLog(setIndex: 2)
+    try await queue.enqueueSetLogs([secondLog])
+
+    // One 422 attempt on the second item.
+    _ = try await queue.flush(bearerToken: "tok")
+
+    // Behavioral assertion: the second item must still be in the queue
+    // after a single failed attempt. A queue-wide counter (which the
+    // fix rejects) would dead-letter immediately because the shared
+    // counter was already at threshold.
+    let stillQueued = try await store.isEmpty()
+    try expect(
+        !stillQueued,
+        "second item must survive its first 422 — counter is per-item, not queue-wide"
+    )
+
+    // And the telemetry record must still show exactly one dead-letter
+    // (the original item), not two.
+    let laterDeadLetters = recorder.events().filter {
+        $0.name == "execution.push_item_dead_lettered"
+    }
+    try expectEqual(
+        laterDeadLetters.count, 1,
+        "fresh item at 1 attempt must not trigger a second dead-letter"
+    )
+}
+
+runAsyncCase("PushFlusher401StillTriggersTokenRejected — not a dead-letter path") {
+    // 401 must keep its existing `.tokenRejected` semantics and never
+    // dead-letter the row. Reauth replaces the bearer and the same row
+    // ships again — we must not drop the user's data because the token
+    // expired.
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: Array(
+        repeating: FakeOutcome.response(HTTPResponse(status: 401, body: Data())),
+        count: 10
+    ))
+    let recorder = RecordingTelemetryEmitter()
+    let queue = PushQueue(
+        store: store,
+        transport: transport,
+        telemetry: recorder
+    )
+    try await queue.enqueueSetLogs([makeLog(setIndex: 1)])
+
+    // Run a batch of flushes well past the dead-letter threshold.
+    for _ in 0..<PushBackoff.deadLetterThreshold + 2 {
+        let result = try await queue.flush(bearerToken: "tok")
+        try expect(result.tokenRejected, "401 must surface as tokenRejected")
+    }
+
+    // The row must still be in the queue — 401 preserves data.
+    let isEmpty = try await store.isEmpty()
+    try expect(!isEmpty, "401 must not dead-letter the item")
+
+    // And no dead-letter event must have fired.
+    let deadLetters = recorder.events().filter {
+        $0.name == "execution.push_item_dead_lettered"
+    }
+    try expectEqual(deadLetters.count, 0, "401 must not emit dead-letter telemetry")
+}
+
+runAsyncCase("PushQueue replace-in-place — does NOT touch telemetry events") {
+    // Events are append-only diagnostics — a telemetry replay is just
+    // another event row on the server. Guarding this explicitly so a
+    // future change that hands a logical id to events doesn't
+    // accidentally silence duplicate events.
+    let store = FakePushQueueStore()
+    let queue = PushQueue(
+        store: store,
+        transport: FakeTransport(outcomes: []),
+        clock: SystemClock()
+    )
+    let event = CoreTelemetry.Event(
+        sessionID: UUID(),
+        kind: "state",
+        name: "test.event"
+    )
+    try await queue.enqueueEvents([event])
+    try await queue.enqueueEvents([event])
+
+    let all = await store.all()
+    try expectEqual(all.count, 2, "events are not deduped — two enqueues produce two rows")
 }
 
 reportAndExit()

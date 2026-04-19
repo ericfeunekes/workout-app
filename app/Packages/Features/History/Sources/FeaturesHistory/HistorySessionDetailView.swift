@@ -45,11 +45,18 @@ struct HistorySessionDetailView: View {
                 setIndex: editing.setLog.setIndex,
                 initialReps: editing.setLog.reps,
                 initialRir: editing.setLog.rir,
-                initialLoadKg: editing.setLog.weight,
-                onCommit: { reps, rir, loadKg in
+                initialLoad: editing.setLog.weight,
+                // `weightUnit` defaults to `.kg` for rows that predate the
+                // column being populated — today's writers always set it,
+                // but the SetLog type allows nil so we collapse defensively
+                // here rather than assuming every call site tightened its
+                // invariant. Once we're confident, make the field
+                // non-optional upstream and delete this fallback.
+                weightUnit: editing.setLog.weightUnit ?? .kg,
+                onCommit: { reps, rir, load in
                     commitEdit(
                         setLogID: editing.setLog.id,
-                        reps: reps, rir: rir, loadKg: loadKg
+                        reps: reps, rir: rir, load: load
                     )
                 }
             )
@@ -136,8 +143,8 @@ struct HistorySessionDetailView: View {
     private func commitEdit(
         setLogID: UUID,
         reps: Int?,
-        rir: Int?,
-        loadKg: Double?
+        rir: EditPastSetRirCommit,
+        load: EditPastSetLoadCommit?
     ) {
         let workoutID = viewModel.workoutID
         let historyVM = historyViewModel
@@ -148,7 +155,7 @@ struct HistorySessionDetailView: View {
                 setLogID: setLogID,
                 reps: reps,
                 rir: rir,
-                loadKg: loadKg
+                load: load
             )
         }
         // Dismiss the sheet + clear highlight immediately so the UI

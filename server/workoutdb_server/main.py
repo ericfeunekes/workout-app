@@ -5,6 +5,7 @@ logging + request-id middleware. The actual route handlers live under
 workoutdb_server.api.*.
 """
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -26,8 +27,13 @@ from workoutdb_server.db import make_engine
 from workoutdb_server.logging_setup import RequestIdMiddleware, configure_logging
 from workoutdb_server.migrations import apply_migrations
 from workoutdb_server.models import AppUser
+from workoutdb_server.sync.event_log_retention import prune_event_log
 
 _log = logging.getLogger(__name__)
+
+# Periodic sweep interval: a fresh prune once per day is plenty for a
+# single-user home server. Module-level so tests can monkey-patch it.
+_PERIODIC_SWEEP_INTERVAL_SEC = 86400
 
 
 def _ensure_app_user(engine, settings: Settings) -> None:
@@ -43,6 +49,45 @@ def _ensure_app_user(engine, settings: Settings) -> None:
             _log.info("created app_user %s (%s)", settings.user_id, settings.user_name)
 
 
+def _sweep_event_log(engine, settings: Settings) -> None:
+    """Prune stale `event_log` rows.
+
+    Called once at startup and then again from `_periodic_sweep` on a timer —
+    between the two, the table stays bounded even when the process runs for
+    weeks. No cron, no admin endpoint, no external scheduler. See
+    `workoutdb_server.sync.event_log_retention`.
+    """
+    with Session(engine) as session:
+        deleted = prune_event_log(session, settings.event_log_retention_days)
+    if deleted:
+        _log.info(
+            "event_log retention sweep: pruned %s rows older than %s days",
+            deleted,
+            settings.event_log_retention_days,
+        )
+
+
+async def _periodic_sweep(engine, settings: Settings) -> None:
+    """Run `_sweep_event_log` on a daily tick.
+
+    Sleeps first so the startup sweep in `lifespan` isn't immediately doubled
+    up. Exceptions are logged and swallowed — retention is maintenance, not
+    load-bearing, and a transient DB error must not take the task down.
+    Cancellation (during shutdown) unwinds cleanly via `CancelledError`.
+    """
+    while True:
+        try:
+            await asyncio.sleep(_PERIODIC_SWEEP_INTERVAL_SEC)
+        except asyncio.CancelledError:
+            raise
+        try:
+            _sweep_event_log(engine, settings)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            _log.warning("periodic event_log sweep failed", exc_info=True)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     """Configure logging, apply migrations, and bootstrap the auth'd user."""
@@ -56,7 +101,24 @@ async def lifespan(_app: FastAPI):
     else:
         _log.info("no pending migrations")
     _ensure_app_user(engine, settings)
-    yield
+
+    # Retention sweep at startup: log and swallow any error — retention is
+    # maintenance, not a startup prerequisite, and a sweep failure must not
+    # prevent the server from accepting traffic.
+    try:
+        _sweep_event_log(engine, settings)
+    except Exception:
+        _log.warning("startup event_log sweep failed", exc_info=True)
+
+    sweep_task = asyncio.create_task(_periodic_sweep(engine, settings))
+    try:
+        yield
+    finally:
+        sweep_task.cancel()
+        try:
+            await sweep_task
+        except asyncio.CancelledError:
+            pass
 
 
 app = FastAPI(title="WorkoutDB Home Server", version=__version__, lifespan=lifespan)

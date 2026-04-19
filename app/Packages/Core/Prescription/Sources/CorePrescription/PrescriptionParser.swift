@@ -65,6 +65,39 @@ public struct PrescriptionParser: Sendable {
         }
     }
 
+    /// Parse a prescription JSON, but if the parse fails AND retrying with
+    /// the `autoreg` sub-object stripped succeeds, return the stripped
+    /// prescription (no autoreg config). This is the seeding-side fallback
+    /// for the "unsupported autoreg.apply_to value" class of authoring
+    /// errors — the server's smart-defaults merge can't gate these today,
+    /// so a bad `apply_to: "all"` used to wipe the whole item's SetPlan to
+    /// `0 kg / 0 reps`. With this fallback, the base prescription still
+    /// seeds and only the autoreg config is skipped.
+    ///
+    /// The full parse is still attempted first, so a prescription with a
+    /// valid `autoreg` object keeps it. This method is intentionally
+    /// narrow — only the top-level `autoreg` key is stripped on retry;
+    /// any other parse failure (malformed `reps`, wrong-typed `load_kg`,
+    /// etc.) surfaces unchanged.
+    public func parseTolerantOfAutoreg(
+        prescriptionJSON: String
+    ) -> Result<Prescription, ParseError> {
+        switch parseRootObject(prescriptionJSON, shape: "prescription") {
+        case .failure(let e): return .failure(e)
+        case .success(let obj):
+            switch parse(dictionary: obj) {
+            case .success(let p): return .success(p)
+            case .failure(let original):
+                guard obj["autoreg"] != nil else {
+                    return .failure(original)
+                }
+                var stripped = obj
+                stripped.removeValue(forKey: "autoreg")
+                return parse(dictionary: stripped)
+            }
+        }
+    }
+
     /// Used by fixture tests that already have a decoded dict in hand.
     public func parse(
         dictionary obj: [String: Any]

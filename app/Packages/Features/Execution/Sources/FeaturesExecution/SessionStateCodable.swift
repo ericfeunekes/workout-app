@@ -14,6 +14,7 @@
 
 import Foundation
 import CoreAutoreg
+import CoreDomain
 import CorePrescription
 import CoreSession
 import WorkoutCoreFoundation
@@ -33,6 +34,8 @@ struct SessionStateCodable: Codable {
         case restEndsAt
         case blockEndsAt
         case workEndsAt
+        case intervalAnchorAt
+        case workStartedAt
         case note
         case structure
     }
@@ -46,8 +49,24 @@ struct SessionStateCodable: Codable {
         let restEndsAt = try c.decodeIfPresent(Date.self, forKey: .restEndsAt)
         let blockEndsAt = try c.decodeIfPresent(Date.self, forKey: .blockEndsAt)
         let workEndsAt = try c.decodeIfPresent(Date.self, forKey: .workEndsAt)
+        // Optional for back-compat — payloads persisted before the EMOM
+        // boundary-anchor fix decode cleanly with `intervalAnchorAt = nil`;
+        // the VM's restore normalization path restamps on block entry.
+        let intervalAnchorAt = try c.decodeIfPresent(Date.self, forKey: .intervalAnchorAt)
+        // Optional for back-compat — payloads persisted before the
+        // working-time anchor fix decode cleanly with
+        // `workStartedAt = nil`. A restored mid-set session with a nil
+        // anchor will stamp `SetPlan.startedAt` as nil on the NEXT log;
+        // downstream analysis treats that as "work window unknown"
+        // rather than collapsing start + complete onto the same instant.
+        let workStartedAt = try c.decodeIfPresent(Date.self, forKey: .workStartedAt)
         let note = try c.decode(String.self, forKey: .note)
-        let structure = try c.decode(StructureCodable.self, forKey: .structure).value
+        // `StructureCodable.decodedValue()` throws on unknown or count-
+        // mismatched `advancementByBlock`. Propagating the throw makes
+        // `restoreIfPossible` treat the payload as "no saved state" and
+        // re-seed from the pulled workout rather than silently dropping
+        // an unknown enum case and mis-aligning later blocks' policies.
+        let structure = try c.decode(StructureCodable.self, forKey: .structure).decodedValue()
         self.state = SessionState(
             workoutID: workoutID,
             route: route,
@@ -56,6 +75,8 @@ struct SessionStateCodable: Codable {
             restEndsAt: restEndsAt,
             blockEndsAt: blockEndsAt,
             workEndsAt: workEndsAt,
+            intervalAnchorAt: intervalAnchorAt,
+            workStartedAt: workStartedAt,
             note: note,
             structure: structure
         )
@@ -70,6 +91,8 @@ struct SessionStateCodable: Codable {
         try c.encodeIfPresent(state.restEndsAt, forKey: .restEndsAt)
         try c.encodeIfPresent(state.blockEndsAt, forKey: .blockEndsAt)
         try c.encodeIfPresent(state.workEndsAt, forKey: .workEndsAt)
+        try c.encodeIfPresent(state.intervalAnchorAt, forKey: .intervalAnchorAt)
+        try c.encodeIfPresent(state.workStartedAt, forKey: .workStartedAt)
         try c.encode(state.note, forKey: .note)
         try c.encode(StructureCodable(value: state.structure), forKey: .structure)
     }
@@ -112,8 +135,50 @@ private struct StructureCodable: Codable {
         advancementByBlock = value.advancementByBlock.map(\.rawValue)
     }
 
-    var value: SessionState.Structure {
-        let advancement = advancementByBlock?.compactMap(SessionState.BlockAdvancement.init(rawValue:))
+    /// Decode `Structure`, refusing payloads whose `advancementByBlock`
+    /// carries an unknown raw value or a count that doesn't match
+    /// `itemsPerBlock`. The old shape used `compactMap(rawValue:)`, which
+    /// silently dropped unknown entries and shifted later block policies
+    /// onto earlier block indices — a future enum case landing on a phone
+    /// still running an older build would corrupt the round-robin policy
+    /// of every subsequent block. Throwing here forces the caller
+    /// (`restoreIfPossible`) down the "no saved state" path so the
+    /// session re-seeds rather than silently mis-advancing.
+    func decodedValue() throws -> SessionState.Structure {
+        guard let raws = advancementByBlock else {
+            return .init(
+                itemsPerBlock: itemsPerBlock,
+                setsPerItem: setsPerItem,
+                advancementByBlock: nil
+            )
+        }
+        var advancement: [SessionState.BlockAdvancement] = []
+        advancement.reserveCapacity(raws.count)
+        for raw in raws {
+            guard let decoded = SessionState.BlockAdvancement(rawValue: raw) else {
+                throw DecodingError.dataCorrupted(
+                    .init(
+                        codingPath: [],
+                        debugDescription: "Unknown BlockAdvancement rawValue: \(raw). "
+                            + "Refusing to restore — the session will re-seed from the "
+                            + "pulled workout rather than silently drop the policy and "
+                            + "shift later blocks onto earlier indices."
+                    )
+                )
+            }
+            advancement.append(decoded)
+        }
+        guard advancement.count == itemsPerBlock.count else {
+            throw DecodingError.dataCorrupted(
+                .init(
+                    codingPath: [],
+                    debugDescription: "advancementByBlock count (\(advancement.count)) "
+                        + "must equal itemsPerBlock count (\(itemsPerBlock.count)). "
+                        + "Refusing to restore — a size mismatch would shift policies "
+                        + "off their blocks."
+                )
+            )
+        }
         return .init(
             itemsPerBlock: itemsPerBlock,
             setsPerItem: setsPerItem,
@@ -151,46 +216,129 @@ private struct ItemLogCodable: Codable {
 }
 
 private struct AlternativeOverridesCodable: Codable {
+    let sets: Int?
     let reps: Int?
     let loadKg: Double?
+    /// Persisted override unit. Optional on the wire; `nil` means the
+    /// override inherits the parent SetPlan's unit. Back-compat: payloads
+    /// persisted before R2.10 decode with `unit == nil`, which preserves
+    /// the pre-cutover behavior.
+    let unit: String?
     let targetRir: Int?
+    let perSide: Bool?
+    let autoreg: AutoregOverridesCodable?
 
     init(value: AlternativeOverrides) {
+        sets = value.sets
         reps = value.reps
         loadKg = value.loadKg
+        unit = value.unit?.rawValue
         targetRir = value.targetRir
+        perSide = value.perSide
+        autoreg = value.autoreg.map(AutoregOverridesCodable.init(value:))
     }
 
     var value: AlternativeOverrides {
-        AlternativeOverrides(reps: reps, loadKg: loadKg, targetRir: targetRir)
+        AlternativeOverrides(
+            sets: sets,
+            reps: reps,
+            loadKg: loadKg,
+            unit: unit.flatMap(WeightUnit.init(rawValue:)),
+            targetRir: targetRir,
+            perSide: perSide,
+            autoreg: autoreg?.value
+        )
+    }
+}
+
+private struct AutoregOverridesCodable: Codable {
+    let overshootAt: Int?
+    let overshootStepKg: Double?
+    let undershootAt: Int?
+    let undershootStepKg: Double?
+    let applyTo: String?
+
+    init(value: AutoregOverrides) {
+        overshootAt = value.overshootAt
+        overshootStepKg = value.overshootStepKg
+        undershootAt = value.undershootAt
+        undershootStepKg = value.undershootStepKg
+        applyTo = value.applyTo?.rawValue
+    }
+
+    var value: AutoregOverrides {
+        AutoregOverrides(
+            overshootAt: overshootAt,
+            overshootStepKg: overshootStepKg,
+            undershootAt: undershootAt,
+            undershootStepKg: undershootStepKg,
+            applyTo: applyTo.flatMap(Autoreg.ApplyTo.init(rawValue:))
+        )
     }
 }
 
 private struct SetPlanCodable: Codable {
     let setIndex: Int
-    let loadKg: Double
+    /// Persisted load. Optional end-to-end: `nil` means loadless (BW /
+    /// loadless AMRAP token / `.empty` placeholder). Payloads persisted
+    /// before this field flipped optional carry a numeric value and
+    /// decode cleanly — after the cutover new writes use nil for
+    /// loadless rows so display, push, and History stay coherent.
+    let loadKg: Double?
+    /// Persisted unit. Optional on decode only — payloads persisted
+    /// before R2.10 have no `unit` field and fall back to `.lb` (the
+    /// post-R2.10 default matches pound-first authoring). Always non-nil
+    /// on encode.
+    let unit: String?
     let reps: Int
     let done: Bool
     let adjust: String?
     let rir: Int?
+    /// Wall-clock stamp for when the user logged this set. Optional
+    /// because (a) pending sets have no stamp, (b) payloads persisted
+    /// before the field existed decode cleanly as nil. Encoded
+    /// losslessly via `Date`'s default Codable (timeIntervalSinceReferenceDate).
+    let completedAt: Date?
+    /// Cardio-only fields. All optional for back-compat: payloads
+    /// persisted before the R2.11 cardio cutover decode cleanly with
+    /// every cardio metric nil. Strength sets never populate these.
+    let durationSec: Double?
+    let distanceM: Double?
+    let hrAvgBpm: Int?
+    let cadenceAvgSpm: Int?
+    let startedAt: Date?
 
     init(value: SetPlan) {
         setIndex = value.setIndex
         loadKg = value.loadKg
+        unit = value.unit.rawValue
         reps = value.reps
         done = value.done
         adjust = value.adjust?.rawValue
         rir = value.rir
+        completedAt = value.completedAt
+        durationSec = value.durationSec
+        distanceM = value.distanceM
+        hrAvgBpm = value.hrAvgBpm
+        cadenceAvgSpm = value.cadenceAvgSpm
+        startedAt = value.startedAt
     }
 
     var value: SetPlan {
         .init(
             setIndex: setIndex,
             loadKg: loadKg,
+            unit: unit.flatMap(WeightUnit.init(rawValue:)) ?? .lb,
             reps: reps,
             done: done,
             adjust: adjust.flatMap(SetPlan.Adjust.init(rawValue:)),
-            rir: rir
+            rir: rir,
+            completedAt: completedAt,
+            durationSec: durationSec,
+            distanceM: distanceM,
+            hrAvgBpm: hrAvgBpm,
+            cadenceAvgSpm: cadenceAvgSpm,
+            startedAt: startedAt
         )
     }
 }

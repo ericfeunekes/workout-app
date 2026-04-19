@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     )
     port: int = Field(default=8080)
     debug: bool = Field(default=False, description="Verbose logging; never enable in prod.")
+    event_log_retention_days: int = Field(
+        default=90,
+        description="How many days of `event_log` rows to retain. The startup "
+        "sweep deletes rows with `ts` older than this. 90 days gives plenty of "
+        "runway for post-hoc debugging of 'what happened at the gym last week' "
+        "without letting the table grow unbounded on a single-user home server. "
+        "Set to 0 to purge everything on every boot (useful in tests / fresh deploys).",
+    )
 
 
 @lru_cache

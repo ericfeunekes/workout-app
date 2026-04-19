@@ -54,8 +54,8 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
             workoutID: firstLog.workoutID,
             setLogID: firstLog.setLog.id,
             reps: 4,
-            rir: 1,
-            loadKg: nil
+            rir: .set(1),
+            load: nil
         )
 
         let pushed = await recorder.pushed
@@ -97,8 +97,8 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
             workoutID: firstLog.workoutID,
             setLogID: knownID,
             reps: 5,
-            rir: nil,
-            loadKg: nil
+            rir: .preserve,
+            load: nil
         )
 
         let pushed = await recorder.pushed
@@ -134,8 +134,8 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
             workoutID: firstLog.workoutID,
             setLogID: firstLog.setLog.id,
             reps: 4,
-            rir: 1,
-            loadKg: 97.5
+            rir: .set(1),
+            load: EditPastSetLoadCommit(value: 97.5, unit: .kg)
         )
 
         // Post-edit: `detail(for:)` builds a fresh VM from `rawSessions`,
@@ -156,7 +156,16 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         // History edit emits a dedicated `history.past_set_edited` event
         // tagged with workoutID + setLogID. The payload carries setIndex
         // so an analyst can join the event back to the updated row.
-        let (cache, firstLog) = try makeSingleLogFixture()
+        //
+        // Wire-casing (R1.3): `workoutID` / `setLogID` in the dataJSON
+        // payload must be LOWERCASE — the "every id + *_id on the wire
+        // is a lowercase UUID" invariant. Pin a known-lowercase setLogID
+        // and workoutID so the assertion can match the payload verbatim
+        // (Swift `UUID().uuidString` is uppercase, so a naive
+        // `contains(uuidString)` would pass either casing).
+        // swiftlint:disable:next force_unwrapping
+        let seededSetLogID = UUID(uuidString: "aaaabbbb-1111-4222-8333-444444444444")!
+        let (cache, firstLog) = try makeSingleLogFixture(setLogID: seededSetLogID)
         let telemetry = HistoryTelemetryRecorder()
         let vm = HistoryViewModel(
             cache: cache,
@@ -170,8 +179,8 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
             workoutID: firstLog.workoutID,
             setLogID: firstLog.setLog.id,
             reps: 3,
-            rir: nil,
-            loadKg: nil
+            rir: .preserve,
+            load: nil
         )
 
         let events = telemetry.events.filter { $0.name == "history.past_set_edited" }
@@ -182,8 +191,35 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         let payload = event.dataJSON ?? ""
         XCTAssertTrue(payload.contains("\"setIndex\":\(firstLog.setLog.setIndex)"),
                       "payload must carry setIndex — got \(payload)")
-        XCTAssertTrue(payload.contains(firstLog.workoutID.uuidString),
-                      "payload must carry workoutID — got \(payload)")
+        XCTAssertTrue(
+            payload.contains("\"setLogID\":\"aaaabbbb-1111-4222-8333-444444444444\""),
+            "payload must carry EXACT lowercase setLogID — got \(payload)"
+        )
+        XCTAssertTrue(
+            payload.contains(
+                "\"workoutID\":\"\(firstLog.workoutID.uuidString.lowercased())\""
+            ),
+            "payload must carry EXACT lowercase workoutID — got \(payload)"
+        )
+        // Any UUID-shaped substring in the payload must be all-lowercase.
+        // Extract every UUID-shaped match, then assert it equals its own
+        // `.lowercased()` so a partial-uppercase regression is caught
+        // regardless of which UUID leaked.
+        let uuidShape = try NSRegularExpression(
+            pattern: "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+        )
+        let hits = uuidShape.matches(
+            in: payload, range: NSRange(payload.startIndex..., in: payload)
+        )
+        for hit in hits {
+            // swiftlint:disable:next force_unwrapping
+            let range = Range(hit.range, in: payload)!
+            let substr = String(payload[range])
+            XCTAssertEqual(
+                substr, substr.lowercased(),
+                "payload leaked an uppercase UUID: \(substr) in \(payload)"
+            )
+        }
     }
 
     // MARK: - Fixtures

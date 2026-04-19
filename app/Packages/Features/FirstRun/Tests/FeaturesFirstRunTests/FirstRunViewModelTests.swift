@@ -4,6 +4,12 @@
 // TokenStore + FakeHTTPTransport. No URLSession round-trips, no SwiftData
 // — the point is to prove the state transitions and side effects match
 // the contract in `docs/sync.md` § "First-run UX".
+//
+// Scope boundary: FirstRun only fires `GET /api/version`. The first
+// `GET /api/sync/pull` is AppBootstrap's job (see the file header on
+// `FirstRunViewModel.swift` for why). These tests therefore assert that
+// the ONLY transport call during `connect()` is `/api/version` — no
+// second pull-from-FirstRun path exists.
 
 import XCTest
 import Foundation
@@ -63,8 +69,11 @@ final class FirstRunViewModelTests: XCTestCase {
         XCTAssertEqual(box.count, 1)
         XCTAssertEqual(store.saved?.token, "valid-token")
         XCTAssertEqual(store.saved?.url.absoluteString, "https://host.ts.net")
-        XCTAssertEqual(transport.callCount, 2)
-        XCTAssertEqual(transport.paths, ["/api/version", "/api/sync/pull"])
+        // Only one call — FirstRun no longer fires `/api/sync/pull`. The
+        // first pull lives in AppBootstrap; that's the whole point of the
+        // scope-boundary comment in `FirstRunViewModel.swift`.
+        XCTAssertEqual(transport.callCount, 1)
+        XCTAssertEqual(transport.paths, ["/api/version"])
     }
 
     func testConnectTrimsWhitespaceOnToken() async {
@@ -97,33 +106,7 @@ final class FirstRunViewModelTests: XCTestCase {
         // Critically, TokenStore.save was never called — we don't want to
         // persist a token that produces 401 on every subsequent call.
         XCTAssertNil(store.saved)
-        // Only one network call — we never hit /api/sync/pull.
         XCTAssertEqual(transport.callCount, 1)
-    }
-
-    // MARK: - 401 on /api/sync/pull
-
-    func testConnectWith401OnPullFails() async {
-        let store = FakeTokenStore()
-        let transport = FakeHTTPTransport()
-
-        transport.enqueue(.response(HTTPResponse(
-            status: 200,
-            body: Data(#"{"server_version":"0.0.1"}"#.utf8)
-        )))
-        transport.enqueue(.response(HTTPResponse(status: 401, body: Data())))
-
-        let vm = makeViewModel(store: store, transport: transport)
-        vm.url = "https://host.ts.net"
-        vm.token = "tok"
-
-        await vm.connect()
-
-        XCTAssertEqual(vm.state, .failed(reason: .tokenRejected))
-        // Version succeeded, so the token did get saved. That matches the
-        // spec's "first-sync crash recovery" note — the connection string
-        // persists, the partial cache (which we never wrote) is cleared.
-        XCTAssertNotNil(store.saved)
     }
 
     // MARK: - Transport throws
@@ -143,18 +126,17 @@ final class FirstRunViewModelTests: XCTestCase {
         XCTAssertNil(store.saved)
     }
 
-    // MARK: - Decode failure
+    // MARK: - Decode failure on /api/version
 
-    func testConnectWithDecodeFailureOnPullYieldsDecode() async {
+    /// Version endpoint returns a 200 with a body that doesn't match the
+    /// expected VersionProbe shape. FirstRun flips to `.decode` — "this
+    /// URL answered but it's not a workoutdb server." Previously this
+    /// test covered the equivalent case on `/api/sync/pull`; now that the
+    /// pull is gone, the only decode path left is the version probe.
+    func testConnectWithDecodeFailureOnVersionYieldsDecode() async {
         let store = FakeTokenStore()
         let transport = FakeHTTPTransport()
 
-        // Version is fine.
-        transport.enqueue(.response(HTTPResponse(
-            status: 200,
-            body: Data(#"{"server_version":"0.0.1"}"#.utf8)
-        )))
-        // Pull responds with something that can't decode to the probe.
         transport.enqueue(.response(HTTPResponse(
             status: 200,
             body: Data("not json".utf8)
@@ -167,6 +149,7 @@ final class FirstRunViewModelTests: XCTestCase {
         await vm.connect()
 
         XCTAssertEqual(vm.state, .failed(reason: .decode))
+        XCTAssertNil(store.saved)
     }
 
     // MARK: - 5xx
@@ -194,7 +177,7 @@ final class FirstRunViewModelTests: XCTestCase {
     /// Double-tap regression: firing `connect()` twice concurrently must
     /// produce exactly one pipeline run. Without the re-entrancy guard
     /// the second call would reach `TokenStore.save` + `onComplete` a
-    /// second time — duplicate Keychain writes, duplicate pull traffic.
+    /// second time — duplicate Keychain writes.
     func testConcurrentConnectCallsRunOnlyOnce() async {
         let store = FakeTokenStore()
         let transport = FakeHTTPTransport()
@@ -210,20 +193,20 @@ final class FirstRunViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state, .complete)
         XCTAssertEqual(store.saveCount, 1)
         XCTAssertEqual(completions.count, 1)
-        XCTAssertEqual(transport.callCount, 2)
+        XCTAssertEqual(transport.callCount, 1)
     }
 
     /// Bug-018 regression: rapid double-tap of the "connect" button must
-    /// only run the version → persist → pull pipeline once. The scripted
+    /// only run the version → persist pipeline once. The scripted
     /// transport enqueues a SINGLE happy path; if the guard regressed and
     /// the second call fell through, the second `GET /api/version` would
-    /// hit the empty script tail — call count would jump to 4, not 2.
+    /// hit the empty script tail — call count would jump to 2, not 1.
     ///
     /// The user-visible fix is belt-and-braces: `connect()` short-circuits
-    /// when `state ∈ {.connecting, .syncingFirstPull, .complete}` AND the
-    /// view's connect button binds `.disabled(viewModel.isConnectInFlight)`
-    /// so the UI can't dispatch a second call mid-flight. This test pins
-    /// the VM-level guard; a ViewInspector-style test would pin the view.
+    /// when `state ∈ {.connecting, .complete}` AND the view's connect
+    /// button binds `.disabled(viewModel.isConnectInFlight)` so the UI
+    /// can't dispatch a second call mid-flight. This test pins the
+    /// VM-level guard; a ViewInspector-style test would pin the view.
     ///
     /// Distinct from `testConcurrentConnectCallsRunOnlyOnce` above: that
     /// test enqueues TWO happy paths and asserts the second is unused.
@@ -250,10 +233,10 @@ final class FirstRunViewModelTests: XCTestCase {
                        "rapid double-tap must save exactly once")
         XCTAssertEqual(completions.count, 1,
                        "onComplete must fire exactly once")
-        XCTAssertEqual(transport.callCount, 2,
-                       "exactly one version + one pull — no duplicate requests")
-        XCTAssertEqual(transport.paths, ["/api/version", "/api/sync/pull"],
-                       "paths pinned so a future change that re-orders or adds calls fails here")
+        XCTAssertEqual(transport.callCount, 1,
+                       "exactly one /api/version — the first pull is AppBootstrap's job")
+        XCTAssertEqual(transport.paths, ["/api/version"],
+                       "paths pinned so a future change that re-adds the pull here fails")
     }
 
     // MARK: - Retry
@@ -272,14 +255,7 @@ final class FirstRunViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state, .failed(reason: .tokenRejected))
 
         // User fixes the token and retries.
-        transport.enqueue(.response(HTTPResponse(
-            status: 200,
-            body: Data(#"{"server_version":"0.0.1"}"#.utf8)
-        )))
-        transport.enqueue(.response(HTTPResponse(
-            status: 200,
-            body: Data(#"{"server_time":"2026-04-17T19:04:22Z","workouts":[{}],"exercises":[{},{}],"user_parameters_latest":{},"last_performed":[]}"#.utf8)
-        )))
+        enqueueHappyPath(transport)
         vm.token = "good"
         await vm.retry()
 
@@ -305,14 +281,13 @@ final class FirstRunViewModelTests: XCTestCase {
 // File-scope helpers — kept out of the test class so it stays under
 // SwiftLint's `type_body_length` cap.
 
+/// Queues exactly one successful `/api/version` response. FirstRun no
+/// longer calls `/api/sync/pull`, so the happy-path script is a single
+/// 200 now.
 private func enqueueHappyPath(_ transport: FakeHTTPTransport) {
     transport.enqueue(.response(HTTPResponse(
         status: 200,
         body: Data(#"{"server_version":"0.0.1"}"#.utf8)
-    )))
-    transport.enqueue(.response(HTTPResponse(
-        status: 200,
-        body: Data(#"{"server_time":"2026-04-17T19:04:22Z","workouts":[],"exercises":[],"user_parameters_latest":{},"last_performed":[]}"#.utf8)
     )))
 }
 

@@ -5,6 +5,7 @@
     { "reps": 8, "load_kg": 70 },
     { "reps": 6, "load_kg": 75 }
   ],
+  "weight_unit": "kg",
   "target_rir": 2,
   "autoreg": {
     "overshoot_at": 2,

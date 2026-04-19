@@ -17,6 +17,21 @@
 //   - Corrective edits NEVER retrigger autoreg — History writes the
 //     updated SetLog directly and the reducer path is bypassed entirely.
 //
+// Weight-unit correctness: the load override arrives as an
+// `EditPastSetLoadCommit` carrying both the numeric value AND the unit
+// the user typed in. We write the SetLog's `weight` / `weightUnit`
+// together — the unit is preserved as what the user just confirmed,
+// not silently stamped as `.kg`. That prevents the footgun where a
+// `.lb` row gets corrected and becomes a `.kg` row numerically equal
+// to the old pounds (a 100 lb row "corrected" would read as 100 kg,
+// twice the actual load).
+//
+// RIR three-state: the commit carries `.preserve` / `.clear` / `.set(n)`
+// so the edit can distinguish "user didn't touch RIR" (leave existing)
+// from "user explicitly cleared RIR" (write nil). Plain `Int?` would
+// collapse those two — the earlier shape did, which is why an explicit
+// clear from the sheet never reached the SetLog.
+//
 // Why the History edit is local-cache + push, not reducer-dispatched:
 //   History looks at COMPLETED workouts. The in-memory SessionState for
 //   a completed workout has already been wiped by `saveAndDone`; there
@@ -34,11 +49,15 @@ extension HistoryViewModel {
     /// Corrective edit of one past set from a completed workout.
     ///
     /// Looks up the cached `SetLog` by `(workoutID, setLogID)`, applies
-    /// the `reps` / `rir` / `loadKg` overrides (nil = preserve), writes
-    /// the updated row to the local cache, emits telemetry, fires the
-    /// push hook, and reloads so the detail view re-renders with the
+    /// the `reps` / `rir` / `load` overrides (nil/`.preserve` = preserve),
+    /// writes the updated row to the local cache, emits telemetry, fires
+    /// the push hook, and reloads so the detail view re-renders with the
     /// corrected row. Unknown IDs are silent no-ops — the cache read
     /// would just miss and we'd return without side effects.
+    ///
+    /// `load.unit` is written onto the SetLog verbatim — the sheet
+    /// rendered the numbers in the unit the row was recorded in, so
+    /// preserving the unit on save is the contract.
     ///
     /// Called from `HistorySessionDetailView` when the user commits an
     /// `EditSetSheet`.
@@ -46,8 +65,8 @@ extension HistoryViewModel {
         workoutID: WorkoutID,
         setLogID: SetLogID,
         reps: Int?,
-        rir: Int?,
-        loadKg: Double?
+        rir: EditPastSetRirCommit,
+        load loadCommit: EditPastSetLoadCommit?
     ) async {
         guard let session = rawSessions.first(where: { $0.workout.id == workoutID }),
               let existing = session.setLogs.first(where: { $0.id == setLogID }) else {
@@ -60,14 +79,28 @@ extension HistoryViewModel {
         // identity-changing.
         var edited = existing
         if let reps { edited.reps = reps }
-        if let rir { edited.rir = rir }
-        if let loadKg {
-            edited.weight = loadKg
-            if edited.weightUnit == nil { edited.weightUnit = .kg }
+        switch rir {
+        case .preserve:
+            break
+        case .clear:
+            edited.rir = nil
+        case .set(let value):
+            edited.rir = value
+        }
+        if let loadCommit {
+            edited.weight = loadCommit.value
+            // Always stamp the unit the user just confirmed. Never
+            // default to `.kg` when a concrete unit is in hand —
+            // doing so silently corrupts lb-stored rows.
+            edited.weightUnit = loadCommit.unit
         }
 
         do {
-            try await cache.saveSetLogs([edited])
+            // Corrective edits stay pinned to their original workout —
+            // `workoutID` passes through unchanged so the denormalized
+            // column on the existing SetLog row is preserved (R1.4
+            // SetLog denormalization, see `SwiftDataModels.swift`).
+            try await cache.saveSetLogs([edited], workoutID: workoutID)
         } catch {
             // Local write failed — surface nothing to the UI (the edit
             // screen has already dismissed) but bail before pushing.
@@ -92,21 +125,43 @@ extension HistoryViewModel {
     /// composite key so an analyst can join the event back to the
     /// updated row. Parallels
     /// `ExecutionViewModel.emitPastSetEdited(itemID:setIndex:setLogID:)`.
+    ///
+    /// Both ids are written via `.wireID` so the payload obeys the
+    /// "every id on the wire is lowercase UUID" invariant (Codex R1.3).
+    /// Encoded via a typed `Encodable` struct rather than hand-formatted
+    /// — one less place to forget the lowercasing.
     func emitPastSetEdited(workoutID: WorkoutID, setLog: SetLog) {
-        let payload = """
-        {\
-        "workoutID":"\(workoutID.uuidString)",\
-        "setLogID":"\(setLog.id.uuidString)",\
-        "setIndex":\(setLog.setIndex)\
-        }
-        """
+        let payload = HistoryPastSetEditedEventPayload(
+            workoutID: workoutID.wireID,
+            setLogID: setLog.id.wireID,
+            setIndex: setLog.setIndex
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        // swiftlint:disable:next force_try
+        let data = try! encoder.encode(payload)
+        // swiftlint:disable:next force_unwrapping
+        let dataJSON = String(data: data, encoding: .utf8)!
         telemetry.emit(Event(
             sessionID: TelemetrySession.id,
             kind: "state",
             name: "history.past_set_edited",
-            dataJSON: payload,
+            dataJSON: dataJSON,
             workoutID: workoutID,
             setLogID: setLog.id
         ))
     }
+}
+
+// MARK: - Telemetry payload
+
+/// Payload for `history.past_set_edited`. CamelCase field names match the
+/// existing shape of this event — `ExecutionViewModel.emitPastSetEdited`
+/// uses the same convention, and the two surfaces compose into one event
+/// stream that an analyst joins by `setLogID`. The R1.3 fix is about
+/// lowercasing UUIDs, not renaming the payload fields.
+private struct HistoryPastSetEditedEventPayload: Encodable {
+    let workoutID: String
+    let setLogID: String
+    let setIndex: Int
 }

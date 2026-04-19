@@ -162,7 +162,7 @@ final class EMOMDriverTests: XCTestCase {
         XCTAssertEqual(content?.reps, 10)
         XCTAssertEqual(content?.repsDisplay, "10")
         XCTAssertEqual(content?.loadKg, 24)
-        XCTAssertEqual(content?.loadDisplay, "24 kg")
+        XCTAssertEqual(content?.loadDisplay, "24 lb")
         // Cursor starts at setIndex 1 (interval 1). Total intervals =
         // 12 minutes * 60s / 60s = 12.
         XCTAssertEqual(content?.setIndex, 1)

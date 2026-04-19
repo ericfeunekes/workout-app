@@ -52,10 +52,13 @@ public struct TabataDriver: TimingDriver {
 
     // MARK: - Active content
 
-    /// Resolve the active item for the current round. When the block has
-    /// multiple items they alternate per round in listed order —
-    /// `items[(roundIndex) % items.count]` — so a two-item tabata walks
-    /// A, B, A, B, ... over the 8 rounds.
+    /// Resolve the active item for the current round. Tabata is strictly
+    /// single-item per `docs/prescription.md` § "tabata" ("one exercise").
+    /// The seeder collapses multi-item authoring to item[0] at seed time
+    /// (`SessionSeeder.seed`), so the driver also pins to item[0] here —
+    /// this keeps the render + auto-logged set pointing at the same
+    /// exercise across all 8 rounds even if a pulled context still lists
+    /// multiple items for the block.
     ///
     /// `setIndex` on the returned content is the 1-based round counter
     /// (1...rounds). `totalSets` is the hardcoded `rounds` constant so the
@@ -78,16 +81,16 @@ public struct TabataDriver: TimingDriver {
         let round = c.setIndex
         guard round >= 1, round <= TabataDriver.rounds else { return nil }
 
-        // Round-to-item mapping: round N (1-based) → items[(N-1) % count].
-        // Single-item blocks collapse to index 0 every round.
-        let itemIdx = (round - 1) % blockItems.count
-        let item = blockItems[itemIdx]
+        // Single-item tabata — always render item[0]. The seeder has
+        // already dropped any extras from `state.items`, so this also
+        // matches what `autoLogAndRestForTabata` writes.
+        let item = blockItems[0]
 
         guard let itemLog = state.items.first(where: { $0.itemID == item.id }) else {
             return nil
         }
 
-        let (reps, loadKg) = prescribedRepsAndLoad(for: item)
+        let (reps, loadKg, unit) = prescribedRepsAndLoad(for: item)
         let exerciseName = context.exerciseName(
             for: item,
             performedExerciseID: itemLog.performedExerciseID
@@ -96,7 +99,7 @@ public struct TabataDriver: TimingDriver {
         let loadDisplay: String
         let heroLoadKg: Double?
         if let kg = loadKg {
-            loadDisplay = formatLoad(kg: kg)
+            loadDisplay = formatLoad(weight: kg, unit: LoadUnit(setPlanUnit: unit))
             heroLoadKg = kg
         } else {
             loadDisplay = "BW"
@@ -150,31 +153,31 @@ public struct TabataDriver: TimingDriver {
     /// extraction in AMRAPDriver so renders stay coherent across modes.
     private func prescribedRepsAndLoad(
         for item: WorkoutItem
-    ) -> (reps: Int, loadKg: Double?) {
+    ) -> (reps: Int, loadKg: Double?, unit: WeightUnit) {
         switch parser.parse(prescriptionJSON: item.prescriptionJSON) {
         case .success(let p):
             return repsAndLoad(from: p)
         case .failure:
-            return (0, nil)
+            return (0, nil, .lb)
         }
     }
 
     private func repsAndLoad(
         from prescription: Prescription
-    ) -> (reps: Int, loadKg: Double?) {
+    ) -> (reps: Int, loadKg: Double?, unit: WeightUnit) {
         switch prescription {
-        case .straightSets(_, let reps, let loadKg, _, _, _, _):
-            return (intReps(from: reps), loadKg)
+        case .straightSets(_, let reps, let loadKg, let unit, _, _, _, _):
+            return (intReps(from: reps), loadKg, unit)
         case .bodyweight(_, let reps, _):
-            return (reps, nil)
-        case .cluster(_, let reps, let loadKg, _, _, _):
-            return (reps, loadKg)
-        case .repRange(_, _, let repsMax, let loadKg, _, _):
-            return (repsMax, loadKg)
-        case .warmup(_, let reps, let loadKg):
-            return (reps, loadKg)
+            return (reps, nil, .lb)
+        case .cluster(_, let reps, let loadKg, let unit, _, _, _):
+            return (reps, loadKg, unit)
+        case .repRange(_, _, let repsMax, let loadKg, let unit, _, _):
+            return (repsMax, loadKg, unit)
+        case .warmup(_, let reps, let loadKg, let unit):
+            return (reps, loadKg, unit)
         case .setsDetail, .percentOf1RM, .amrapToken, .empty:
-            return (0, nil)
+            return (0, nil, .lb)
         }
     }
 

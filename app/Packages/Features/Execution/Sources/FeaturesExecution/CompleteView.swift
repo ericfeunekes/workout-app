@@ -65,6 +65,14 @@ struct CompleteView: View {
                     style: .primary,
                     action: onSaveAndDoneTap
                 )
+                // Belt-and-suspenders for the re-entrancy guard in
+                // `ExecutionViewModel.saveAndDone`. The guard is the
+                // correctness-critical check (drops the second call
+                // silently); disabling the button stops the user from
+                // watching a no-op second tap flash the press state
+                // during the few ms before the reducer's `.save` flips
+                // the route to `.today` and unmounts this view.
+                .disabled(viewModel.saveAndDoneInFlight)
                 .padding(.horizontal, DSSpacing.xl)
                 .padding(.top, DSSpacing.lg)
                 .padding(.bottom, DSSpacing.xl)

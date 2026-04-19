@@ -6,6 +6,7 @@
 // `type_body_length` and `file_length` caps.
 
 import Foundation
+import CoreDomain
 
 extension PrescriptionParser {
 
@@ -25,6 +26,7 @@ extension PrescriptionParser {
                     sets: load.sets,
                     reps: load.reps,
                     loadKg: load.loadKg,
+                    unit: load.unit,
                     targetRir: load.targetRir,
                     autoreg: load.autoreg,
                     tempo: mods.tempo,
@@ -38,6 +40,7 @@ extension PrescriptionParser {
         let sets: Int?
         let reps: RepCount?
         let loadKg: Double?
+        let unit: WeightUnit
         let targetRir: Int?
         let autoreg: Autoreg?
     }
@@ -66,13 +69,18 @@ extension PrescriptionParser {
         case .failure(let e): return .failure(e)
         case .success(let v): loadKg = v
         }
+        let unit: WeightUnit
+        switch readWeightUnit(obj) {
+        case .failure(let e): return .failure(e)
+        case .success(let v): unit = v
+        }
         let targetRir: Int?
         switch readOptionalInt(obj, "target_rir") {
         case .failure(let e): return .failure(e)
         case .success(let v): targetRir = v
         }
         let autoreg: Autoreg?
-        switch parseAutoreg(obj, shape: shape) {
+        switch parseAutoreg(obj, shape: shape, unit: unit) {
         case .failure(let e): return .failure(e)
         case .success(let v): autoreg = v
         }
@@ -80,6 +88,7 @@ extension PrescriptionParser {
             sets: sets,
             reps: reps,
             loadKg: loadKg,
+            unit: unit,
             targetRir: targetRir,
             autoreg: autoreg
         ))
@@ -153,6 +162,7 @@ extension PrescriptionParser {
                     repsMin: bounds.lo,
                     repsMax: bounds.hi,
                     loadKg: load.loadKg,
+                    unit: load.unit,
                     targetRir: load.targetRir,
                     autoreg: load.autoreg
                 ))
@@ -168,6 +178,7 @@ extension PrescriptionParser {
 
     private struct RepRangeLoad {
         let loadKg: Double?
+        let unit: WeightUnit
         let targetRir: Int?
         let autoreg: Autoreg?
     }
@@ -203,18 +214,24 @@ extension PrescriptionParser {
         case .failure(let e): return .failure(e)
         case .success(let v): loadKg = v
         }
+        let unit: WeightUnit
+        switch readWeightUnit(obj) {
+        case .failure(let e): return .failure(e)
+        case .success(let v): unit = v
+        }
         let targetRir: Int?
         switch readOptionalInt(obj, "target_rir") {
         case .failure(let e): return .failure(e)
         case .success(let v): targetRir = v
         }
         let autoreg: Autoreg?
-        switch parseAutoreg(obj, shape: shape) {
+        switch parseAutoreg(obj, shape: shape, unit: unit) {
         case .failure(let e): return .failure(e)
         case .success(let v): autoreg = v
         }
         return .success(RepRangeLoad(
             loadKg: loadKg,
+            unit: unit,
             targetRir: targetRir,
             autoreg: autoreg
         ))

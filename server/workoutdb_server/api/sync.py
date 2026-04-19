@@ -192,6 +192,13 @@ def sync_results(payload: SyncResultsIn, db: DbSession, user_id: CurrentUserId) 
         workout.status = update.status
         if update.completed_at is not None:
             workout.completed_at = update.completed_at
+        # `notes` is opt-in: a push that omits it (or sends None) leaves
+        # the existing server-side value alone. The app sends the post-
+        # workout note as part of the terminal push so the server becomes
+        # authoritative — without this the next `sync/pull` would
+        # overwrite the freshly-typed note with the server's old value.
+        if update.notes is not None:
+            workout.notes = update.notes
 
     db.commit()
     return {

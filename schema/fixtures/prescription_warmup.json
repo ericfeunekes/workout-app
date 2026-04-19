@@ -2,5 +2,6 @@
   "warmup": true,
   "sets": 3,
   "reps": 5,
-  "load_kg": 40
+  "load_kg": 40,
+  "weight_unit": "kg"
 }

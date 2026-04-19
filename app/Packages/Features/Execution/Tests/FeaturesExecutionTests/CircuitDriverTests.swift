@@ -151,7 +151,7 @@ final class CircuitDriverTests: XCTestCase {
         XCTAssertEqual(content?.reps, 12)
         XCTAssertEqual(content?.repsDisplay, "12")
         XCTAssertEqual(content?.loadKg, 20)
-        XCTAssertEqual(content?.loadDisplay, "20 kg")
+        XCTAssertEqual(content?.loadDisplay, "20 lb")
         // Round 1 of 3.
         XCTAssertEqual(content?.setIndex, 1)
         XCTAssertEqual(content?.totalSets, 3)
@@ -281,5 +281,51 @@ final class CircuitDriverTests: XCTestCase {
         )
         XCTAssertNil(outcome.proposal)
         XCTAssertTrue(outcome.mutations.isEmpty)
+    }
+
+    // MARK: - Swap override
+
+    /// Regression: prior to this fix, CircuitDriver re-parsed
+    /// `prescriptionJSON` in `activeContent`, so swap overrides on load /
+    /// reps were ignored — the exercise NAME updated but load/reps stayed
+    /// stale. Post-fix: `activeContent` reads the live SetPlan row (which
+    /// the reducer mirrors override values onto at swap time).
+    func testCircuitDriverRespectsSwapOverride() {
+        let (ctx, itemIDs, baseState) = makeStandardCircuit()
+
+        // Simulate post-swap: item 0 (Goblet Squat, originally 12 reps @
+        // 20 kg) now has overrides mirrored onto its SetPlan rows at
+        // 30 kg / 10 reps.
+        var state = baseState
+        let swappedExerciseID = UUID()
+        state.items = state.items.map { log in
+            guard log.itemID == itemIDs[0] else { return log }
+            let mirrored = log.sets.map { set -> SetPlan in
+                SetPlan(
+                    setIndex: set.setIndex,
+                    loadKg: 30,
+                    unit: .kg,
+                    reps: 10,
+                    done: set.done,
+                    adjust: set.adjust,
+                    rir: set.rir
+                )
+            }
+            return SessionState.ItemLog(
+                itemID: log.itemID,
+                autoregHeld: log.autoregHeld,
+                sets: mirrored,
+                performedExerciseID: swappedExerciseID,
+                overrides: AlternativeOverrides(reps: 10, loadKg: 30, unit: .kg)
+            )
+        }
+
+        // Advance cursor into round 2.
+        state.cursor = SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 2)
+
+        let content = CircuitDriver().activeContent(state: state, context: ctx)
+        XCTAssertEqual(content?.loadKg, 30, "post-swap SetPlan load wins")
+        XCTAssertEqual(content?.reps, 10, "post-swap SetPlan reps win")
+        XCTAssertEqual(content?.loadDisplay, "30 kg", "unit override carries through")
     }
 }

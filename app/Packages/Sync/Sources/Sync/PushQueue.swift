@@ -43,30 +43,63 @@ public struct FlushResult: Sendable, Equatable {
 }
 
 public actor PushQueue {
-    private let store: PushQueueStore
+    /// The durable queue. `internal` (not `private`) so
+    /// `PushQueue+Dedup.swift` can peek for logical-identity collisions
+    /// before a new enqueue lands. Only other `PushQueue` extensions in
+    /// the Sync module can see it.
+    let store: PushQueueStore
     private let transport: HTTPTransport
     private let clock: any Clock
-    private let encoder: JSONEncoder
+    /// JSON encoder shared across encode paths. `internal` so
+    /// `PushQueue+Encoding.swift` can reach it without a parameter.
+    let encoder: JSONEncoder
     /// The number of items pulled per flush. Small enough to bound memory, big
     /// enough that the steady-state (one set per log) drains in one pass.
     private let batchSize: Int
+    /// Fire-and-forget telemetry sink. Used to record
+    /// `execution.push_item_dead_lettered` when the queue drops a row
+    /// whose persistent 4xx (non-401) count crosses
+    /// `PushBackoff.deadLetterThreshold`. A no-op emitter is the default
+    /// so existing callers don't have to wire anything.
+    private let telemetry: TelemetryEmitter
+    /// Per-item count of consecutive persistent-4xx (non-401) failures.
+    /// NOT persisted — if the process restarts the counter resets, which
+    /// is the correct behavior: a cold start is a fresh shot at the
+    /// server. Cleared when an item is removed (via dead-letter or 2xx)
+    /// or when a fresh enqueue replaces the id in the store.
+    private var persistent4xxAttempts: [PushItemID: Int] = [:]
 
     public init(
         store: PushQueueStore,
         transport: HTTPTransport,
         clock: any Clock = SystemClock(),
-        batchSize: Int = 32
+        batchSize: Int = 32,
+        telemetry: TelemetryEmitter = NoopTelemetryEmitter()
     ) {
         self.store = store
         self.transport = transport
         self.clock = clock
         self.encoder = JSONEncoder.workoutDB()
         self.batchSize = batchSize
+        self.telemetry = telemetry
     }
 
     /// Enqueue a batch of set_logs. Callers typically pass the single log
     /// that was just written; batching at workout completion is also fine.
+    ///
+    /// Logical dedup: for a single-log payload we drop any queued item that
+    /// carries a `.setLogs` payload containing the same SetLog.id BEFORE
+    /// inserting the fresh one. Otherwise a correction to a just-logged
+    /// set would queue a stale and a fresh copy side-by-side — the server
+    /// upserts on id so both get collapsed, but the stale copy gets pushed
+    /// first and transiently overwrites the corrected bytes on the server
+    /// until the second push resolves. Batch payloads (multi-log arrays)
+    /// are NOT deduped — a workout-completion batch is a distinct logical
+    /// unit and shouldn't shadow individual single-log enqueues.
     public func enqueueSetLogs(_ logs: [CoreDomain.SetLog]) async throws {
+        if logs.count == 1 {
+            try await dropExistingSetLog(id: logs[0].id)
+        }
         let item = PushItem(
             payload: .setLogs(logs),
             enqueuedAt: clock.now
@@ -74,13 +107,30 @@ public actor PushQueue {
         try await store.enqueue(item)
     }
 
+    /// Enqueue a terminal-status update for a workout. Logical dedup: any
+    /// previously-queued status update for the same (workoutID, status)
+    /// pair is dropped first. Real-world trigger: the user taps End, then
+    /// Save & Done — without dedup we'd queue two identical updates.
+    ///
+    /// `notes` rides on the terminal push so the server becomes
+    /// authoritative for the user-authored post-workout note. Without
+    /// this the next `sync/pull` overwrote the just-typed note with the
+    /// server's stale value. `nil` leaves the existing server-side note
+    /// untouched (non-terminal flips pass nil).
     public func enqueueStatusUpdate(
         workoutID: WorkoutID,
         status: CoreDomain.WorkoutStatus,
-        completedAt: Date?
+        completedAt: Date?,
+        notes: String? = nil
     ) async throws {
+        try await dropExistingStatusUpdate(workoutID: workoutID, status: status)
         let item = PushItem(
-            payload: .statusUpdate(workoutID: workoutID, status: status, completedAt: completedAt),
+            payload: .statusUpdate(
+                workoutID: workoutID,
+                status: status,
+                completedAt: completedAt,
+                notes: notes
+            ),
             enqueuedAt: clock.now
         )
         try await store.enqueue(item)
@@ -89,6 +139,9 @@ public actor PushQueue {
     /// Enqueue a batch of telemetry events. Routed to `/api/telemetry/events`
     /// at push time — a separate endpoint from set_logs/status_updates so
     /// telemetry failures never block user data and vice versa.
+    ///
+    /// Events are NOT deduped — diagnostics are append-only and a replay
+    /// is just another event row on the server. Duplicates are cheap.
     public func enqueueEvents(_ events: [CoreTelemetry.Event]) async throws {
         let item = PushItem(
             payload: .events(events),
@@ -99,15 +152,25 @@ public actor PushQueue {
 
     /// Enqueue a single `user_parameter` row. Routed to
     /// `/api/user-parameters` at push time. `user_parameters` is append-
-    /// only on the server; the app's UUID is not sent (the server assigns
-    /// its own id per insert).
+    /// only on the server but the app owns the id end-to-end, so an
+    /// in-queue replay of the same id upserts server-side.
+    ///
+    /// Logical dedup: any queued item with the same `UserParameter.id` is
+    /// dropped first. Trigger: user edits the bodyweight again before the
+    /// first push flushes — we want the latest value, not a stale-then-
+    /// fresh sequence that transiently overwrites.
     public func enqueueUserParameter(_ param: CoreDomain.UserParameter) async throws {
+        try await dropExistingUserParameter(id: param.id)
         let item = PushItem(
             payload: .userParameter(param),
             enqueuedAt: clock.now
         )
         try await store.enqueue(item)
     }
+
+    // Logical dedup helpers (`dropExisting*`) live in
+    // `PushQueue+Dedup.swift` so the actor body stays under SwiftLint's
+    // `type_body_length` cap.
 
     public func isEmpty() async throws -> Bool {
         try await store.isEmpty()
@@ -194,87 +257,70 @@ public actor PushQueue {
 
         switch response.status {
         case 200...299:
+            persistent4xxAttempts[item.id] = nil
             try await store.remove(ids: [item.id])
             return .pushed
         case 401:
+            // 401 is its own signal path — the bearer is bad, not the
+            // body. Don't count it against the persistent-4xx budget;
+            // reauth replaces the token and the same row ships again.
             try await store.update(item.incrementingAttempts())
             return .tokenRejected
+        case 400...499:
+            // Persistent 4xx (non-401): the server is saying "this body
+            // will never be accepted". Count it, and after
+            // `PushBackoff.deadLetterThreshold` consecutive hits drop the
+            // row + emit telemetry so it can't block the queue forever.
+            return try await handlePersistent4xx(item: item, status: response.status)
         default:
-            // 4xx (non-401) and 5xx both land here. Leave the item for
-            // retry — server errors are transient; 4xx other than 401
-            // for us is "server rejected this specific body" and we'd
-            // rather re-push than silently drop.
+            // 5xx / 1xx / 3xx — transient by convention. Leave the item
+            // for retry; `PushBackoff` slows the loop on consecutive
+            // failures at the caller level.
             try await store.update(item.incrementingAttempts())
             return .networkFailed
         }
     }
 
-    // MARK: - Private
-
-    /// Route a payload to its endpoint. Set logs + status updates share
-    /// `/api/sync/results`; telemetry has its own endpoint so failures on
-    /// one path don't block the other; user_parameters have their own
-    /// endpoint and are append-only.
-    private func pushPath(for payload: PushItem.Payload) -> String {
-        switch payload {
-        case .setLogs, .statusUpdate:
-            return "/api/sync/results"
-        case .events:
-            return "/api/telemetry/events"
-        case .userParameter:
-            return "/api/user-parameters"
-        }
-    }
-
-    private func encodeBody(for item: PushItem) throws -> Data {
-        switch item.payload {
-        case .setLogs(let logs):
-            let payload = WorkoutDBSchema.SyncResultsPayload(
-                setLogs: logs.map(DTOMapping.toDTO),
-                statusUpdates: []
-            )
-            return try encoder.encode(payload)
-        case .statusUpdate(let workoutID, let status, let completedAt):
-            // `CoreDomain.WorkoutStatus` and `WorkoutDBSchema.WorkoutStatus`
-            // share their string-backed cases by construction (contract test
-            // `test_swift_schema_parity.py` enforces parity). The force-unwrap
-            // cannot fail without a concurrent schema drift that CI would
-            // have rejected.
-            // swiftlint:disable:next force_unwrapping
-            let wireStatus = WorkoutDBSchema.WorkoutStatus(rawValue: status.rawValue)!
-            let dto = WorkoutDBSchema.WorkoutStatusUpdate(
-                workoutId: workoutID.uuidString,
-                status: wireStatus,
-                completedAt: completedAt
-            )
-            let payload = WorkoutDBSchema.SyncResultsPayload(
-                setLogs: [],
-                statusUpdates: [dto]
-            )
-            return try encoder.encode(payload)
-        case .events(let events):
-            let dtoEvents = events.map { event -> WorkoutDBSchema.TelemetryEvent in
-                WorkoutDBSchema.TelemetryEvent(
-                    id: event.id.uuidString.lowercased(),
-                    timestamp: event.timestamp,
-                    sessionId: event.sessionID.uuidString.lowercased(),
-                    kind: event.kind,
-                    name: event.name,
-                    dataJson: event.dataJSON,
-                    workoutId: event.workoutID?.uuidString.lowercased(),
-                    setLogId: event.setLogID?.uuidString.lowercased()
+    /// Persistent-4xx bookkeeping. Increments the in-memory counter for
+    /// this item; on the Nth consecutive hit we emit a telemetry event and
+    /// drop the row from the store. Returning `.networkFailed` for
+    /// sub-threshold attempts keeps the existing `FlushResult` contract
+    /// honest — the caller can slow the loop on consecutive network
+    /// failures. A dead-lettered drop also returns `.networkFailed` (the
+    /// flush ultimately did not land) so the caller's backoff counter
+    /// behaves identically.
+    private func handlePersistent4xx(
+        item: PushItem,
+        status: Int
+    ) async throws -> PushOutcome {
+        let nextCount = (persistent4xxAttempts[item.id] ?? 0) + 1
+        if nextCount >= PushBackoff.deadLetterThreshold {
+            persistent4xxAttempts[item.id] = nil
+            telemetry.emit(Event(
+                sessionID: TelemetrySession.id,
+                kind: "state",
+                name: "execution.push_item_dead_lettered",
+                dataJSON: deadLetterDataJSON(
+                    item: item, status: status, attempts: nextCount
                 )
-            }
-            let payload = WorkoutDBSchema.TelemetryEventsPayload(events: dtoEvents)
-            return try encoder.encode(payload)
-        case .userParameter(let param):
-            // Server's `POST /api/user-parameters` expects an array of
-            // `UserParameterIn` — `{key, value, source, updated_at?}`. The
-            // server assigns the row id and resolves user_id from the
-            // bearer token; we do not send our local UUID. See
-            // `server/workoutdb_server/api/user_parameters.py`.
-            let body = [DTOMapping.toInDTO(param)]
-            return try encoder.encode(body)
+            ))
+            try await store.remove(ids: [item.id])
+            return .networkFailed
         }
+        persistent4xxAttempts[item.id] = nextCount
+        try await store.update(item.incrementingAttempts())
+        return .networkFailed
     }
+
+    // Implementation note: new enqueues get a fresh `PushItem.id`, so a
+    // dedup-replaced row's old counter is orphaned in the dictionary —
+    // harmless (no correctness impact, trivial memory) and keeps this
+    // file off `PushQueue+Dedup.swift`'s back. The "fresh enqueue resets
+    // counter" property tested in SyncTests holds via the new id, not
+    // via explicit clearing.
+
+    // Body encoding + endpoint routing live in
+    // `PushQueue+Encoding.swift`; dead-letter telemetry payload builders
+    // live in `PushQueue+DeadLetter.swift`. Both splits keep the actor
+    // body under SwiftLint's `type_body_length` cap.
 }

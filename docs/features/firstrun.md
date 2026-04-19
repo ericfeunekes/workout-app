@@ -10,18 +10,24 @@ covers:
 # firstrun
 
 ## What it does
-Presents a welcome card with URL + bearer-token inputs. On "connect" tap, `FirstRunViewModel.connect()` validates the URL, fires `GET /api/version` as a handshake, persists the (url, token) pair to `TokenStore` only after 200, then fires `GET /api/sync/pull` (no `since`) to prime the cache and surface "N sessions · M exercises". On success, invokes `onComplete` which the shell uses to advance to `bootstrapping`. Failures render an inline banner under the welcome card; inputs remain editable for retry. See `docs/sync.md` § "First-run UX" for the contract.
+Presents a welcome card with URL + bearer-token inputs. On "connect" tap, `FirstRunViewModel.connect()` validates the URL, fires `GET /api/version` as a handshake, persists the (url, token) pair to `TokenStore` only after 200, and invokes `onComplete` which the shell uses to advance to `bootstrapping`. The shell's `AppBootstrap` then owns the first `GET /api/sync/pull` — FirstRun does NOT fire that itself (see "Scope boundary" below). Failures render an inline banner under the welcome card; inputs remain editable for retry. See `docs/sync.md` § "First-run UX" for the contract.
 
 ## State surface
-- **Inputs:** `url: String`, `token: String` (two-field — diverges from `docs/sync.md`'s single-payload QR design; two-field wins for v1 per `open-questions.md` § "FirstRun connection string format")
+- **Inputs:** `url: String`, `token: String` (two-field — diverges from `docs/sync.md`'s single-payload QR design; two-field wins for v1 per `open-questions.md` § "FirstRun connection string format"). Both pre-fillable via `initialURL` / `initialToken` init params, used by the shell's `.empty → Change Server → FirstRun` recovery route so Eric doesn't retype.
 - **Outputs / side effects:** `TokenStore.saveConnection(url:token:)` (only after /api/version 200), `onComplete()` closure fired on success
-- **State transitions:** `.welcome → .connecting → .syncingFirstPull(nil) → .syncingFirstPull(summary) → .complete`, or any step → `.failed(reason)` which keeps the welcome card rendered with a banner
+- **State transitions:** `.welcome → .connecting → .complete`, or any step → `.failed(reason)` which keeps the welcome card rendered with a banner. The shell's `BootstrapLoadingView` ("Syncing…") renders during AppBootstrap's first pull.
+
+## Scope boundary — FirstRun validates, AppBootstrap hydrates
+
+FirstRun only fires `/api/version` as a credentials handshake. The first `/api/sync/pull` — the one that populates the cache — is `Shell.AppBootstrap`'s exclusive responsibility. History: an earlier shape had FirstRun ALSO fire `/api/sync/pull` to surface a "N sessions · M exercises" count, while AppBootstrap also pulled immediately after. This duplicated network work AND opened a stranding hazard: if FirstRun's pull succeeded but AppBootstrap's follow-up pull later failed (non-401), the user would land on `.empty` despite valid creds with no way back to FirstRun to edit the server. Eliminating FirstRun's pull closed the hazard at the root.
+
+Pinned by `testFirstRunHandsOffToBootstrapWithoutSecondPull` (FirstRun target) + `testBootstrapFiresExactlyOnePullPerRun` (Shell target).
 
 ## What it deliberately doesn't do
-- Does not map pull DTOs to Domain — uses a minimal `PullProbe` that counts `workouts` + `exercises` only (`FirstRunViewModel.swift:287-322`). Full mapping is `AppBootstrap`'s job.
-- Does not save token before `/api/version` returns 200 (`FirstRunViewModel.swift:190-207` — comment: "we do not want to persist a token that produces 401 on every subsequent call")
+- Does not fire `/api/sync/pull` — that's AppBootstrap's job. See "Scope boundary" above.
+- Does not save token before `/api/version` returns 200 (`FirstRunViewModel.swift` — comment: "we do not want to persist a token that produces 401 on every subsequent call")
 - Does not retry automatically — user taps retry. No exponential backoff, no timeout tuning.
-- Does not implement QR scan — `QRStubSheet` says "qr scan coming in v1.1" (`FirstRunView.swift:225-252`)
+- Does not implement QR scan — `QRStubSheet` says "qr scan coming in v1.1" (`FirstRunView.swift`)
 - Does not dismiss keyboard on field blur — no explicit `.submitLabel` / `.onSubmit` wiring
 
 ## Edge cases handled in code
@@ -35,18 +41,19 @@ Presents a welcome card with URL + bearer-token inputs. On "connect" tap, `First
 - Version decode failure → `.decode` — "server responded but the shape didn't match" (proves it's not a workoutdb server at that URL)
 
 ## Known issues / gaps
-- `open-questions.md` § "FirstRun `connect()` re-entrancy" — MUST-FIX identified 2026-04-18, fixed via the re-entrancy guard above. Named regression `testRapidDoubleTapConnectOnlyInvokesPipelineOnce` closes bug-018.
-- `open-questions.md` § "App shell double-bootstrap race" — fixed this session; FirstRun's `onComplete` no longer double-fires bootstrap (see `bootstrap.md`).
-- Fixed this session: naive datetime decode at bootstrap caused silent FirstRun → empty state (see `bootstrap.md`).
-- Fixed this session: UUID-case mismatch on `/api/sync/results` (see `push-queue.md`) — orthogonal to FirstRun but surfaced during first-run push after sync.
-- Not built: trailing-slash normalization — `https://host/` vs `https://host` are passed to `URLSessionTransport` as-is. Behavior depends on the transport's path joining.
+- Re-entrancy (bug-018) closed via the guard in `connect()` + `.disabled(isConnectInFlight)` on the view. Pinned by `testRapidDoubleTapConnectOnlyInvokesPipelineOnce`.
+- Scope boundary (bug-048) closed: FirstRun only hits `/api/version`; AppBootstrap owns the sole pull. `testFirstRunHandsOffToBootstrapWithoutSecondPull` + `testBootstrapFiresExactlyOnePullPerRun` pin it. `.empty` state gained a "change server" route with URL + token pre-fill so a wrong server URL doesn't trap the user.
+- Double-bootstrap race closed: `FirstRun.onComplete` no longer double-fires bootstrap; shell's `didStartBootstrap` guard + inert `BootstrapLoadingView` (no `.task`).
+- Naive-datetime decode (bug-002) closed server-side via `UtcDatetime` / `UtcDatetimeIn` serializers.
+- UUID-case mismatch (bug-004 / bug-045) closed: every outbound UUID routes through `UUID.wireID` (lowercase).
+- Not built: trailing-slash normalization — `https://host/` vs `https://host` are passed to `URLSessionTransport` as-is.
 
 ## QA scenarios
 
 ### S1. Happy path: valid URL + token
 - **setup:** fresh install, server reachable at `https://host.ts.net` with a valid bearer
 - **steps:** paste URL, paste token, tap "connect"
-- **expected:** "connecting…" card → "syncing your program" card with "N sessions · M exercises" → shell advances to bootstrap loading → Today renders
+- **expected:** "connecting…" card → shell advances to `BootstrapLoadingView` ("Syncing…") while AppBootstrap runs the first pull → Today renders
 
 ### S2. Happy path: whitespace-wrapped paste
 - **setup:** clipboard holds `"  https://host.ts.net  \n"` and `"  tok123  \n"`
@@ -81,18 +88,18 @@ Presents a welcome card with URL + bearer-token inputs. On "connect" tap, `First
 ### S8. Rapid double-tap "connect" (bug-018 fix)
 - **setup:** any valid config
 - **steps:** tap "connect" twice as fast as possible
-- **expected:** single pipeline runs. Button is `.disabled` while `isConnectInFlight`. No duplicate `TokenStore.saveConnection` call, no duplicate pull.
-- **notes:** re-entrancy guard in `connect()` backstops the view-side disable. If you can force two concurrent Tasks programmatically, the second no-ops. Pinned by `testRapidDoubleTapConnectOnlyInvokesPipelineOnce` — the scripted transport enqueues exactly one happy path and asserts call counts stay at 2 (one version + one pull).
+- **expected:** single pipeline runs. Button is `.disabled` while `isConnectInFlight`. No duplicate `TokenStore.saveConnection` call.
+- **notes:** re-entrancy guard in `connect()` backstops the view-side disable. If you can force two concurrent Tasks programmatically, the second no-ops. Pinned by `testRapidDoubleTapConnectOnlyInvokesPipelineOnce` — the scripted transport enqueues exactly one happy path and asserts call counts stay at 1 (one `/api/version`).
 
 ### S9. Retry after failure
 - **setup:** just failed with `.tokenRejected`
 - **steps:** edit token, tap "connect" again
 - **expected:** same pipeline re-runs from `.welcome` path (failed state is an allowed entry in `connect()`)
 
-### S10. Pull succeeds but count is 0/0
+### S10. Auth succeeds but server has no workouts
 - **setup:** valid auth, server has no workouts or exercises yet
 - **steps:** connect
-- **expected:** "syncing your program" card shows "0 sessions · 0 exercises", then `onComplete` fires. Shell typically lands in `.empty` state after bootstrap.
+- **expected:** `onComplete` fires → shell's BootstrapLoadingView → AppBootstrap pull returns empty → shell lands in `.empty` state. The "change server" button on `.empty` routes back to FirstRun with URL + token pre-filled (see `bootstrap.md` S4 and the "change server" recovery route in `RootView.changeServer()`).
 - **notes:** see `bootstrap.md` S4 for shell handling
 
 ### S11. http vs https

@@ -44,11 +44,15 @@ extension HistoryViewModel {
     func derivePickerRows() -> [ExercisePickerRow] {
         let agg = aggregate(rawSessions)
         var rows = agg.counts.map { id, count in
-            ExercisePickerRow(
+            let topSummary: String? = agg.topLoad[id].map { entry in
+                let unitLabel = entry.unit == .kg ? "KG" : "LB"
+                return "TOP \(formatKilograms(entry.weight)) \(unitLabel)"
+            }
+            return ExercisePickerRow(
                 id: id,
                 name: exerciseName[id] ?? "(unknown)",
                 sessionSummary: "\(count) SESSION\(count == 1 ? "" : "S")",
-                topLoadSummary: agg.topLoad[id].map { "TOP \(formatKilograms($0)) KG" },
+                topLoadSummary: topSummary,
                 isInCurrentProgram: currentProgramExerciseIDs.contains(id)
             )
         }
@@ -58,11 +62,21 @@ extension HistoryViewModel {
 
     /// Session count + top load per exercise across the loaded sessions.
     /// Split so `derivePickerRows` stays short.
+    ///
+    /// Top load is computed within a single unit to avoid the numeric
+    /// mix-up where "100 lb > 50 kg" is true by number but false by
+    /// weight. For each exercise, whichever unit has more logged rows
+    /// wins the comparison — ties fall to kg (v0 is kg-only). Rows in
+    /// the non-dominant unit are skipped from the top-load search so
+    /// the displayed value is always coherent with its own label.
     private func aggregate(
         _ sessions: [SessionDetail]
-    ) -> (counts: [ExerciseID: Int], topLoad: [ExerciseID: Double]) {
+    ) -> (counts: [ExerciseID: Int], topLoad: [ExerciseID: TopLoad]) {
         var counts: [ExerciseID: Int] = [:]
-        var topLoad: [ExerciseID: Double] = [:]
+        // Per-exercise: kg-unit log count, lb-unit log count, and
+        // best-weight-seen per unit.
+        var unitCounts: [ExerciseID: [WeightUnit: Int]] = [:]
+        var bestByUnit: [ExerciseID: [WeightUnit: Double]] = [:]
         for session in sessions {
             for id in session.performedExerciseIDs {
                 counts[id, default: 0] += 1
@@ -70,13 +84,42 @@ extension HistoryViewModel {
             for log in session.setLogs {
                 let displayID = log.performedExerciseID
                     ?? session.plannedExerciseByItem[log.workoutItemID]
-                guard let displayID else { continue }
-                if let w = log.weight, w > (topLoad[displayID] ?? 0) {
-                    topLoad[displayID] = w
+                guard let displayID, let weight = log.weight else { continue }
+                let unit = log.weightUnit ?? .kg
+                unitCounts[displayID, default: [:]][unit, default: 0] += 1
+                let existing = bestByUnit[displayID, default: [:]][unit] ?? 0
+                if weight > existing {
+                    bestByUnit[displayID, default: [:]][unit] = weight
                 }
             }
         }
+
+        var topLoad: [ExerciseID: TopLoad] = [:]
+        for (id, perUnit) in bestByUnit {
+            let dominant = dominantUnit(perUnitCounts: unitCounts[id] ?? [:])
+            if let weight = perUnit[dominant] {
+                topLoad[id] = TopLoad(weight: weight, unit: dominant)
+            }
+        }
         return (counts, topLoad)
+    }
+
+    /// Top load for one exercise — the weight is in `unit`'s own scale,
+    /// not normalized. Kept as a small struct so downstream consumers
+    /// (the picker row builder today, tests, future API) don't have to
+    /// re-pair weight with unit.
+    struct TopLoad: Equatable {
+        let weight: Double
+        let unit: WeightUnit
+    }
+
+    /// Pick the unit with more logged rows for a given exercise. Ties
+    /// fall to kg (v0 is kg-only in practice; the default matches the
+    /// spec's stated norm).
+    private func dominantUnit(perUnitCounts: [WeightUnit: Int]) -> WeightUnit {
+        let kgCount = perUnitCounts[.kg] ?? 0
+        let lbCount = perUnitCounts[.lb] ?? 0
+        return lbCount > kgCount ? .lb : .kg
     }
 
     /// Current-program rows first, then alphabetical case-insensitive.

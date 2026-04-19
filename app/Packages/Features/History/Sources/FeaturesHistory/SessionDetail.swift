@@ -49,15 +49,25 @@ public struct SessionDetail: Sendable, Equatable {
     /// the user didn't swap mid-workout (so `performedExerciseID` is
     /// nil). Empty when the caller couldn't populate it cheaply.
     public let plannedExerciseByItem: [WorkoutItemID: ExerciseID]
+    /// Bodyweight captured with this session, if any. Populated by
+    /// `HistoryViewModel+Load.buildSession` from the local
+    /// `user_parameters` cache by finding the most recent
+    /// `bodyweight_kg` row whose `updatedAt` falls inside the workout's
+    /// time window (`scheduledDate` | first-log `startedAt` start →
+    /// `completedAt` + 2 min). Bodyweight lives in `user_parameters`
+    /// (append-only) — see `docs/observability-map.md` § "Completion".
+    public let bodyweightKg: Double?
 
     public init(
         workout: Workout,
         setLogs: [SetLog],
-        plannedExerciseByItem: [WorkoutItemID: ExerciseID] = [:]
+        plannedExerciseByItem: [WorkoutItemID: ExerciseID] = [:],
+        bodyweightKg: Double? = nil
     ) {
         self.workout = workout
         self.setLogs = setLogs
         self.plannedExerciseByItem = plannedExerciseByItem
+        self.bodyweightKg = bodyweightKg
     }
 
     /// All exercise ids that appear in this session, counting both
@@ -125,13 +135,6 @@ public struct SessionDetail: Sendable, Equatable {
             return !n.isEmpty
         }
     }
-
-    /// Body weight recorded with the completion, if any. Sourced from
-    /// `set_log.notes` is _not_ the right place — bodyweight lives in
-    /// `user_parameters`. For v1 we pass nil here and let the eventual
-    /// join-to-user-parameters step populate it. Hook kept so the row
-    /// shape is stable.
-    public var bodyweightKg: Double? { nil }
 
     /// Render a `HistoryViewModel.SessionRow` from this detail.
     public func listRow(calendar: Calendar) -> HistoryViewModel.SessionRow {

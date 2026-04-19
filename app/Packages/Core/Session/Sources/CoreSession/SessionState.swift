@@ -191,6 +191,38 @@ public struct SessionState: Equatable, Sendable {
     /// auto-logs a placeholder `.logSet(0, nil)` and enters the 10s rest.
     /// Nil outside tabata or between work windows.
     public var workEndsAt: Date?
+    /// Absolute wall-clock anchor for the CURRENT EMOM block's interval
+    /// grid — the moment interval 1 started. All EMOM interval boundaries
+    /// derive from this: boundary of interval N (1-based) is
+    /// `intervalAnchorAt + N * interval_sec`. Stamped on block entry by
+    /// `enterBlockTimerIfNeeded` (alongside `blockEndsAt`) and cleared on
+    /// block change (alongside `blockEndsAt`/`workEndsAt`). Log-time does
+    /// NOT re-anchor — EMOM drift-free correctness depends on the anchor
+    /// staying fixed for the block's duration. Nil outside EMOM.
+    /// Absolute-timestamp semantics so backgrounding + reload survives
+    /// without drift, matching `restEndsAt` / `blockEndsAt`.
+    public var intervalAnchorAt: Date?
+    /// Wall-clock instant the user began the CURRENT working set — i.e.,
+    /// when the previous rest ended (or when the session started, for the
+    /// very first set). Read by the reducer's `.logSet` / `.logCardioSet`
+    /// handlers and stamped onto the logged `SetPlan.startedAt`, then
+    /// cleared back to nil so the next set's anchor must be set again by
+    /// `.advanceFromRest` (or the equivalent VM-level entry helper).
+    ///
+    /// Distinct semantics from `SetPlan.completedAt` chaining — rest time
+    /// is NOT part of set work time. A 10s bench press followed by a 90s
+    /// rest stamps `startedAt = T`, `completedAt = T+10`; the next set's
+    /// `startedAt` is T+100 (when rest ended), NOT T+10 (previous
+    /// completedAt). Folding rest into set duration makes per-set working
+    /// time un-analyzable.
+    ///
+    /// Set by the view model on workout start and rest-end via direct
+    /// state mutation (matching the `workEndsAt` / `intervalAnchorAt`
+    /// precedent — the reducer doesn't own wall-clock anchors). Persisted
+    /// via `SessionStateCodable` so a kill-then-relaunch mid-set preserves
+    /// the anchor rather than collapsing `startedAt == completedAt` for
+    /// the resumed set.
+    public var workStartedAt: Date?
     public var note: String
     public var structure: Structure
 
@@ -202,6 +234,8 @@ public struct SessionState: Equatable, Sendable {
         restEndsAt: Date? = nil,
         blockEndsAt: Date? = nil,
         workEndsAt: Date? = nil,
+        intervalAnchorAt: Date? = nil,
+        workStartedAt: Date? = nil,
         note: String = "",
         structure: Structure
     ) {
@@ -212,6 +246,8 @@ public struct SessionState: Equatable, Sendable {
         self.restEndsAt = restEndsAt
         self.blockEndsAt = blockEndsAt
         self.workEndsAt = workEndsAt
+        self.intervalAnchorAt = intervalAnchorAt
+        self.workStartedAt = workStartedAt
         self.note = note
         self.structure = structure
     }

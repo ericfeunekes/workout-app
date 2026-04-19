@@ -21,3 +21,17 @@ public typealias ExerciseAlternativeID = UUID
 public typealias SetLogID = UUID
 public typealias UserParameterID = UUID
 public typealias UserID = UUID
+
+/// Wire-format ID string for UUIDs.
+///
+/// Apple's `UUID.uuidString` returns uppercase (Swift default); the server's
+/// `_UuidInputBase` accepts either case but the project invariant is
+/// "every `id` + `*_id` on the wire is lowercase UUID." Using this property
+/// rather than raw `.uuidString` on every outbound mapping site keeps the
+/// invariant trivial to audit — one grep catches uppercase drift.
+///
+/// See `docs/specs/v2-architecture.md` § "UUIDs everywhere" and the
+/// `_UuidInputBase.lowercase_and_validate` model validator on the server.
+public extension UUID {
+    var wireID: String { uuidString.lowercased() }
+}

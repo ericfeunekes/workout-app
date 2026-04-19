@@ -48,88 +48,81 @@ extension WorkoutCacheImpl {
     }
 
     public func loadSetLogs(workoutID: WorkoutID) async throws -> [SetLog] {
-        // Fetch the workout's items, then for each item fetch its set_logs.
-        // We deliberately avoid a cross-entity #Predicate join (SwiftData's
-        // predicate language doesn't express "item.block.workoutID" well)
-        // and do the two-step walk in-actor — still one transaction, one
-        // actor hop from the caller's perspective.
-        let blocks = try fetchBlocks(workoutID: workoutID)
-        guard !blocks.isEmpty else { return [] }
-        let blockIDs = Set(blocks.map(\.id))
+        // Direct predicate on the denormalized `workoutID` column (R1.4
+        // SetLog denormalization — see `SwiftDataModels.swift`). This
+        // path survives reconcile: a SetLog whose parent WorkoutItem
+        // was deleted by a server-side plan edit still carries its
+        // original `workoutID` and stays visible to History, which is
+        // the whole reason we added the column. Pre-R1.4 the query
+        // walked blocks → items → logs and silently dropped orphans.
+        var descriptor = FetchDescriptor<SetLogModel>(
+            predicate: #Predicate<SetLogModel> { $0.workoutID == workoutID }
+        )
+        // Stable UI order: by the parent WorkoutItem's position (when the
+        // item still exists) then by `setIndex`. We resolve the positions
+        // with a single items fetch scoped to the workout's blocks — the
+        // ordering is a best-effort UI concern, so a reconciled-away item
+        // falls through to `Int.max` and sorts after extant items, which
+        // matches the "show the live plan then the orphaned history"
+        // intent.
+        descriptor.sortBy = [SortDescriptor(\SetLogModel.setIndex)]
+        let rows = try modelContext.fetch(descriptor)
+        guard !rows.isEmpty else { return [] }
 
-        var itemRows: [WorkoutItemModel] = []
-        for blockID in blockIDs {
-            let itemsDescriptor = FetchDescriptor<WorkoutItemModel>(
-                predicate: #Predicate<WorkoutItemModel> { $0.blockID == blockID }
-            )
-            itemRows.append(contentsOf: try modelContext.fetch(itemsDescriptor))
-        }
-
-        // Preserve block-then-item order for stable UI rendering.
-        let blockPosition = Dictionary(uniqueKeysWithValues: blocks.map { ($0.id, $0.position) })
-        itemRows.sort { a, b in
-            let pa = blockPosition[a.blockID] ?? Int.max
-            let pb = blockPosition[b.blockID] ?? Int.max
+        let positionByItem = try itemPositions(workoutID: workoutID)
+        let ordered = rows.sorted { a, b in
+            let pa = positionByItem[a.workoutItemID] ?? Int.max
+            let pb = positionByItem[b.workoutItemID] ?? Int.max
             if pa != pb { return pa < pb }
-            return a.position < b.position
+            return a.setIndex < b.setIndex
         }
+        return ordered.map { $0.toDomain() }
+    }
 
-        var out: [SetLog] = []
-        for item in itemRows {
-            let itemID = item.id
-            var logDescriptor = FetchDescriptor<SetLogModel>(
-                predicate: #Predicate<SetLogModel> { $0.workoutItemID == itemID }
-            )
-            logDescriptor.sortBy = [SortDescriptor(\SetLogModel.setIndex)]
-            let logs = try modelContext.fetch(logDescriptor)
-            out.append(contentsOf: logs.map { $0.toDomain() })
-        }
-        return out
+    public func loadOrphanedSetLogs() async throws -> [SetLog] {
+        // Rows the V2→V3 backfill (and every subsequent open-time
+        // pass) could not map to a surviving WorkoutItem: their
+        // original parent item was reconciled away under the R1.3
+        // detach path BEFORE the V3 upgrade shipped, so neither the
+        // block→item walk nor the new map scan can resolve the chain.
+        // We never invent a workoutID for these — they stay nil on
+        // disk and this API is the only way to surface them to the
+        // UI. Local set_logs are authoritative client data; silently
+        // hiding them would violate the one invariant `CLAUDE.md`
+        // names as load-bearing.
+        let descriptor = FetchDescriptor<SetLogModel>(
+            predicate: #Predicate<SetLogModel> { $0.workoutID == nil }
+        )
+        let rows = try modelContext.fetch(descriptor)
+        let ordered = rows.sorted { $0.completedAt > $1.completedAt }
+        return ordered.map { $0.toDomain() }
     }
 
     public func loadSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [SetLog] {
         guard limit > 0 else { return [] }
 
-        // Two sources: set_logs whose `performedExerciseID == exerciseID`
-        // (mid-workout swaps), and set_logs whose underlying WorkoutItem has
-        // `exerciseID == exerciseID` and no swap recorded. We union both.
-        //
-        // SwiftData predicates can't traverse the loose UUID link from
-        // SetLog → WorkoutItem cleanly, so we resolve in two passes.
-        let swapDescriptor = FetchDescriptor<SetLogModel>(
-            predicate: #Predicate<SetLogModel> { $0.performedExerciseID == exerciseID }
+        // Direct predicate against the denormalized `plannedExerciseID`
+        // (set to the parent WorkoutItem's `exerciseID` at log time) or
+        // `performedExerciseID` (the swap target when the user mid-
+        // workout swapped). Both columns live on SetLog itself, so this
+        // query no longer needs a WorkoutItem fetch and survives the
+        // case where the parent item was reconciled away — the hole
+        // the R1.4 fix-it exists to close.
+        let descriptor = FetchDescriptor<SetLogModel>(
+            predicate: #Predicate<SetLogModel> { log in
+                log.plannedExerciseID == exerciseID
+                    || log.performedExerciseID == exerciseID
+            }
         )
-        let swapRows = try modelContext.fetch(swapDescriptor)
-
-        let itemDescriptor = FetchDescriptor<WorkoutItemModel>(
-            predicate: #Predicate<WorkoutItemModel> { $0.exerciseID == exerciseID }
-        )
-        let itemRows = try modelContext.fetch(itemDescriptor)
-        let itemIDs = Set(itemRows.map(\.id))
-
-        var plannedRows: [SetLogModel] = []
-        for itemID in itemIDs {
-            let descriptor = FetchDescriptor<SetLogModel>(
-                predicate: #Predicate<SetLogModel> {
-                    $0.workoutItemID == itemID && $0.performedExerciseID == nil
-                }
-            )
-            plannedRows.append(contentsOf: try modelContext.fetch(descriptor))
-        }
-
-        // Merge, de-dupe on id (a row can't match both passes but belt-and-
-        // braces), sort newest first, cap at limit.
-        var seen = Set<UUID>()
-        var merged: [SetLogModel] = []
-        for row in swapRows + plannedRows where !seen.contains(row.id) {
-            seen.insert(row.id)
-            merged.append(row)
-        }
-        merged.sort { $0.completedAt > $1.completedAt }
-        return merged.prefix(limit).map { $0.toDomain() }
+        let rows = try modelContext.fetch(descriptor)
+        // Sort newest first, cap at limit. Pre-R1.4 the query also had
+        // to de-dupe between two passes; with a single predicate the
+        // two sources can't double-count a row, so no de-dupe needed.
+        let ordered = rows.sorted { $0.completedAt > $1.completedAt }
+        return ordered.prefix(limit).map { $0.toDomain() }
     }
 
-    public func saveSetLogs(_ setLogs: [SetLog]) async throws {
+    public func saveSetLogs(_ setLogs: [SetLog], workoutID: WorkoutID) async throws {
         // Explicit do/catch/rollback per the SwiftData caveat documented in
         // docs/architecture/hotspots.md § "SwiftData `ModelContext.transaction`
         // does not roll back on throw (iOS 17.x)". Using `transaction { }`
@@ -138,7 +131,7 @@ extension WorkoutCacheImpl {
         // explicit pattern; tested by WorkoutCacheTests.
         do {
             for log in setLogs {
-                try upsertSetLog(log)
+                try upsertSetLog(log, workoutID: workoutID)
             }
             try modelContext.save()
         } catch {
@@ -180,39 +173,78 @@ extension WorkoutCacheImpl {
 
     // MARK: - Internal helpers
 
-    /// Fetch blocks for a workoutID as models (used by the history walk).
-    /// Kept separate from `loadBlocks(workoutID:)` so we can work in the
-    /// model space inside one transaction without round-tripping to
-    /// `CoreDomain` just to re-wrap.
-    private func fetchBlocks(workoutID: UUID) throws -> [BlockModel] {
-        var descriptor = FetchDescriptor<BlockModel>(
+    /// Build an `itemID -> block.position * 10000 + item.position` map
+    /// scoped to one workout, used by `loadSetLogs(workoutID:)` to sort
+    /// logs into block-then-item order for stable UI rendering. The
+    /// composite key is just a compact way to encode the two-axis sort
+    /// in a single `Int` — the exact magnitude doesn't matter, only
+    /// that later blocks / items dominate earlier ones.
+    private func itemPositions(workoutID: UUID) throws -> [UUID: Int] {
+        let blocksDescriptor = FetchDescriptor<BlockModel>(
             predicate: #Predicate<BlockModel> { $0.workoutID == workoutID }
         )
-        descriptor.sortBy = [SortDescriptor(\BlockModel.position)]
-        return try modelContext.fetch(descriptor)
+        let blocks = try modelContext.fetch(blocksDescriptor)
+        guard !blocks.isEmpty else { return [:] }
+        let blockPosition = Dictionary(uniqueKeysWithValues: blocks.map { ($0.id, $0.position) })
+
+        var out: [UUID: Int] = [:]
+        for block in blocks {
+            let blockID = block.id
+            let itemsDescriptor = FetchDescriptor<WorkoutItemModel>(
+                predicate: #Predicate<WorkoutItemModel> { $0.blockID == blockID }
+            )
+            let items = try modelContext.fetch(itemsDescriptor)
+            for item in items {
+                let bp = blockPosition[item.blockID] ?? 0
+                out[item.id] = bp * 10_000 + item.position
+            }
+        }
+        return out
     }
 
-    private func upsertSetLog(_ s: SetLog) throws {
+    private func upsertSetLog(_ s: SetLog, workoutID: UUID) throws {
         let id = s.id
         let descriptor = FetchDescriptor<SetLogModel>(
             predicate: #Predicate<SetLogModel> { $0.id == id }
         )
+        // Resolve `plannedExerciseID` from the parent WorkoutItem so
+        // History's exerciseID query can bypass a WorkoutItem fetch
+        // even after reconcile removes the item. This runs once per
+        // insert (not per edit) — `apply(_:)` intentionally leaves
+        // the denormalized columns alone.
+        let itemID = s.workoutItemID
+        let parentItem = try modelContext.fetch(
+            FetchDescriptor<WorkoutItemModel>(
+                predicate: #Predicate<WorkoutItemModel> { $0.id == itemID }
+            )
+        ).first
+        let plannedExerciseID = parentItem?.exerciseID
+
         if let existing = try modelContext.fetch(descriptor).first {
             existing.apply(s)
-            try attachSetLogToItem(existing, itemID: s.workoutItemID)
+            // Stamp the denormalized columns if they're missing — this
+            // is the in-actor equivalent of the V2→V3 backfill, for
+            // rows that shipped before R1.4 landed. Preserves any
+            // value that was already populated.
+            if existing.workoutID == nil {
+                existing.workoutID = workoutID
+            }
+            if existing.plannedExerciseID == nil, let planned = plannedExerciseID {
+                existing.plannedExerciseID = planned
+            }
+            if let parent = parentItem {
+                existing.workoutItem = parent
+            }
         } else {
-            let model = SetLogModel.from(s)
+            let model = SetLogModel.from(
+                s,
+                workoutID: workoutID,
+                plannedExerciseID: plannedExerciseID
+            )
             modelContext.insert(model)
-            try attachSetLogToItem(model, itemID: s.workoutItemID)
-        }
-    }
-
-    private func attachSetLogToItem(_ log: SetLogModel, itemID: UUID) throws {
-        let descriptor = FetchDescriptor<WorkoutItemModel>(
-            predicate: #Predicate<WorkoutItemModel> { $0.id == itemID }
-        )
-        if let parent = try modelContext.fetch(descriptor).first {
-            log.workoutItem = parent
+            if let parent = parentItem {
+                model.workoutItem = parent
+            }
         }
     }
 }

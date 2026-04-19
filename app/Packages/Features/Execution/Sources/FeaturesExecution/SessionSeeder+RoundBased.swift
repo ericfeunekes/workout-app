@@ -33,22 +33,27 @@ extension SessionSeeder {
         guard let block else {
             return seedSets(for: item, parser: parser)
         }
-        let (reps, loadKg) = itemRepsAndLoad(for: item, parser: parser)
+        let (reps, loadKg, unit) = itemRepsAndLoad(for: item, parser: parser)
         switch block.timingMode {
         case .circuit, .superset, .forTime:
             let rounds = max(block.rounds ?? 1, 1)
-            return seedUniform(sets: rounds, loadKg: loadKg ?? 0, reps: reps)
+            // Authored-nil load stays nil — a BW station in a circuit or
+            // superset must render "BW" end-to-end, not "0 lb".
+            return seedUniform(sets: rounds, loadKg: loadKg, unit: unit, reps: reps)
         case .tabata:
-            return seedUniform(sets: 8, loadKg: loadKg ?? 0, reps: reps)
+            return seedUniform(sets: 8, loadKg: loadKg, unit: unit, reps: reps)
         case .intervals:
             let count = intervalCount(from: block, parser: parser)
-            return seedUniform(sets: max(count, 1), loadKg: 0, reps: reps)
+            // Cardio intervals carry no external load — seed loadKg: nil.
+            return seedUniform(sets: max(count, 1), loadKg: nil, unit: unit, reps: reps)
         case .continuous:
-            return seedUniform(sets: 1, loadKg: 0, reps: reps)
+            // Continuous cardio — no external load. Seed loadKg: nil.
+            return seedUniform(sets: 1, loadKg: nil, unit: unit, reps: reps)
         case .amrap, .emom:
             return seedUniform(
                 sets: unboundedRoundsSentinel,
-                loadKg: loadKg ?? 0,
+                loadKg: loadKg,
+                unit: unit,
                 reps: reps
             )
         case .rest:
@@ -62,35 +67,43 @@ extension SessionSeeder {
         }
     }
 
-    /// Pull `(reps, optional load_kg)` off an item's prescription for the
-    /// round-based seeders. Defensive across every Prescription shape:
-    /// unknown/empty shapes collapse to (0, nil) so we still seed a row.
+    /// Pull `(reps, optional load_kg, unit)` off an item's prescription
+    /// for the round-based seeders. Defensive across every Prescription
+    /// shape: unknown/empty shapes collapse to (0, nil, .lb) — `.lb` is
+    /// the R2.10 default when no unit signal is available.
     static func itemRepsAndLoad(
         for item: WorkoutItem,
         parser: PrescriptionParser
-    ) -> (reps: Int, loadKg: Double?) {
-        switch parser.parse(prescriptionJSON: item.prescriptionJSON) {
+    ) -> (reps: Int, loadKg: Double?, unit: WeightUnit) {
+        switch parser.parseTolerantOfAutoreg(prescriptionJSON: item.prescriptionJSON) {
         case .success(let p):
             switch p {
-            case .straightSets(_, let reps, let loadKg, _, _, _, _):
+            case .straightSets(_, let reps, let loadKg, let unit, _, _, _, _):
                 let n: Int
                 if let rc = reps, case .count(let k) = rc { n = k } else { n = 0 }
-                return (n, loadKg)
+                return (n, loadKg, unit)
             case .bodyweight(_, let reps, _):
-                return (reps, nil)
-            case .repRange(_, _, let repsMax, let loadKg, _, _):
-                return (repsMax, loadKg)
-            case .cluster(_, let reps, let loadKg, _, _, _):
-                return (reps, loadKg)
-            case .warmup(_, let reps, let loadKg):
-                return (reps, loadKg)
+                return (reps, nil, .lb)
+            case .repRange(_, _, let repsMax, let loadKg, let unit, _, _):
+                return (repsMax, loadKg, unit)
+            case .cluster(_, let reps, let loadKg, let unit, _, _, _):
+                return (reps, loadKg, unit)
+            case .warmup(_, let reps, let loadKg, let unit):
+                return (reps, loadKg, unit)
             case .percentOf1RM(_, let reps, _, _):
-                return (reps, nil)
-            case .setsDetail, .amrapToken, .empty:
-                return (0, nil)
+                return (reps, nil, .lb)
+            case .amrapToken(let loadKg, let unit, _):
+                // AMRAP token inside a round-based block (e.g. a superset
+                // finisher or a circuit station) — preserve authored
+                // load/unit so a weighted AMRAP token renders its load.
+                // `reps=0` is the open-entry sentinel (the user enters the
+                // observed count at log time).
+                return (0, loadKg, unit)
+            case .setsDetail, .empty:
+                return (0, nil, .lb)
             }
         case .failure:
-            return (0, nil)
+            return (0, nil, .lb)
         }
     }
 

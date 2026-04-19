@@ -176,7 +176,7 @@ final class TabataDriverTests: XCTestCase {
         XCTAssertEqual(content?.exerciseName, "Thruster")
         XCTAssertEqual(content?.reps, 10)
         XCTAssertEqual(content?.loadKg, 20)
-        XCTAssertEqual(content?.loadDisplay, "20 kg")
+        XCTAssertEqual(content?.loadDisplay, "20 lb")
     }
 
     func testActiveContentSurfacesRoundCounterViaSetIndex() {
@@ -191,9 +191,15 @@ final class TabataDriverTests: XCTestCase {
         XCTAssertEqual(content?.totalSets, 8)
     }
 
-    func testActiveContentAlternatesItemsAcrossRoundsWhenMultiItem() {
-        // Two-item tabata — round N → items[(N-1) % 2]. Odd rounds hit
-        // item 0, even rounds hit item 1.
+    func testActiveContentPinsToFirstItemAcrossRoundsWhenMultiItem() {
+        // Spec (docs/prescription.md § "tabata"): tabata is single-item —
+        // "one exercise." Authors that stamp > 1 item on a tabata block
+        // trip the seed-time collapse (see
+        // `testTabataMultiItemSeedRejects`), and the driver also pins to
+        // items[0] so that render and auto-log always agree across the
+        // 8 rounds. Regression guard for the prior per-round alternator
+        // that made the screen and `autoLogAndRestForTabata` disagree on
+        // the active exercise after round 1.
         let (ctx, _) = makeTabataContext(
             items: [
                 (name: "Squats", prescriptionJSON: #"{"reps":20}"#),
@@ -205,21 +211,51 @@ final class TabataDriverTests: XCTestCase {
 
         let driver = TabataDriver()
 
-        // Round 1 → Squats.
-        state.cursor = SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1)
-        XCTAssertEqual(driver.activeContent(state: state, context: ctx)?.exerciseName, "Squats")
+        for round in 1...TabataDriver.rounds {
+            state.cursor = SessionState.Cursor(
+                blockIndex: 0, itemIndex: 0, setIndex: round
+            )
+            XCTAssertEqual(
+                driver.activeContent(state: state, context: ctx)?.exerciseName,
+                "Squats",
+                "round \(round) must resolve to items[0]; no per-round alternation"
+            )
+        }
+    }
 
-        // Round 2 → Push-ups.
-        state.cursor = SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 2)
-        XCTAssertEqual(driver.activeContent(state: state, context: ctx)?.exerciseName, "Push-ups")
+    // MARK: - Multi-item seed collapse
 
-        // Round 3 → Squats (wraps).
-        state.cursor = SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 3)
-        XCTAssertEqual(driver.activeContent(state: state, context: ctx)?.exerciseName, "Squats")
+    func testTabataMultiItemSeedRejects() {
+        // `SessionSeeder.seed` collapses a multi-item tabata block to the
+        // first item: one seeded ItemLog, one row in `itemsPerBlock`, no
+        // SetPlan rows for items[1..] and beyond. The bug this guards
+        // against: prior to the collapse the seeder emitted 8 rows per
+        // item under `.roundRobin`, and the driver picked an item per
+        // round — the two disagreed so the screen rendered item 1 while
+        // the auto-log path wrote to item 0 (and vice versa).
+        let (ctx, itemIDs) = makeTabataContext(
+            items: [
+                (name: "Squats", prescriptionJSON: #"{"reps":20}"#),
+                (name: "Push-ups", prescriptionJSON: #"{"reps":15}"#),
+                (name: "Burpees", prescriptionJSON: #"{"reps":10}"#),
+            ]
+        )
 
-        // Round 8 (last) → Push-ups (round 8 is even, hits items[1]).
-        state.cursor = SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 8)
-        XCTAssertEqual(driver.activeContent(state: state, context: ctx)?.exerciseName, "Push-ups")
+        let state = SessionSeeder.seed(context: ctx)
+
+        XCTAssertEqual(state.structure.itemsPerBlock, [1],
+                       "tabata must collapse to one seeded item")
+        XCTAssertEqual(state.items.count, 1,
+                       "only items[0] gets an ItemLog; extras dropped")
+        XCTAssertEqual(state.items.first?.itemID, itemIDs[0])
+        XCTAssertEqual(state.structure.setsPerItem, [[8]],
+                       "items[0] still gets the 8 tabata rounds as SetPlans")
+
+        // The extras exist in the context (a shell/upstream concern) but
+        // the session state does NOT carry ItemLogs for them — so the
+        // reducer can't route a log at them.
+        XCTAssertFalse(state.items.contains { $0.itemID == itemIDs[1] })
+        XCTAssertFalse(state.items.contains { $0.itemID == itemIDs[2] })
     }
 
     func testActiveContentReturnsNilForOutOfRangeCursors() {

@@ -49,7 +49,8 @@ final class TrendComputationTests: XCTestCase {
 
         XCTAssertEqual(trend.topSets.count, 13)
         XCTAssertEqual(trend.weeks, 12)
-        XCTAssertEqual(trend.deltaKg, 24, accuracy: 0.0001)
+        XCTAssertEqual(trend.delta, 24, accuracy: 0.0001)
+        XCTAssertEqual(trend.unit, .kg)
         XCTAssertEqual(trend.displayString, "↑ 24 KG / 12 WK")
     }
 
@@ -92,7 +93,7 @@ final class TrendComputationTests: XCTestCase {
             )
         }
         let trend = TrendComputation.compute(setLogs: logs, calendar: utcCalendar)
-        XCTAssertEqual(trend.deltaKg, 0)
+        XCTAssertEqual(trend.delta, 0)
         XCTAssertEqual(trend.weeks, 3)
         XCTAssertEqual(trend.displayString, "→ 0 KG / 3 WK")
     }
@@ -113,7 +114,7 @@ final class TrendComputationTests: XCTestCase {
             )
         }
         let trend = TrendComputation.compute(setLogs: logs, calendar: utcCalendar)
-        XCTAssertEqual(trend.deltaKg, -10)
+        XCTAssertEqual(trend.delta, -10)
         XCTAssertEqual(trend.displayString, "↓ 10 KG / 3 WK")
     }
 
@@ -154,9 +155,10 @@ final class TrendComputationTests: XCTestCase {
                 notes: nil
             ),
         ]
-        let top = TrendComputation.topSetsByDay(setLogs: logs, calendar: utcCalendar)
+        let top = TrendComputation.topSetsByDay(setLogs: logs, unit: .kg, calendar: utcCalendar)
         XCTAssertEqual(top.count, 1)
         XCTAssertEqual(top[0].reps, 7)
-        XCTAssertEqual(top[0].weightKg, 100)
+        XCTAssertEqual(top[0].weight, 100)
+        XCTAssertEqual(top[0].unit, .kg)
     }
 }

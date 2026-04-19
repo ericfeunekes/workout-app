@@ -5,6 +5,7 @@
 // SwiftLint's `file_length` cap.
 
 import Foundation
+import CoreDomain
 
 extension PrescriptionParser {
 
@@ -32,18 +33,24 @@ extension PrescriptionParser {
             case .success(let d): details.append(d)
             }
         }
+        let unit: WeightUnit
+        switch readWeightUnit(obj) {
+        case .failure(let e): return .failure(e)
+        case .success(let v): unit = v
+        }
         let targetRir: Int?
         switch readOptionalInt(obj, "target_rir") {
         case .failure(let e): return .failure(e)
         case .success(let v): targetRir = v
         }
         let autoreg: Autoreg?
-        switch parseAutoreg(obj, shape: shape) {
+        switch parseAutoreg(obj, shape: shape, unit: unit) {
         case .failure(let e): return .failure(e)
         case .success(let v): autoreg = v
         }
         return .success(.setsDetail(
             sets: details,
+            unit: unit,
             targetRir: targetRir,
             autoreg: autoreg
         ))
@@ -86,6 +93,7 @@ extension PrescriptionParser {
 
     // MARK: - cluster
 
+    // swiftlint:disable:next function_body_length
     func parseCluster(
         _ obj: [String: Any]
     ) -> Result<Prescription, ParseError> {
@@ -104,6 +112,11 @@ extension PrescriptionParser {
         switch readRequiredDouble(obj, "load_kg", shape: shape) {
         case .failure(let e): return .failure(e)
         case .success(let v): loadKg = v
+        }
+        let unit: WeightUnit
+        switch readWeightUnit(obj) {
+        case .failure(let e): return .failure(e)
+        case .success(let v): unit = v
         }
         let subSets: Int
         switch readRequiredInt(obj, "sub_sets", shape: shape) {
@@ -124,6 +137,7 @@ extension PrescriptionParser {
             sets: sets,
             reps: reps,
             loadKg: loadKg,
+            unit: unit,
             subSets: subSets,
             intraSetRestSec: intra,
             targetRir: targetRir
@@ -142,12 +156,17 @@ extension PrescriptionParser {
         case .failure(let e): return .failure(e)
         case .success(let v): loadKg = v
         }
+        let unit: WeightUnit
+        switch readWeightUnit(obj) {
+        case .failure(let e): return .failure(e)
+        case .success(let v): unit = v
+        }
         let targetRir: Int?
         switch readOptionalInt(obj, "target_rir") {
         case .failure(let e): return .failure(e)
         case .success(let v): targetRir = v
         }
-        return .success(.amrapToken(loadKg: loadKg, targetRir: targetRir))
+        return .success(.amrapToken(loadKg: loadKg, unit: unit, targetRir: targetRir))
     }
 
     func parseBodyweight(
@@ -195,6 +214,11 @@ extension PrescriptionParser {
         case .failure(let e): return .failure(e)
         case .success(let v): loadKg = v
         }
-        return .success(.warmup(sets: sets, reps: reps, loadKg: loadKg))
+        let unit: WeightUnit
+        switch readWeightUnit(obj) {
+        case .failure(let e): return .failure(e)
+        case .success(let v): unit = v
+        }
+        return .success(.warmup(sets: sets, reps: reps, loadKg: loadKg, unit: unit))
     }
 }

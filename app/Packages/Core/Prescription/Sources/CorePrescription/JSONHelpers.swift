@@ -9,6 +9,7 @@
 // All helpers return `Result` so callers can flatMap cleanly.
 
 import Foundation
+import CoreDomain
 
 /// Parse a JSON string into a top-level `[String: Any]`. Non-object roots
 /// (arrays, primitives) are rejected — every prescription and timing-config
@@ -143,6 +144,35 @@ func readOptionalArray(
     if raw is NSNull { return .success(nil) }
     if let arr = raw as? [Any] { return .success(arr) }
     return .failure(.wrongType(key: key, expected: "array"))
+}
+
+/// Read `weight_unit` from a prescription dict. Returns `.lb` when the
+/// key is absent — R2.10 default for Eric's pound-first gym setup
+/// (`docs/prescription.md` § "Units"). A present but invalid value
+/// surfaces as `.failure(.wrongType)`.
+func readWeightUnit(
+    _ dict: [String: Any]
+) -> Result<WeightUnit, ParseError> {
+    switch readOptionalString(dict, "weight_unit") {
+    case .failure(let e): return .failure(e)
+    case .success(.none): return .success(.lb)
+    case .success(.some(let raw)):
+        guard let unit = WeightUnit(rawValue: raw) else {
+            return .failure(.wrongType(key: "weight_unit", expected: "\"kg\" or \"lb\""))
+        }
+        return .success(unit)
+    }
+}
+
+/// Default autoreg step for a given weight unit. `.kg → 1.25` (fractional
+/// plate), `.lb → 5.0` (smallest commonly available loadable plate pair).
+/// Used by the parser when the prescription authors an `autoreg` block
+/// without an explicit `overshoot_step_kg` / `undershoot_step_kg`.
+func defaultAutoregStep(for unit: WeightUnit) -> Double {
+    switch unit {
+    case .kg: return 1.25
+    case .lb: return 5.0
+    }
 }
 
 /// A rep count is either an integer or the string "amrap". Anything else

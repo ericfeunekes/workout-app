@@ -39,6 +39,11 @@ enum PushQueuePayloadCoding {
         var statusWorkoutID: UUID?
         var statusRaw: String?
         var statusCompletedAt: Date?
+        /// User-authored post-workout note that rides on the terminal
+        /// status push. Optional on disk so envelopes written before
+        /// this field landed still decode cleanly (they default to nil,
+        /// which is the pre-bug behavior).
+        var statusNotes: String?
         var events: [CodableEvent]?
         var userParameter: CodableUserParameter?
 
@@ -49,6 +54,7 @@ enum PushQueuePayloadCoding {
                 statusWorkoutID: nil,
                 statusRaw: nil,
                 statusCompletedAt: nil,
+                statusNotes: nil,
                 events: nil,
                 userParameter: nil
             )
@@ -163,11 +169,12 @@ enum PushQueuePayloadCoding {
         case .setLogs(let logs):
             envelope = .empty(kind: .setLogs)
             envelope.setLogs = logs.map(CodableSetLog.init)
-        case .statusUpdate(let workoutID, let status, let completedAt):
+        case .statusUpdate(let workoutID, let status, let completedAt, let notes):
             envelope = .empty(kind: .statusUpdate)
             envelope.statusWorkoutID = workoutID
             envelope.statusRaw = status.rawValue
             envelope.statusCompletedAt = completedAt
+            envelope.statusNotes = notes
         case .events(let events):
             envelope = .empty(kind: .events)
             envelope.events = events.map(CodableEvent.init)
@@ -197,7 +204,8 @@ enum PushQueuePayloadCoding {
             return .statusUpdate(
                 workoutID: workoutID,
                 status: status,
-                completedAt: envelope.statusCompletedAt
+                completedAt: envelope.statusCompletedAt,
+                notes: envelope.statusNotes
             )
         case .events:
             let events = (envelope.events ?? []).map { $0.toDomain() }

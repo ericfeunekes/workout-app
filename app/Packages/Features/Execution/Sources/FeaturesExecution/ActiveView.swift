@@ -24,9 +24,12 @@ import WorkoutCoreFoundation
 struct ActiveView: View {
     @Bindable var viewModel: ExecutionViewModel
 
-    @State private var showLogSheet = false
+    // `internal` so the log-button helper in `ActiveView+LogButton.swift`
+    // can toggle the binding on the strength path (tapping the primary
+    // log button opens this sheet).
+    @State var showLogSheet = false
     // `internal` so the swap-sheet helpers in `ActiveView+Swap.swift`
-    // can toggle the binding. The rest stay file-private.
+    // can toggle the binding.
     @State var showSwapSheet = false
 
     // Time-cap tick source (bug-042). `TimelineView` is a render-time
@@ -101,6 +104,12 @@ struct ActiveView: View {
             // semantics. The NumPad + Rir individual sheets still ship
             // for past-set edits on the Rest screen where only one
             // field changes at a time.
+            //
+            // Sheet is strength-only — cardio blocks never present it
+            // (they dispatch `logCurrentSet` directly from the button
+            // tap). So the sheet's commit fires the strength-specific
+            // `logSet(reps:rir:)` rather than the mode-branching
+            // `logCurrentSet(...)`.
             if let content = viewModel.activeContent {
                 LogSetSheet(
                     initialReps: content.reps,
@@ -209,19 +218,21 @@ struct ActiveView: View {
     }
 
     /// Render the hero load face. `loadDisplay` from the driver is a
-    /// pre-formatted string — "102.5 kg", "BW", or a pace token
-    /// ("4:30 / km") for cardio modes. We split off the " kg" suffix
-    /// so the unit renders in the same mono family + weight as the
-    /// number (bug-027 — the prior single-Text `"102.5 kg"` let "kg"
-    /// drift into the default sans face on some devices). Non-kg
-    /// displays (BW, pace, dash) render plain.
+    /// pre-formatted string — "102.5 kg", "225 lb", "BW", or a pace
+    /// token ("4:30 / km") for cardio modes. We split off any known
+    /// unit suffix so the unit renders in the same mono family +
+    /// weight as the number (bug-027 — the prior single-Text
+    /// `"102.5 kg"` let "kg" drift into the default sans face on
+    /// some devices). Non-weight displays (BW, pace, dash) render
+    /// plain. R2.10 unit-thread: scan `LoadUnit.allCases` instead
+    /// of hardcoding `" kg"` so lb-prescribed workouts also get the
+    /// DSWeightLabel mono pairing.
     @ViewBuilder
     private func heroLoad(_ display: String) -> some View {
-        if display.hasSuffix(" kg") {
-            let number = String(display.dropLast(3))
+        if let (number, unit) = splitWeightDisplay(display) {
             DSWeightLabel(
                 number: number,
-                unit: "kg",
+                unit: unit,
                 size: 64,
                 weight: .light,
                 color: DSColors.accentInk
@@ -232,6 +243,21 @@ struct ActiveView: View {
                 .monospacedDigit()
                 .foregroundStyle(DSColors.accentInk)
         }
+    }
+
+    /// Pull a `(number, unit)` pair off the end of a pre-formatted
+    /// load string when it ends in a known `LoadUnit` suffix. Returns
+    /// nil for "BW", pace tokens, and anything else that doesn't
+    /// terminate in a unit — those render as plain mono text.
+    private func splitWeightDisplay(_ display: String) -> (String, String)? {
+        for unit in LoadUnit.allCases {
+            let suffix = " \(unit.rawValue)"
+            if display.hasSuffix(suffix) {
+                let number = String(display.dropLast(suffix.count))
+                return (number, unit.rawValue)
+            }
+        }
+        return nil
     }
 
     private func adjustGlyph(_ adjust: SetPlan.Adjust?) -> String? {
@@ -256,12 +282,7 @@ struct ActiveView: View {
         }
     }
 
-    private func logButton(content: ActiveContent) -> some View {
-        DSButton(
-            title: "log set \(content.setIndex)",
-            style: .primary,
-            action: { showLogSheet = true }
-        )
-    }
-
+    // `logButton` + cardio-branch title helper live in
+    // `ActiveView+LogButton.swift` to keep the struct body under
+    // SwiftLint's `type_body_length` cap.
 }

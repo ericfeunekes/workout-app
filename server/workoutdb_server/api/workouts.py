@@ -88,10 +88,21 @@ def _build_item(payload: WorkoutItemIn, db: Session) -> WorkoutItem:
     resolved form. The original sparse payload is preserved in
     prescription_json_raw when the merge changed something; otherwise the raw
     column is null (saves bytes + makes re-pushes visibly idempotent).
+
+    bug-036: prevalidate that `exercise_id` resolves to a real exercise row.
+    Without this check, a missing / unknown exercise_id falls through to the
+    FK constraint on `workout_items.exercise_id` at commit time and bubbles
+    a generic 500. Fail fast here with a specific 422 so the client can
+    react.
     """
     exercise = db.get(Exercise, payload.exercise_id)
-    default_prescription = exercise.default_prescription_json if exercise else None
-    default_alternatives = exercise.default_alternatives_json if exercise else None
+    if exercise is None:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+            detail=f"exercise_id {payload.exercise_id} not found",
+        )
+    default_prescription = exercise.default_prescription_json
+    default_alternatives = exercise.default_alternatives_json
 
     resolved_prescription = merge_prescriptions(default_prescription, payload.prescription_json)
     raw_canonical = canonicalize(payload.prescription_json)
@@ -99,6 +110,20 @@ def _build_item(payload: WorkoutItemIn, db: Session) -> WorkoutItem:
 
     item_alts_dicts = [_alt_to_dict(a) for a in payload.alternatives]
     resolved_alts_dicts = merge_alternatives(default_alternatives, item_alts_dicts)
+
+    # bug-R2.3 follow-up: prevalidate each resolved alternative's exercise_id
+    # against the Exercise table. Without this check, an unknown exercise_id
+    # (from either the client payload or a stale library default) falls
+    # through to the FK on `exercise_alternative.exercise_id` at commit time
+    # and bubbles a generic 500. Run BEFORE any DB writes so the 422 path
+    # leaves no partial rows behind.
+    for alt in resolved_alts_dicts:
+        alt_ex = db.get(Exercise, alt["exercise_id"])
+        if alt_ex is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=f"alternative exercise_id {alt['exercise_id']} not found",
+            )
 
     item = WorkoutItem(
         id=payload.id or _new_id(),

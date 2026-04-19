@@ -308,12 +308,24 @@ def test_smart_defaults_library_fallback_alternatives(client, test_engine) -> No
 
 
 def test_smart_defaults_noop_when_payload_fully_resolved(client, test_engine) -> None:
-    """If the client sends the same shape the library provides, prescription_json_raw is null."""
+    """If the client sends the same shape the library provides, prescription_json_raw is null.
+
+    R2.10: the client must also author `weight_unit` explicitly for the
+    merge to be a true no-op — otherwise the server stamps the "lb"
+    default and the canonicalized form differs from the input, which
+    preserves the raw payload.
+    """
     library = {"target_rir": 2}
     exercise_id = _seed_exercise_with_defaults(
         test_engine, default_prescription_json=json.dumps(library)
     )
-    full = {"sets": 4, "reps": 5, "load_kg": 102.5, "target_rir": 2}
+    full = {
+        "sets": 4,
+        "reps": 5,
+        "load_kg": 102.5,
+        "target_rir": 2,
+        "weight_unit": "lb",
+    }
 
     payload = _workout_payload(exercise_id)
     payload["blocks"][0]["workout_items"][0]["prescription_json"] = json.dumps(full)
@@ -553,6 +565,144 @@ def test_post_workouts_repost_rejects_another_users_id(client, test_engine) -> N
         assert still.user_id == _OTHER_USER
 
 
+def test_post_workouts_unknown_exercise_id_returns_422(client, test_engine) -> None:
+    """bug-036: workout_item pointing at a non-existent exercise_id must 422,
+    not 500. Prior behavior: the FK constraint on `workout_items.exercise_id`
+    fired at commit time and bubbled a generic IntegrityError. Now we
+    prevalidate in `_build_item()` and raise a specific 422 naming the bad id.
+    """
+    _seed_exercise(test_engine)  # a real exercise, but we'll reference a different id
+    missing_id = "deadbeef-dead-4bee-8bee-beefdeadbeef"
+
+    payload = _workout_payload(_BACK_SQUAT)
+    payload["blocks"][0]["workout_items"][0]["exercise_id"] = missing_id
+    # Also align the alternative so the only bad ref is the item's exercise_id.
+    payload["blocks"][0]["workout_items"][0]["alternatives"] = []
+
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422, response.text
+    assert missing_id in response.text
+    assert "not found" in response.text
+
+
+def test_post_workouts_unknown_alternative_exercise_id_returns_422(
+    client, test_engine
+) -> None:
+    """bug-R2.3 follow-up: a client-supplied alternative pointing at a
+    non-existent exercise_id must 422, not 500. Prior behavior: the FK
+    constraint on `exercise_alternative.exercise_id` fired at commit time
+    and bubbled a generic IntegrityError. Now we prevalidate every resolved
+    alternative in `_build_item()` BEFORE any DB writes, so the 422 path
+    leaves no partial rows.
+    """
+    _seed_exercise(test_engine)
+    missing_id = "deadbeef-dead-4bee-8bee-beefdeadbeef"
+
+    payload = _workout_payload(_BACK_SQUAT)
+    # Only the alternative references a bad exercise id.
+    payload["blocks"][0]["workout_items"][0]["alternatives"] = [
+        {"exercise_id": missing_id, "reason": "bar taken"}
+    ]
+
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422, response.text
+    assert missing_id in response.text
+    assert "alternative" in response.text
+    assert "not found" in response.text
+
+    # Transaction cleanliness: no workout row was committed.
+    with Session(test_engine) as session:
+        from workoutdb_server.models import Workout
+
+        assert session.query(Workout).count() == 0
+
+
+def test_post_workouts_library_default_alternative_with_unknown_exercise_id_returns_422(
+    client, test_engine
+) -> None:
+    """bug-R2.3 follow-up: a library-default alternative (authored on the
+    Exercise's `default_alternatives_json`) that points at a non-existent
+    exercise must 422 when the item omits alternatives and the library
+    default materializes. Previously this crashed at commit with 500.
+    """
+    missing_id = "cafebabe-cafe-4bab-8bab-cafebabecafe"
+    lib_alts = [
+        {
+            "exercise_id": missing_id,
+            "reason": "library default with stale target",
+            "parameter_overrides_json": None,
+        }
+    ]
+    exercise_id = _seed_exercise_with_defaults(
+        test_engine,
+        default_alternatives_json=json.dumps(lib_alts),
+    )
+
+    payload = _workout_payload(exercise_id)
+    # Item omits alternatives so library defaults materialize.
+    payload["blocks"][0]["workout_items"][0]["alternatives"] = []
+
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422, response.text
+    assert missing_id in response.text
+    assert "alternative" in response.text
+    assert "not found" in response.text
+
+    # Transaction cleanliness: no workout row was committed.
+    with Session(test_engine) as session:
+        from workoutdb_server.models import Workout
+
+        assert session.query(Workout).count() == 0
+
+
+def test_library_alternative_id_is_minted_fresh_per_workout(client, test_engine) -> None:
+    """bug-034: a library-default alternative carrying an `id` gets a fresh
+    UUID minted on every workout materialization. Two workouts sharing the
+    same library default must land as two distinct `exercise_alternatives`
+    rows on disk — the same id would UNIQUE-crash the second POST.
+    """
+    lib_alts = [
+        {
+            # Deliberately carry an `id` — some real-world library defaults
+            # ship with one. It must not propagate to stored rows.
+            "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+            "exercise_id": _BACK_SQUAT,
+            "reason": "bar taken",
+            "parameter_overrides_json": None,
+        }
+    ]
+    exercise_id = _seed_exercise_with_defaults(
+        test_engine,
+        default_alternatives_json=json.dumps(lib_alts),
+    )
+
+    # First workout: item omits alternatives so library defaults materialize.
+    first = _workout_payload(exercise_id)
+    first["id"] = "11111111-1111-4111-8111-111111111111"
+    first["blocks"][0]["workout_items"][0]["alternatives"] = []
+    resp1 = client.post("/api/workouts", json=first)
+    assert resp1.status_code == 200, resp1.text
+    first_alts = resp1.json()["blocks"][0]["workout_items"][0]["alternatives"]
+    assert len(first_alts) == 1
+
+    # Second workout: same library default. Pre-fix this would UNIQUE-crash
+    # with a 500 on the reused alternative id.
+    second = _workout_payload(exercise_id)
+    second["id"] = "22222222-2222-4222-8222-222222222222"
+    second["blocks"][0]["workout_items"][0]["alternatives"] = []
+    resp2 = client.post("/api/workouts", json=second)
+    assert resp2.status_code == 200, resp2.text
+    second_alts = resp2.json()["blocks"][0]["workout_items"][0]["alternatives"]
+    assert len(second_alts) == 1
+
+    # The two materialized alternatives must have distinct ids — and neither
+    # should echo the library's template id.
+    assert first_alts[0]["id"] != second_alts[0]["id"]
+    template_id = lib_alts[0]["id"]
+    assert first_alts[0]["id"] != template_id
+    assert second_alts[0]["id"] != template_id
+
+
 def test_list_pagination(client, test_engine) -> None:
     exercise_id = _seed_exercise(test_engine)
     for i in range(5):
@@ -566,3 +716,25 @@ def test_list_pagination(client, test_engine) -> None:
     assert len(page1) == 2
     assert len(page2) == 2
     assert {w["name"] for w in page1}.isdisjoint({w["name"] for w in page2})
+
+
+def test_api_workouts_rejects_non_Z_timestamp(client, test_engine) -> None:
+    """`UtcDatetimeIn` must reject `+00:00` on workout `completed_at` too.
+
+    Parity with `test_telemetry_rejects_non_Z_timestamp` — every Write/Update
+    schema shares the same validator. A client that slipped through the
+    telemetry regression but stayed on the old `datetime` parser here would
+    still corrupt the invariant, so both paths carry a guard.
+    """
+    exercise_id = _seed_exercise(test_engine)
+    create = client.post("/api/workouts", json=_workout_payload(exercise_id))
+    assert create.status_code == 200
+    workout_id = create.json()["id"]
+
+    response = client.put(
+        f"/api/workouts/{workout_id}",
+        json={"status": "completed", "completed_at": "2026-04-18T12:00:00+00:00"},
+    )
+    assert response.status_code == 422, response.text
+    body = response.json()
+    assert any("completed_at" in str(err).lower() for err in body["detail"])

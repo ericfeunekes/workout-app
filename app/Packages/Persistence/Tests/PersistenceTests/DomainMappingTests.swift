@@ -43,7 +43,13 @@ final class DomainMappingTests: XCTestCase {
 
     func testSetLogRoundTrip() {
         let s = Fixtures.sampleSetLog()
-        let model = SetLogModel.from(s)
+        // `workoutID` / `plannedExerciseID` are local-only denormalized
+        // columns on `SetLogModel` — they round-trip inside Persistence
+        // but don't appear on the domain `SetLog`. Pass nil here so the
+        // test exercises the ingestion path a pre-R1.4 row would hit
+        // (see `SchemaMigrationTests.testV2toV3UpgradeBackfills...` for
+        // the post-backfill path).
+        let model = SetLogModel.from(s, workoutID: nil, plannedExerciseID: nil)
         XCTAssertEqual(model.toDomain(), s)
     }
 

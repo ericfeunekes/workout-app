@@ -84,7 +84,9 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         XCTAssertEqual(edited.rir, 1)
         // loadKg not touched by the edit → stays at the prescribed value.
         XCTAssertEqual(edited.weight, 100)
-        XCTAssertEqual(edited.weightUnit, .kg)
+        // R2.10: pound-default — JSON fixture omits `weight_unit` so the
+        // SetPlan seeds as .lb and the pushed SetLog stamps .lb.
+        XCTAssertEqual(edited.weightUnit, .lb)
         XCTAssertEqual(edited.id, logs.first?.id)
     }
 
@@ -93,8 +95,16 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         // corrective-edit trail was missing from the event log. Assert
         // `execution.past_set_edited` fires exactly once, tagged with
         // workoutID + setLogID and a payload carrying itemID + setIndex.
+        //
+        // Wire-casing (R1.3): `itemID` / `setLogID` in the dataJSON
+        // payload must be LOWERCASE — the "every id + *_id on the wire
+        // is a lowercase UUID" invariant. The fixture seeds a
+        // known-lowercase `itemID` so a regression that re-leaked
+        // `.uuidString` (uppercase) fails this assertion by casing.
         let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_001_200))
-        let (ctx, itemID) = Fixtures.context()
+        // swiftlint:disable:next force_unwrapping
+        let seededItemID = UUID(uuidString: "aaaaaaaa-1111-4222-8333-444444444444")!
+        let (ctx, itemID) = Fixtures.context(itemID: seededItemID)
         let telemetry = TelemetryRecorder()
         let vm = ExecutionViewModel(context: ctx, clock: fixed, telemetry: telemetry)
         vm.start()
@@ -105,15 +115,80 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         XCTAssertEqual(events.count, 1, "edit must emit exactly one past_set_edited event")
         let event = try XCTUnwrap(events.first)
         XCTAssertEqual(event.workoutID, ctx.workout.id)
-        XCTAssertEqual(
-            event.setLogID,
-            ExecutionViewModel.setLogID(itemID: itemID, setIndex: 1)
-        )
+        let expectedSetLogID = ExecutionViewModel.setLogID(itemID: itemID, setIndex: 1)
+        XCTAssertEqual(event.setLogID, expectedSetLogID)
         let payload = event.dataJSON ?? ""
         XCTAssertTrue(payload.contains("\"setIndex\":1"),
                       "payload must carry setIndex — got \(payload)")
-        XCTAssertTrue(payload.contains(itemID.uuidString),
-                      "payload must carry itemID — got \(payload)")
+        XCTAssertTrue(
+            payload.contains("\"itemID\":\"aaaaaaaa-1111-4222-8333-444444444444\""),
+            "payload must carry EXACT lowercase itemID — got \(payload)"
+        )
+        XCTAssertTrue(
+            payload.contains("\"setLogID\":\"\(expectedSetLogID.uuidString.lowercased())\""),
+            "payload must carry EXACT lowercase setLogID — got \(payload)"
+        )
+        // Any UUID-shaped substring in the payload must be all-lowercase.
+        // Extract every UUID-shaped match, then assert it equals its own
+        // `.lowercased()` so a partial-uppercase regression is caught
+        // regardless of which UUID leaked.
+        let uuidShape = try NSRegularExpression(
+            pattern: "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+        )
+        let hits = uuidShape.matches(
+            in: payload, range: NSRange(payload.startIndex..., in: payload)
+        )
+        for hit in hits {
+            // swiftlint:disable:next force_unwrapping
+            let range = Range(hit.range, in: payload)!
+            let substr = String(payload[range])
+            XCTAssertEqual(
+                substr, substr.lowercased(),
+                "payload leaked an uppercase UUID: \(substr) in \(payload)"
+            )
+        }
+    }
+
+    func testEditedSetPreservesOriginalCompletedAt() async throws {
+        // Regression: `enqueueEditedSet` previously sent `clock.now` as
+        // the pushed `completedAt`, and the server's `_upsert_set_log`
+        // overwrites the timestamp on every push. A past-set edit would
+        // retroactively move the set's wall-clock onto the edit moment,
+        // diverging from History's edit path (which preserves the
+        // cached stamp) and corrupting any rest-time / duration analysis.
+        //
+        // Seed: log set 1 at T0 via a clock fixed at T0. Swap the clock
+        // forward to T0 + 60s. Edit reps. Assert the pushed DTO carries
+        // `completed_at = T0` — the original log moment, not the edit
+        // moment.
+        let t0 = Date(timeIntervalSince1970: 1_700_002_000)
+        let clock = EditTestMutableClock(now: t0)
+        let (ctx, itemID) = Fixtures.context()
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
+        vm.start()
+        vm.logSet(reps: 5, rir: 2)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        // Move the clock 60s forward — any use of `clock.now` in the
+        // edit push path would now stamp the later moment. Class-backed
+        // so the VM's captured reference sees the update.
+        clock.now = t0.addingTimeInterval(60)
+
+        vm.editPastSet(itemID: itemID, setIndex: 1, loadKg: nil, reps: 4, rir: nil)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let logs = await recorder.setLogs
+        XCTAssertEqual(logs.count, 2, "edit must enqueue a second push")
+        let original = try XCTUnwrap(logs.first)
+        let edited = try XCTUnwrap(logs.last)
+        XCTAssertEqual(original.completedAt, t0, "original push stamped at T0")
+        XCTAssertEqual(edited.completedAt, t0,
+                       "edit must preserve the original completedAt, not rewrite to edit time")
+        XCTAssertEqual(edited.reps, 4, "edit payload still carries updated reps")
     }
 
     func testMultipleEditsOfSameSetAllUseSameUUID() async throws {
@@ -151,12 +226,16 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
 /// Kept local to this file so test changes don't ripple through the
 /// already-oversized `ExecutionViewModelTests.swift`.
 private enum Fixtures {
-    static func context() -> (WorkoutContext, UUID) {
+    /// `itemID` defaults to a fresh `UUID()` — callers that need to
+    /// assert exact lowercase substrings in telemetry payloads pass a
+    /// known-lowercase id so the assertion can match verbatim. Swift's
+    /// `UUID().uuidString` is uppercase, which would let a payload with
+    /// either casing pass a naive `contains(uuidString)` check.
+    static func context(itemID: UUID = UUID()) -> (WorkoutContext, UUID) {
         let userID = UUID()
         let workoutID = UUID()
         let blockID = UUID()
         let exerciseID = UUID()
-        let itemID = UUID()
         let now = Date()
 
         let workout = Workout(
@@ -207,4 +286,14 @@ final class TelemetryRecorder: TelemetryEmitter, @unchecked Sendable {
         defer { lock.unlock() }
         buffer.append(event)
     }
+}
+
+/// Class-backed `Clock` for the edit-preserves-completedAt regression —
+/// the VM captures the Clock reference, so a test that advances "now"
+/// between `logSet` and `editPastSet` needs class semantics (value-type
+/// `FixedClock` would copy). Scoped to this file so the name doesn't
+/// collide with the private `MutableClock` in `ExecutionViewModelTests`.
+private final class EditTestMutableClock: Clock, @unchecked Sendable {
+    var now: Date
+    init(now: Date) { self.now = now }
 }

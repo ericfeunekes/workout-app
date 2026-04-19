@@ -76,7 +76,13 @@ Implementation subagents are Claude. **Reviews are Codex (a different model).** 
 
 ### The cycle
 
-For any non-trivial unit of work:
+For any non-trivial unit of work, the three roles are:
+
+- **Implementation = Claude subagent.** Dispatched from the main thread with a tight brief.
+- **Review = Codex** (via `cxd task`). A different model, reading the same repo cold.
+- **Synthesis = the lead agent** (the human-facing Claude in the main conversation). Synthesis is **not** delegated to a spawned subagent — the lead reads Codex findings directly, filters false-positives, and dispatches the next fix-it round from the main thread.
+
+The loop:
 
 1. **Dispatch a Claude implementer subagent** with a tight brief: what to build, which files to touch, what stop conditions (tests pass, build succeeds, specific gates green), and any conventions to follow. Attach full-path reading lists — don't make the implementer discover context.
 2. **Implementer returns a self-report** including files changed, design decisions, gate outputs, and any deviations or judgment calls.
@@ -87,7 +93,9 @@ For any non-trivial unit of work:
      -f path/to/review-prompt.md
    ```
    The review prompt cites: what the implementer claims they did, the files to focus on, the questions to answer, the specific hazards to probe, and the gates Codex should re-run. See `scratch/codex-reviews/_template-header.md` + `_session-context.md` for the methodology baseline.
-4. **Lead agent synthesizes.** Codex verdict = ship / needs-another-round. If needs-another-round, dispatch another Claude implementer with Codex's findings inline. Loop until Codex signs off.
+4. **Lead synthesizes in the main thread.** Codex verdict = ship / needs-another-round. If needs-another-round, the lead dispatches another Claude implementer with Codex's findings inline. Loop until Codex signs off.
+
+**Sweeps and investigations also use Codex.** Codebase-state sweeps ("what might be broken?"), hypothesis-driven bug investigations, and adversarial reviews all run via `cxd task --sandbox read-only --detach` in separate lanes. Read-only sandbox keeps them safe; the different-model constraint keeps them productive.
 
 Same-model Claude-subagent reviews are acceptable only for: trivial scoped fixes, pure doc edits, or config tweaks already guarded by automated checks. Every other change goes through Codex.
 

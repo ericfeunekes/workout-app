@@ -67,13 +67,40 @@ public enum SessionMutation: Equatable, Sendable {
     // --- Set log mutations ---------------------------------------------
 
     /// Log a set. Finds the item, finds the 1-based `setIndex`, sets
-    /// `done=true`, `reps=loggedReps`, `rir=loggedRir`. Does NOT fire
-    /// autoreg — that's a Features-layer concern (see file header).
+    /// `done=true`, `reps=loggedReps`, `rir=loggedRir`, and stamps
+    /// `completedAt = now`. Does NOT fire autoreg — that's a Features-
+    /// layer concern (see file header).
+    ///
+    /// `now` is passed in explicitly rather than read from `Date()` so the
+    /// reducer stays pure — callers (the view model) source it from their
+    /// injected `Clock`. The stamp is session-authoritative: history edits
+    /// preserve it, and the local-cache writer reads it per set so rest
+    /// intervals reflect real timing rather than the final `saveAndDone`
+    /// instant.
     case logSet(
         itemID: WorkoutItemID,
         setIndex: Int,
         loggedReps: Int,
-        loggedRir: Int?
+        loggedRir: Int?,
+        now: Date
+    )
+
+    /// Cardio log variant. Stamps `durationSec` / `distanceM` /
+    /// `hrAvgBpm` / `cadenceAvgSpm` / `startedAt` on the SetPlan plus
+    /// `done=true` and `completedAt = now`. `reps` is set to 0 (cardio
+    /// intervals carry no rep count) and `rir` is forced nil. Every
+    /// cardio metric is optional — a time-based interval with no HR
+    /// source logs with only `durationSec` populated. Drivers for
+    /// `intervals` / `continuous` dispatch this instead of `.logSet`.
+    case logCardioSet(
+        itemID: WorkoutItemID,
+        setIndex: Int,
+        durationSec: Double?,
+        distanceM: Double?,
+        hrAvgBpm: Int?,
+        cadenceAvgSpm: Int?,
+        startedAt: Date?,
+        now: Date
     )
 
     /// Edit a pending (not-yet-logged) set. Updates loadKg/reps (either

@@ -151,15 +151,19 @@ public final class SessionDetailViewModel {
         }
     }
 
-    /// "1 · 100 kg × 5 · RIR 2".
+    /// "1 · 100 kg × 5 · RIR 2" — or "1 · 225 lb × 5 · RIR 2" when the
+    /// set was logged in lb.
     /// - setIndex is 1-based both in storage and in display — the rest
     ///   of the session pipeline (SessionSeeder, cursor math, reducer)
     ///   emits 1-based indexes, so no off-by-one shift is needed here.
     /// - Weight is omitted when nil ("bodyweight" collapses to "BW").
+    /// - Unit suffix follows `log.weightUnit`; nil defaults to `.kg` to
+    ///   match the app's historical v0-kg-only logs (pre-unit-field rows).
     /// - RIR is omitted when not logged.
     static func formatSetRow(_ log: SetLog) -> String {
         var parts: [String] = [String(log.setIndex)]
-        let load = formatLoad(kg: log.weight)
+        let unit: LoadUnit = log.weightUnit.flatMap { LoadUnit(rawValue: $0.rawValue) } ?? .kg
+        let load = formatLoad(weight: log.weight, unit: unit)
         let reps = log.reps.map(String.init) ?? "—"
         parts.append("\(load) × \(reps)")
         if let rir = log.rir {

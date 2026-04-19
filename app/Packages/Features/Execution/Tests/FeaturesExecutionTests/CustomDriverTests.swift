@@ -122,7 +122,7 @@ final class CustomDriverTests: XCTestCase {
         XCTAssertEqual(content?.reps, 5)
         XCTAssertEqual(content?.repsDisplay, "5")
         XCTAssertEqual(content?.loadKg, 80)
-        XCTAssertEqual(content?.loadDisplay, "80 kg")
+        XCTAssertEqual(content?.loadDisplay, "80 lb")
         XCTAssertEqual(content?.setIndex, 1)
         XCTAssertEqual(content?.totalSets, 3)
         XCTAssertNil(content?.adjustGlyph)
@@ -164,6 +164,28 @@ final class CustomDriverTests: XCTestCase {
         XCTAssertEqual(content?.reps, 0)
         XCTAssertEqual(content?.loadDisplay, "BW")
         XCTAssertGreaterThanOrEqual(content?.totalSets ?? 0, 1)
+    }
+
+    func testCustomDriverZeroRowItemRendersNoActivity() {
+        // If an ItemLog has no SetPlan rows (defensive — e.g. legacy
+        // persisted state predating the manual-placeholder seeder
+        // fix), the driver must NOT fabricate a "1 of 1" display. A
+        // logSet dispatch against a fabricated index would vanish into
+        // the reducer (no matching SetPlan row).
+        let (ctx, _, baseState) = makeStandardCustom()
+        var state = baseState
+        // Manually strip the SetPlan rows to simulate an empty ItemLog.
+        state.items = state.items.map { item in
+            SessionState.ItemLog(
+                itemID: item.itemID,
+                autoregHeld: item.autoregHeld,
+                sets: [],
+                performedExerciseID: item.performedExerciseID,
+                overrides: item.overrides
+            )
+        }
+
+        XCTAssertNil(CustomDriver().activeContent(state: state, context: ctx))
     }
 
     func testActiveContentReturnsNilWhenCursorOutOfRange() {
@@ -212,5 +234,52 @@ final class CustomDriverTests: XCTestCase {
         )
         XCTAssertNil(outcome.proposal)
         XCTAssertTrue(outcome.mutations.isEmpty)
+    }
+
+    // MARK: - Swap override
+
+    /// Regression: prior to this fix, CustomDriver re-parsed
+    /// `prescriptionJSON` in `activeContent`, so swap overrides on load /
+    /// reps / unit were ignored — the exercise NAME updated but load/reps
+    /// stayed stale. Post-fix: the driver reads the live SetPlan row at
+    /// the cursor (which the reducer mirrors override values onto at
+    /// swap time).
+    func testCustomDriverRespectsSwapOverride() {
+        let (ctx, itemIDs, baseState) = makeStandardCustom()
+
+        // Simulate post-swap: item 0 (Back Squat, originally 3×5 @ 80 kg
+        // rendered in lb via R2.10 default) now has overrides mirrored
+        // onto its SetPlan rows at 70 kg / 6 reps.
+        var state = baseState
+        let swappedExerciseID = UUID()
+        state.items = state.items.map { log in
+            guard log.itemID == itemIDs[0] else { return log }
+            let mirrored = log.sets.map { set -> SetPlan in
+                SetPlan(
+                    setIndex: set.setIndex,
+                    loadKg: 70,
+                    unit: .kg,
+                    reps: 6,
+                    done: set.done,
+                    adjust: set.adjust,
+                    rir: set.rir
+                )
+            }
+            return SessionState.ItemLog(
+                itemID: log.itemID,
+                autoregHeld: log.autoregHeld,
+                sets: mirrored,
+                performedExerciseID: swappedExerciseID,
+                overrides: AlternativeOverrides(reps: 6, loadKg: 70, unit: .kg)
+            )
+        }
+
+        // Advance cursor into set 2.
+        state.cursor = SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 2)
+
+        let content = CustomDriver().activeContent(state: state, context: ctx)
+        XCTAssertEqual(content?.loadKg, 70, "post-swap SetPlan load wins")
+        XCTAssertEqual(content?.reps, 6, "post-swap SetPlan reps win")
+        XCTAssertEqual(content?.loadDisplay, "70 kg", "unit override carries through")
     }
 }

@@ -17,6 +17,7 @@
 
 import SwiftUI
 import Combine
+import CoreAutoreg
 import DesignSystem
 import WorkoutCoreFoundation
 
@@ -154,9 +155,17 @@ struct RestView: View {
 
             HStack(spacing: DSSpacing.md) {
                 let set = viewModel.lastLoggedSet
+                // R2.10 unit-thread: load caption follows the SetPlan's
+                // unit so an lb-prescribed workout reads "LB" here, not
+                // the hardcoded "KG" that leaked through before this fix.
+                // Loadless sets (SetPlan.loadKg == nil) render "BW"
+                // instead of a numeric value so a bodyweight log doesn't
+                // flash "0" on the rest pill.
                 DSPill(
-                    value: set.map { formatKilograms($0.loadKg) } ?? "—",
-                    caption: "KG",
+                    value: set.flatMap { plan in
+                        plan.loadKg.map { formatKilograms($0) } ?? "BW"
+                    } ?? "—",
+                    caption: RestView.loadPillCaption(for: set),
                     isEditable: set != nil,
                     onTap: set == nil ? nil : { activeSheet = .load }
                 )
@@ -182,6 +191,26 @@ struct RestView: View {
             style: .primary,
             action: { viewModel.advance() }
         )
+    }
+
+    // MARK: - Pure helpers (exposed for tests)
+
+    /// Caption for the load pill on the "just logged" row. Returns the
+    /// SetPlan's unit in uppercase ("KG", "LB"); falls back to "KG" when
+    /// no set is logged yet (the pill shows "—" in that state, so the
+    /// caption is cosmetic). Exposed as a static so unit tests can pin
+    /// the R2.10 unit-thread contract without building a SwiftUI view.
+    static func loadPillCaption(for set: SetPlan?) -> String {
+        (set?.unit.rawValue ?? "kg").uppercased()
+    }
+
+    /// Unit string for the autoreg banner's DSWeightLabel. The proposal
+    /// has no unit field — we inherit from the SetPlan it targets (the
+    /// just-logged set on the same item). Exposed for tests so the
+    /// inheritance contract stays locked; the banner callsite passes
+    /// `viewModel.lastLoggedSet?.unit` directly.
+    static func proposalBannerUnit(for set: SetPlan?) -> String {
+        set?.unit.rawValue ?? "kg"
     }
 
     // MARK: - Timer math

@@ -146,3 +146,55 @@ def test_post_exercises_rejects_malformed_default_alternatives_json(client) -> N
     assert response.status_code == 422, response.text
     assert "default_alternatives_json" in response.text
     assert "not valid JSON" in response.text
+
+
+def test_post_exercises_rejects_non_object_default_prescription_json(client) -> None:
+    """bug-035: a parseable-but-wrong-shape `default_prescription_json` must 422
+    at ingest. `_load_or_empty` in the merge helper requires an object; an
+    array or scalar crashes later `POST /api/workouts` calls with a 500.
+
+    Covers both array and string shapes — both parse as valid JSON but would
+    explode in `merge_prescriptions`.
+    """
+    for bad_shape in (
+        json.dumps([{"sets": 4}]),  # array
+        json.dumps("a scalar string"),  # string
+        json.dumps(42),  # number
+    ):
+        response = client.post(
+            "/api/exercises",
+            json=[
+                {
+                    "id": _BACK_SQUAT,
+                    "name": "Back Squat",
+                    "default_prescription_json": bad_shape,
+                }
+            ],
+        )
+        assert response.status_code == 422, response.text
+        assert "default_prescription_json" in response.text
+        assert "must be a JSON object" in response.text
+
+
+def test_post_exercises_rejects_non_array_default_alternatives_json(client) -> None:
+    """bug-035: parseable-but-wrong-shape `default_alternatives_json` must 422.
+    `merge_alternatives` requires a JSON array; anything else crashes the
+    workout-build path with a 500.
+    """
+    for bad_shape in (
+        json.dumps({"exercise_id": _FRONT_SQUAT}),  # object
+        json.dumps("a string"),  # string
+    ):
+        response = client.post(
+            "/api/exercises",
+            json=[
+                {
+                    "id": _BACK_SQUAT,
+                    "name": "Back Squat",
+                    "default_alternatives_json": bad_shape,
+                }
+            ],
+        )
+        assert response.status_code == 422, response.text
+        assert "default_alternatives_json" in response.text
+        assert "must be a JSON array" in response.text

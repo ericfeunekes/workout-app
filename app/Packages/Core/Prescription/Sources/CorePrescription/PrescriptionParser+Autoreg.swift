@@ -6,16 +6,24 @@
 // overshoot/undershoot thresholds are measured from).
 
 import Foundation
+import CoreDomain
 
 extension PrescriptionParser {
 
     /// Parses the `autoreg` subobject + sibling `target_rir` into an
-    /// Autoreg struct. Returns nil when `autoreg` is absent. The doc's
-    /// default values (overshoot/undershoot_at=2, step_kg=2.5, apply_to=
-    /// "remaining") are applied for omitted inner keys.
+    /// Autoreg struct. Returns nil when `autoreg` is absent.
+    ///
+    /// Default inner values are unit-aware (R2.10): when the prescription
+    /// carries `weight_unit: "lb"` (or no explicit unit — lb is the
+    /// default) and the author omits `overshoot_step_kg`, the step
+    /// defaults to `5.0` (smallest loadable plate pair in a US gym). For
+    /// `"kg"` the default is `1.25`. Explicit authoring always wins.
+    /// `overshoot_at` / `undershoot_at` default to `2`, `apply_to` to
+    /// `"remaining"`, per `docs/prescription.md` § "Autoregulation".
     func parseAutoreg(
         _ obj: [String: Any],
-        shape: String
+        shape: String,
+        unit: WeightUnit
     ) -> Result<Autoreg?, ParseError> {
         let autoreg: [String: Any]
         switch readOptionalObject(obj, "autoreg") {
@@ -28,7 +36,7 @@ extension PrescriptionParser {
         case .failure(let e): return .failure(e)
         case .success(let v): targetRir = v
         }
-        switch readAutoregThresholds(autoreg) {
+        switch readAutoregThresholds(autoreg, unit: unit) {
         case .failure(let e): return .failure(e)
         case .success(let thresholds):
             let applyTo: Autoreg.ApplyTo
@@ -71,17 +79,19 @@ extension PrescriptionParser {
     }
 
     private func readAutoregThresholds(
-        _ autoreg: [String: Any]
+        _ autoreg: [String: Any],
+        unit: WeightUnit
     ) -> Result<AutoregThresholds, ParseError> {
         let overshootAt: Int
         switch readOptionalInt(autoreg, "overshoot_at") {
         case .failure(let e): return .failure(e)
         case .success(let v): overshootAt = v ?? 2
         }
+        let defaultStep = defaultAutoregStep(for: unit)
         let overshootStep: Double
         switch readOptionalDouble(autoreg, "overshoot_step_kg") {
         case .failure(let e): return .failure(e)
-        case .success(let v): overshootStep = v ?? 2.5
+        case .success(let v): overshootStep = v ?? defaultStep
         }
         let undershootAt: Int
         switch readOptionalInt(autoreg, "undershoot_at") {
@@ -91,7 +101,7 @@ extension PrescriptionParser {
         let undershootStep: Double
         switch readOptionalDouble(autoreg, "undershoot_step_kg") {
         case .failure(let e): return .failure(e)
-        case .success(let v): undershootStep = v ?? 2.5
+        case .success(let v): undershootStep = v ?? defaultStep
         }
         return .success(AutoregThresholds(
             overshootAt: overshootAt,

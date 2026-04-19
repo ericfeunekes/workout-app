@@ -19,7 +19,15 @@ actor FakePushQueueStore: PushQueueStore {
     }
 
     func peek(max: Int) async throws -> [PushItem] {
-        let sorted = items.sorted { $0.enqueuedAt < $1.enqueuedAt }
+        // Sort by priority first (results=0 drain before events=1), then
+        // FIFO within a priority class. Mirrors the production
+        // SwiftData-backed store so tests exercise the same ordering.
+        let sorted = items.sorted { lhs, rhs in
+            if lhs.priority != rhs.priority {
+                return lhs.priority < rhs.priority
+            }
+            return lhs.enqueuedAt < rhs.enqueuedAt
+        }
         return Array(sorted.prefix(max))
     }
 

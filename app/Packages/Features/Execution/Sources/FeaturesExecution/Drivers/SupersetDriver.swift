@@ -51,7 +51,12 @@ public struct SupersetDriver: TimingDriver {
             return nil
         }
 
-        let (reps, loadKg) = prescribedRepsAndLoad(for: item)
+        // Prefer the live SetPlan row at the cursor — the reducer mirrors
+        // swap `reps` / `load_kg` / `weight_unit` overrides onto non-done
+        // rows, so reading the SetPlan reflects post-swap state. Re-parsing
+        // `prescriptionJSON` would return the pre-swap authored values and
+        // strand the Active screen on stale load/reps after a swap.
+        let (reps, loadKg, unit) = resolveRepsAndLoad(for: item, itemLog: itemLog, cursor: c)
         let exerciseName = context.exerciseName(
             for: item,
             performedExerciseID: itemLog.performedExerciseID
@@ -60,7 +65,7 @@ public struct SupersetDriver: TimingDriver {
         let loadDisplay: String
         let heroLoadKg: Double?
         if let kg = loadKg {
-            loadDisplay = formatLoad(kg: kg)
+            loadDisplay = formatLoad(weight: kg, unit: LoadUnit(setPlanUnit: unit))
             heroLoadKg = kg
         } else {
             loadDisplay = "BW"
@@ -135,37 +140,60 @@ public struct SupersetDriver: TimingDriver {
         return state.structure.itemsPerBlock[b]
     }
 
+    /// Resolve `(reps, loadKg, unit)` for the active round. The SetPlan row
+    /// at `cursor.setIndex` is the source of truth for live numeric values
+    /// (reps / loadKg / unit) — the reducer mirrors swap overrides onto
+    /// non-done rows so reading the SetPlan reflects the post-swap plan.
+    /// `set.loadKg == nil` is the loadless sentinel (BW item, loadless
+    /// AMRAP token) — it passes straight through to the caller as nil
+    /// so the display renders "BW".
+    private func resolveRepsAndLoad(
+        for item: WorkoutItem,
+        itemLog: SessionState.ItemLog,
+        cursor: SessionState.Cursor
+    ) -> (reps: Int, loadKg: Double?, unit: WeightUnit) {
+        if let set = itemLog.sets.first(where: { $0.setIndex == cursor.setIndex }) {
+            return (set.reps, set.loadKg, set.unit)
+        }
+        // Fallback when no SetPlan row matches the cursor (defensive —
+        // the seeder produces one row per round). Parse the prescription
+        // as a last resort so the Active screen still renders.
+        return prescribedRepsAndLoad(for: item)
+    }
+
     /// Superset items author as `{reps, load_kg?, target_rir?, autoreg?}`
     /// (parses as `.straightSets` with `sets: nil`). Bodyweight lifts
     /// omit `load_kg`. Tolerant extraction across related shapes so
-    /// renders stay coherent on authoring drift.
+    /// renders stay coherent on authoring drift. Used only as the fallback
+    /// when no SetPlan row matches the cursor — normal reads go through
+    /// `resolveRepsAndLoad`.
     private func prescribedRepsAndLoad(
         for item: WorkoutItem
-    ) -> (reps: Int, loadKg: Double?) {
+    ) -> (reps: Int, loadKg: Double?, unit: WeightUnit) {
         switch parser.parse(prescriptionJSON: item.prescriptionJSON) {
         case .success(let p):
             return repsAndLoad(from: p)
         case .failure:
-            return (0, nil)
+            return (0, nil, .lb)
         }
     }
 
     private func repsAndLoad(
         from prescription: Prescription
-    ) -> (reps: Int, loadKg: Double?) {
+    ) -> (reps: Int, loadKg: Double?, unit: WeightUnit) {
         switch prescription {
-        case .straightSets(_, let reps, let loadKg, _, _, _, _):
-            return (intReps(from: reps), loadKg)
+        case .straightSets(_, let reps, let loadKg, let unit, _, _, _, _):
+            return (intReps(from: reps), loadKg, unit)
         case .bodyweight(_, let reps, _):
-            return (reps, nil)
-        case .cluster(_, let reps, let loadKg, _, _, _):
-            return (reps, loadKg)
-        case .repRange(_, _, let repsMax, let loadKg, _, _):
-            return (repsMax, loadKg)
-        case .warmup(_, let reps, let loadKg):
-            return (reps, loadKg)
+            return (reps, nil, .lb)
+        case .cluster(_, let reps, let loadKg, let unit, _, _, _):
+            return (reps, loadKg, unit)
+        case .repRange(_, _, let repsMax, let loadKg, let unit, _, _):
+            return (repsMax, loadKg, unit)
+        case .warmup(_, let reps, let loadKg, let unit):
+            return (reps, loadKg, unit)
         case .setsDetail, .percentOf1RM, .amrapToken, .empty:
-            return (0, nil)
+            return (0, nil, .lb)
         }
     }
 

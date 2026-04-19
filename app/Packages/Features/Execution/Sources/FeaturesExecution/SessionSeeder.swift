@@ -55,52 +55,132 @@ public enum SessionSeeder {
 
     /// Produce the initial `SessionState` for a workout. Route is
     /// `.today`; cursor is (0, 0, 1); items are seeded per prescription.
+    ///
+    /// Tabata collapse: per `docs/prescription.md` § "tabata" the mode is
+    /// strictly single-item ("one exercise"). Authors cannot compose a
+    /// multi-item tabata — the driver + cursor pair disagree on per-item
+    /// vs global rounds and the active screen ends up out of sync with
+    /// what just got auto-logged. When the pulled context carries > 1 item
+    /// for a tabata block, we collapse to item[0]: only the first item is
+    /// seeded (SetPlan rows + ItemLog), `itemsPerBlock[blockIndex] == 1`,
+    /// and extras are dropped. Paired fix in `TabataDriver.activeContent`
+    /// always resolves `blockItems[0]` so the render matches the seed.
+    /// Callers that care about the collapse (the VM, to emit telemetry)
+    /// use `seedWithNormalization` instead.
     public static func seed(
         context: WorkoutContext,
         parser: PrescriptionParser = PrescriptionParser()
     ) -> SessionState {
-        var items: [SessionState.ItemLog] = []
-        var setsPerItem: [[Int]] = []
-        var itemsPerBlock: [Int] = []
-        var advancementByBlock: [SessionState.BlockAdvancement] = []
+        seedWithNormalization(context: context, parser: parser).state
+    }
 
-        for (bi, blockItems) in context.itemsByBlock.enumerated() {
-            let block = context.block(at: bi)
-            var perBlock: [Int] = []
-            for item in blockItems {
-                let sets = setRowsForBlock(
-                    block: block,
-                    item: item,
-                    parser: parser
-                )
-                items.append(SessionState.ItemLog(
-                    itemID: item.id,
-                    autoregHeld: false,
-                    sets: sets,
-                    performedExerciseID: nil
-                ))
-                perBlock.append(sets.count)
-            }
-            setsPerItem.append(perBlock)
-            itemsPerBlock.append(blockItems.count)
-            advancementByBlock.append(advancement(for: block, itemCount: blockItems.count))
+    /// Same seed as `seed(context:)`, but also returns a manifest of any
+    /// normalization drops (e.g. a multi-item tabata collapsed to its
+    /// first item). The VM uses this variant so it can emit telemetry
+    /// for each drop at init time — the pure `seed(context:)` path stays
+    /// side-effect-free for test callers that don't care about drops.
+    public static func seedWithNormalization(
+        context: WorkoutContext,
+        parser: PrescriptionParser = PrescriptionParser()
+    ) -> SeedResult {
+        var accum = SeedAccumulator()
+        for (bi, rawBlockItems) in context.itemsByBlock.enumerated() {
+            accum.append(seedBlock(
+                rawBlockItems: rawBlockItems,
+                blockIndex: bi,
+                block: context.block(at: bi),
+                parser: parser
+            ))
         }
-
-        let structure = SessionState.Structure(
-            itemsPerBlock: itemsPerBlock,
-            setsPerItem: setsPerItem,
-            advancementByBlock: advancementByBlock
-        )
-
-        return SessionState(
+        let state = SessionState(
             workoutID: context.workout.id,
             route: .today,
             cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1),
-            items: items,
+            items: accum.items,
             restEndsAt: nil,
             note: "",
-            structure: structure
+            structure: SessionState.Structure(
+                itemsPerBlock: accum.itemsPerBlock,
+                setsPerItem: accum.setsPerItem,
+                advancementByBlock: accum.advancementByBlock
+            )
         )
+        // Debug-only defense: the paired fix in `TabataDriver.activeContent`
+        // depends on `itemsPerBlock[bi] == 1` after a collapse. Release
+        // builds omit the assert; authoring regressions still surface
+        // through the telemetry event.
+        assert(
+            accum.collapses.allSatisfy { state.structure.itemsPerBlock[$0.blockIndex] == 1 },
+            "tabata collapse must leave exactly one seeded item per affected block"
+        )
+        return SeedResult(state: state, tabataCollapses: accum.collapses)
+    }
+
+    /// Seed one block: normalize its items, produce ItemLogs + set counts,
+    /// and emit any collapse record. Extracted so `seedWithNormalization`
+    /// stays under SwiftLint's `function_body_length`.
+    private static func seedBlock(
+        rawBlockItems: [WorkoutItem],
+        blockIndex: Int,
+        block: Block?,
+        parser: PrescriptionParser
+    ) -> BlockSeed {
+        let blockItems = normalizeBlockItems(rawBlockItems, block: block)
+        let collapse = tabataCollapseRecord(
+            rawBlockItems: rawBlockItems,
+            normalizedItems: blockItems,
+            blockIndex: blockIndex,
+            block: block
+        )
+        let (itemLogs, perBlock) = seedItems(blockItems, block: block, parser: parser)
+        return BlockSeed(
+            itemLogs: itemLogs,
+            perBlock: perBlock,
+            itemsInBlock: blockItems.count,
+            advancement: advancement(for: block, itemCount: blockItems.count),
+            collapse: collapse
+        )
+    }
+
+    /// Apply mode-specific validity constraints to the context's items for a
+    /// block before they are seeded. Currently just the Tabata single-item
+    /// collapse — see the `seed(context:)` doc-comment for the rationale.
+    /// Returns the items that should be seeded for this block (possibly a
+    /// strict prefix of the raw list).
+    private static func normalizeBlockItems(
+        _ rawBlockItems: [WorkoutItem],
+        block: Block?
+    ) -> [WorkoutItem] {
+        if block?.timingMode == .tabata, rawBlockItems.count > 1 {
+            return Array(rawBlockItems.prefix(1))
+        }
+        return rawBlockItems
+    }
+
+    // `tabataCollapseRecord`, `TabataCollapse`, `SeedResult` live in
+    // `SessionSeeder+Accumulator.swift` so the seeder enum body stays
+    // under SwiftLint's `type_body_length` cap.
+
+    /// Seed ItemLogs + per-item set counts for one block. Extracted so
+    /// `seed(context:)` stays under SwiftLint's `function_body_length`.
+    private static func seedItems(
+        _ blockItems: [WorkoutItem],
+        block: Block?,
+        parser: PrescriptionParser
+    ) -> (items: [SessionState.ItemLog], perBlock: [Int]) {
+        var items: [SessionState.ItemLog] = []
+        var perBlock: [Int] = []
+        for item in blockItems {
+            let sets = setRowsForBlock(block: block, item: item, parser: parser)
+            items.append(SessionState.ItemLog(
+                itemID: item.id,
+                autoregHeld: false,
+                sets: sets,
+                performedExerciseID: nil
+            ))
+            perBlock.append(sets.count)
+        }
+        return (items, perBlock)
     }
 
     /// Build per-item SetPlan rows from a prescription. All rows start
@@ -116,14 +196,25 @@ public enum SessionSeeder {
         for item: WorkoutItem,
         parser: PrescriptionParser = PrescriptionParser()
     ) -> [SetPlan] {
-        switch parser.parse(prescriptionJSON: item.prescriptionJSON) {
+        // Use the autoreg-tolerant parse so an unsupported `apply_to`
+        // value (or any other autoreg-inner parse failure) doesn't wipe
+        // the whole item's base reps/load. When the base prescription
+        // parses cleanly, autoreg is dropped silently and the set seed
+        // carries the authored load/reps. When the base prescription is
+        // itself malformed, we still fall back to the zero-row
+        // placeholder — there's nothing to recover from.
+        switch parser.parseTolerantOfAutoreg(prescriptionJSON: item.prescriptionJSON) {
         case .success(let p):
             return setsFor(prescription: p)
         case .failure:
             // Graceful fallback — one placeholder set so the UI doesn't
             // hand the user an empty item. The parse error already ate
-            // the authored values; we can't recover them.
-            return [SetPlan(setIndex: 1, loadKg: 0, reps: 0, done: false, adjust: nil)]
+            // the authored values; we can't recover them. Unit defaults
+            // to .lb per R2.10 — matches the pound-first default applied
+            // when a prescription parses but omits `weight_unit`. Load
+            // is nil (loadless) so the placeholder doesn't claim a
+            // real numeric 0 that would render as "0 lb".
+            return [SetPlan(setIndex: 1, loadKg: nil, unit: .lb, reps: 0, done: false, adjust: nil)]
         }
     }
 
@@ -131,66 +222,119 @@ public enum SessionSeeder {
 
     private static func setsFor(prescription: Prescription) -> [SetPlan] {
         switch prescription {
-        case .straightSets(let sets, let reps, let loadKg, _, _, _, _):
-            return seedStraightSets(sets: sets, reps: reps, loadKg: loadKg)
+        case .straightSets(let sets, let reps, let loadKg, let unit, _, _, _, _):
+            return seedStraightSets(sets: sets, reps: reps, loadKg: loadKg, unit: unit)
         case .bodyweight(let sets, let reps, _):
-            return seedUniform(sets: sets, loadKg: 0, reps: reps)
-        case .repRange(let sets, _, let repsMax, let loadKg, _, _):
+            // Bodyweight carries no load; unit is moot. Seed loadKg: nil
+            // so the row's loadless-ness travels end-to-end: drivers
+            // render "BW", push writes `SetLog.weight = nil`, History
+            // renders "BW" — not "0 lb".
+            return seedUniform(sets: sets, loadKg: nil, unit: .lb, reps: reps)
+        case .repRange(let sets, _, let repsMax, let loadKg, let unit, _, _):
             // Seed with the upper end of the range — authors pick the
-            // range with the ceiling as the stretch goal.
-            return seedUniform(sets: sets, loadKg: loadKg ?? 0, reps: repsMax)
-        case .setsDetail(let details, _, _):
-            return seedSetsDetail(details: details)
+            // range with the ceiling as the stretch goal. Authored-nil
+            // load stays nil (loadless variant).
+            return seedUniform(sets: sets, loadKg: loadKg, unit: unit, reps: repsMax)
+        case .setsDetail(let details, let unit, _, _):
+            return seedSetsDetail(details: details, unit: unit)
         case .percentOf1RM(let sets, let reps, _, _):
             // v0 does not resolve percent → kg here. The percent-of-1RM
-            // slice will layer a resolver on top. Seed at loadKg=0 so
-            // the UI at least shows the set counter.
-            return seedUniform(sets: sets, loadKg: 0, reps: reps)
-        case .cluster(let sets, let reps, let loadKg, _, _, _):
-            return seedUniform(sets: sets, loadKg: loadKg, reps: reps)
-        case .warmup(let sets, let reps, let loadKg):
-            return seedUniform(sets: sets, loadKg: loadKg ?? 0, reps: reps)
-        case .amrapToken, .empty:
-            // Nothing structurally to seed — these items rely on the
-            // block-level timing for their set count, which v0 does
-            // not model.
-            return []
+            // slice will layer a resolver on top. Seed loadKg: nil until
+            // the 1RM resolver lands with a real number; UI still shows
+            // the set counter. Unit defaults to .lb until the resolver
+            // lands with its own unit plumb.
+            return seedUniform(sets: sets, loadKg: nil, unit: .lb, reps: reps)
+        case .cluster(let sets, let reps, let loadKg, let unit, _, _, _):
+            return seedUniform(sets: sets, loadKg: loadKg, unit: unit, reps: reps)
+        case .warmup(let sets, let reps, let loadKg, let unit):
+            // Authored-nil load stays nil (warm-up bodyweight shapes).
+            return seedUniform(sets: sets, loadKg: loadKg, unit: unit, reps: reps)
+        case .amrapToken(let loadKg, let unit, _):
+            // AMRAP token — "as many reps as possible, open numeric
+            // entry" (docs/prescription.md § "amrap_token"). Seeds a
+            // single open-entry SetPlan row that preserves the authored
+            // load and unit so a weighted AMRAP token (e.g. "kettlebell
+            // snatch @ 24 kg, AMRAP") renders and logs with the correct
+            // load. `reps=0` is the open-entry sentinel: the user enters
+            // the actual rep count at log time. A nil `load_kg` seeds
+            // loadKg: nil so drivers / push / History all render "BW".
+            return [SetPlan(
+                setIndex: 1,
+                loadKg: loadKg,
+                unit: unit,
+                reps: 0,
+                done: false,
+                adjust: nil
+            )]
+        case .empty:
+            // `{}` can legitimately appear inside set-major blocks
+            // (straight_sets / custom) where the segment describes the
+            // work. A zero-row seed strands the cursor on `(b, i, 1)`
+            // with no matching SetPlan: the driver renders nothing and
+            // the reducer never advances past the item. Seed a single
+            // manual placeholder so the driver can render "set 1 of 1"
+            // and the user can log-or-skip to move the cursor forward.
+            return [manualPlaceholder]
         }
     }
+
+    /// Single 1-row placeholder for `.empty` prescriptions inside set-major
+    /// blocks. Keeps the cursor's (b, i, 1) position matched by a real
+    /// SetPlan so `logSet` lands and `advanceCursor` walks on. `loadKg`
+    /// is nil (loadless) so the placeholder flows as BW through display
+    /// and push — never as a fabricated "0 lb". The sibling `.amrapToken`
+    /// case seeds its own row that preserves authored load/unit, since
+    /// AMRAP-token is semantically distinct — see `setsFor` above.
+    static let manualPlaceholder = SetPlan(
+        setIndex: 1,
+        loadKg: nil,
+        unit: .lb,
+        reps: 0,
+        done: false,
+        adjust: nil
+    )
 
     private static func seedStraightSets(
         sets: Int?,
         reps: RepCount?,
-        loadKg: Double?
+        loadKg: Double?,
+        unit: WeightUnit
     ) -> [SetPlan] {
         let n = sets ?? 1
         let repCount = reps.flatMap { rc -> Int? in
             if case .count(let r) = rc { return r }
             return nil
         } ?? 0
-        let load = loadKg ?? 0
+        // Authored-nil load stays nil — a `straight_sets` shape without
+        // load_kg is a bodyweight / loadless variant (circuit station,
+        // pull-up block) and must render as "BW", not "0 lb".
         return (1...max(n, 1)).map {
-            SetPlan(setIndex: $0, loadKg: load, reps: repCount, done: false, adjust: nil)
+            SetPlan(setIndex: $0, loadKg: loadKg, unit: unit, reps: repCount, done: false, adjust: nil)
         }
     }
 
     static func seedUniform(
         sets: Int,
-        loadKg: Double,
+        loadKg: Double?,
+        unit: WeightUnit,
         reps: Int
     ) -> [SetPlan] {
         (1...max(sets, 1)).map {
-            SetPlan(setIndex: $0, loadKg: loadKg, reps: reps, done: false, adjust: nil)
+            SetPlan(setIndex: $0, loadKg: loadKg, unit: unit, reps: reps, done: false, adjust: nil)
         }
     }
 
-    private static func seedSetsDetail(details: [SetDetail]) -> [SetPlan] {
+    private static func seedSetsDetail(details: [SetDetail], unit: WeightUnit) -> [SetPlan] {
         details.enumerated().map { i, d in
             let reps: Int
             if case .count(let n) = d.reps { reps = n } else { reps = 0 }
+            // Per-set `load_kg` on a SetDetail: authored-nil stays nil,
+            // so a mixed-load `sets_detail` (warm-up BW → weighted) can
+            // carry nil on the loadless rows.
             return SetPlan(
                 setIndex: i + 1,
-                loadKg: d.loadKg ?? 0,
+                loadKg: d.loadKg,
+                unit: unit,
                 reps: reps,
                 done: false,
                 adjust: nil

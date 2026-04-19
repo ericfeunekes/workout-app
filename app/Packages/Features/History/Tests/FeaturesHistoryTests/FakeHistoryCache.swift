@@ -18,19 +18,25 @@ final class FakeHistoryCache: WorkoutCache, @unchecked Sendable {
     var itemsByBlock: [UUID: [WorkoutItem]]
     var exercises: [Exercise]
     var setLogsByWorkout: [UUID: [SetLog]]
+    /// `user_parameters` rows indexed by `key`. Tests that exercise the
+    /// History bodyweight-window lookup seed this directly; the rest
+    /// ignore it.
+    var userParametersByKey: [String: [UserParameter]]
 
     init(
         workouts: [Workout] = [],
         blocksByWorkout: [UUID: [Block]] = [:],
         itemsByBlock: [UUID: [WorkoutItem]] = [:],
         exercises: [Exercise] = [],
-        setLogsByWorkout: [UUID: [SetLog]] = [:]
+        setLogsByWorkout: [UUID: [SetLog]] = [:],
+        userParametersByKey: [String: [UserParameter]] = [:]
     ) {
         self.workouts = workouts
         self.blocksByWorkout = blocksByWorkout
         self.itemsByBlock = itemsByBlock
         self.exercises = exercises
         self.setLogsByWorkout = setLogsByWorkout
+        self.userParametersByKey = userParametersByKey
     }
 
     func save(_ dataset: PulledDataset) async throws {}
@@ -57,7 +63,18 @@ final class FakeHistoryCache: WorkoutCache, @unchecked Sendable {
     }
 
     func loadUserParametersLatest() async throws -> [String: UserParameter] {
-        [:]
+        var latest: [String: UserParameter] = [:]
+        for (key, rows) in userParametersByKey {
+            if let newest = rows.max(by: { $0.updatedAt < $1.updatedAt }) {
+                latest[key] = newest
+            }
+        }
+        return latest
+    }
+
+    func loadUserParameters(key: String) async throws -> [UserParameter] {
+        (userParametersByKey[key] ?? [])
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
 
     func loadCompletedWorkouts(limit: Int, offset: Int) async throws -> [Workout] {
@@ -93,36 +110,41 @@ final class FakeHistoryCache: WorkoutCache, @unchecked Sendable {
             .map { $0 }
     }
 
+    func loadOrphanedSetLogs() async throws -> [SetLog] {
+        // FakeHistoryCache doesn't model the post-V2→V3 orphan state —
+        // none of the History feature tests drive the backfill-fallback
+        // path. Returning empty keeps the fake honest about what it
+        // does simulate.
+        []
+    }
+
     /// Records of every `saveSetLogs` call. Each entry is the full
     /// batch handed in. Used by the edit-past-set tests to assert the
     /// local write happens AND see the row it wrote.
     var savedSetLogBatches: [[SetLog]] = []
 
-    func saveSetLogs(_ setLogs: [SetLog]) async throws {
+    /// Records the workoutID passed with each `saveSetLogs` call so
+    /// tests can assert the R1.4 denormalization threading reached the
+    /// cache. Paired with `savedSetLogBatches` by index.
+    var savedSetLogWorkoutIDs: [WorkoutID] = []
+
+    func saveSetLogs(_ setLogs: [SetLog], workoutID: WorkoutID) async throws {
         savedSetLogBatches.append(setLogs)
-        // Mirror the update into `setLogsByWorkout` so `load()`
-        // re-reads the edited values on the next `loadSetLogs(workoutID:)`
-        // call. Real `WorkoutCacheImpl.saveSetLogs` upserts rows in
-        // SwiftData; this fake upserts by `id` in the flat array.
+        savedSetLogWorkoutIDs.append(workoutID)
+        // Upsert-by-id into the workout-indexed bucket. The fake
+        // respects the caller's `workoutID` (R1.4 denormalization)
+        // rather than scanning existing buckets — this matches the
+        // real `WorkoutCacheImpl.saveSetLogs` contract and makes it
+        // possible to land a brand-new row via this fake in tests.
+        var bucket = setLogsByWorkout[workoutID] ?? []
         for newLog in setLogs {
-            var attached = false
-            for (workoutID, logs) in setLogsByWorkout {
-                if logs.contains(where: { $0.id == newLog.id }) {
-                    setLogsByWorkout[workoutID] = logs.map { old in
-                        old.id == newLog.id ? newLog : old
-                    }
-                    attached = true
-                    break
-                }
-            }
-            if !attached {
-                // Not tied to an existing workout in the fake — drop
-                // silently. Matches the "caller is responsible for
-                // passing coherent data" contract; none of the shipping
-                // tests exercise this path today.
-                _ = attached
+            if let idx = bucket.firstIndex(where: { $0.id == newLog.id }) {
+                bucket[idx] = newLog
+            } else {
+                bucket.append(newLog)
             }
         }
+        setLogsByWorkout[workoutID] = bucket
     }
 
     func saveWorkout(_ workout: Workout) async throws {

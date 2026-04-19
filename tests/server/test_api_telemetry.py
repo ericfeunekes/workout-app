@@ -181,6 +181,38 @@ def test_telemetry_rejects_oversized_batch(client, test_engine) -> None:
         assert rows == 0
 
 
+def test_telemetry_rejects_non_Z_timestamp(client) -> None:
+    """Session invariant: every datetime on the wire ends in literal `Z`.
+
+    Prior to the `UtcDatetimeIn` validator, Pydantic's default datetime parser
+    silently accepted `+00:00` / `+0000` / naive strings and coerced them to
+    UTC, so a client that drifted from the `Z`-suffix contract would persist
+    an off-spec row without the server noticing. This guard fails ingest at
+    422 so the wire format stays one-way.
+    """
+    payload = {
+        "events": [
+            {
+                "id": _EVENT_A,
+                "timestamp": "2026-04-18T14:32:15+00:00",
+                "session_id": _SESSION_ID,
+                "kind": "interaction",
+                "name": "today.start_tap",
+                "data_json": None,
+                "workout_id": None,
+                "set_log_id": None,
+            }
+        ]
+    }
+    response = client.post("/api/telemetry/events", json=payload)
+    assert response.status_code == 422, response.text
+    # The error message must name the offending field so a client-side
+    # fix is obvious — we don't want a future regression to widen the
+    # validator into "accept anything" silently.
+    body = response.json()
+    assert any("timestamp" in str(err).lower() for err in body["detail"])
+
+
 def test_telemetry_accepts_batch_at_cap(client) -> None:
     """Regression: exactly 500 events still goes through (off-by-one watch)."""
     batch = [

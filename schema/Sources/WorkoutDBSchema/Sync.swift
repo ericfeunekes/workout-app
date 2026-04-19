@@ -6,17 +6,30 @@ public struct WorkoutStatusUpdate: Codable, Sendable, Equatable {
     public let workoutId: String
     public let status: WorkoutStatus
     public let completedAt: Date?
+    /// User-authored post-workout note. Carried on the terminal status
+    /// push so the server becomes authoritative for the value — without
+    /// this the next `sync/pull` would overwrite the freshly-typed note
+    /// with the server's stale value. `nil` leaves the existing server-
+    /// side notes alone; a non-nil value replaces them.
+    public let notes: String?
 
     enum CodingKeys: String, CodingKey {
         case workoutId = "workout_id"
         case status
         case completedAt = "completed_at"
+        case notes
     }
 
-    public init(workoutId: String, status: WorkoutStatus, completedAt: Date? = nil) {
+    public init(
+        workoutId: String,
+        status: WorkoutStatus,
+        completedAt: Date? = nil,
+        notes: String? = nil
+    ) {
         self.workoutId = workoutId
         self.status = status
         self.completedAt = completedAt
+        self.notes = notes
     }
 }
 

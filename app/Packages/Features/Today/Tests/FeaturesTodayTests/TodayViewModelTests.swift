@@ -80,11 +80,12 @@ final class TodayViewModelTests: XCTestCase {
 
         XCTAssertEqual(vm.exercises.count, 3)
         XCTAssertEqual(vm.exercises[0].name, "Bench")
-        XCTAssertEqual(vm.exercises[0].prescriptionLine, "4 \u{00D7} 5 @ 102.5 kg")
+        // R2.10: JSON fixtures in this test omit `weight_unit` → pound default.
+        XCTAssertEqual(vm.exercises[0].prescriptionLine, "4 \u{00D7} 5 @ 102.5 lb")
         XCTAssertEqual(vm.exercises[0].lastTime, "5×5 @ 100 kg · RIR 2")
 
         XCTAssertEqual(vm.exercises[1].name, "Row")
-        XCTAssertEqual(vm.exercises[1].prescriptionLine, "3 \u{00D7} 8 @ 80 kg")
+        XCTAssertEqual(vm.exercises[1].prescriptionLine, "3 \u{00D7} 8 @ 80 lb")
         XCTAssertNil(vm.exercises[1].lastTime)
 
         XCTAssertEqual(vm.exercises[2].name, "Dips")
@@ -124,7 +125,7 @@ final class TodayViewModelTests: XCTestCase {
         let vm = TodayViewModel(context: ctx)
         XCTAssertEqual(vm.exercises.count, 1)
         XCTAssertEqual(vm.exercises[0].name, "(unknown exercise)")
-        XCTAssertEqual(vm.exercises[0].prescriptionLine, "3 \u{00D7} 5 @ 60 kg")
+        XCTAssertEqual(vm.exercises[0].prescriptionLine, "3 \u{00D7} 5 @ 60 lb")
     }
 
     func testStartDispatchesMutation() {
@@ -369,6 +370,10 @@ private final class MutableFakeCache: WorkoutCache, @unchecked Sendable {
         [:]
     }
 
+    func loadUserParameters(key: String) async throws -> [UserParameter] {
+        []
+    }
+
     func loadCompletedWorkouts(limit: Int, offset: Int) async throws -> [Workout] {
         []
     }
@@ -381,7 +386,9 @@ private final class MutableFakeCache: WorkoutCache, @unchecked Sendable {
         []
     }
 
-    func saveSetLogs(_ setLogs: [SetLog]) async throws {}
+    func loadOrphanedSetLogs() async throws -> [SetLog] { [] }
+
+    func saveSetLogs(_ setLogs: [SetLog], workoutID: WorkoutID) async throws {}
 
     func saveWorkout(_ workout: Workout) async throws {
         lock.lock()

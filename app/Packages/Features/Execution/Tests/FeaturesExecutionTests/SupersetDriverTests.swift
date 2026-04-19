@@ -127,7 +127,7 @@ final class SupersetDriverTests: XCTestCase {
         XCTAssertEqual(content?.reps, 10)
         XCTAssertEqual(content?.repsDisplay, "10")
         XCTAssertEqual(content?.loadKg, 60)
-        XCTAssertEqual(content?.loadDisplay, "60 kg")
+        XCTAssertEqual(content?.loadDisplay, "60 lb")
         XCTAssertEqual(content?.setIndex, 1)
         XCTAssertEqual(content?.totalSets, 3)
         XCTAssertNil(content?.adjustGlyph)
@@ -236,5 +236,59 @@ final class SupersetDriverTests: XCTestCase {
         )
         XCTAssertNil(outcome.proposal)
         XCTAssertTrue(outcome.mutations.isEmpty)
+    }
+
+    // MARK: - Swap override
+
+    /// Regression: R2.10 widened the override parser + added unit; the
+    /// reducer mirrors `reps` / `load_kg` / `weight_unit` overrides onto
+    /// non-done SetPlan rows. Prior to this fix, SupersetDriver re-parsed
+    /// `prescriptionJSON` in `activeContent`, so the exercise NAME updated
+    /// after a swap but load/reps stayed stale. Post-fix: activeContent
+    /// reads the live SetPlan row so the override wins.
+    func testSupersetDriverRespectsSwapOverride() {
+        let (ctx, itemIDs, baseState) = makeStandardSuperset()
+
+        // Simulate a post-swap state: item 0 has a performedExerciseID,
+        // overrides with load_kg=72.5 & reps=8, and the non-done SetPlan
+        // rows have been mirrored (by the reducer at swap time) to carry
+        // the override values. The driver should render those directly.
+        var state = baseState
+        let swappedExerciseID = UUID()
+        state.items = state.items.map { log in
+            guard log.itemID == itemIDs[0] else { return log }
+            let mirrored = log.sets.map { set -> SetPlan in
+                SetPlan(
+                    setIndex: set.setIndex,
+                    loadKg: 72.5,
+                    unit: .kg,
+                    reps: 8,
+                    done: set.done,
+                    adjust: set.adjust,
+                    rir: set.rir
+                )
+            }
+            return SessionState.ItemLog(
+                itemID: log.itemID,
+                autoregHeld: log.autoregHeld,
+                sets: mirrored,
+                performedExerciseID: swappedExerciseID,
+                overrides: AlternativeOverrides(reps: 8, loadKg: 72.5, unit: .kg)
+            )
+        }
+
+        // Advance cursor into round 2 (still item 0, setIndex=2).
+        state.cursor = SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 2)
+
+        let content = SupersetDriver().activeContent(state: state, context: ctx)
+        XCTAssertEqual(
+            content?.loadKg, 72.5,
+            "post-swap SetPlan load wins over re-parsed prescriptionJSON"
+        )
+        XCTAssertEqual(content?.reps, 8, "post-swap SetPlan reps win")
+        XCTAssertEqual(
+            content?.loadDisplay, "72.5 kg",
+            "unit override (.kg) is carried through to the display"
+        )
     }
 }

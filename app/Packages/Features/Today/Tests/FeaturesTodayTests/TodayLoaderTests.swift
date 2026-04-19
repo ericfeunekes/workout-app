@@ -155,6 +155,10 @@ private final class FakeCache: WorkoutCache, @unchecked Sendable {
         [:]
     }
 
+    func loadUserParameters(key: String) async throws -> [UserParameter] {
+        []
+    }
+
     func loadCompletedWorkouts(limit: Int, offset: Int) async throws -> [Workout] {
         []
     }
@@ -167,7 +171,9 @@ private final class FakeCache: WorkoutCache, @unchecked Sendable {
         []
     }
 
-    func saveSetLogs(_ setLogs: [SetLog]) async throws {}
+    func loadOrphanedSetLogs() async throws -> [SetLog] { [] }
+
+    func saveSetLogs(_ setLogs: [SetLog], workoutID: WorkoutID) async throws {}
 
     func saveWorkout(_ workout: Workout) async throws {}
 

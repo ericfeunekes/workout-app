@@ -180,7 +180,7 @@ final class ForTimeDriverTests: XCTestCase {
         XCTAssertEqual(content?.totalSets, 3)
         XCTAssertEqual(content?.exerciseName, "Thruster")
         XCTAssertEqual(content?.loadKg, 43)
-        XCTAssertEqual(content?.loadDisplay, "43 kg")
+        XCTAssertEqual(content?.loadDisplay, "43 lb")
         XCTAssertNil(content?.adjustGlyph)
     }
 

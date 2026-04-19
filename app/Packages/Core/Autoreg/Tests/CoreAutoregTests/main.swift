@@ -5,6 +5,7 @@
 
 import Foundation
 import CoreAutoreg
+import CoreDomain
 import CorePrescription
 
 // A single "default" autoreg config reused across trigger tests. Individual
@@ -410,6 +411,78 @@ runCase("clamp · hit-failure on prescribed=4.0 with step=5.0 → 0.0, not -1.0"
     } else {
         throw ExpectationFailure(message: "expected .hitFailure reason, got \(p.reason)", file: #file, line: #line)
     }
+}
+
+// ===========================================================================
+// 15. SetPlan unit (R2.10).
+// ===========================================================================
+
+runCase("SetPlan · unit defaults to .lb when unspecified") {
+    // R2.10: new default when no unit is declared is pounds.
+    let plan = SetPlan(setIndex: 1, loadKg: 225, reps: 5, done: false, adjust: nil)
+    try expectEqual(plan.unit, WeightUnit.lb)
+}
+
+runCase("SetPlan · explicit .lb preserved through apply") {
+    let sets = [
+        SetPlan(setIndex: 1, loadKg: 225, unit: .lb, reps: 5, done: false, adjust: nil),
+        SetPlan(setIndex: 2, loadKg: 225, unit: .lb, reps: 5, done: false, adjust: nil),
+    ]
+    let proposal = AutoregProposal(
+        direction: .down,
+        newLoadKg: 220,
+        reason: .hitFailure(targetRir: 2)
+    )
+    let updated = Autoreg.apply(proposal: proposal, to: sets)
+    try expectEqual(updated.count, 2)
+    try expectEqual(updated[0].unit, WeightUnit.lb)
+    try expectEqual(updated[1].unit, WeightUnit.lb)
+    try expectEqual(updated[0].loadKg, 220)
+    try expectEqual(updated[1].loadKg, 220)
+    try expectEqual(updated[0].adjust, .down)
+}
+
+runCase("SetPlan · explicit .kg preserved through apply") {
+    let sets = [
+        SetPlan(setIndex: 1, loadKg: 102.5, unit: .kg, reps: 5, done: false, adjust: nil),
+    ]
+    let proposal = AutoregProposal(
+        direction: .up,
+        newLoadKg: 103.75,
+        reason: .overshoot(rirLogged: 4, targetRir: 2, threshold: 2)
+    )
+    let updated = Autoreg.apply(proposal: proposal, to: sets)
+    try expectEqual(updated[0].unit, WeightUnit.kg)
+    try expectEqual(updated[0].loadKg, 103.75)
+}
+
+// ===========================================================================
+// 16. SetPlan.loadKg Optional — loadless rows survive the type flip.
+// ===========================================================================
+
+runCase("SetPlan · loadKg nil is accepted (loadless / BW row)") {
+    let plan = SetPlan(setIndex: 1, loadKg: nil, reps: 10, done: false, adjust: nil)
+    try expectEqual(plan.loadKg, nil)
+}
+
+runCase("apply · nil-load rows are skipped (autoreg can't propose a kg change on BW)") {
+    // Mixed: a loaded row + a loadless (BW) row. The proposal must
+    // only rewrite the loaded row; the BW row keeps loadKg=nil and
+    // adjust=nil.
+    let sets: [SetPlan] = [
+        SetPlan(setIndex: 1, loadKg: 100.0, reps: 5, done: false, adjust: nil),
+        SetPlan(setIndex: 2, loadKg: nil,   reps: 10, done: false, adjust: nil),
+    ]
+    let proposal = AutoregProposal(
+        direction: .down,
+        newLoadKg: 97.5,
+        reason: .undershootReps(prescribed: 5, actual: 3, threshold: 2)
+    )
+    let out = Autoreg.apply(proposal: proposal, to: sets)
+    try expectEqual(out[0].loadKg, 97.5)
+    try expectEqual(out[0].adjust, .down)
+    try expectEqual(out[1].loadKg, nil, "loadless row untouched")
+    try expectEqual(out[1].adjust, nil, "no adjust glyph stamped on BW")
 }
 
 reportAndExit()

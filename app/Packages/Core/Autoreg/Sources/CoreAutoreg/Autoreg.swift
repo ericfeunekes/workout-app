@@ -164,12 +164,17 @@ public enum Autoreg {
     ///   - A set with `done == true` is never touched — it's in the past.
     ///   - A set with `adjust == .manual` is never touched — the user
     ///     explicitly chose its load.
+    ///   - A set with `loadKg == nil` (loadless / bodyweight) is never
+    ///     touched — there is no numeric load to autoreg. The spec's
+    ///     autoreg rules operate on kg adjustments; applying them to a
+    ///     BW row would fabricate a numeric load out of thin air and
+    ///     render "2.5 kg" for a bodyweight row.
     ///   - Any other set has its `loadKg` overwritten with the proposal's
     ///     `newLoadKg`, and its `adjust` set to `.up` / `.down` based on
     ///     the proposal direction.
     ///
-    /// Note: this function treats every non-done, non-manual set as
-    /// "remaining" — the caller is expected to pass only the sets that
+    /// Note: this function treats every non-done, non-manual, numeric set
+    /// as "remaining" — the caller is expected to pass only the sets that
     /// should be considered (typically: sets strictly after the one that
     /// just logged). Core/Session will own the windowing; Core/Autoreg
     /// stays pure.
@@ -182,6 +187,7 @@ public enum Autoreg {
         return sets.map { set in
             if set.done { return set }
             if set.adjust == .manual { return set }
+            if set.loadKg == nil { return set }
             return set.with(loadKg: proposal.newLoadKg, adjust: newAdjust)
         }
     }

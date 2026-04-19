@@ -1,33 +1,30 @@
 // FirstRunViewModel.swift
 //
 // Drives the first-run connection flow: URL + token entry → /api/version
-// handshake → first /api/sync/pull → persist and hand off. Pattern mirrors
+// handshake → persist connection → hand off to the shell. Pattern mirrors
 // `TodayViewModel` / `ExecutionViewModel`: `@Observable @MainActor final
 // class`, state transitions set via plain property assignments, async
 // entry points are regular `func` methods.
 //
 // Why a dedicated state enum rather than individual booleans:
-//   The screen is a finite state machine (welcome → connecting → syncing
-//   → complete | failed) and SwiftUI views switch on `state`. Individual
-//   flags would let the UI drift into impossible combinations ("is
-//   loading AND has error"). A single enum stays honest.
+//   The screen is a finite state machine (welcome → connecting → complete
+//   | failed) and SwiftUI views switch on `state`. Individual flags would
+//   let the UI drift into impossible combinations ("is loading AND has
+//   error"). A single enum stays honest.
 //
-// Why call both /api/version and /api/sync/pull here:
-//   - /api/version is the cheap handshake: 401 surfaces immediately and
-//     decode failures on it mean "this isn't a workoutdb server".
-//   - /api/sync/pull primes the cache so Today has data to render on
-//     first entry. Per docs/sync.md § "First-run UX" the first sync is
-//     all-or-nothing; crashing mid-pull restarts from scratch on next
-//     launch.
+// Scope boundary — FirstRun validates, AppBootstrap hydrates:
+//   FirstRun only fires `GET /api/version` as a cheap "is this a workoutdb
+//   server with a valid token" handshake. It does NOT fire `GET
+//   /api/sync/pull` — that job belongs to `Shell.AppBootstrap`, which
+//   maps DTOs to Domain, writes them to the local cache, and builds the
+//   Today + Execution view models. Running the pull here too would be a
+//   duplicate network call and a stranding hazard: if this-layer pull
+//   succeeded but bootstrap's pull later failed, the user could land on
+//   `.empty` with no way back to FirstRun to pick a different server.
+//   One owner for the initial pull is the fix.
 //
 // TokenStore writes happen *only after* /api/version returns 200. We do
 // not want to persist a token that produces 401 on every subsequent call.
-//
-// PullSummary counts come from the pull response DTO. We decode the
-// `workouts` and `exercises` array lengths locally rather than using
-// `PullService` — PullService drags in the full domain mapping pipeline
-// and we only need two ints here. Kept the decoder forgiving: if the
-// shape doesn't match, we flip to .failed(.decode) and the user can retry.
 
 import Foundation
 import Sync
@@ -45,11 +42,10 @@ public final class FirstRunViewModel {
         case welcome
         /// `GET /api/version` in flight.
         case connecting
-        /// `GET /api/sync/pull` in flight. Summary populates once the
-        /// response decodes; before that the count chip is absent.
-        case syncingFirstPull(pulled: PullSummary?)
         /// Terminal success — `onComplete` has been invoked and the shell
-        /// is expected to route past this screen.
+        /// is expected to route past this screen. The shell's
+        /// BootstrapLoadingView takes over from here and owns the first
+        /// `/api/sync/pull`.
         case complete
         /// Inline-banner failure. The user remains on the welcome card
         /// with their inputs intact and can retry.
@@ -64,10 +60,10 @@ public final class FirstRunViewModel {
         /// runs before any network I/O — we never fire a request at junk
         /// input.
         case invalidURL
-        /// Server returned 401 on `/api/version` or `/api/sync/pull`.
-        /// Distinct from `.unreachable` because per docs/sync.md § "Auth
-        /// posture" a 401 is "token rejected — re-enter credentials",
-        /// not a transient network blip.
+        /// Server returned 401 on `/api/version`. Distinct from
+        /// `.unreachable` because per docs/sync.md § "Auth posture" a 401
+        /// is "token rejected — re-enter credentials", not a transient
+        /// network blip.
         case tokenRejected
         /// Transport-level failure: DNS, timeout, connection refused, or
         /// any non-2xx non-401 HTTP status. Retrying makes sense.
@@ -76,20 +72,6 @@ public final class FirstRunViewModel {
         /// Usually means "this URL answered but it's not a workoutdb
         /// server" — fixable by correcting the URL.
         case decode
-    }
-
-    /// Lightweight counts for the "syncing your program" card. The full
-    /// mapped pull lives in Persistence once this package's consumer
-    /// wires in the cache write — we deliberately don't hold the mapped
-    /// rows on the view model.
-    public struct PullSummary: Equatable, Sendable {
-        public let sessions: Int
-        public let exercises: Int
-
-        public init(sessions: Int, exercises: Int) {
-            self.sessions = sessions
-            self.exercises = exercises
-        }
     }
 
     // MARK: - Observable properties
@@ -108,7 +90,7 @@ public final class FirstRunViewModel {
     /// `connect()` protects programmatic / test callers.
     public var isConnectInFlight: Bool {
         switch state {
-        case .connecting, .syncingFirstPull, .complete:
+        case .connecting, .complete:
             return true
         case .welcome, .failed:
             return false
@@ -130,50 +112,62 @@ public final class FirstRunViewModel {
     /// a pre-built `HTTPTransport`. The builder closure constructs a
     /// `URLSessionTransport` (or a fake in tests) against the entered
     /// base URL.
+    ///
+    /// `initialURL` / `initialToken` pre-fill the fields — used by the
+    /// "change server" recovery route from `.empty` so Eric doesn't have
+    /// to retype a URL he likely wants to edit rather than replace.
     public init(
         tokenStore: any TokenStore,
         transportBuilder: @escaping @Sendable (URL) -> any HTTPTransport,
-        onComplete: @escaping @Sendable () -> Void
+        onComplete: @escaping @Sendable () -> Void,
+        initialURL: String = "",
+        initialToken: String = ""
     ) {
         self.tokenStore = tokenStore
         self.transportBuilder = transportBuilder
         self.onComplete = onComplete
         self.decoder = JSONDecoder()
+        self.url = initialURL
+        self.token = initialToken
     }
 
     /// Convenience for production callers: always builds a
     /// `URLSessionTransport`. Tests use the primary init with a fake.
     public convenience init(
         tokenStore: any TokenStore,
-        onComplete: @escaping @Sendable () -> Void
+        onComplete: @escaping @Sendable () -> Void,
+        initialURL: String = "",
+        initialToken: String = ""
     ) {
         self.init(
             tokenStore: tokenStore,
             transportBuilder: { url in URLSessionTransport(baseURL: url) },
-            onComplete: onComplete
+            onComplete: onComplete,
+            initialURL: initialURL,
+            initialToken: initialToken
         )
     }
 
     // MARK: - Intent
 
-    /// Kick off the connect → version → pull → save → done pipeline.
+    /// Kick off the connect → version → save → done pipeline.
     /// Idempotent on failure: the view lets the user edit and call this
     /// again. Every call starts from `.connecting` and runs to a terminal
     /// state (`.complete` or `.failed`).
     ///
     /// Re-entrancy guard: a second tap while the pipeline is mid-flight
-    /// (state is `.connecting`, `.syncingFirstPull`, or `.complete`) is a
-    /// no-op. Without this guard, double-tapping "connect" enqueues two
-    /// concurrent Task { await connect() } pipelines that both reach
-    /// `TokenStore.save` and `onComplete`, producing duplicate saves and
-    /// duplicate pulls. The view layer also disables the primary button
-    /// while the flow is in flight; this guard is the belt-and-braces
-    /// backstop for test / programmatic callers.
+    /// (state is `.connecting` or `.complete`) is a no-op. Without this
+    /// guard, double-tapping "connect" enqueues two concurrent Task {
+    /// await connect() } pipelines that both reach `TokenStore.save` and
+    /// `onComplete`, producing duplicate saves. The view layer also
+    /// disables the primary button while the flow is in flight; this
+    /// guard is the belt-and-braces backstop for test / programmatic
+    /// callers.
     public func connect() async {
         switch state {
         case .welcome, .failed:
             break
-        case .connecting, .syncingFirstPull, .complete:
+        case .connecting, .complete:
             return
         }
         guard let baseURL = validatedURL() else {
@@ -195,11 +189,10 @@ public final class FirstRunViewModel {
             break
         }
 
-        // Step 2 — persist. Writing before the pull means the pair
-        // survives a mid-pull crash (per docs/sync.md § "First-sync
-        // crash recovery" — the connection string persists; the
-        // partial cache is cleared). If the save itself throws we treat
-        // it as unreachable so the user can retry.
+        // Step 2 — persist. The shell's AppBootstrap fires the actual
+        // first pull after `onComplete`; see the scope-boundary comment
+        // at the top of the file. If the save itself throws we treat it
+        // as unreachable so the user can retry.
         do {
             try tokenStore.saveConnection(url: baseURL, token: bearer)
         } catch {
@@ -207,16 +200,8 @@ public final class FirstRunViewModel {
             return
         }
 
-        // Step 3 — first pull. Report counts as soon as we have them.
-        state = .syncingFirstPull(pulled: nil)
-        switch await fetchFirstPull(transport: transport, bearerToken: bearer) {
-        case .success(let summary):
-            state = .syncingFirstPull(pulled: summary)
-            state = .complete
-            onComplete()
-        case .failure(let reason):
-            state = .failed(reason: reason)
-        }
+        state = .complete
+        onComplete()
     }
 
     /// Shorthand for "user tapped retry after a failure." Semantically
@@ -281,46 +266,6 @@ public final class FirstRunViewModel {
         }
     }
 
-    /// Fire `GET /api/sync/pull` (no `since`) and summarize. We only read
-    /// the two count fields — we do not map DTOs to Domain here. The
-    /// shell's real sync path does that on subsequent pulls.
-    private func fetchFirstPull(
-        transport: any HTTPTransport,
-        bearerToken: String
-    ) async -> Result<PullSummary, FailureReason> {
-        let response: HTTPResponse
-        do {
-            response = try await transport.get(
-                path: "/api/sync/pull",
-                query: [],
-                bearerToken: bearerToken
-            )
-        } catch let err as SyncError {
-            return .failure(mapSyncError(err))
-        } catch {
-            return .failure(FailureReason.unreachable)
-        }
-
-        switch response.status {
-        case 200...299:
-            break
-        case 401:
-            return .failure(FailureReason.tokenRejected)
-        default:
-            return .failure(FailureReason.unreachable)
-        }
-
-        do {
-            let probe = try decoder.decode(PullProbe.self, from: response.body)
-            return .success(PullSummary(
-                sessions: probe.workouts.count,
-                exercises: probe.exercises.count
-            ))
-        } catch {
-            return .failure(FailureReason.decode)
-        }
-    }
-
     /// Map Sync's error vocabulary to FirstRun's narrower one. Sync
     /// distinguishes `.tokenRejected`, `.network`, `.server`, `.decode`,
     /// `.encode`; FirstRun only needs the three branches the user can
@@ -348,13 +293,3 @@ private struct VersionProbe: Decodable {
         case serverVersion = "server_version"
     }
 }
-
-/// Minimal shape of `GET /api/sync/pull` — just enough to count sessions
-/// and exercises. We decode only two arrays; everything else on the
-/// response is ignored until the real sync path takes over.
-private struct PullProbe: Decodable {
-    let workouts: [PullProbeEmpty]
-    let exercises: [PullProbeEmpty]
-}
-
-private struct PullProbeEmpty: Decodable {}

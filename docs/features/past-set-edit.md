@@ -42,10 +42,11 @@ Correctively edit a logged set's load, reps, or RIR. **In active session** (Rest
 - `adjustGlyph` renders `✎` for `.manual` on `ActiveView.swift:154-156`. The "adjusted" glyph shows in the active hero block.
 
 ## Known issues / gaps
-- **History-screen edit stubbed** (bug-015). `docs/open-questions.md` § "Editing a completed, synced set from history" says "allowed, and push. UUIDs make it idempotent" as the assumption. The UI is still a flash-highlight placeholder, but the push path is now available — the sheet only needs to call `viewModel.editPastSet(...)` once it's built.
-- `docs/open-questions.md:22-24` flags lack of `set_log.updated_at` on the server — no provenance for edits.
-- `docs/open-questions.md:285-287` — **session detail set indexes render "2..N" instead of "1..N"** (cosmetic watchlist).
-- Bugs fixed this session that touch History's path into this feature: `HistoryRow` Button-in-NavigationLink (now flattened); server naive datetime; `/api/sync/results` UUID case mismatch; `saveAndDone` missing status_update. See `docs/open-questions.md`.
+- History-screen edit sheet shipped (bug-015) and is unit-aware (bug-051): labels per source `weightUnit`, reps capped at 999, RIR clear via explicit-clear enum state.
+- `completedAt` preservation (bug-054): `enqueueEditedSet` now carries the original `completedAt` instead of stamping edit time. The Active-session and History-tab edit paths now agree on timestamps.
+- Per-set `startedAt` provenance (bug-054): `SessionState.workStartedAt` anchor is stamped on `.start` + `.advanceFromRest`, consumed by the reducer in `.logSet` / `.logCardioSet`, and preserved through completion + edit.
+- Set-index render bug (bug-020) closed — `formatSetRow` uses `setIndex` as-is; pipeline is 1-based throughout.
+- `set_log.updated_at` still not a server column — no provenance for edits on the server side.
 
 ## QA scenarios
 

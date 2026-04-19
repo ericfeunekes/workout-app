@@ -1,0 +1,373 @@
+// ExecutionViewModelLogCurrentSetTests.swift
+//
+// Regression coverage for the R2.12 cardio-dispatch bug: pre-R2.12,
+// `ActiveView`'s primary log button opened `LogSetSheet` for every
+// block, so cardio sessions enqueued strength-shaped SetLog rows
+// (reps=0, durationSec=nil). The fix adds a VM-level `logCurrentSet`
+// that inspects the current block's timing mode and routes to either
+// `logSet(reps:rir:)` (strength) or `logCardioSet(...)` (cardio).
+//
+// These tests pin the routing contract:
+//   * strength blocks → `logSet` path: the pushed SetLog carries reps
+//     and (if authored) weight.
+//   * intervals blocks → `logCardioSet` path: SetLog carries
+//     durationSec derived from the timing config's work shape.
+//   * continuous blocks → `logCardioSet` path: SetLog carries
+//     durationSec derived from elapsed `clock.now - workStartedAt`.
+//   * ActiveView no longer calls `logSet(reps:rir:)` from its primary
+//     button action — the only `logSet(reps:rir:)` reference left is
+//     inside the strength-only `LogSetSheet` commit closure. Enforced
+//     via source inspection so a future refactor can't silently re-
+//     introduce the cardio dispatch bug.
+
+import Foundation
+import XCTest
+import CoreDomain
+import CoreSession
+import WorkoutCoreFoundation
+@testable import FeaturesExecution
+
+@MainActor
+final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
+
+    // MARK: - Fixtures (single-block workouts per timing mode)
+
+    /// Strength straight-sets — 3 × 5 @ 100 kg bench press. Used to
+    /// prove `logCurrentSet` routes to the strength path.
+    private static func strengthContext() -> (WorkoutContext, UUID) {
+        let userID = UUID()
+        let workoutID = UUID()
+        let blockID = UUID()
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let now = Date()
+        let workout = Workout(
+            id: workoutID, userID: userID, name: "Strength",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil, createdAt: now, updatedAt: now,
+            completedAt: nil, tagsJSON: nil
+        )
+        let block = Block(
+            id: blockID, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: nil, timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":60,"rest_between_exercises_sec":60}"#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let item = WorkoutItem(
+            id: itemID, blockID: blockID, position: 0,
+            exerciseID: exerciseID,
+            prescriptionJSON: #"{"sets":3,"reps":5,"load_kg":100,"weight_unit":"kg"}"#
+        )
+        let ctx = WorkoutContext(
+            workout: workout,
+            blocks: [block],
+            itemsByBlock: [[item]],
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Bench")]
+        )
+        return (ctx, itemID)
+    }
+
+    /// Distance-based intervals fixture — 10 × 400 m at 4:30 / km.
+    /// `work_distance_m / 1000 * target_pace_sec_per_km` = 108 s.
+    private static func intervalsContext() -> (WorkoutContext, UUID) {
+        let userID = UUID()
+        let workoutID = UUID()
+        let blockID = UUID()
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let now = Date()
+        let workout = Workout(
+            id: workoutID, userID: userID, name: "Intervals",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil, createdAt: now, updatedAt: now,
+            completedAt: nil, tagsJSON: nil
+        )
+        let block = Block(
+            id: blockID, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: nil, timingMode: .intervals,
+            timingConfigJSON: #"""
+            {"work_distance_m":400,"rest_distance_m":200,"interval_count":10,"target_pace_sec_per_km":270}
+            """#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let item = WorkoutItem(
+            id: itemID, blockID: blockID, position: 0,
+            exerciseID: exerciseID,
+            prescriptionJSON: "{}"
+        )
+        let ctx = WorkoutContext(
+            workout: workout,
+            blocks: [block],
+            itemsByBlock: [[item]],
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Run")]
+        )
+        return (ctx, itemID)
+    }
+
+    /// Continuous — a 30 min Z2 run.
+    private static func continuousContext() -> (WorkoutContext, UUID) {
+        let userID = UUID()
+        let workoutID = UUID()
+        let blockID = UUID()
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let now = Date()
+        let workout = Workout(
+            id: workoutID, userID: userID, name: "Continuous",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil, createdAt: now, updatedAt: now,
+            completedAt: nil, tagsJSON: nil
+        )
+        let block = Block(
+            id: blockID, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: nil, timingMode: .continuous,
+            timingConfigJSON: #"""
+            {"target_duration_sec":1800,"target_pace_sec_per_km":360,"target_hr_zone":2}
+            """#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let item = WorkoutItem(
+            id: itemID, blockID: blockID, position: 0,
+            exerciseID: exerciseID,
+            prescriptionJSON: "{}"
+        )
+        let ctx = WorkoutContext(
+            workout: workout,
+            blocks: [block],
+            itemsByBlock: [[item]],
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Run")]
+        )
+        return (ctx, itemID)
+    }
+
+    // MARK: - Routing
+
+    func testLogCurrentSetRoutesToLogSetForStrength() async throws {
+        // Strength straight-sets block: `logCurrentSet(reps: 5, rir: 2)`
+        // must fall through to `logSet(reps:rir:)`. The pushed SetLog
+        // carries reps / weight / weightUnit — strength-shaped — and
+        // leaves durationSec / distanceM / hrAvgBpm nil.
+        let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_000))
+        let (ctx, itemID) = Self.strengthContext()
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
+        vm.start()
+
+        XCTAssertFalse(
+            vm.isCurrentBlockCardio,
+            "straight-sets must be classified as strength"
+        )
+        vm.logCurrentSet(reps: 5, rir: 2)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let logs = await recorder.setLogs
+        XCTAssertEqual(logs.count, 1)
+        let log = try XCTUnwrap(logs.first)
+        XCTAssertEqual(log.workoutItemID, itemID)
+        XCTAssertEqual(log.reps, 5, "strength path carries reps")
+        XCTAssertEqual(log.rir, 2)
+        XCTAssertEqual(log.weight, 100)
+        XCTAssertEqual(log.weightUnit, .kg)
+        XCTAssertNil(log.durationSec, "strength path must NOT populate durationSec")
+        XCTAssertNil(log.distanceM)
+        XCTAssertNil(log.hrAvgBpm)
+    }
+
+    func testLogCurrentSetRoutesToLogCardioSetForIntervals() async throws {
+        // Intervals distance-based block. `logCurrentSet()` (no reps /
+        // rir) must dispatch the cardio path; the pushed SetLog carries
+        // durationSec = elapsed `clock.now - workStartedAt`, NOT the
+        // authored target_pace_sec_per_km × distance. Authored work_sec
+        // / target pace are prescription targets — logging them would
+        // echo the plan instead of what actually happened. A runner
+        // pushing a 400 m interval at 25 s under target must see the
+        // faster time land in the log, not the target 108 s.
+        //
+        // Distance still comes from the authored prescription (v1 has
+        // no sensor integration), so `distanceM == 400`.
+        let t0 = Date(timeIntervalSince1970: 1_700_001_000)
+        let clock = AdvanceableClock(now: t0)
+        let (ctx, itemID) = Self.intervalsContext()
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
+        vm.start()
+
+        XCTAssertTrue(
+            vm.isCurrentBlockCardio,
+            "intervals must be classified as cardio"
+        )
+        // Runner comes in under target — 83 s vs the authored 108 s.
+        clock.advance(by: 83)
+        vm.logCurrentSet()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let logs = await recorder.setLogs
+        XCTAssertEqual(logs.count, 1, "cardio path must push exactly one SetLog")
+        let log = try XCTUnwrap(logs.first)
+        XCTAssertEqual(log.workoutItemID, itemID)
+        XCTAssertEqual(log.setIndex, 1)
+        XCTAssertEqual(
+            try XCTUnwrap(log.durationSec),
+            83,
+            accuracy: 0.001,
+            "intervals duration = elapsed since workStartedAt, not target pace × distance"
+        )
+        XCTAssertEqual(log.distanceM, 400, "authored distance still flows through")
+        // Cardio rows must not carry strength-shaped fields.
+        XCTAssertNil(log.reps, "cardio path must NOT carry reps")
+        XCTAssertNil(log.weight)
+        XCTAssertNil(log.weightUnit)
+        XCTAssertNil(log.rir)
+    }
+
+    func testLogCurrentSetRoutesToLogCardioSetForContinuous() async throws {
+        // Continuous block. `logCurrentSet()` must route through the
+        // cardio path with durationSec = elapsed since workStartedAt.
+        // `start()` stamps workStartedAt = clock.now. Advance the clock
+        // by 1805 s (just over the 30-min target), then log.
+        let t0 = Date(timeIntervalSince1970: 1_700_002_000)
+        let clock = AdvanceableClock(now: t0)
+        let (ctx, itemID) = Self.continuousContext()
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
+        vm.start()
+
+        XCTAssertTrue(
+            vm.isCurrentBlockCardio,
+            "continuous must be classified as cardio"
+        )
+        clock.advance(by: 1805)
+        vm.logCurrentSet()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let logs = await recorder.setLogs
+        XCTAssertEqual(logs.count, 1)
+        let log = try XCTUnwrap(logs.first)
+        XCTAssertEqual(log.workoutItemID, itemID)
+        XCTAssertEqual(
+            try XCTUnwrap(log.durationSec),
+            1805,
+            accuracy: 0.001,
+            "continuous duration = elapsed since workStartedAt"
+        )
+        XCTAssertEqual(log.startedAt, t0)
+        XCTAssertNil(log.distanceM, "no authored distance → nil")
+        XCTAssertNil(log.reps)
+        XCTAssertNil(log.weight)
+        // The block has no rest and the single set is the last one,
+        // so the VM should land on .complete.
+        XCTAssertEqual(vm.state.route, .complete)
+    }
+
+    // MARK: - Source inspection
+
+    func testActiveViewCardioBlockDispatchesLogCurrentSet() throws {
+        // Contract: ActiveView's primary log-button action MUST NOT call
+        // `logSet(reps:rir:)` directly — that's the cardio-dispatch bug.
+        // The only `logSet(reps:rir:)` call left in the Active screen's
+        // UI surface is inside `LogSetSheet`'s commit closure in
+        // `ActiveView.swift`, which the cardio branch never presents.
+        //
+        // This test reads the two source files that constitute the
+        // primary-button path — `ActiveView.swift` and
+        // `ActiveView+LogButton.swift` — and asserts:
+        //   * `ActiveView+LogButton.swift` dispatches `logCurrentSet`
+        //     (the cardio-safe routing entry point).
+        //   * `ActiveView+LogButton.swift` does NOT contain
+        //     `logSet(reps:` — the button must not bypass routing.
+        //   * `ActiveView.swift` still has exactly one `logSet(reps:`
+        //     call (the strength-only `LogSetSheet` commit).
+        let activeView = try loadSource(
+            relativePath: "ActiveView.swift"
+        )
+        let activeViewLogButton = try loadSource(
+            relativePath: "ActiveView+LogButton.swift"
+        )
+
+        // Count actual call sites (`viewModel.logSet(reps:`) — ignore doc
+        // comments and the declaration itself. The only permitted call is
+        // inside `ActiveView.swift`'s LogSetSheet commit closure (strength
+        // only). `ActiveView+LogButton.swift` must have zero.
+        func callSiteCount(_ source: String) -> Int {
+            source.components(separatedBy: "viewModel.logSet(reps:").count - 1
+        }
+        func callCurrentSetCount(_ source: String) -> Int {
+            source.components(separatedBy: "viewModel.logCurrentSet(").count - 1
+        }
+
+        XCTAssertGreaterThanOrEqual(
+            callCurrentSetCount(activeViewLogButton),
+            1,
+            "the log button must dispatch viewModel.logCurrentSet for mode routing"
+        )
+        XCTAssertEqual(
+            callSiteCount(activeViewLogButton),
+            0,
+            "the log button must not bypass routing by calling viewModel.logSet(reps:rir:)"
+        )
+        XCTAssertEqual(
+            callSiteCount(activeView),
+            1,
+            "only the LogSetSheet's strength-specific commit may call viewModel.logSet(reps:)"
+        )
+    }
+
+    // MARK: - Helpers
+
+    /// Locate a sibling source file under the Execution package's
+    /// `Sources/FeaturesExecution` directory relative to this test
+    /// file's compile-time path. Works under both `swift test` and
+    /// `xcodebuild test` because `#filePath` resolves to the test
+    /// source's absolute path in both environments.
+    private func loadSource(relativePath: String, file: StaticString = #filePath) throws -> String {
+        let here = URL(fileURLWithPath: String(describing: file))
+        // `here` = .../Execution/Tests/FeaturesExecutionTests/<this>.swift
+        // Walk up to the package root, then into Sources.
+        let packageRoot = here
+            .deletingLastPathComponent() // FeaturesExecutionTests/
+            .deletingLastPathComponent() // Tests/
+            .deletingLastPathComponent() // Execution/
+        let source = packageRoot
+            .appendingPathComponent("Sources/FeaturesExecution/\(relativePath)")
+        return try String(contentsOf: source, encoding: .utf8)
+    }
+}
+
+// MARK: - Test Clocks
+
+/// A `Clock` whose `now` can be advanced after construction. Enables the
+/// continuous-duration test to prove `logCurrentSet` reads the VM's
+/// injected clock at dispatch time (not at `start()` time).
+///
+/// Scoped `private` to this test file — `ExecutionViewModelTests.swift`
+/// ships its own `MutableClock` with slightly different semantics, and
+/// we don't want name / behavior collisions across the target.
+private final class AdvanceableClock: Clock, @unchecked Sendable {
+    private var _now: Date
+    private let lock = NSLock()
+
+    init(now: Date) {
+        self._now = now
+    }
+
+    var now: Date {
+        lock.lock()
+        defer { lock.unlock() }
+        return _now
+    }
+
+    func advance(by seconds: TimeInterval) {
+        lock.lock()
+        defer { lock.unlock() }
+        _now = _now.addingTimeInterval(seconds)
+    }
+}

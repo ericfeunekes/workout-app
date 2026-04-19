@@ -94,6 +94,11 @@ enum Fixtures {
         )
     }
 
+    /// Build a domain `SetLog` fixture. The local-only denormalized
+    /// fields (`workoutID`, `plannedExerciseID` on `SetLogModel`) are
+    /// stamped by the cache at insert time, so they don't belong on
+    /// the domain fixture — callers pass them through `saveSetLogs`'s
+    /// `workoutID` parameter instead.
     static func sampleSetLog(
         id: UUID = UUID(),
         workoutItemID: UUID = UUID(),

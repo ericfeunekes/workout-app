@@ -224,10 +224,25 @@ extension SetLogModel {
         )
     }
 
-    public static func from(_ s: SetLog) -> SetLogModel {
+    /// Build a `SetLogModel` from a domain `SetLog` plus the two
+    /// denormalized-locally fields (`workoutID`, `plannedExerciseID`)
+    /// that don't exist on the wire or the domain type. Callers who
+    /// know the workout and planned exercise at write time pass them
+    /// through; the R1.4 SetLog denormalization relies on these being
+    /// stamped on insert so the History queries can resolve without
+    /// walking the block → item chain. See
+    /// `WorkoutCache+History.swift` for the query path and the file
+    /// header on `SwiftDataModels.swift` for the rationale.
+    public static func from(
+        _ s: SetLog,
+        workoutID: UUID?,
+        plannedExerciseID: UUID?
+    ) -> SetLogModel {
         SetLogModel(
             id: s.id,
             workoutItemID: s.workoutItemID,
+            workoutID: workoutID,
+            plannedExerciseID: plannedExerciseID,
             performedExerciseID: s.performedExerciseID,
             setIndex: s.setIndex,
             reps: s.reps,
@@ -247,6 +262,11 @@ extension SetLogModel {
         )
     }
 
+    /// Apply domain-level fields to an existing row. `workoutID` +
+    /// `plannedExerciseID` are deliberately NOT updated here — they
+    /// are local denormalizations stamped at insert time; an edit
+    /// (corrective past-set edit, for example) must not change the
+    /// row's original workout / planned-exercise binding.
     public func apply(_ s: SetLog) {
         workoutItemID = s.workoutItemID
         performedExerciseID = s.performedExerciseID

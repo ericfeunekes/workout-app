@@ -34,12 +34,12 @@ covers:
 - EMOM `interval_sec` + `total_minutes` — parsed as typed fields; no driver logic consumes them yet (`TimingConfig.swift:36-39`).
 
 ## Known issues / gaps
-- All 11 drivers built + registered + unit-tested. Integration coverage: `testAMRAPBlockCompletesAtTimeCap`, `testEMOMCursorRoundRobinsPerInterval`, `testCircuitRoundsWalkItemsThenRoundBumps`, `testForTimeRoundSchemeRendersEachRoundReps`, `testContinuousSingleItemCompletesAfterLog`. Reducer round-robin: 4 new cases in `CoreSessionTests/main.swift`.
-- **Tabata work-expiry auto-logs a placeholder `(reps: 0, rir: nil)`.** The 20s / 10s / 8-round cadence is enforced; prompting the user for a real per-round rep count is a later slice. Documented in `TabataDriver.swift` and `ExecutionViewModel+Persistence.swift` (`autoLogAndRestForTabata`).
-- **Intervals distance-based** (`work_distance_m` / `rest_distance_m`) renders correctly but GPS-driven lap advancement is out of scope for v1 — the user taps next-lap. Time-based intervals auto-cadence via `IntervalsDriver.restDuration`.
-- **Custom segment-walker UI** is deferred — v1 treats `custom` as a thin renderer: the seeder uses set-major advancement reading the item's own `sets`, the user ticks through without the driver imposing segment cadence.
-- **Superset autoreg** is off in v1 — the reducer needs "applies to remaining rounds of the superset" semantics before autoreg proposals make sense for round-robin modes. Flagged in `SupersetDriver.swift` header.
-- **AMRAP / EMOM sentinel.** Seeded at 100 rows per item; the VM's time-cap path (`blockEndsAt` + `tickBlockTimer`) terminates the block well before the cursor hits row 100.
+- All 11 drivers built + registered + unit-tested. Integration coverage: `testAMRAPBlockCompletesAtTimeCap`, `testEMOMCursorRoundRobinsPerInterval`, `EMOMBoundaryTests` (bug-050 minute-boundary via `intervalAnchorAt`), `testCircuitRoundsWalkItemsThenRoundBumps`, `testForTimeRoundSchemeRendersEachRoundReps`, `testContinuousSingleItemCompletesAfterLog`.
+- **EMOM minute-boundary advance** (bug-050): `SessionState.intervalAnchorAt` anchors the interval; VM auto-dispatches `.advanceFromRest` when wall-clock elapses past `anchor + interval_sec`. Pre-R2.1 restore backfills the anchor from `blockEndsAt − total_minutes*60`. Rest-ring uses log-time against the anchor, not `interval_sec` from log moment.
+- **Tabata narrowed to strength-only for v0.** The 20s / 10s / 8-round cadence is enforced; work-expiry auto-logs `(reps: 0, rir: nil)`. Multi-item Tabata collapses to `items[0]` at seed time and emits `execution.tabata_multi_item_collapsed` telemetry (bug-055). Cardio-shaped Tabata (rower / assault-bike work windows) deferred.
+- **Cardio contract** (bug-049): IntervalsDriver + ContinuousDriver now route logs through `.logCardioSet` which carries `durationSec` / `distanceM` / `hrAvgBpm` / `cadenceAvgSpm` / `startedAt`. Elapsed wins over authored target pace × distance. IntervalsDriver suppresses trailing rest on the final interval. GPS-driven lap advancement still out of scope — user taps next-lap.
+- **Superset / Circuit / Custom autoreg** is off in v1 — those drivers now read `itemLog.sets[cursor]` (bug-053) so swap overrides survive, but autoreg proposals for round-robin modes still need "applies to remaining rounds" semantics in the reducer.
+- **AMRAP / EMOM sentinel.** Seeded at 100 rows per item; the VM's time-cap path (`blockEndsAt` + `tickBlockTimer`) terminates the block well before the cursor hits row 100. AMRAP's `totalSets = 0` (bug-037) hides the progress-dot row.
 
 ---
 

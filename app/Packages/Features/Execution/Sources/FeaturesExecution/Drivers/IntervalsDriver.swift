@@ -100,6 +100,14 @@ public struct IntervalsDriver: TimingDriver {
     /// authored pace; without a pace we return 0 (user taps "next lap"
     /// to advance — GPS-driven advance is not v1). Malformed / wrong-mode
     /// configs also return 0.
+    ///
+    /// Final-interval short-circuit: when the cursor is on the last
+    /// interval (cursor.setIndex == interval_count), rest is 0 so the
+    /// VM's `buildLogMutations` emits `.advanceFromRest` instead of
+    /// `.enterRest`. The cursor then falls off the end of the block via
+    /// `nextCursor → nil` and the route lands on `.complete` — no
+    /// trailing rest screen after the last rep. Matches the "no rest
+    /// after final interval" rule from the R2.11 cardio brief.
     public func restDuration(
         state: SessionState,
         context: WorkoutContext
@@ -111,7 +119,18 @@ public struct IntervalsDriver: TimingDriver {
             configJSON: block.timingConfigJSON
         ) {
         case .success(let config):
-            guard case let .intervals(_, restSec, _, restDistanceM, _, paceSecPerKm) = config else {
+            guard case let .intervals(
+                _,
+                restSec,
+                _,
+                restDistanceM,
+                intervalCount,
+                paceSecPerKm
+            ) = config else {
+                return 0
+            }
+            // Final interval → no rest, go straight to .complete.
+            if c.setIndex >= intervalCount {
                 return 0
             }
             if let restSec {

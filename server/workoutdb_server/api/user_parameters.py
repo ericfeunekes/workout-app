@@ -5,7 +5,7 @@ Caller's user_id is resolved from the bearer token (ADR-2026-04-17).
 
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, status
 from sqlalchemy import func, select
 
 from workoutdb_server.api.deps import CurrentUserId, DbSession
@@ -19,22 +19,67 @@ router = APIRouter(prefix="/api/user-parameters", tags=["user_parameters"])
 def append_parameters(
     payload: list[UserParameterIn], db: DbSession, user_id: CurrentUserId
 ) -> list[UserParameter]:
-    """Always inserts. Never updates. That's the contract."""
-    inserted: list[UserParameter] = []
+    """Insert-or-upsert per row.
+
+    The append-only contract is on (user_id, key) — multiple rows for the same
+    key over time is the design. Idempotency is on PK: when the caller supplies
+    an `id`, a replay of the same payload UPSERTS on that id rather than
+    inserting a second row. This keeps app-side retries safe — the iOS push
+    queue may replay a commit after a crash-between-commit-and-queue-remove,
+    and without id-level idempotency that replay would double-write the row
+    (and since append-only reads never delete, the duplicate would live
+    forever). When `id` is omitted (Claude's bulk imports), the server
+    generates a fresh UUID via the ORM default.
+    """
+    committed: list[UserParameter] = []
     for item in payload:
-        row = UserParameter(
-            user_id=user_id,
-            key=item.key,
-            value=item.value,
-            updated_at=item.updated_at or datetime.now(UTC),
-            source=item.source,
-        )
+        updated_at = item.updated_at or datetime.now(UTC)
+        if item.id is not None:
+            existing = db.get(UserParameter, item.id)
+            if existing is not None:
+                # Tenant guard: the deterministic id scheme lives in the
+                # app (hash of userID+key+timestamp) so collisions across
+                # users are astronomically unlikely, but a malicious or
+                # misbehaving client could replay another user's UUID to
+                # try to read its row. Refuse with 403 instead of
+                # returning the sibling-tenant's value.
+                if existing.user_id != user_id:
+                    raise HTTPException(
+                        status_code=status.HTTP_403_FORBIDDEN,
+                        detail=f"user_parameter {item.id} belongs to another user",
+                    )
+                # Row already exists for this deterministic id — treat the
+                # second push as a no-op update so the response still
+                # carries the canonical row (value + updated_at from the
+                # original commit). Writing EXCLUDED.value here would let
+                # a racing second call overwrite the first's value; the
+                # deterministic id guarantees the caller is re-sending
+                # the same logical row, so keeping the first write wins
+                # by construction.
+                committed.append(existing)
+                continue
+            row = UserParameter(
+                id=item.id,
+                user_id=user_id,
+                key=item.key,
+                value=item.value,
+                updated_at=updated_at,
+                source=item.source,
+            )
+        else:
+            row = UserParameter(
+                user_id=user_id,
+                key=item.key,
+                value=item.value,
+                updated_at=updated_at,
+                source=item.source,
+            )
         db.add(row)
-        inserted.append(row)
+        committed.append(row)
     db.commit()
-    for row in inserted:
+    for row in committed:
         db.refresh(row)
-    return inserted
+    return committed
 
 
 @router.get("", response_model=list[UserParameterRead])

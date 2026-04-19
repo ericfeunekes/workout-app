@@ -39,11 +39,11 @@ On launch (or after FirstRun succeeds), the shell checks `TokenStore.loadConnect
 - `pull.pull` feeds `since: lastSyncAt` on subsequent launches (`AppBootstrap.swift:135-136`) — server returns only changed rows
 
 ## Known issues / gaps
-- Fixed this session: server emitted naive datetimes; Swift decoder required TZ suffix; decode failed silently; bootstrap fell through to empty cache → `.empty` phase. Fixed server-side via `UtcDatetime` annotated type. See `open-questions.md` § "Server emitted naive datetimes".
-- Fixed this session: double-bootstrap race — `onComplete` set phase AND `BootstrapLoadingView.task` kicked off a second pull. Fixed via inert loading view + `didStartBootstrap` guard. See `open-questions.md` § "App shell double-bootstrap race".
-- Fixed this session: `executionVMHolder` weak capture dropped to nil when `runBootstrap()` returned → "start workout" no-op on prod path. Fixed by capturing strongly. See `open-questions.md` § "RootView holder captured weakly".
-- Open: `WorkoutCacheImpl.save` non-atomicity — mid-loop throw leaves dirty ModelContext. See `open-questions.md`.
-- Open: `.empty` retry is the only forward path; no Settings entry. The retry button was added this session (`open-questions.md` § "Empty-cache state dead end").
+- Closed: server naive datetimes (bug-002) via `UtcDatetime` / `UtcDatetimeIn`.
+- Closed: double-bootstrap race via inert loading view + `didStartBootstrap` guard.
+- Closed: `executionVMHolder` weak capture (bug-003).
+- Closed: `.empty` dead-end (bug-048) — a "change server" route with URL + token pre-fill now lets the user back to FirstRun when the cache pulls empty on a wrong server.
+- Closed: `WorkoutCacheImpl.save` non-atomicity — replaced by subtree reconcile with explicit do/catch/rollback frames and detach-before-delete (bug-046).
 - Open: no manual sync trigger — pull only runs at bootstrap. Settings "sync now" is TODO.
 
 ## QA scenarios

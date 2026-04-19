@@ -16,6 +16,7 @@
 
 import XCTest
 import CoreDomain
+import CoreTelemetry
 import FeaturesExecution
 import FeaturesToday
 import Persistence
@@ -255,6 +256,79 @@ final class AppBootstrapTests: XCTestCase {
             return XCTFail("expected .ready from cache, got \(result)")
         }
         XCTAssertEqual(executionVM.context.workout.name, "Push A")
+    }
+
+    // MARK: - Early-launch telemetry reaches the push queue
+
+    /// Regression: the very first `bootstrap.start` event must enqueue
+    /// into the push queue, not just land in the local `EventModel` row.
+    ///
+    /// Old behaviour: `PersistenceFactory.init` fired
+    /// `Task { await emitter.attach(pushQueueStore: ...) }` and returned.
+    /// `AppBootstrap.bootstrap` then emitted `bootstrap.start` on the very
+    /// next MainActor tick — before that detached task had reached the
+    /// actor. The event persisted locally but the emitter's
+    /// `pushQueueStore` was still nil, so `emit` skipped the enqueue
+    /// branch. Events stranded on disk indefinitely, never reached the
+    /// server, and telemetry for launch-time failures (the ones you most
+    /// need to see) disappeared.
+    ///
+    /// Fix: `bootstrap(...)` awaits `persistence.prepareTelemetry()`
+    /// before the first emit. Calling the same method twice is a no-op.
+    /// This test drives a bootstrap that will produce `.empty` (failing
+    /// pull on an empty cache) and confirms the push queue nonetheless
+    /// holds a telemetry event — proof the attach completed before emit.
+    func testBootstrapStartEventEnqueuedBeforeFirstEmit() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        // Network failure + empty cache → .empty. The path is irrelevant;
+        // what matters is that bootstrap emits at least one event before
+        // returning. `bootstrap.start` fires first, `bootstrap.empty`
+        // after the pull-failure catch and TodayLoader.load returns nil.
+        let transport = ScriptedTransport(
+            getOutcomes: [.error(.network("dns"))]
+        )
+
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: Date(),
+            transportBuilder: { _ in transport },
+            telemetryEmitter: factory.telemetryEmitter()
+        )
+        XCTAssertEqual(result, .empty)
+
+        // Emit is fire-and-forget from the caller's perspective — the
+        // TelemetryEmitterImpl hops onto its actor via Task.detached.
+        // Give the actor a chance to land both the local persist AND the
+        // enqueue before we assert. A small sleep is the simplest way
+        // that mirrors how the app itself doesn't block on telemetry.
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        let pending = try await factory.pushQueueStore.peek(max: 32)
+        let eventItems = pending.filter {
+            if case .events = $0.payload { return true }
+            return false
+        }
+        XCTAssertGreaterThanOrEqual(
+            eventItems.count,
+            1,
+            "expected bootstrap.* events to reach the push queue; " +
+            "found \(eventItems.count) of \(pending.count) total items"
+        )
+
+        // The very first emit (`bootstrap.start`) must be among them.
+        var names: [String] = []
+        for item in eventItems {
+            if case .events(let events) = item.payload {
+                names.append(contentsOf: events.map { $0.name })
+            }
+        }
+        XCTAssertTrue(
+            names.contains("bootstrap.start"),
+            "expected bootstrap.start in push queue, got \(names)"
+        )
     }
 
     // MARK: - Helpers

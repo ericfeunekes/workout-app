@@ -10,7 +10,9 @@
 // history review drill-down) have a single entry point.
 
 import SwiftUI
+import CoreDomain
 import DesignSystem
+import WorkoutCoreFoundation
 
 public enum PastSetField: String, Sendable {
     case load
@@ -30,6 +32,7 @@ public struct PastSetSheet: View {
     let mode: PastSetMode
     let setIndex: Int
     let initialLoad: Double
+    let loadUnit: WeightUnit
     let initialReps: Int
     let initialRir: Int?
     let onCommit: (_ load: Double?, _ reps: Int?, _ rir: Int?) -> Void
@@ -40,6 +43,7 @@ public struct PastSetSheet: View {
         mode: PastSetMode,
         setIndex: Int,
         initialLoad: Double,
+        loadUnit: WeightUnit,
         initialReps: Int,
         initialRir: Int?,
         onCommit: @escaping (_ load: Double?, _ reps: Int?, _ rir: Int?) -> Void,
@@ -49,6 +53,7 @@ public struct PastSetSheet: View {
         self.mode = mode
         self.setIndex = setIndex
         self.initialLoad = initialLoad
+        self.loadUnit = loadUnit
         self.initialReps = initialReps
         self.initialRir = initialRir
         self.onCommit = onCommit
@@ -58,9 +63,11 @@ public struct PastSetSheet: View {
     public var body: some View {
         switch field {
         case .load:
+            // R2.10 unit-thread: numpad suffix follows the SetPlan's
+            // unit so lb-prescribed sets render "LB", not "kg".
             NumPadSheet(
                 title: "set \(setIndex) — load",
-                unit: "kg",
+                unit: loadUnit.rawValue,
                 initialValue: initialLoad,
                 step: 2.5,
                 allowsDecimal: true,

@@ -19,6 +19,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
+    BeforeValidator,
     ConfigDict,
     Field,
     PlainSerializer,
@@ -43,7 +44,33 @@ def _serialize_utc(value: datetime) -> str:
     return iso.replace("+00:00", "Z")
 
 
+def _require_z_suffix(value: Any) -> Any:
+    """Reject incoming datetime strings that don't end with a literal `Z`.
+
+    Session invariant: every datetime on the wire carries a `Z` suffix. The
+    Swift encoder emits `Z`; Pydantic's default datetime parser is lax and
+    accepts `+00:00`, `+0000`, naive, etc., so without this guard a client
+    that drifted from the contract would still be silently accepted and
+    stored. Failing loudly at ingest keeps the wire format one-way.
+
+    Non-string values pass through untouched — Pydantic still gets to run
+    its normal datetime coercion for programmatic callers (tests that pass
+    `datetime` instances directly, ORM round-trips via `from_attributes`).
+    `None` also passes through so the Optional-field machinery keeps
+    working; the real parser enforces non-null separately.
+    """
+    if isinstance(value, str) and not value.endswith("Z"):
+        raise ValueError(f"datetime must end with 'Z' (literal UTC), got {value!r}")
+    return value
+
+
 UtcDatetime = Annotated[datetime, PlainSerializer(_serialize_utc, return_type=str)]
+
+# Input-side datetime: validate the `Z` suffix before Pydantic parses. Used
+# on every Create/Update/Upsert schema so a misbehaving client can't slip
+# `+00:00` through. Read-side (`UtcDatetime`) doesn't need the validator —
+# the serializer produces `Z` by construction.
+UtcDatetimeIn = Annotated[datetime, BeforeValidator(_require_z_suffix)]
 
 
 class _UuidReadBase(BaseModel):
@@ -131,26 +158,51 @@ class ExerciseUpsert(_UuidInputBase):
     default_prescription_json: str | None = None
     default_alternatives_json: str | None = None
 
-    @field_validator("default_prescription_json", "default_alternatives_json")
+    @field_validator("default_prescription_json")
     @classmethod
-    def _defaults_must_be_valid_json(cls, value: str | None) -> str | None:
-        """Reject malformed JSON at ingest (bug-032).
+    def _default_prescription_must_be_json_object(cls, value: str | None) -> str | None:
+        """Reject malformed or non-object `default_prescription_json` at ingest.
 
-        `prescription_merge._load_or_empty` assumes these columns hold valid
-        JSON; without this validator a bad string accepted here crashes every
+        bug-032: `prescription_merge._load_or_empty` assumes this column holds
+        a JSON *object*; without this validator a bad value here crashed every
         future `POST /api/workouts` referencing this exercise with a 500.
-        Fail loudly at the write side so the invariant is enforced once,
-        where the data enters the system.
 
-        Deeper shape validation (object vs array, required keys) stays in
-        the merge helpers — this only proves the blob is parseable.
+        bug-035: extended from "valid JSON" to "JSON object". An array or
+        scalar parses cleanly but still blows up in the merge helper, which
+        means the validation is load-bearing at the shape level, not just
+        parseability. Fail once, at ingest, where the data enters the system.
         """
         if value is None:
             return value
         try:
-            json.loads(value)
+            parsed = json.loads(value)
         except (json.JSONDecodeError, ValueError) as exc:
             raise ValueError(f"not valid JSON: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise ValueError(
+                f"default_prescription_json must be a JSON object, got {type(parsed).__name__}"
+            )
+        return value
+
+    @field_validator("default_alternatives_json")
+    @classmethod
+    def _default_alternatives_must_be_json_array(cls, value: str | None) -> str | None:
+        """Reject malformed or non-array `default_alternatives_json` at ingest.
+
+        Same class of fix as `default_prescription_json` (bug-032, bug-035):
+        `merge_alternatives` expects a JSON array. Any other shape crashes the
+        merge at workout POST time with a 500. Shape-check at write time.
+        """
+        if value is None:
+            return value
+        try:
+            parsed = json.loads(value)
+        except (json.JSONDecodeError, ValueError) as exc:
+            raise ValueError(f"not valid JSON: {exc}") from exc
+        if not isinstance(parsed, list):
+            raise ValueError(
+                f"default_alternatives_json must be a JSON array, got {type(parsed).__name__}"
+            )
         return value
 
 
@@ -271,7 +323,7 @@ class WorkoutUpdate(_UuidInputBase):
     status: Literal["planned", "active", "completed", "skipped"] | None = None
     notes: str | None = None
     tags_json: str | None = None
-    completed_at: datetime | None = None
+    completed_at: UtcDatetimeIn | None = None
     blocks: list[BlockIn] | None = None
 
 
@@ -310,8 +362,8 @@ class SetLogIn(_UuidInputBase):
     distance_m: float | None = None
     rir: int | None = Field(default=None, ge=0, le=5)
     is_warmup: bool = False
-    started_at: datetime | None = None
-    completed_at: datetime
+    started_at: UtcDatetimeIn | None = None
+    completed_at: UtcDatetimeIn
     hr_avg_bpm: int | None = None
     hr_max_bpm: int | None = None
     cadence_avg_spm: int | None = None
@@ -346,13 +398,23 @@ class SetLogRead(_UuidReadBase):
 
 
 class UserParameterIn(_UuidInputBase):
-    """user_id is resolved from the bearer token (ADR-2026-04-17)."""
+    """user_id is resolved from the bearer token (ADR-2026-04-17).
 
+    `id` is client-owned when the caller is the iOS app: the app derives
+    a deterministic UUID from `(userID, key, updated_at)` so a replayed
+    push (crash between commit and queue-remove) upserts on id instead
+    of inserting a duplicate row. `user_parameters` is append-only on
+    read, so a duplicate row would live forever. When `id` is omitted
+    (Claude's bulk imports), the server falls back to generating a
+    fresh UUID — Claude's pushes aren't retried client-side.
+    """
+
+    id: str | None = None
     key: str
     value: str
     source: Literal["claude", "app_log", "manual"] = "claude"
     # updated_at optional on create; server stamps now if omitted.
-    updated_at: datetime | None = None
+    updated_at: UtcDatetimeIn | None = None
 
 
 class UserParameterRead(_UuidReadBase):
@@ -370,11 +432,21 @@ class UserParameterRead(_UuidReadBase):
 
 
 class WorkoutStatusUpdate(_UuidInputBase):
-    """App tells server 'this workout transitioned to status X at time Y.'"""
+    """App tells server 'this workout transitioned to status X at time Y.'
+
+    `notes` is optional: the app carries the user's post-workout note as
+    part of the terminal status push so the server is authoritative for
+    the value. Without this, the local cache held the note but the next
+    `sync/pull` overwrote it with the server's stale value (bug: post-
+    completion notes disappeared on next pull). Sending `None` leaves
+    the existing server-side `notes` untouched — only a non-None value
+    updates the row.
+    """
 
     workout_id: str
     status: Literal["active", "completed", "skipped"]
-    completed_at: datetime | None = None
+    completed_at: UtcDatetimeIn | None = None
+    notes: str | None = None
 
 
 class SyncResultsIn(_UuidInputBase):
@@ -413,7 +485,7 @@ class TelemetryEventIn(_UuidInputBase):
     """
 
     id: str
-    timestamp: datetime
+    timestamp: UtcDatetimeIn
     session_id: str
     kind: str
     name: str

@@ -30,6 +30,7 @@
 //   a parser/doc mismatch flagged in the Chunk 5 return summary.
 
 import Foundation
+import CoreDomain
 
 public enum Prescription: Equatable, Sendable, Hashable {
 
@@ -37,10 +38,16 @@ public enum Prescription: Equatable, Sendable, Hashable {
     /// doc (§ "Per-side", § "Tempo"). `sets` and `reps` are optional to
     /// accommodate superset / circuit / emom / for_time items where the
     /// block carries the round count or rep scheme.
+    ///
+    /// `unit` is the `weight_unit` declared on the prescription; defaults
+    /// to `.lb` when the author omits the key (docs/prescription.md
+    /// § "Units"). Numeric `loadKg` is interpreted in this unit — the
+    /// field retains the legacy key spelling (see `SetPlan.loadKg` note).
     case straightSets(
         sets: Int?,
         reps: RepCount?,
         loadKg: Double?,
+        unit: WeightUnit,
         targetRir: Int?,
         autoreg: Autoreg?,
         tempo: String?,
@@ -63,6 +70,7 @@ public enum Prescription: Equatable, Sendable, Hashable {
         repsMin: Int,
         repsMax: Int,
         loadKg: Double?,
+        unit: WeightUnit,
         targetRir: Int?,
         autoreg: Autoreg?
     )
@@ -72,6 +80,7 @@ public enum Prescription: Equatable, Sendable, Hashable {
     /// SetDetail.
     case setsDetail(
         sets: [SetDetail],
+        unit: WeightUnit,
         targetRir: Int?,
         autoreg: Autoreg?
     )
@@ -81,6 +90,7 @@ public enum Prescription: Equatable, Sendable, Hashable {
         sets: Int,
         reps: Int,
         loadKg: Double,
+        unit: WeightUnit,
         subSets: Int,
         intraSetRestSec: Double,
         targetRir: Int?
@@ -91,6 +101,7 @@ public enum Prescription: Equatable, Sendable, Hashable {
     /// `amrap` timing mode. The doc calls this an "AMRAP token".
     case amrapToken(
         loadKg: Double?,
+        unit: WeightUnit,
         targetRir: Int?
     )
 
@@ -108,7 +119,8 @@ public enum Prescription: Equatable, Sendable, Hashable {
     case warmup(
         sets: Int,
         reps: Int,
-        loadKg: Double?
+        loadKg: Double?,
+        unit: WeightUnit
     )
 
     /// The prescription body is `{}`. Used by items whose work is described

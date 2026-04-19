@@ -65,8 +65,11 @@ struct WorkoutDBApp: App {
 
 /// Which high-level state the shell is in. Drives `RootView.body`.
 private enum ShellPhase {
-    /// No saved connection. Show FirstRun.
-    case firstRun
+    /// No saved connection. Show FirstRun. The optional `prefill` carries
+    /// the previously-entered URL + token when the user arrives here via
+    /// the "change server" recovery button on `.empty`, so they don't
+    /// retype values they likely just want to edit.
+    case firstRun(prefill: FirstRunPrefill?)
     /// Saved connection, bootstrap not yet run (or running).
     case bootstrapping
     /// Bootstrap produced view models. `pushFlusher` is the periodic
@@ -84,6 +87,15 @@ private enum ShellPhase {
     /// DEBUG launch-arg fast-path. Uses the preview seed directly.
     case debugSeed(todayVM: TodayViewModel, executionVM: ExecutionViewModel)
     #endif
+}
+
+/// Pre-fill the FirstRun inputs when returning there via the "change
+/// server" recovery route on `.empty`. Both fields are strings (not a
+/// typed URL) so the existing `validatedURL()` path runs unchanged when
+/// the user taps connect.
+struct FirstRunPrefill: Equatable {
+    let url: String
+    let token: String
 }
 
 /// The shell's composite view — owns the shell phase and routes between
@@ -113,7 +125,7 @@ private enum ShellPhase {
 /// guard in hand.
 struct RootView: View {
 
-    @State private var phase: ShellPhase = .firstRun
+    @State private var phase: ShellPhase = .firstRun(prefill: nil)
     @State private var didPerformLaunchCheck: Bool = false
     @State private var didStartBootstrap: Bool = false
 
@@ -168,15 +180,18 @@ struct RootView: View {
     var body: some View {
         Group {
             switch phase {
-            case .firstRun:
+            case .firstRun(let prefill):
                 FirstRunView(viewModel: FirstRunViewModel(
                     tokenStore: persistence.tokenStore,
                     onComplete: {
                         Task { @MainActor in
+                            didStartBootstrap = false
                             phase = .bootstrapping
                             await runBootstrap()
                         }
-                    }
+                    },
+                    initialURL: prefill?.url ?? "",
+                    initialToken: prefill?.token ?? ""
                 ))
 
             case .bootstrapping:
@@ -186,19 +201,26 @@ struct RootView: View {
                 BootstrapLoadingView()
 
             case .empty:
-                EmptyStateView(onRetry: {
-                    // User-initiated retry must be able to re-enter the
-                    // bootstrap path, so clear the guard first. The async
-                    // form lets EmptyStateView reset its local `isRetrying`
-                    // after `runBootstrap` returns, which matters if the
-                    // phase transitions `.empty → .empty` (failed retry)
-                    // without a teardown — SwiftUI `@State` persists across
-                    // identical view-identity renders, so the old behaviour
-                    // relied on teardown that doesn't always happen.
-                    didStartBootstrap = false
-                    phase = .bootstrapping
-                    await runBootstrap()
-                })
+                EmptyStateView(
+                    onRetry: {
+                        // User-initiated retry must be able to re-enter
+                        // the bootstrap path, so clear the guard first.
+                        // The async form lets EmptyStateView reset its
+                        // local `isRetrying` after `runBootstrap` returns,
+                        // which matters if the phase transitions
+                        // `.empty → .empty` (failed retry) without a
+                        // teardown — SwiftUI `@State` persists across
+                        // identical view-identity renders, so the old
+                        // behaviour relied on teardown that doesn't
+                        // always happen.
+                        didStartBootstrap = false
+                        phase = .bootstrapping
+                        await runBootstrap()
+                    },
+                    onChangeServer: {
+                        await changeServer()
+                    }
+                )
 
             case .ready(let todayVM, let executionVM, _):
                 tabbedView(todayVM: todayVM, executionVM: executionVM)
@@ -259,11 +281,11 @@ struct RootView: View {
                 phase = .bootstrapping
                 Task { @MainActor in await runBootstrap() }
             } else {
-                phase = .firstRun
+                phase = .firstRun(prefill: nil)
             }
         } catch {
             // Keychain read failure — treat as no connection.
-            phase = .firstRun
+            phase = .firstRun(prefill: nil)
         }
     }
 
@@ -279,7 +301,7 @@ struct RootView: View {
         didStartBootstrap = true
         guard let connection = try? persistence.tokenStore.loadConnection() else {
             didStartBootstrap = false
-            phase = .firstRun
+            phase = .firstRun(prefill: nil)
             return
         }
 
@@ -355,7 +377,7 @@ struct RootView: View {
             // FirstRun success callback can re-enter.
             try? persistence.tokenStore.clear()
             didStartBootstrap = false
-            phase = .firstRun
+            phase = .firstRun(prefill: nil)
         } catch {
             // Any other error here is unexpected — bootstrap is supposed
             // to absorb transport failures and return `.empty`. Treat as
@@ -382,6 +404,61 @@ struct RootView: View {
         phase = .debugSeed(todayVM: todayVM, executionVM: executionVM)
     }
     #endif
+}
+
+// MARK: - Change server recovery
+//
+// Extracted to an extension so RootView's struct body stays under
+// SwiftLint's `type_body_length` cap. Only `changeServer()` is needed
+// externally — it uses `@MainActor`-isolated `@State` writes on the
+// owning view.
+
+extension RootView {
+
+    /// Bail out of `.empty` back to FirstRun so the user can point at a
+    /// different server (or fix a typo) without force-quitting. Captures
+    /// the current saved URL + token so FirstRun pre-fills its fields
+    /// rather than forcing the user to retype.
+    ///
+    /// Order of operations is deliberate:
+    ///   1. Read the current connection for pre-fill BEFORE clearing it.
+    ///   2. Clear `TokenStore` so a subsequent launch (or a failed new
+    ///      connect) cannot accidentally re-enter bootstrap with the
+    ///      stale pair.
+    ///   3. Wipe the local `WorkoutCache`. Per `docs/sync.md` §
+    ///      "Changing servers" pointing at a different server is
+    ///      equivalent to switching users, so the cached workouts /
+    ///      blocks / items / set_logs must go.
+    ///   4. Reset `didStartBootstrap` so the new FirstRun's onComplete
+    ///      can re-enter `runBootstrap()`.
+    ///   5. Flip phase. The new FirstRun VM sees `prefill` and pre-fills
+    ///      both fields.
+    ///
+    /// Known gap: `lastSyncAt` on the shared `UserDefaults`-backed
+    /// `SyncMetadataStore` is not reset here (that API has no `clear()`).
+    /// If the user picks a *different* server, the stale `lastSyncAt`
+    /// causes the next pull to fetch only deltas after that timestamp.
+    /// Acceptable for the `.empty → change server` recovery path where
+    /// the empty state typically means `lastSyncAt` is nil anyway (no
+    /// successful pull ever produced a serverTime). Full "change server"
+    /// handling (settings surface + dated warning) is the open-question
+    /// item already in `docs/open-questions.md` § "Empty-cache state
+    /// dead end".
+    func changeServer() async {
+        let prefill: FirstRunPrefill
+        if let existing = try? persistence.tokenStore.loadConnection() {
+            prefill = FirstRunPrefill(
+                url: existing.url.absoluteString,
+                token: existing.token
+            )
+        } else {
+            prefill = FirstRunPrefill(url: "", token: "")
+        }
+        try? persistence.tokenStore.clear()
+        try? await persistence.workoutCache.clear()
+        didStartBootstrap = false
+        phase = .firstRun(prefill: prefill)
+    }
 }
 
 // MARK: - Holder for the Today → Execution binding
@@ -416,14 +493,20 @@ private struct BootstrapLoadingView: View {
 /// Shown when bootstrap returned `.empty` — nothing cached and the server
 /// was unreachable. The primary "try again" button re-enters
 /// `runBootstrap()` (clearing the `didStartBootstrap` guard first, see
-/// `RootView.body`). `isRetrying` locally disables the button while the
-/// caller's async closure is running so rapid taps cannot enqueue parallel
-/// bootstraps from this surface either. The async-closure shape ensures
-/// `isRetrying` resets deterministically when the retry returns, rather
+/// `RootView.body`); the ghost "change server" button routes back to
+/// FirstRun so the user can point at a different server or fix a typo
+/// without force-quitting (closes `open-questions.md` § "Empty-cache
+/// state dead end" partially — Settings remains TODO).
+///
+/// `isRetrying` locally disables both buttons while either async closure
+/// is running so rapid taps cannot enqueue parallel bootstraps / change-
+/// server calls from this surface. The async-closure shape ensures
+/// `isRetrying` resets deterministically when the caller returns, rather
 /// than relying on SwiftUI tearing down `@State` on a phase transition.
 private struct EmptyStateView: View {
     let onRetry: @MainActor () async -> Void
-    @State private var isRetrying = false
+    let onChangeServer: @MainActor () async -> Void
+    @State private var isBusy = false
 
     var body: some View {
         VStack(spacing: DSSpacing.lg) {
@@ -437,19 +520,34 @@ private struct EmptyStateView: View {
                     .multilineTextAlignment(.center)
                     .padding(.horizontal, DSSpacing.lg)
             }
-            DSButton(
-                title: "try again",
-                style: .primary,
-                disabled: isRetrying,
-                action: {
-                    guard !isRetrying else { return }
-                    isRetrying = true
-                    Task { @MainActor in
-                        await onRetry()
-                        isRetrying = false
+            VStack(spacing: DSSpacing.md) {
+                DSButton(
+                    title: "try again",
+                    style: .primary,
+                    disabled: isBusy,
+                    action: {
+                        guard !isBusy else { return }
+                        isBusy = true
+                        Task { @MainActor in
+                            await onRetry()
+                            isBusy = false
+                        }
                     }
-                }
-            )
+                )
+                DSButton(
+                    title: "change server",
+                    style: .ghost,
+                    disabled: isBusy,
+                    action: {
+                        guard !isBusy else { return }
+                        isBusy = true
+                        Task { @MainActor in
+                            await onChangeServer()
+                            isBusy = false
+                        }
+                    }
+                )
+            }
             .padding(.horizontal, DSSpacing.xl)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

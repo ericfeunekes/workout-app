@@ -50,12 +50,33 @@ public enum HistoryPreviewSeed {
             build(spec: spec, userID: ids.userID, now: now)
         }
 
+        // Bodyweight sample lands inside the most-recent Push A session's
+        // wall-clock window (`[firstSetStartedAt, completedAt + 2min]`, see
+        // `HistoryViewModel.bodyweight(for:setLogs:history:)`). Without
+        // this the Complete-screen BW chip never renders in SwiftUI
+        // previews — `loadUserParameters("bodyweight_kg")` used to return
+        // `[]`. The id is deterministic so the preview is stable across
+        // canvas refreshes; source `.appLog` matches what
+        // `ExecutionViewModel.enqueueBodyweight` writes in production.
+        let pushASpec = specs[0]
+        let pushAScheduled = now.addingTimeInterval(TimeInterval(-pushASpec.daysAgo * 86_400))
+        let pushACompletedAt = pushAScheduled.addingTimeInterval(54 * 60)
+        let bodyweight = UserParameter(
+            id: UUID(uuidString: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb") ?? UUID(),
+            userID: ids.userID,
+            key: "bodyweight_kg",
+            value: "80.5",
+            updatedAt: pushACompletedAt,
+            source: .appLog
+        )
+
         return PreviewSeed(
             exercises: ids.exercises,
             workouts: built.map(\.workout),
             blocks: built.flatMap(\.blocks),
             items: built.flatMap(\.items),
-            setLogs: built.flatMap(\.setLogs)
+            setLogs: built.flatMap(\.setLogs),
+            userParameters: [bodyweight]
         )
     }
 
@@ -66,6 +87,23 @@ public enum HistoryPreviewSeed {
         public let blocks: [Block]
         public let items: [WorkoutItem]
         public let setLogs: [SetLog]
+        public let userParameters: [UserParameter]
+
+        public init(
+            exercises: [Exercise],
+            workouts: [Workout],
+            blocks: [Block],
+            items: [WorkoutItem],
+            setLogs: [SetLog],
+            userParameters: [UserParameter] = []
+        ) {
+            self.exercises = exercises
+            self.workouts = workouts
+            self.blocks = blocks
+            self.items = items
+            self.setLogs = setLogs
+            self.userParameters = userParameters
+        }
     }
 
     // MARK: - Session specs / IDs
@@ -175,46 +213,8 @@ public enum HistoryPreviewSeed {
         ]
     }
 
-    private static func encodeTags(_ tags: [String]) -> String? {
-        guard let data = try? JSONEncoder().encode(tags) else { return nil }
-        return String(data: data, encoding: .utf8)
-    }
-
-    /// Deterministic set_log timeline: 4 bench sets 3 minutes apart
-    /// starting from `startedAt`, then 3 OHP sets 10 minutes later.
-    private static func makeSetLogs(
-        primaryItemID: UUID,
-        secondaryItemID: UUID,
-        startedAt: Date
-    ) -> [SetLog] {
-        var setLogs: [SetLog] = []
-        for i in 0..<4 {
-            let completedAt = startedAt.addingTimeInterval(TimeInterval(i * 180))
-            setLogs.append(SetLog(
-                id: UUID(), workoutItemID: primaryItemID,
-                performedExerciseID: nil, setIndex: i,
-                reps: i == 3 ? 4 : 5, weight: 100, weightUnit: .kg,
-                rir: i == 2 ? 1 : 2, isWarmup: false,
-                startedAt: completedAt.addingTimeInterval(-60),
-                completedAt: completedAt,
-                notes: nil
-            ))
-        }
-        let ohpStart = startedAt.addingTimeInterval(TimeInterval(4 * 180 + 600))
-        for i in 0..<3 {
-            let completedAt = ohpStart.addingTimeInterval(TimeInterval(i * 150))
-            setLogs.append(SetLog(
-                id: UUID(), workoutItemID: secondaryItemID,
-                performedExerciseID: nil, setIndex: i,
-                reps: i == 2 ? 6 : 8, weight: 52.5, weightUnit: .kg,
-                rir: 2, isWarmup: false,
-                startedAt: completedAt.addingTimeInterval(-45),
-                completedAt: completedAt,
-                notes: nil
-            ))
-        }
-        return setLogs
-    }
+    // `encodeTags` + `makeSetLogs` live on `HistoryPreviewSeed+Builders.swift`
+    // so the enum body stays under SwiftLint's `type_body_length` cap.
 }
 
 // MARK: - Seed cache
@@ -253,7 +253,23 @@ final class SeedCache: WorkoutCache, @unchecked Sendable {
     }
 
     func loadUserParametersLatest() async throws -> [String: UserParameter] {
-        [:]
+        // History's BW chip reads `loadUserParameters(key:)`, not this
+        // endpoint, but the protocol has both so the preview seed mirrors
+        // what a real cache would return. Group by key, newest wins.
+        var latest: [String: UserParameter] = [:]
+        for row in seed.userParameters.sorted(by: { $0.updatedAt < $1.updatedAt }) {
+            latest[row.key] = row
+        }
+        return latest
+    }
+
+    func loadUserParameters(key: String) async throws -> [UserParameter] {
+        // Newest-first ordering matches the real `WorkoutCache` — the
+        // `bodyweight(for:setLogs:history:)` picker walks the list
+        // front-to-back and stops at the first in-window match.
+        seed.userParameters
+            .filter { $0.key == key }
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
 
     func loadCompletedWorkouts(limit: Int, offset: Int) async throws -> [Workout] {
@@ -294,7 +310,9 @@ final class SeedCache: WorkoutCache, @unchecked Sendable {
         )
     }
 
-    func saveSetLogs(_ setLogs: [SetLog]) async throws {}
+    func loadOrphanedSetLogs() async throws -> [SetLog] { [] }
+
+    func saveSetLogs(_ setLogs: [SetLog], workoutID: WorkoutID) async throws {}
 
     func saveWorkout(_ workout: Workout) async throws {}
 

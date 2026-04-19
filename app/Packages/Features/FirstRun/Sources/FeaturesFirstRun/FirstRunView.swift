@@ -44,11 +44,12 @@ public struct FirstRunView: View {
                 )
             case .connecting:
                 ConnectingCard()
-            case .syncingFirstPull(let summary):
-                SyncingCard(summary: summary)
             case .complete:
                 // Transient — the shell should swap us out on `onComplete`.
                 // Render nothing rather than a flash of the welcome card.
+                // The shell's BootstrapLoadingView ("Syncing…") renders
+                // next; see `FirstRunViewModel.connect()` for why the
+                // first `/api/sync/pull` lives in AppBootstrap, not here.
                 Color.clear
             }
         }
@@ -148,40 +149,6 @@ struct ConnectingCard: View {
             ProgressView()
                 .progressViewStyle(.circular)
                 .tint(DSColors.accent)
-            Spacer()
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .padding(.horizontal, DSSpacing.xl)
-    }
-}
-
-// MARK: - Syncing card
-
-struct SyncingCard: View {
-    let summary: FirstRunViewModel.PullSummary?
-
-    var body: some View {
-        VStack(spacing: DSSpacing.xl) {
-            Spacer()
-            VStack(spacing: DSSpacing.md) {
-                Text("syncing your program")
-                    .font(DSTypography.title)
-                    .foregroundStyle(DSColors.foreground)
-                Text("first pull — hang tight")
-                    .font(DSTypography.caption)
-                    .foregroundStyle(DSColors.foregroundMuted)
-            }
-            ProgressView()
-                .progressViewStyle(.circular)
-                .tint(DSColors.accent)
-            if let summary {
-                // Mono, tabular figures — consistent with the rest of the
-                // app's numeric presentation per docs/design/RULES.md.
-                Text("\(summary.sessions) sessions · \(summary.exercises) exercises")
-                    .font(DSTypography.mono)
-                    .monospacedDigit()
-                    .foregroundStyle(DSColors.foregroundMuted)
-            }
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -306,16 +273,6 @@ struct DSInputField: View {
         onComplete: {}
     )
     vm.state = .connecting
-    return FirstRunView(viewModel: vm).preferredColorScheme(.dark)
-}
-
-#Preview("Syncing") {
-    let vm = FirstRunViewModel(
-        tokenStore: PreviewTokenStore(),
-        transportBuilder: { _ in PreviewTransport() },
-        onComplete: {}
-    )
-    vm.state = .syncingFirstPull(pulled: .init(sessions: 14, exercises: 42))
     return FirstRunView(viewModel: vm).preferredColorScheme(.dark)
 }
 

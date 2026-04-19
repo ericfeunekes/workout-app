@@ -7,13 +7,18 @@
 // validate-and-shape step.
 //
 // Push: the app posts `POST /api/user-parameters` with the subset shape
-// `UserParameterIn` — `{key, value, source, updated_at?}`. The server
-// assigns the row id and resolves `user_id` from the bearer token, so we
-// do not send our local UUID. See
-// `server/workoutdb_server/api/user_parameters.py`.
+// `UserParameterIn` — `{id, key, value, source, updated_at?}`. The client
+// owns the id end-to-end (same pattern as `SetLog`): a deterministic UUID
+// derived from `(userID, key, observedAt)` keeps the push idempotent so a
+// replay after a crash-between-commit-and-queue-remove upserts in place
+// rather than inserting a second row. The server resolves `user_id` from
+// the bearer token, so the local `userID` never rides the wire.
+// See `server/workoutdb_server/api/user_parameters.py` for the server-
+// side upsert contract.
 
 import Foundation
 import CoreDomain
+import WorkoutCoreFoundation
 import WorkoutDBSchema
 
 /// Wire shape for `POST /api/user-parameters`. Matches the server's
@@ -21,12 +26,14 @@ import WorkoutDBSchema
 /// inline — there is no generated Swift DTO for the POST-in shape
 /// because the schema package only models the pull/read entities.
 struct UserParameterInDTO: Encodable {
+    let id: String
     let key: String
     let value: String
     let source: String
     let updatedAt: Date?
 
     enum CodingKeys: String, CodingKey {
+        case id
         case key
         case value
         case source
@@ -61,6 +68,7 @@ extension DTOMapping {
     /// Map a Domain `UserParameter` to the push wire shape.
     static func toInDTO(_ param: CoreDomain.UserParameter) -> UserParameterInDTO {
         UserParameterInDTO(
+            id: param.id.wireID,
             key: param.key,
             value: param.value,
             source: param.source.rawValue,

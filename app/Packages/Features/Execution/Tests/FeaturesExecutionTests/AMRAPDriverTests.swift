@@ -187,7 +187,8 @@ final class AMRAPDriverTests: XCTestCase {
         XCTAssertEqual(content?.exerciseName, "Power Clean")
         XCTAssertEqual(content?.reps, 10)
         XCTAssertEqual(content?.loadKg, 95)
-        XCTAssertEqual(content?.loadDisplay, "95 kg")
+        // R2.10: pound-default renders as " lb" suffix when JSON omits `weight_unit`.
+        XCTAssertEqual(content?.loadDisplay, "95 lb")
     }
 
     func testActiveContentSurfacesRoundCounterViaSetIndex() {

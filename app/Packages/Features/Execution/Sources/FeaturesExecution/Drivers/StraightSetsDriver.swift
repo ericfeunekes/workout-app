@@ -60,19 +60,14 @@ public struct StraightSetsDriver: TimingDriver {
 
         // The load in the display honors whatever the session state has
         // for this set (which reflects autoreg/manual edits via the
-        // reducer). Bodyweight cases come through as `loadKg == 0`
-        // here — straight_sets items that are truly bodyweight are
-        // discriminated as `.bodyweight` and render via the same driver
-        // with the "BW" sentinel in SetPlan seeding. The seeding choice
-        // lives in `SessionSeeder` below.
-        let loadDisplay: String = {
-            // The SetPlan stores 0 for bodyweight-only rows (see
-            // `SessionSeeder`); render as plain "BW" in that case.
-            if set.loadKg == 0 && isBodyweightItem(item) {
-                return "BW"
-            }
-            return formatLoad(kg: set.loadKg)
-        }()
+        // reducer). `set.loadKg == nil` is the loadless sentinel — a
+        // bodyweight row, a loadless AMRAP token, or a `.empty`
+        // placeholder. `formatLoad(weight: nil, ...)` renders "BW" for
+        // those; numeric rows render through the unit-aware formatter.
+        let loadDisplay = formatLoad(
+            weight: set.loadKg,
+            unit: LoadUnit(setPlanUnit: set.unit)
+        )
 
         return ActiveContent(
             exerciseName: exerciseName,
@@ -80,7 +75,7 @@ public struct StraightSetsDriver: TimingDriver {
             totalSets: itemLog.sets.count,
             loadDisplay: loadDisplay,
             repsDisplay: String(set.reps),
-            loadKg: set.loadKg == 0 && isBodyweightItem(item) ? nil : set.loadKg,
+            loadKg: set.loadKg,
             reps: set.reps,
             adjustGlyph: set.adjust,
             lastTime: context.lastPerformed[item.exerciseID]
@@ -129,57 +124,33 @@ public struct StraightSetsDriver: TimingDriver {
         context: WorkoutContext,
         event: SetLogEvent
     ) -> DriverLogOutcome {
-        let itemID = event.itemID
-        let setIndex = event.setIndex
-        let loggedReps = event.loggedReps
-        let loggedRir = event.loggedRir
-        guard let itemLog = state.items.first(where: { $0.itemID == itemID }) else {
-            return DriverLogOutcome()
-        }
-        // Resolve the item via cursor — the itemID we got should match
-        // the cursor position in normal flow, but we walk the context to
-        // find the authored prescription either way.
-        guard
-            let item = findItem(id: itemID, in: context),
-            let prescribed = prescribed(for: item, setIndex: setIndex, in: itemLog)
+        guard let itemLog = state.items.first(where: { $0.itemID == event.itemID }),
+              let item = findItem(id: event.itemID, in: context),
+              let prescribed = prescribed(for: item, setIndex: event.setIndex, in: itemLog)
         else {
             return DriverLogOutcome()
         }
-
-        // Pull autoreg config + target RIR from the item's prescription.
-        let autoregConfig: CorePrescription.Autoreg?
-        let parsedTargetRir: Int?
-        switch parser.parse(prescriptionJSON: item.prescriptionJSON) {
-        case .success(let p):
-            (autoregConfig, parsedTargetRir) = autoregAndTarget(from: p)
-        case .failure:
-            autoregConfig = nil
-            parsedTargetRir = nil
-        }
-
-        // An alternative swap may have shadowed `target_rir`. The override
-        // wins when present (the user swapped to a movement Claude rated
-        // at a different stimulus); fall back to the prescription's
-        // authored target otherwise.
-        let resolvedTargetRir = itemLog.overrides?.targetRir ?? parsedTargetRir
-
-        guard let autoreg = autoregConfig, let target = resolvedTargetRir else {
+        // No autoreg for loadless sets — autoreg proposes numeric kg
+        // adjustments, which have no meaning for a BW row. Matches
+        // `Autoreg.apply` which also skips nil-load rows.
+        guard let prescribedLoadKg = prescribed.loadKg,
+              let (autoreg, target) = resolveAutoreg(item: item, itemLog: itemLog)
+        else {
             return DriverLogOutcome()
         }
-
         // Don't propose on the last set of the item — there are no
         // remaining sets to adjust. This mirrors the JSX prototype
         // (`hasRemaining = si + 1 < block.sets`).
-        let remaining = itemLog.sets.contains(where: { !$0.done && $0.setIndex > setIndex })
-        guard remaining else {
-            return DriverLogOutcome()
+        let remaining = itemLog.sets.contains {
+            !$0.done && $0.setIndex > event.setIndex
         }
+        guard remaining else { return DriverLogOutcome() }
 
         let proposal = Autoreg.propose(Autoreg.Input(
-            prescribedLoadKg: prescribed.loadKg,
+            prescribedLoadKg: prescribedLoadKg,
             prescribedReps: prescribed.reps,
-            loggedReps: loggedReps,
-            loggedRir: loggedRir,
+            loggedReps: event.loggedReps,
+            loggedRir: event.loggedRir,
             targetRir: target,
             autoreg: autoreg,
             autoregHeld: itemLog.autoregHeld
@@ -188,13 +159,37 @@ public struct StraightSetsDriver: TimingDriver {
         return DriverLogOutcome(proposal: proposal)
     }
 
+    /// Pull the autoreg config + resolved target RIR for an item.
+    /// Returns nil when the prescription carries neither (so the caller
+    /// skips proposing). An alternative swap may have shadowed
+    /// `target_rir`; the override wins when present — fall back to the
+    /// prescription's authored target otherwise.
+    private func resolveAutoreg(
+        item: WorkoutItem,
+        itemLog: SessionState.ItemLog
+    ) -> (CorePrescription.Autoreg, Int)? {
+        let autoregConfig: CorePrescription.Autoreg?
+        let parsedTargetRir: Int?
+        switch parser.parse(prescriptionJSON: item.prescriptionJSON) {
+        case .success(let p):
+            (autoregConfig, parsedTargetRir) = autoregAndTarget(from: p)
+        case .failure:
+            return nil
+        }
+        let resolvedTargetRir = itemLog.overrides?.targetRir ?? parsedTargetRir
+        guard let autoreg = autoregConfig, let target = resolvedTargetRir else {
+            return nil
+        }
+        return (autoreg, target)
+    }
+
     // MARK: - Helpers
 
     private func prescribed(
         for item: WorkoutItem,
         setIndex: Int,
         in itemLog: SessionState.ItemLog
-    ) -> (loadKg: Double, reps: Int)? {
+    ) -> (loadKg: Double?, reps: Int)? {
         guard let set = itemLog.sets.first(where: { $0.setIndex == setIndex }) else {
             return nil
         }
@@ -215,11 +210,11 @@ public struct StraightSetsDriver: TimingDriver {
         from prescription: Prescription
     ) -> (CorePrescription.Autoreg?, Int?) {
         switch prescription {
-        case .straightSets(_, _, _, let target, let autoreg, _, _):
+        case .straightSets(_, _, _, _, let target, let autoreg, _, _):
             return (autoreg, target)
-        case .repRange(_, _, _, _, let target, let autoreg):
+        case .repRange(_, _, _, _, _, let target, let autoreg):
             return (autoreg, target)
-        case .setsDetail(_, let target, let autoreg):
+        case .setsDetail(_, _, let target, let autoreg):
             return (autoreg, target)
         case .percentOf1RM, .cluster, .amrapToken, .bodyweight, .warmup, .empty:
             return (nil, nil)
@@ -232,18 +227,6 @@ public struct StraightSetsDriver: TimingDriver {
         let perItem = state.structure.setsPerItem[c.blockIndex]
         guard c.itemIndex < perItem.count else { return false }
         return c.setIndex >= perItem[c.itemIndex]
-    }
-
-    /// `{sets, reps}` with no `load_kg` discriminates as `.bodyweight`
-    /// in the parser. The SetPlan row carries `loadKg = 0` for these
-    /// (see `SessionSeeder`) — we render "BW" at the display layer.
-    private func isBodyweightItem(_ item: WorkoutItem) -> Bool {
-        switch parser.parse(prescriptionJSON: item.prescriptionJSON) {
-        case .success(.bodyweight):
-            return true
-        default:
-            return false
-        }
     }
 }
 

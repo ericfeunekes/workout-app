@@ -26,10 +26,15 @@ extension RestView {
     }
 
     func loadSheet(set: SetPlan, item: RestViewItem) -> some View {
+        // R2.10 unit-thread: numpad suffix follows the SetPlan's unit
+        // so the user sees "102.5 LB" when editing a pound-prescribed
+        // set, not a hardcoded "kg". Loadless rows (`SetPlan.loadKg ==
+        // nil`) seed the numpad at 0 — the user was on a BW lift and
+        // is now adding a numeric load via corrective edit.
         NumPadSheet(
             title: "load",
-            unit: "kg",
-            initialValue: set.loadKg,
+            unit: set.unit.rawValue,
+            initialValue: set.loadKg ?? 0,
             step: 2.5,
             allowsDecimal: true,
             subtitle: "correcting log · no autoreg",

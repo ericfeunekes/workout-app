@@ -18,7 +18,7 @@ runCase("fixture · straight_sets · parses prescription as .straightSets with f
     let (pre, mode, cfg) = try FixtureLoader.wrapped("straight_sets")
     try expectEqual(mode, "straight_sets")
     let p = try unwrap(parser.parse(prescriptionJSON: pre))
-    guard case .straightSets(let sets, let reps, let loadKg, let targetRir, let autoreg, let tempo, let perSide) = p else {
+    guard case .straightSets(let sets, let reps, let loadKg, _, let targetRir, let autoreg, let tempo, let perSide) = p else {
         throw ExpectationFailure(message: "expected .straightSets, got \(p)", file: #file, line: #line)
     }
     try expectEqual(sets, 4)
@@ -40,7 +40,7 @@ runCase("fixture · straight_sets · parses prescription as .straightSets with f
 runCase("fixture · superset · parses item as .straightSets with nil sets") {
     let (pre, mode, cfg) = try FixtureLoader.wrapped("superset")
     let p = try unwrap(parser.parse(prescriptionJSON: pre))
-    guard case .straightSets(let sets, let reps, let loadKg, _, let autoreg, _, _) = p else {
+    guard case .straightSets(let sets, let reps, let loadKg, _, _, let autoreg, _, _) = p else {
         throw ExpectationFailure(message: "expected .straightSets, got \(p)", file: #file, line: #line)
     }
     try expectEqual(sets, nil)
@@ -58,7 +58,7 @@ runCase("fixture · superset · parses item as .straightSets with nil sets") {
 runCase("fixture · circuit · parses .straightSets item + .circuit config") {
     let (pre, mode, cfg) = try FixtureLoader.wrapped("circuit")
     let p = try unwrap(parser.parse(prescriptionJSON: pre))
-    guard case .straightSets(_, let reps, let loadKg, _, _, _, _) = p else {
+    guard case .straightSets(_, let reps, let loadKg, _, _, _, _, _) = p else {
         throw ExpectationFailure(message: "expected .straightSets, got \(p)", file: #file, line: #line)
     }
     try expectEqual(reps, .count(12))
@@ -75,7 +75,7 @@ runCase("fixture · circuit · parses .straightSets item + .circuit config") {
 runCase("fixture · emom · parses .straightSets item + .emom config") {
     let (pre, mode, cfg) = try FixtureLoader.wrapped("emom")
     let p = try unwrap(parser.parse(prescriptionJSON: pre))
-    guard case .straightSets(_, let reps, let loadKg, _, _, _, _) = p else {
+    guard case .straightSets(_, let reps, let loadKg, _, _, _, _, _) = p else {
         throw ExpectationFailure(message: "expected .straightSets, got \(p)", file: #file, line: #line)
     }
     try expectEqual(reps, .count(10))
@@ -92,7 +92,7 @@ runCase("fixture · emom · parses .straightSets item + .emom config") {
 runCase("fixture · amrap · parses .straightSets item + .amrap config") {
     let (pre, mode, cfg) = try FixtureLoader.wrapped("amrap")
     let p = try unwrap(parser.parse(prescriptionJSON: pre))
-    guard case .straightSets(_, let reps, _, _, _, _, _) = p else {
+    guard case .straightSets(_, let reps, _, _, _, _, _, _) = p else {
         throw ExpectationFailure(message: "expected .straightSets, got \(p)", file: #file, line: #line)
     }
     try expectEqual(reps, .count(10))
@@ -107,7 +107,7 @@ runCase("fixture · amrap · parses .straightSets item + .amrap config") {
 runCase("fixture · for_time · parses .straightSets (load-only) + .forTime config") {
     let (pre, mode, cfg) = try FixtureLoader.wrapped("for_time")
     let p = try unwrap(parser.parse(prescriptionJSON: pre))
-    guard case .straightSets(let sets, let reps, let loadKg, _, _, _, _) = p else {
+    guard case .straightSets(let sets, let reps, let loadKg, _, _, _, _, _) = p else {
         throw ExpectationFailure(message: "expected .straightSets, got \(p)", file: #file, line: #line)
     }
     try expectEqual(sets, nil)
@@ -208,7 +208,7 @@ runCase("fixture · percent_1rm · parses as .percentOf1RM") {
 runCase("fixture · rep_range · parses as .repRange") {
     let json = try FixtureLoader.bare("rep_range")
     let p = try unwrap(parser.parse(prescriptionJSON: json))
-    guard case .repRange(let sets, let lo, let hi, let loadKg, let rir, _) = p else {
+    guard case .repRange(let sets, let lo, let hi, let loadKg, _, let rir, _) = p else {
         throw ExpectationFailure(message: "expected .repRange, got \(p)", file: #file, line: #line)
     }
     try expectEqual(sets, 3)
@@ -221,7 +221,7 @@ runCase("fixture · rep_range · parses as .repRange") {
 runCase("fixture · sets_detail · parses as .setsDetail with 4 entries + autoreg") {
     let json = try FixtureLoader.bare("sets_detail")
     let p = try unwrap(parser.parse(prescriptionJSON: json))
-    guard case .setsDetail(let details, let rir, let autoreg) = p else {
+    guard case .setsDetail(let details, _, let rir, let autoreg) = p else {
         throw ExpectationFailure(message: "expected .setsDetail, got \(p)", file: #file, line: #line)
     }
     try expectEqual(details.count, 4)
@@ -236,7 +236,7 @@ runCase("fixture · sets_detail · parses as .setsDetail with 4 entries + autore
 runCase("fixture · drop_set · parses as .setsDetail with drop flags on sets 1..2") {
     let json = try FixtureLoader.bare("drop_set")
     let p = try unwrap(parser.parse(prescriptionJSON: json))
-    guard case .setsDetail(let details, _, _) = p else {
+    guard case .setsDetail(let details, _, _, _) = p else {
         throw ExpectationFailure(message: "expected .setsDetail, got \(p)", file: #file, line: #line)
     }
     try expectEqual(details.count, 3)
@@ -252,7 +252,7 @@ runCase("fixture · drop_set · parses as .setsDetail with drop flags on sets 1.
 runCase("fixture · cluster · parses as .cluster") {
     let json = try FixtureLoader.bare("cluster")
     let p = try unwrap(parser.parse(prescriptionJSON: json))
-    guard case .cluster(let sets, let reps, let load, let sub, let intra, let rir) = p else {
+    guard case .cluster(let sets, let reps, let load, _, let sub, let intra, let rir) = p else {
         throw ExpectationFailure(message: "expected .cluster, got \(p)", file: #file, line: #line)
     }
     try expectEqual(sets, 4)
@@ -266,7 +266,7 @@ runCase("fixture · cluster · parses as .cluster") {
 runCase("fixture · amrap_token · parses as .amrapToken") {
     let json = try FixtureLoader.bare("amrap_token")
     let p = try unwrap(parser.parse(prescriptionJSON: json))
-    guard case .amrapToken(let loadKg, let rir) = p else {
+    guard case .amrapToken(let loadKg, _, let rir) = p else {
         throw ExpectationFailure(message: "expected .amrapToken, got \(p)", file: #file, line: #line)
     }
     try expectEqual(loadKg, nil)
@@ -276,7 +276,7 @@ runCase("fixture · amrap_token · parses as .amrapToken") {
 runCase("fixture · per_side · parses as .straightSets with perSide=true") {
     let json = try FixtureLoader.bare("per_side")
     let p = try unwrap(parser.parse(prescriptionJSON: json))
-    guard case .straightSets(let sets, let reps, let loadKg, _, _, _, let perSide) = p else {
+    guard case .straightSets(let sets, let reps, let loadKg, _, _, _, _, let perSide) = p else {
         throw ExpectationFailure(message: "expected .straightSets, got \(p)", file: #file, line: #line)
     }
     try expectEqual(sets, 3)
@@ -288,7 +288,7 @@ runCase("fixture · per_side · parses as .straightSets with perSide=true") {
 runCase("fixture · tempo · parses as .straightSets with tempo string") {
     let json = try FixtureLoader.bare("tempo")
     let p = try unwrap(parser.parse(prescriptionJSON: json))
-    guard case .straightSets(_, _, _, _, _, let tempo, _) = p else {
+    guard case .straightSets(_, _, _, _, _, _, let tempo, _) = p else {
         throw ExpectationFailure(message: "expected .straightSets, got \(p)", file: #file, line: #line)
     }
     try expectEqual(tempo, "3-0-1-0")
@@ -312,7 +312,7 @@ runCase("fixture · weighted_bodyweight · parses as .straightSets (no JSON-leve
     // pin the parser's behavior and surface the mismatch in tests.
     let json = try FixtureLoader.bare("weighted_bodyweight")
     let p = try unwrap(parser.parse(prescriptionJSON: json))
-    guard case .straightSets(let sets, let reps, let loadKg, let rir, let autoreg, _, _) = p else {
+    guard case .straightSets(let sets, let reps, let loadKg, _, let rir, let autoreg, _, _) = p else {
         throw ExpectationFailure(message: "expected .straightSets, got \(p)", file: #file, line: #line)
     }
     try expectEqual(sets, 4)
@@ -325,7 +325,7 @@ runCase("fixture · weighted_bodyweight · parses as .straightSets (no JSON-leve
 runCase("fixture · warmup · parses as .warmup") {
     let json = try FixtureLoader.bare("warmup")
     let p = try unwrap(parser.parse(prescriptionJSON: json))
-    guard case .warmup(let sets, let reps, let loadKg) = p else {
+    guard case .warmup(let sets, let reps, let loadKg, _) = p else {
         throw ExpectationFailure(message: "expected .warmup, got \(p)", file: #file, line: #line)
     }
     try expectEqual(sets, 3)
@@ -347,7 +347,7 @@ runCase("fixture · parameter_overrides · inner overrides parse as .straightSet
     let innerData = try JSONSerialization.data(withJSONObject: inner)
     let innerJSON = String(data: innerData, encoding: .utf8) ?? ""
     let p = try unwrap(parser.parse(prescriptionJSON: innerJSON))
-    guard case .straightSets(let sets, let reps, let loadKg, let rir, _, _, let perSide) = p else {
+    guard case .straightSets(let sets, let reps, let loadKg, _, let rir, _, _, let perSide) = p else {
         throw ExpectationFailure(message: "expected .straightSets, got \(p)", file: #file, line: #line)
     }
     try expectEqual(sets, 3)
@@ -364,7 +364,7 @@ runCase("fixture · parameter_overrides · inner overrides parse as .straightSet
 runCase("autoreg · every field round-trips from straight_sets fixture") {
     let (pre, _, _) = try FixtureLoader.wrapped("straight_sets")
     let p = try unwrap(parser.parse(prescriptionJSON: pre))
-    guard case .straightSets(_, _, _, _, let autoreg, _, _) = p, let a = autoreg else {
+    guard case .straightSets(_, _, _, _, _, let autoreg, _, _) = p, let a = autoreg else {
         throw ExpectationFailure(message: "expected .straightSets with autoreg", file: #file, line: #line)
     }
     try expectEqual(a.targetRir, 2)
@@ -375,21 +375,38 @@ runCase("autoreg · every field round-trips from straight_sets fixture") {
     try expectEqual(a.applyTo, .remaining)
 }
 
-runCase("autoreg · defaults applied when inner keys omitted") {
-    // Opt into autoreg but omit every inner key — doc defaults should apply.
+runCase("autoreg · defaults applied when inner keys omitted (lb default)") {
+    // Opt into autoreg but omit every inner key — no `weight_unit` means
+    // .lb (R2.10 default), so the step default is 5.0 (loadable-plate
+    // increment in pounds). See docs/prescription.md § "Autoregulation
+    // · Load step and equipment".
     let json = """
     {"sets": 3, "reps": 5, "load_kg": 80, "target_rir": 3, "autoreg": {}}
     """
     let p = try unwrap(parser.parse(prescriptionJSON: json))
-    guard case .straightSets(_, _, _, _, let autoreg, _, _) = p, let a = autoreg else {
+    guard case .straightSets(_, _, _, _, _, let autoreg, _, _) = p, let a = autoreg else {
         throw ExpectationFailure(message: "expected straightSets with defaulted autoreg", file: #file, line: #line)
     }
     try expectEqual(a.targetRir, 3)
     try expectEqual(a.overshootAt, 2)
-    try expectEqual(a.overshootStepKg, 2.5)
+    try expectEqual(a.overshootStepKg, 5.0)
     try expectEqual(a.undershootAt, 2)
-    try expectEqual(a.undershootStepKg, 2.5)
+    try expectEqual(a.undershootStepKg, 5.0)
     try expectEqual(a.applyTo, .remaining)
+}
+
+runCase("autoreg · defaults applied when inner keys omitted (kg unit)") {
+    // Same prescription with explicit `weight_unit: "kg"` — step default
+    // is 1.25 (fractional plate increment in kilograms).
+    let json = """
+    {"sets": 3, "reps": 5, "load_kg": 80, "weight_unit": "kg", "target_rir": 3, "autoreg": {}}
+    """
+    let p = try unwrap(parser.parse(prescriptionJSON: json))
+    guard case .straightSets(_, _, _, _, _, let autoreg, _, _) = p, let a = autoreg else {
+        throw ExpectationFailure(message: "expected straightSets with defaulted autoreg", file: #file, line: #line)
+    }
+    try expectEqual(a.overshootStepKg, 1.25)
+    try expectEqual(a.undershootStepKg, 1.25)
 }
 
 runCase("autoreg · target_rir required when autoreg present") {
@@ -420,7 +437,7 @@ runCase("discrimination · {} → .empty") {
 
 runCase("discrimination · {reps: amrap} → .amrapToken (not .straightSets)") {
     let p = try unwrap(parser.parse(prescriptionJSON: #"{"reps": "amrap"}"#))
-    if case .amrapToken(let loadKg, let rir) = p {
+    if case .amrapToken(let loadKg, _, let rir) = p {
         try expectEqual(loadKg, nil)
         try expectEqual(rir, nil)
     } else {
@@ -626,6 +643,267 @@ runCase("bug-039 · straight_sets · both absent → both fields zero") {
     }
     try expectEqual(rbs, 0)
     try expectEqual(rbe, 0)
+}
+
+// ===========================================================================
+// AlternativeOverrides — widened parser (bug P1 · swap overrides)
+// ===========================================================================
+
+runCase("AlternativeOverrides · accepts full documented key set") {
+    // Every key from docs/prescription.md § "Alternative prescription
+    // (overrides)" lands on the parsed struct. The fixture matches the
+    // example in the doc: dumbbell-bench override carrying sets/reps/
+    // load/per_side/target_rir plus an autoreg step override.
+    let json = #"""
+    {
+      "sets": 3,
+      "reps": 10,
+      "load_kg": 32.5,
+      "target_rir": 2,
+      "per_side": true,
+      "autoreg": {
+        "overshoot_at": 1,
+        "overshoot_step_kg": 1.25,
+        "undershoot_at": 1,
+        "undershoot_step_kg": 1.25,
+        "apply_to": "remaining"
+      }
+    }
+    """#
+    switch AlternativeOverrides.parse(json) {
+    case .success(let overrides):
+        try expectEqual(overrides.sets, 3)
+        try expectEqual(overrides.reps, 10)
+        try expectEqual(overrides.loadKg, 32.5)
+        try expectEqual(overrides.targetRir, 2)
+        try expectEqual(overrides.perSide, true)
+        try expect(overrides.autoreg != nil, "autoreg overrides should parse")
+        try expectEqual(overrides.autoreg?.overshootAt, 1)
+        try expectEqual(overrides.autoreg?.overshootStepKg, 1.25)
+        try expectEqual(overrides.autoreg?.undershootAt, 1)
+        try expectEqual(overrides.autoreg?.undershootStepKg, 1.25)
+        try expectEqual(overrides.autoreg?.applyTo, .remaining)
+        try expect(!overrides.isEmpty, "non-empty override")
+    case .failure(let e):
+        throw ExpectationFailure(message: "expected success, got \(e)", file: #file, line: #line)
+    }
+}
+
+runCase("AlternativeOverrides · nil / empty input → success with empty struct") {
+    switch AlternativeOverrides.parse(nil) {
+    case .success(let o):
+        try expect(o.isEmpty, "nil input should yield empty")
+    case .failure:
+        throw ExpectationFailure(message: "nil input should not fail", file: #file, line: #line)
+    }
+    switch AlternativeOverrides.parse("") {
+    case .success(let o):
+        try expect(o.isEmpty, "empty input should yield empty")
+    case .failure:
+        throw ExpectationFailure(message: "empty input should not fail", file: #file, line: #line)
+    }
+}
+
+runCase("AlternativeOverrides · rejects malformed key whole-struct (wrong type)") {
+    // A single bad key rejects the whole override — we do NOT silently
+    // drop `reps` and keep `load_kg`; that would leave the user in a
+    // half-swapped state with no feedback. See the header comment on
+    // AlternativeOverrides.swift.
+    let json = #"{"reps":"many","load_kg":72.5}"#
+    switch AlternativeOverrides.parse(json) {
+    case .success(let o):
+        throw ExpectationFailure(message: "expected failure, got \(o)", file: #file, line: #line)
+    case .failure(let e):
+        if case .wrongType(let key, _) = e {
+            try expectEqual(key, "reps")
+        } else {
+            throw ExpectationFailure(message: "expected .wrongType(reps), got \(e)", file: #file, line: #line)
+        }
+    }
+}
+
+runCase("AlternativeOverrides · rejects malformed autoreg inner key (whole-struct)") {
+    // An unsupported `apply_to` value fails the autoreg-override parser
+    // and bubbles up as a whole-struct failure — the caller drops the
+    // entire override, rather than accepting a half-parsed struct.
+    let json = #"{"reps":8,"autoreg":{"apply_to":"all"}}"#
+    switch AlternativeOverrides.parse(json) {
+    case .success(let o):
+        throw ExpectationFailure(message: "expected failure, got \(o)", file: #file, line: #line)
+    case .failure(let e):
+        if case .wrongType(let key, _) = e {
+            try expectEqual(key, "apply_to")
+        } else {
+            throw ExpectationFailure(message: "expected .wrongType(apply_to), got \(e)", file: #file, line: #line)
+        }
+    }
+}
+
+runCase("AlternativeOverrides · partial autoreg override (only one inner key)") {
+    // Inner autoreg keys are optional — an override can carry just one
+    // without tripping parse. The unauthored keys remain nil and the
+    // driver falls back to the prescription's authored value.
+    let json = #"{"autoreg":{"overshoot_step_kg":1.25}}"#
+    switch AlternativeOverrides.parse(json) {
+    case .success(let o):
+        try expectEqual(o.autoreg?.overshootStepKg, 1.25)
+        try expectEqual(o.autoreg?.overshootAt, nil)
+        try expectEqual(o.autoreg?.undershootAt, nil)
+    case .failure(let e):
+        throw ExpectationFailure(message: "expected success, got \(e)", file: #file, line: #line)
+    }
+}
+
+// ===========================================================================
+// parseTolerantOfAutoreg — isolate autoreg parse failures (bug P2)
+// ===========================================================================
+
+runCase("parseTolerantOfAutoreg · unsupported apply_to → base prescription seeds, autoreg dropped") {
+    // Bug: autoreg with `apply_to: "all"` used to fail the whole
+    // prescription parse; SessionSeeder caught the failure and replaced
+    // the item's SetPlan with a `0 kg / 0 reps` placeholder, wiping the
+    // authored base values. The tolerant parser strips the autoreg block
+    // on retry so the base reps/load still seed.
+    let json = #"""
+    {"sets": 4, "reps": 5, "load_kg": 102.5,
+     "target_rir": 2,
+     "autoreg": {"apply_to": "all", "overshoot_step_kg": 2.5}}
+    """#
+    switch parser.parseTolerantOfAutoreg(prescriptionJSON: json) {
+    case .success(let p):
+        guard case .straightSets(let sets, let reps, let loadKg, _, let rir, let autoreg, _, _) = p else {
+            throw ExpectationFailure(message: "expected .straightSets, got \(p)", file: #file, line: #line)
+        }
+        try expectEqual(sets, 4)
+        try expectEqual(reps, .count(5))
+        try expectEqual(loadKg, 102.5)
+        try expectEqual(rir, 2)
+        try expectEqual(autoreg, nil, "autoreg stripped on retry")
+    case .failure(let e):
+        throw ExpectationFailure(message: "expected success, got \(e)", file: #file, line: #line)
+    }
+}
+
+runCase("parseTolerantOfAutoreg · valid autoreg passes through untouched") {
+    // When the autoreg block is valid, the tolerant parser returns the
+    // full prescription (autoreg included) — the retry-without-autoreg
+    // path only fires on failure.
+    let json = #"""
+    {"sets": 3, "reps": 5, "load_kg": 80, "target_rir": 2,
+     "autoreg": {"overshoot_at": 2, "overshoot_step_kg": 2.5,
+                 "undershoot_at": 2, "undershoot_step_kg": 2.5,
+                 "apply_to": "remaining"}}
+    """#
+    switch parser.parseTolerantOfAutoreg(prescriptionJSON: json) {
+    case .success(let p):
+        guard case .straightSets(_, _, _, _, _, let autoreg, _, _) = p else {
+            throw ExpectationFailure(message: "expected .straightSets, got \(p)", file: #file, line: #line)
+        }
+        try expect(autoreg != nil, "valid autoreg preserved")
+    case .failure(let e):
+        throw ExpectationFailure(message: "expected success, got \(e)", file: #file, line: #line)
+    }
+}
+
+runCase("parseTolerantOfAutoreg · non-autoreg failure surfaces unchanged") {
+    // A malformed base-prescription key (not inside autoreg) is not
+    // masked by the tolerant parser — the caller still sees the original
+    // failure, which SessionSeeder translates into the zero-row
+    // placeholder.
+    let json = #"{"sets":"three","reps":5,"load_kg":80}"#
+    switch parser.parseTolerantOfAutoreg(prescriptionJSON: json) {
+    case .success(let p):
+        throw ExpectationFailure(message: "expected failure, got \(p)", file: #file, line: #line)
+    case .failure(let e):
+        if case .wrongType(let key, _) = e {
+            try expectEqual(key, "sets")
+        } else {
+            throw ExpectationFailure(message: "expected .wrongType, got \(e)", file: #file, line: #line)
+        }
+    }
+}
+
+// ===========================================================================
+// weight_unit (R2.10)
+// ===========================================================================
+
+import CoreDomain
+
+runCase("weight_unit · straightSets defaults to .lb when omitted") {
+    // R2.10: Eric trains primarily in pounds; new default is .lb when
+    // `weight_unit` is absent on the prescription.
+    let p = try unwrap(parser.parse(prescriptionJSON: #"{"sets":4,"reps":5,"load_kg":225}"#))
+    guard case .straightSets(_, _, _, let unit, _, _, _, _) = p else {
+        throw ExpectationFailure(message: "expected .straightSets, got \(p)", file: #file, line: #line)
+    }
+    try expectEqual(unit, WeightUnit.lb)
+}
+
+runCase("weight_unit · straightSets respects explicit kg") {
+    let p = try unwrap(parser.parse(prescriptionJSON: #"{"sets":4,"reps":5,"load_kg":102.5,"weight_unit":"kg"}"#))
+    guard case .straightSets(_, _, _, let unit, _, _, _, _) = p else {
+        throw ExpectationFailure(message: "expected .straightSets, got \(p)", file: #file, line: #line)
+    }
+    try expectEqual(unit, WeightUnit.kg)
+}
+
+runCase("weight_unit · invalid value rejected") {
+    let json = #"{"sets":4,"reps":5,"load_kg":102.5,"weight_unit":"grams"}"#
+    switch parser.parse(prescriptionJSON: json) {
+    case .success(let p):
+        throw ExpectationFailure(message: "expected failure, got \(p)", file: #file, line: #line)
+    case .failure(let e):
+        if case .wrongType(let key, _) = e {
+            try expectEqual(key, "weight_unit")
+        } else {
+            throw ExpectationFailure(message: "expected .wrongType, got \(e)", file: #file, line: #line)
+        }
+    }
+}
+
+runCase("weight_unit · repRange / cluster / setsDetail / amrapToken / warmup inherit the same default") {
+    let repRangeJSON = #"{"sets":3,"reps_min":8,"reps_max":12,"load_kg":70}"#
+    guard case .repRange(_, _, _, _, let rrUnit, _, _) = try unwrap(parser.parse(prescriptionJSON: repRangeJSON)) else {
+        throw ExpectationFailure(message: "expected .repRange", file: #file, line: #line)
+    }
+    try expectEqual(rrUnit, WeightUnit.lb)
+
+    let clusterJSON = #"{"sets":4,"reps":5,"load_kg":100,"sub_sets":4,"intra_set_rest_sec":15}"#
+    guard case .cluster(_, _, _, let cUnit, _, _, _) = try unwrap(parser.parse(prescriptionJSON: clusterJSON)) else {
+        throw ExpectationFailure(message: "expected .cluster", file: #file, line: #line)
+    }
+    try expectEqual(cUnit, WeightUnit.lb)
+
+    let detailJSON = #"{"sets_detail":[{"reps":5,"load_kg":60}]}"#
+    guard case .setsDetail(_, let sdUnit, _, _) = try unwrap(parser.parse(prescriptionJSON: detailJSON)) else {
+        throw ExpectationFailure(message: "expected .setsDetail", file: #file, line: #line)
+    }
+    try expectEqual(sdUnit, WeightUnit.lb)
+
+    let amrapJSON = #"{"reps":"amrap","load_kg":95}"#
+    guard case .amrapToken(_, let aUnit, _) = try unwrap(parser.parse(prescriptionJSON: amrapJSON)) else {
+        throw ExpectationFailure(message: "expected .amrapToken", file: #file, line: #line)
+    }
+    try expectEqual(aUnit, WeightUnit.lb)
+
+    let warmupJSON = #"{"warmup":true,"sets":2,"reps":5,"load_kg":40}"#
+    guard case .warmup(_, _, _, let wUnit) = try unwrap(parser.parse(prescriptionJSON: warmupJSON)) else {
+        throw ExpectationFailure(message: "expected .warmup", file: #file, line: #line)
+    }
+    try expectEqual(wUnit, WeightUnit.lb)
+}
+
+runCase("AlternativeOverrides · weight_unit is optional (nil means inherit)") {
+    let json = #"{"load_kg":225}"#
+    let o = try unwrap(AlternativeOverrides.parse(json))
+    try expectEqual(o.unit, nil)
+    try expectEqual(o.loadKg, 225)
+}
+
+runCase("AlternativeOverrides · weight_unit parses when authored") {
+    let json = #"{"load_kg":100,"weight_unit":"kg"}"#
+    let o = try unwrap(AlternativeOverrides.parse(json))
+    try expectEqual(o.unit, WeightUnit.kg)
 }
 
 reportAndExit()

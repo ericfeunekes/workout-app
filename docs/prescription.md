@@ -74,7 +74,7 @@ feature flag and no deprecation period — adopt defaults as you go.
 ## Conventions
 
 - **snake_case keys everywhere on the wire.** The design bundle's JSX uses camelCase (`targetRir`, `overshootAt`); our JSON is snake_case (`target_rir`, `overshoot_at`). The app is the translation boundary — Swift Codable keys map to snake_case via `CodingKeys`. When authoring or reviewing, assume snake_case.
-- **Units.** Prescriptions carry `load_kg` (kilograms, Float). `set_log` carries `(weight, weight_unit)` where `weight_unit ∈ {kg, lb}` — the log unit follows the user's preference. No unit conversion happens on the wire; the app converts for display when the user's preference is `lb`.
+- **Units.** Every prescription that carries a load also declares `weight_unit ∈ {"kg", "lb"}`. The key `load_kg` keeps its historical name even when the value is pounds — the *unit* is the source of truth, the field name is a spelling compromise (ADR R2.10). Default is `"lb"` when the key is omitted: Eric trains in pounds, and every prescription that makes it to the app must resolve to a stamp-able unit. The server's `prescription_merge` fills `weight_unit: "lb"` at ingest if neither the library default nor the item authored one, so the app never sees a unit-less strength prescription. On the log side, `set_log` carries `(weight, weight_unit)` — the SetLog's `weight_unit` is stamped from the matching `SetPlan.unit`. No unit conversion happens on the wire; the app renders whatever unit the prescription declared.
 - **`rounds` default.** A block with `rounds: null` or omitted means one round. `rounds: 0` and negatives are invalid.
 - **Timing config is strict.** The app reads only the keys documented per mode. Extraneous keys in `timing_config_json` are ignored — no error, but Claude should avoid littering.
 
@@ -204,15 +204,17 @@ Rule of thumb: autoreg is for load-bearing strength work where the user has a nu
 
 ### Load step and equipment
 
-The `overshoot_step_kg` / `undershoot_step_kg` values encode the equipment's granularity. Claude picks them per block based on what's realistic at the gym:
+The `overshoot_step_kg` / `undershoot_step_kg` values encode the equipment's granularity. The *numeric value* is always in the SetPlan's unit — the `_kg` suffix on the key is historical (ADR R2.10). Claude picks the step per block based on what's realistic at the gym:
 
-| Equipment | Typical step |
-|---|---|
-| Barbell, full plates | `2.5` kg |
-| Dumbbells (pairs) | `2.5` kg |
-| Dip belt / loaded bodyweight | `2.5` kg |
-| Machine stack | `5.0` kg or whatever the stack step is |
-| Fractional plates available | `1.0` or `1.25` kg |
+| Equipment | Pounds (`weight_unit: "lb"`) | Kilograms (`weight_unit: "kg"`) |
+|---|---|---|
+| Barbell, full plates (default) | `5.0` | `2.5` |
+| Dumbbells (pairs) | `5.0` | `2.5` |
+| Dip belt / loaded bodyweight | `5.0` | `2.5` |
+| Machine stack | whatever the stack step is | whatever the stack step is |
+| Fractional plates available | `1.25` | `1.0` / `1.25` |
+
+**Defaults when the parser fills them in:** `5.0` for `"lb"`, `1.25` for `"kg"`. These are the smallest reasonable loadable increments (one pair of 2.5 lb plates for pounds, one pair of 0.625 kg fractional plates for kilograms). Explicit authoring always wins — when Claude provides `overshoot_step_kg`, the parser uses that value verbatim.
 
 There is no per-exercise default in the schema — the authoritative answer lives in the prescription. Claude sets it with equipment knowledge that doesn't fit in a database column.
 
@@ -380,7 +382,9 @@ Fixed 8 rounds of 20s work / 10s rest. Configuration locked.
 
 **Items:** one exercise.
 
-Active face shows 8 pips + current phase timer. Haptic on every transition. Logs per round: `reps` or `duration_sec`, `hr_avg_bpm`. No autoreg.
+Active face shows 8 pips + current phase timer. Haptic on every transition. Logs per round: `reps`, `hr_avg_bpm`. No autoreg.
+
+**v0 scope:** Tabata is **reps-based only** — the app routes tabata through the strength log path so the user's reps count survives. Cardio-shaped tabata (20s run / 10s walk, no reps to count) should be authored as `intervals` with `work_sec: 20`, `rest_sec: 10`, `interval_count: 8` — that path already logs `duration_sec` / `distance_m` via the cardio dispatch.
 
 ### `continuous`
 
@@ -575,6 +579,10 @@ Whole-item flag for a separate warm-up item:
 ```
 
 On swap, the app merges the override onto the original prescription (override keys win). `autoreg` can be overridden too — if the alternative wants different steps (machine → stack-based), set `autoreg` in the override.
+
+**`sets` override scope (R2.8).** The `sets` key is honored only for blocks whose advancement is **set-major** — `straight_sets`, `custom`, `intervals`, `continuous`. Round-robin blocks (`superset`, `circuit`, `amrap`, `emom`, `tabata`, `for_time`) replicate a single `rounds` count across every item, so rewriting one item's row count would either skew the cursor walk or silently collapse the whole block. On those blocks the app **drops** the `sets` portion of the override and applies the rest of the keys (`reps`, `load_kg`, `weight_unit`, `target_rir`, `per_side`, `autoreg`) unchanged. If Claude needs to change the round count for a round-robin block, edit the block's `rounds` in the next planned workout rather than smuggling it through an alternative's `sets` override. The drop is surfaced via the `execution.swap_sets_override_rejected` telemetry event so authoring drift is visible.
+
+**Unit inheritance on overrides (R2.10).** Alternative overrides treat `weight_unit` as fully optional. When the override carries `weight_unit`, it wins; when it omits the key, the override's `load_kg` inherits the parent SetPlan's unit. This matches the real-world case: swapping a barbell bench (authored in lb) for a dumbbell bench press usually keeps the same unit. Claude should only declare `weight_unit` on an override when the alternative is fundamentally different equipment (e.g., a machine with a kg stack substituting for a pound-authored free-weight lift).
 
 If the alternative has a fundamentally different shape (e.g., swap a load-based strength item for a bodyweight-reps item), the override replaces the whole strength prescription. For moves that aren't well-modeled as a swap (e.g., metcon ↔ strength), Claude should push a separate alternative on a different `workout_item` rather than force the shape onto one.
 

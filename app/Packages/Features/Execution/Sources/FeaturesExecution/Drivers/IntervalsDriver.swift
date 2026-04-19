@@ -89,7 +89,8 @@ public struct IntervalsDriver: TimingDriver {
             loadKg: nil,
             reps: 0,
             adjustGlyph: nil,
-            lastTime: context.lastPerformed[item.exerciseID]
+            lastTime: context.lastPerformed[item.exerciseID],
+            kind: .cardio
         )
     }
 

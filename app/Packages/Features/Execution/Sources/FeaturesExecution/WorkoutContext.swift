@@ -42,13 +42,27 @@ public struct WorkoutContext: Sendable {
     /// an empty state rather than failing to open.
     public let alternativesByItem: [UUID: [ExerciseAlternative]]
 
+    /// Latest-per-key numeric user_parameters. Keys follow the server
+    /// convention (`1rm_<slug>_kg`, `bodyweight_kg`, …); values are
+    /// parsed from the append-only `user_parameters` log's latest row
+    /// for each key. Populated by `AppBootstrap.buildWorkoutContext`
+    /// from `WorkoutCache.loadUserParametersLatest()`.
+    ///
+    /// qa-045: load resolvers (e.g. `percent_1rm`) read from this map
+    /// at seed time to resolve prescriptions like "3 × 5 @ 60% 1RM"
+    /// into a concrete load in kg. Missing keys leave `loadKg = nil`
+    /// so the execution UI falls back to "BW" — the user can still
+    /// log the set, just without a pre-filled load suggestion.
+    public let userParameters: [String: Double]
+
     public init(
         workout: Workout,
         blocks: [Block],
         itemsByBlock: [[WorkoutItem]],
         exercises: [UUID: Exercise],
         lastPerformed: [UUID: String] = [:],
-        alternativesByItem: [UUID: [ExerciseAlternative]] = [:]
+        alternativesByItem: [UUID: [ExerciseAlternative]] = [:],
+        userParameters: [String: Double] = [:]
     ) {
         self.workout = workout
         self.blocks = blocks
@@ -56,6 +70,7 @@ public struct WorkoutContext: Sendable {
         self.exercises = exercises
         self.lastPerformed = lastPerformed
         self.alternativesByItem = alternativesByItem
+        self.userParameters = userParameters
     }
 
     // MARK: - Convenience lookups

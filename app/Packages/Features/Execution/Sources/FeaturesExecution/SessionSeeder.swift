@@ -92,6 +92,19 @@ public enum SessionSeeder {
                 parser: parser
             ))
         }
+        // qa-045: post-seed percent_1rm resolution. The per-item
+        // seeders intentionally don't know about `user_parameters` —
+        // they read prescriptions in isolation so they stay
+        // context-free + unit-testable. The resolver walks the seeded
+        // ItemLogs with the full context in hand and rewrites load
+        // on `percentOf1RM` rows where `1rm_<slug>_kg` is populated.
+        // Keys that are missing leave loadKg = nil so the UI falls
+        // back to "BW" — the user can still log the set by hand.
+        accum.items = resolvePercentOf1RM(
+            items: accum.items,
+            context: context,
+            parser: parser
+        )
         let state = SessionState(
             workoutID: context.workout.id,
             route: .today,

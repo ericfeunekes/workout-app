@@ -248,7 +248,7 @@ struct ActiveView: View {
     private func heroBlock(content: ActiveContent) -> some View {
         VStack(spacing: DSSpacing.sm) {
             HStack(alignment: .firstTextBaseline, spacing: DSSpacing.md) {
-                heroLoad(content.loadDisplay)
+                heroPrimary(content: content)
                 if let glyph = adjustGlyph(content.adjustGlyph) {
                     Text(glyph)
                         .font(DSTypography.monoLarge)
@@ -256,12 +256,43 @@ struct ActiveView: View {
                         .baselineOffset(18)
                 }
             }
-            Text("\(content.repsDisplay) reps")
+            Text(heroSecondary(content: content))
                 .font(DSTypography.monoLarge)
                 .foregroundStyle(DSColors.foregroundMuted)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, DSSpacing.xxl)
+    }
+
+    /// Hero primary face. Strength shows `loadDisplay` (which may split
+    /// into DSWeightLabel mono pairing). Cardio shows `repsDisplay`
+    /// (the primary target — "45 min" / "400 m") as the big face —
+    /// qa-043: pre-fix the view rendered "45 min reps" / "400 m reps"
+    /// by feeding `repsDisplay` into the "N reps" template; this branch
+    /// promotes the cardio primary to the hero face instead.
+    @ViewBuilder
+    private func heroPrimary(content: ActiveContent) -> some View {
+        switch content.kind {
+        case .strength:
+            heroLoad(content.loadDisplay)
+        case .cardio:
+            Text(content.repsDisplay)
+                .font(.system(size: 64, weight: .light, design: .monospaced))
+                .monospacedDigit()
+                .foregroundStyle(DSColors.accentInk)
+        }
+    }
+
+    /// Hero secondary face. Strength shows "N reps"; cardio shows
+    /// `loadDisplay` (pace / zone / dash) verbatim — no " reps"
+    /// suffix since a continuous effort or interval doesn't have reps.
+    private func heroSecondary(content: ActiveContent) -> String {
+        switch content.kind {
+        case .strength:
+            return "\(content.repsDisplay) reps"
+        case .cardio:
+            return content.loadDisplay
+        }
     }
 
     /// Render the hero load face. `loadDisplay` from the driver is a

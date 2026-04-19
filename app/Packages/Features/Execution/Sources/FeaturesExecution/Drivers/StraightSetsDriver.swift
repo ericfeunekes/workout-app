@@ -206,6 +206,19 @@ public struct StraightSetsDriver: TimingDriver {
     /// Pull `autoreg` config + the resolved `target_rir` out of a
     /// parsed Prescription, for the straight-sets-adjacent shapes that
     /// may carry them.
+    ///
+    /// Only shapes with a single uniform `{reps, load}` plan may propose:
+    /// `straight_sets` and `rep_range`. Per `docs/autoreg.md` S17, shapes
+    /// that author per-set variation (`sets_detail` pyramid / warm-up /
+    /// cluster drops) already encode the author's intended load trajectory
+    /// — a flat autoreg adjustment against the first set's load would
+    /// silently overwrite the pyramid's authored set-2+ targets. Same
+    /// reasoning applies to `cluster` (intra-set drops), `percent_of_1rm`
+    /// (resolver-derived, not yet wired), bodyweight/warmup (loadless),
+    /// amrap_token (open-entry), and `.empty` (placeholder). qa-044: the
+    /// earlier `.setsDetail` branch returned `(autoreg, target)` and
+    /// collided with authored pyramid loads — now returns `(nil, nil)`
+    /// so `onSetLogged` bails out before calling `Autoreg.propose`.
     private func autoregAndTarget(
         from prescription: Prescription
     ) -> (CorePrescription.Autoreg?, Int?) {
@@ -214,9 +227,7 @@ public struct StraightSetsDriver: TimingDriver {
             return (autoreg, target)
         case .repRange(_, _, _, _, _, let target, let autoreg):
             return (autoreg, target)
-        case .setsDetail(_, _, let target, let autoreg):
-            return (autoreg, target)
-        case .percentOf1RM, .cluster, .amrapToken, .bodyweight, .warmup, .empty:
+        case .setsDetail, .percentOf1RM, .cluster, .amrapToken, .bodyweight, .warmup, .empty:
             return (nil, nil)
         }
     }

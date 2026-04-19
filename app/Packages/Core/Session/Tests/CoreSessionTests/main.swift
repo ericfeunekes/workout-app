@@ -1040,4 +1040,79 @@ runCase("save · clears intervalAnchorAt") {
     try expectEqual(s1.workEndsAt, nil)
 }
 
+// ---------------------------------------------------------------------------
+// 28. qa-041 · crossing a block boundary into a roundRobin block must re-read
+//      advancementByBlock[newBlockIndex]. Regression test: straight-sets block
+//      (setMajor) followed by a superset block (roundRobin). After completing
+//      block 0, the cursor must alternate items within block 1, not continue
+//      with setMajor semantics that leave it stuck on the last item.
+// ---------------------------------------------------------------------------
+runCase("advanceFromRest · block transition from setMajor to roundRobin honors new mode") {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    let blockAItem = UUID()
+    let supersetItem0 = UUID()
+    let supersetItem1 = UUID()
+    // Block 0: 1 item × 2 sets (straight sets).
+    // Block 1: 2 items × 2 rounds (superset / round-robin).
+    let s0 = SessionState(
+        workoutID: workoutID,
+        route: .active,
+        cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1),
+        items: [
+            SessionState.ItemLog(itemID: blockAItem, sets: pristineSets(count: 2)),
+            SessionState.ItemLog(itemID: supersetItem0, sets: pristineSets(count: 2)),
+            SessionState.ItemLog(itemID: supersetItem1, sets: pristineSets(count: 2)),
+        ],
+        restEndsAt: nil,
+        note: "",
+        structure: SessionState.Structure(
+            itemsPerBlock: [1, 2],
+            setsPerItem: [[2], [2, 2]],
+            advancementByBlock: [.setMajor, .roundRobin]
+        )
+    )
+
+    // Walk block 0: log set 1, advance → (0,0,2); log set 2, advance → (1,0,1).
+    var s = SessionReducer.reduce(
+        s0,
+        .logSet(itemID: blockAItem, setIndex: 1, loggedReps: 5, loggedRir: 2, now: now)
+    )
+    s = SessionReducer.reduce(s, .advanceFromRest)
+    try expectEqual(s.cursor.blockIndex, 0, "still in block 0 after first set")
+    try expectEqual(s.cursor.itemIndex, 0)
+    try expectEqual(s.cursor.setIndex, 2)
+
+    s = SessionReducer.reduce(
+        s,
+        .logSet(itemID: blockAItem, setIndex: 2, loggedReps: 5, loggedRir: 2, now: now)
+    )
+    s = SessionReducer.reduce(s, .advanceFromRest)
+    try expectEqual(s.cursor.blockIndex, 1, "crossed into block 1")
+    try expectEqual(s.cursor.itemIndex, 0, "landed on first item of new block")
+    try expectEqual(s.cursor.setIndex, 1, "first round of new block")
+
+    // Block 1 round 1: log item 0 → advance must go to item 1 (round-robin).
+    s = SessionReducer.reduce(
+        s,
+        .logSet(itemID: supersetItem0, setIndex: 1, loggedReps: 10, loggedRir: 2, now: now)
+    )
+    s = SessionReducer.reduce(s, .advanceFromRest)
+    try expectEqual(s.cursor.blockIndex, 1)
+    try expectEqual(s.cursor.itemIndex, 1, "round-robin moved to item 1 in same round")
+    try expectEqual(s.cursor.setIndex, 1, "still round 1")
+
+    // Log item 1 → advance must alternate back to item 0, round 2.
+    s = SessionReducer.reduce(
+        s,
+        .logSet(itemID: supersetItem1, setIndex: 1, loggedReps: 10, loggedRir: 2, now: now)
+    )
+    s = SessionReducer.reduce(s, .advanceFromRest)
+    try expectEqual(s.cursor.blockIndex, 1)
+    try expectEqual(
+        s.cursor.itemIndex, 0,
+        "round-robin alternates back to item 0 at the round boundary — qa-041 regression"
+    )
+    try expectEqual(s.cursor.setIndex, 2, "round bumped to 2")
+}
+
 reportAndExit()

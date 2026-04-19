@@ -7,6 +7,7 @@
 // so its helpers naturally group into their own file.
 
 import SwiftUI
+import CoreAutoreg
 import CoreSession
 import DesignSystem
 import WorkoutCoreFoundation
@@ -86,6 +87,20 @@ extension CompleteView {
         let done = log.sets.filter(\.done)
         guard !done.isEmpty else { return "no sets logged" }
 
+        // qa-043: cardio branch. Cardio logs (continuous / intervals)
+        // carry `durationSec` or `distanceM` on the done row and no
+        // meaningful reps/load pair — pre-fix the strength template
+        // rendered "1×0 @ BW" for a 45-min Z2 run. Detecting via
+        // "any done row carries a cardio field" keeps the branch
+        // narrow (strength logs never populate these), so we don't
+        // need to thread the block's timing mode through this static.
+        let hasCardio = done.contains {
+            ($0.durationSec ?? 0) > 0 || ($0.distanceM ?? 0) > 0
+        }
+        if hasCardio {
+            return cardioLedgerSummary(done: done)
+        }
+
         let loads = Set(done.map(\.loadKg))
         let reps = Set(done.map(\.reps))
 
@@ -112,6 +127,38 @@ extension CompleteView {
         }
 
         return "\(done.count) sets"
+    }
+
+    /// Shape a cardio ledger line from one or more done rows. A single
+    /// row (continuous) renders as "MM:SS at 5:30 / km" / "MM:SS ·
+    /// 5 km" / "MM:SS"; multiple interval rows aggregate into "N ×
+    /// work at pace" when all intervals share the same (duration,
+    /// distance) shape, else fall back to "N intervals · total time".
+    static func cardioLedgerSummary(done: [SetPlan]) -> String {
+        if done.count == 1 {
+            let row = done[0]
+            return formatCardioSummary(
+                durationSec: row.durationSec,
+                distanceM: row.distanceM
+            )
+        }
+        // Uniform intervals: all rows share the same duration / distance.
+        let durations = Set(done.map { $0.durationSec ?? -1 })
+        let distances = Set(done.map { $0.distanceM ?? -1 })
+        if durations.count == 1, distances.count == 1 {
+            return formatCardioSummary(
+                durationSec: done.first?.durationSec,
+                distanceM: done.first?.distanceM,
+                count: done.count
+            )
+        }
+        // Heterogeneous rows — sum the measured time so the user sees
+        // something concrete instead of "N intervals" alone.
+        let total = done.reduce(0.0) { $0 + ($1.durationSec ?? 0) }
+        if total > 0 {
+            return "\(done.count) intervals · \(formatDuration(seconds: total))"
+        }
+        return "\(done.count) intervals"
     }
 
     /// Render a summary line. When the summary ends in a weight unit

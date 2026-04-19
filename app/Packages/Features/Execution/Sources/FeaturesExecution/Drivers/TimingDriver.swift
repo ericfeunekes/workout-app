@@ -30,6 +30,23 @@ import WorkoutCoreFoundation
 /// Pure description of what the Active screen should display for the
 /// current set. Produced by a driver; consumed by `ActiveView`.
 public struct ActiveContent: Equatable, Sendable {
+
+    /// Shape hint the view uses to pick hero-block phrasing.
+    /// `.strength` (default) renders the "NNN kg / N reps" pair.
+    /// `.cardio` drops the " reps" suffix and renders `loadDisplay`
+    /// (e.g. pace "6:00 / km") + `repsDisplay` (e.g. "45 min" or
+    /// "400 m") as free-form cardio labels.
+    ///
+    /// qa-043: before this, cardio drivers (`continuous`, `intervals`)
+    /// stuffed their target into `repsDisplay` and the view appended
+    /// " reps" — producing "45 min reps" / "400 m reps". Branching
+    /// here keeps the repurposed display-string convention in place
+    /// while stopping the spurious suffix.
+    public enum Kind: Sendable, Equatable {
+        case strength
+        case cardio
+    }
+
     public let exerciseName: String
     /// 1-based set counter — "2" of `totalSets`.
     public let setIndex: Int
@@ -49,6 +66,8 @@ public struct ActiveContent: Equatable, Sendable {
     public let adjustGlyph: SetPlan.Adjust?
     /// Optional "last time" summary (e.g. "5×5 @ 100 kg · RIR 2").
     public let lastTime: String?
+    /// Shape hint for hero rendering. See `Kind`.
+    public let kind: Kind
 
     public init(
         exerciseName: String,
@@ -59,7 +78,8 @@ public struct ActiveContent: Equatable, Sendable {
         loadKg: Double?,
         reps: Int,
         adjustGlyph: SetPlan.Adjust?,
-        lastTime: String?
+        lastTime: String?,
+        kind: Kind = .strength
     ) {
         self.exerciseName = exerciseName
         self.setIndex = setIndex
@@ -70,6 +90,7 @@ public struct ActiveContent: Equatable, Sendable {
         self.reps = reps
         self.adjustGlyph = adjustGlyph
         self.lastTime = lastTime
+        self.kind = kind
     }
 }
 

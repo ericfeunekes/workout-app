@@ -198,4 +198,37 @@ runCase("wireID is idempotent on an already-lowercase UUID") {
     try expectEqual(reparsed.wireID, lower.wireID)
 }
 
+// ---- Cardio formatting (qa-043) ------------------------------------------
+
+runCase("formatCardioSummary duration-only renders as mm:ss") {
+    try expectEqual(formatCardioSummary(durationSec: 2700, distanceM: nil), "45:00")
+    try expectEqual(formatCardioSummary(durationSec: 90, distanceM: nil), "1:30")
+}
+
+runCase("formatCardioSummary distance-only renders as N km / N m") {
+    try expectEqual(formatCardioSummary(durationSec: nil, distanceM: 5000), "5 km")
+    try expectEqual(formatCardioSummary(durationSec: nil, distanceM: 400), "400 m")
+}
+
+runCase("formatCardioSummary duration + distance → duration at pace") {
+    // 2700 s over 10000 m → 270 s/km → 4:30 / km.
+    try expectEqual(
+        formatCardioSummary(durationSec: 2700, distanceM: 10000),
+        "45:00 at 4:30 / km"
+    )
+}
+
+runCase("formatCardioSummary interval aggregate uses N × shape") {
+    try expectEqual(
+        formatCardioSummary(durationSec: 96, distanceM: 400, count: 6),
+        "6 × 400 m at 4:00 / km"
+    )
+}
+
+runCase("formatCardioSummary renders 'no data' when both inputs missing") {
+    try expectEqual(formatCardioSummary(durationSec: nil, distanceM: nil), "no data")
+    // Zero inputs are the same as nil — they don't count as data.
+    try expectEqual(formatCardioSummary(durationSec: 0, distanceM: 0), "no data")
+}
+
 reportAndExit()

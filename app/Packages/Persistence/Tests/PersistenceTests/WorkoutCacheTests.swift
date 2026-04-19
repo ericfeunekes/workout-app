@@ -199,6 +199,109 @@ final class WorkoutCacheTests: XCTestCase {
     // Reconcile tests (orphaned-child deletion, set-log preservation) live
     // in `WorkoutCacheReconcileTests.swift`.
 
+    /// Perf regression guard for perf-004. The old `save(_:)` issued one
+    /// `modelContext.fetch` per incoming row (and another per parent
+    /// attachment), turning a 50-workout pull into thousands of SQL
+    /// queries — the first-launch bootstrap hot path. The new shape
+    /// batches one IN-predicate fetch per entity class, so the total
+    /// number of fetches is bounded by entity count, not row count.
+    ///
+    /// Asserts the fetch count scales with O(entity classes), not
+    /// O(rows). The exact upper bound matches the pull-path fetch
+    /// sites in `WorkoutCache+Preload.swift` (six entity classes) plus
+    /// any `detachSetLogs` fetches triggered by reconcile (none in
+    /// this dataset — all items are kept). The bound is chosen to
+    /// fail loudly if an upsert helper starts re-introducing a per-row
+    /// fetch.
+    func testSavePreloadsExistingRowsOnce() async throws {
+        let factory = try makeFactory()
+        let cache = factory.workoutCache
+
+        // Build a modest-but-not-trivial dataset: 10 workouts, each with
+        // 2 blocks, 3 items per block, 1 alternative per item, plus a
+        // catalog of 20 exercises and 5 user_parameters. This hits every
+        // upsert helper multiple times, so a per-row fetch would be
+        // obvious in the count.
+        var workouts: [Workout] = []
+        var blocks: [Block] = []
+        var items: [WorkoutItem] = []
+        var alts: [ExerciseAlternative] = []
+        for _ in 0..<10 {
+            let workout = Fixtures.sampleWorkout()
+            workouts.append(workout)
+            for blockIndex in 0..<2 {
+                let block = Fixtures.sampleBlock(
+                    workoutID: workout.id,
+                    position: blockIndex
+                )
+                blocks.append(block)
+                for itemIndex in 0..<3 {
+                    let item = Fixtures.sampleItem(
+                        blockID: block.id,
+                        position: itemIndex
+                    )
+                    items.append(item)
+                    alts.append(Fixtures.sampleAlternative(workoutItemID: item.id))
+                }
+            }
+        }
+        let exercises = (0..<20).map { _ in Fixtures.sampleExercise() }
+        let params = (0..<5).map { _ in Fixtures.sampleUserParameter() }
+
+        let dataset = PulledDataset(
+            workouts: workouts,
+            blocks: blocks,
+            items: items,
+            alternatives: alts,
+            exercises: exercises,
+            userParameters: params
+        )
+
+        guard let impl = cache as? WorkoutCacheImpl else {
+            XCTFail("WorkoutCacheImpl expected from the factory")
+            return
+        }
+
+        // First save: cold cache, no existing rows. One fetch per
+        // entity class that has incoming data — six total.
+        await impl.resetFetchCallCount()
+        try await cache.save(dataset)
+        let coldFetches = await impl.fetchCallCount
+        XCTAssertLessThanOrEqual(
+            coldFetches,
+            6,
+            """
+            Cold-cache save should issue at most six fetches (one per
+            entity class in PullPreload). Observed \(coldFetches) —
+            this indicates an upsert / reconcile helper has re-introduced
+            a per-row fetch.
+            """
+        )
+
+        // Second save: every row is now in the store, so reconcile has
+        // the full subtree to walk. The bound is still entity-class-
+        // scoped, not row-scoped.
+        await impl.resetFetchCallCount()
+        try await cache.save(dataset)
+        let warmFetches = await impl.fetchCallCount
+        XCTAssertLessThanOrEqual(
+            warmFetches,
+            6,
+            """
+            Warm-cache save should still issue at most six fetches; \
+            the preload covers both upsert matching and reconcile's \
+            per-workout walk. Observed \(warmFetches).
+            """
+        )
+
+        // Round-trip sanity so the perf bound isn't trivially met by
+        // skipping work. Every row must still be on disk.
+        let loadedWorkouts = try await cache.loadWorkouts(status: nil, since: nil)
+        XCTAssertEqual(loadedWorkouts.count, 10)
+        let loadedExercises = try await cache.loadExercises()
+        XCTAssertEqual(loadedExercises.count, 20)
+    }
+
     func testClearRemovesEverything() async throws {
         let factory = try makeFactory()
         let cache = factory.workoutCache

@@ -7,9 +7,10 @@
 // `WorkoutCache.swift`. That leaks stale rows into rendered workouts.
 //
 // This file reconciles per-workout: for every incoming `Workout`, the
-// existing block / item / alternative descendants are fetched, the
-// incoming IDs are subtracted, and the difference is deleted before the
-// upsert phase runs. Scope is the workout subtree only:
+// existing block / item / alternative descendants are looked up in the
+// `PullPreload` (built once at the top of `save(_:)`), the incoming IDs
+// are subtracted, and the difference is deleted before the upsert phase
+// runs. Scope is the workout subtree only:
 //
 //   • Exercises (the catalog) are upsert-only. Claude owns the UUID
 //     space; never drop old catalog rows.
@@ -44,7 +45,10 @@ extension WorkoutCacheImpl {
     ///
     /// Runs inside `save(_:)`'s do/catch; a throw here propagates to the
     /// same `rollback()` path that an upsert throw would.
-    func reconcileWorkoutSubtrees(dataset: PulledDataset) throws {
+    ///
+    /// Uses the pre-built `PullPreload` to resolve existing subtrees in
+    /// memory — no per-workout fetch.
+    func reconcileWorkoutSubtrees(dataset: PulledDataset, preload: PullPreload) throws {
         let incomingWorkoutIDs = Set(dataset.workouts.map(\.id))
         guard !incomingWorkoutIDs.isEmpty else { return }
 
@@ -58,12 +62,13 @@ extension WorkoutCacheImpl {
             let incomingBlockIDs = Set(
                 (incomingBlocksByWorkout[workoutID] ?? []).map(\.id)
             )
-            let existingBlocks = try fetchExistingBlocks(workoutID: workoutID)
+            let existingBlocks = preload.blocksByWorkoutID[workoutID] ?? []
             try reconcileBlocks(
                 existingBlocks: existingBlocks,
                 incomingBlockIDs: incomingBlockIDs,
                 incomingItemsByBlock: incomingItemsByBlock,
-                incomingAltsByItem: incomingAltsByItem
+                incomingAltsByItem: incomingAltsByItem,
+                preload: preload
             )
         }
     }
@@ -72,7 +77,8 @@ extension WorkoutCacheImpl {
         existingBlocks: [BlockModel],
         incomingBlockIDs: Set<UUID>,
         incomingItemsByBlock: [UUID: [WorkoutItem]],
-        incomingAltsByItem: [UUID: [ExerciseAlternative]]
+        incomingAltsByItem: [UUID: [ExerciseAlternative]],
+        preload: PullPreload
     ) throws {
         for existingBlock in existingBlocks {
             if !incomingBlockIDs.contains(existingBlock.id) {
@@ -81,19 +87,42 @@ extension WorkoutCacheImpl {
                 // WorkoutItemModel.setLogs) doesn't take them with the
                 // subtree — set_logs are client-owned and must survive
                 // a server edit that removes the item.
-                try detachSetLogs(fromBlock: existingBlock)
+                try detachSetLogs(fromBlock: existingBlock, preload: preload)
                 modelContext.delete(existingBlock)
+                // Drop references from the preload so a subsequent upsert
+                // in the same save() can't re-attach a parent to a
+                // tombstoned model or look up a cascade-deleted item.
+                // Dataset coherence means incoming items/alts under a
+                // reconciled-away block shouldn't exist, but defending
+                // against a malformed pull is cheap.
+                let cascadedItems = preload.itemsByBlockID.removeValue(
+                    forKey: existingBlock.id
+                ) ?? []
+                for cascadedItem in cascadedItems {
+                    preload.itemsByID.removeValue(forKey: cascadedItem.id)
+                    let cascadedAlts = preload.alternativesByItemID.removeValue(
+                        forKey: cascadedItem.id
+                    ) ?? []
+                    for cascadedAlt in cascadedAlts {
+                        preload.alternativesByID.removeValue(forKey: cascadedAlt.id)
+                    }
+                }
+                preload.blocksByID.removeValue(forKey: existingBlock.id)
+                preload.blocksByWorkoutID[existingBlock.workoutID]?.removeAll {
+                    $0.id == existingBlock.id
+                }
                 continue
             }
 
             let incomingItemIDs = Set(
                 (incomingItemsByBlock[existingBlock.id] ?? []).map(\.id)
             )
-            let existingItems = try fetchExistingItems(blockID: existingBlock.id)
+            let existingItems = preload.itemsByBlockID[existingBlock.id] ?? []
             try reconcileItems(
                 existingItems: existingItems,
                 incomingItemIDs: incomingItemIDs,
-                incomingAltsByItem: incomingAltsByItem
+                incomingAltsByItem: incomingAltsByItem,
+                preload: preload
             )
         }
     }
@@ -101,7 +130,8 @@ extension WorkoutCacheImpl {
     private func reconcileItems(
         existingItems: [WorkoutItemModel],
         incomingItemIDs: Set<UUID>,
-        incomingAltsByItem: [UUID: [ExerciseAlternative]]
+        incomingAltsByItem: [UUID: [ExerciseAlternative]],
+        preload: PullPreload
     ) throws {
         for existingItem in existingItems {
             if !incomingItemIDs.contains(existingItem.id) {
@@ -110,15 +140,29 @@ extension WorkoutCacheImpl {
                 // its alternatives.
                 try detachSetLogs(fromItem: existingItem)
                 modelContext.delete(existingItem)
+                let cascadedAlts = preload.alternativesByItemID.removeValue(
+                    forKey: existingItem.id
+                ) ?? []
+                for cascadedAlt in cascadedAlts {
+                    preload.alternativesByID.removeValue(forKey: cascadedAlt.id)
+                }
+                preload.itemsByID.removeValue(forKey: existingItem.id)
+                preload.itemsByBlockID[existingItem.blockID]?.removeAll {
+                    $0.id == existingItem.id
+                }
                 continue
             }
 
             let incomingAltIDs = Set(
                 (incomingAltsByItem[existingItem.id] ?? []).map(\.id)
             )
-            let existingAlts = try fetchExistingAlternatives(workoutItemID: existingItem.id)
+            let existingAlts = preload.alternativesByItemID[existingItem.id] ?? []
             for existingAlt in existingAlts where !incomingAltIDs.contains(existingAlt.id) {
                 modelContext.delete(existingAlt)
+                preload.alternativesByID.removeValue(forKey: existingAlt.id)
+                preload.alternativesByItemID[existingItem.id]?.removeAll {
+                    $0.id == existingAlt.id
+                }
             }
         }
     }
@@ -127,42 +171,27 @@ extension WorkoutCacheImpl {
     /// before the block is cascade-deleted. The loose `workoutItemID`
     /// column stays intact — History reads by UUID, not by relationship —
     /// so the set_log remains queryable.
-    private func detachSetLogs(fromBlock block: BlockModel) throws {
-        let items = try fetchExistingItems(blockID: block.id)
+    private func detachSetLogs(fromBlock block: BlockModel, preload: PullPreload) throws {
+        let items = preload.itemsByBlockID[block.id] ?? []
         for item in items {
             try detachSetLogs(fromItem: item)
         }
     }
 
     private func detachSetLogs(fromItem item: WorkoutItemModel) throws {
+        // The SetLog fetch here is NOT an N+1 on dataset size — it runs
+        // once per orphaned item (typically zero in the common pull path
+        // and at most a handful on a Claude-side edit). We keep this as a
+        // direct fetch because set_logs aren't in the preload: they're
+        // write-only during a pull and reading them speculatively for
+        // every pull would be wasted work.
         let itemID = item.id
         let descriptor = FetchDescriptor<SetLogModel>(
             predicate: #Predicate<SetLogModel> { $0.workoutItemID == itemID }
         )
-        let logs = try modelContext.fetch(descriptor)
+        let logs = try recordedFetch(descriptor)
         for log in logs {
             log.workoutItem = nil
         }
-    }
-
-    private func fetchExistingBlocks(workoutID: UUID) throws -> [BlockModel] {
-        let descriptor = FetchDescriptor<BlockModel>(
-            predicate: #Predicate<BlockModel> { $0.workoutID == workoutID }
-        )
-        return try modelContext.fetch(descriptor)
-    }
-
-    private func fetchExistingItems(blockID: UUID) throws -> [WorkoutItemModel] {
-        let descriptor = FetchDescriptor<WorkoutItemModel>(
-            predicate: #Predicate<WorkoutItemModel> { $0.blockID == blockID }
-        )
-        return try modelContext.fetch(descriptor)
-    }
-
-    private func fetchExistingAlternatives(workoutItemID: UUID) throws -> [ExerciseAlternativeModel] {
-        let descriptor = FetchDescriptor<ExerciseAlternativeModel>(
-            predicate: #Predicate<ExerciseAlternativeModel> { $0.workoutItemID == workoutItemID }
-        )
-        return try modelContext.fetch(descriptor)
     }
 }

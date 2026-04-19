@@ -145,9 +145,11 @@ extension WorkoutCacheImpl {
         // for why we can't use `modelContext.transaction { ... }` on iOS 17.x.
         // Thin wrapper around the shared `upsertWorkout` helper so callers
         // (Execution on `save & done`) can write a single completed workout
-        // row without building a full `PulledDataset`.
+        // row without building a full `PulledDataset`. Builds a one-row
+        // preload so the upsert helper's dictionary contract is satisfied.
         do {
-            try upsertWorkout(workout)
+            let preload = try preloadModels(for: PulledDataset(workouts: [workout]))
+            try upsertWorkout(workout, preload: preload)
             try modelContext.save()
         } catch {
             modelContext.rollback()
@@ -163,7 +165,8 @@ extension WorkoutCacheImpl {
         // reads it immediately; History and any other live reader see the
         // new row on their next load.
         do {
-            try upsertUserParameter(param)
+            let preload = try preloadModels(for: PulledDataset(userParameters: [param]))
+            try upsertUserParameter(param, preload: preload)
             try modelContext.save()
         } catch {
             modelContext.rollback()

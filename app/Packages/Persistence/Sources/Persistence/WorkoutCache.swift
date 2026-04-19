@@ -183,6 +183,16 @@ public actor WorkoutCacheImpl: WorkoutCache {
     /// `@ModelActor` bounds everything to one context per actor).
     public func save(_ dataset: PulledDataset) async throws {
         do {
+            // 0. Preload the entire working set in one batched IN-predicate
+            //    fetch per entity. The old implementation issued a `fetch`
+            //    per row (and per-parent lookup during attachment) which
+            //    turned a single pull into O(rows) SQL queries — the
+            //    first-launch bootstrap hot path. Now upsert + reconcile
+            //    both resolve via id-keyed dictionaries built from a
+            //    bounded set of fetches (six entity classes; per-parent
+            //    groups derived in memory).
+            let preload = try preloadModels(for: dataset)
+
             // 1. Reconcile the workout subtree BEFORE upserting the new shape.
             //    For every incoming Workout we load its existing Block / Item
             //    / Alternative descendants and delete any that aren't in the
@@ -197,25 +207,25 @@ public actor WorkoutCacheImpl: WorkoutCache {
             //    exercise UUID space and we never want to drop old user-
             //    parameter rows. SetLogs belong to Execution, not to the
             //    pulled workout tree; they survive reconcile by design.
-            try reconcileWorkoutSubtrees(dataset: dataset)
+            try reconcileWorkoutSubtrees(dataset: dataset, preload: preload)
 
             for w in dataset.workouts {
-                try upsertWorkout(w)
+                try upsertWorkout(w, preload: preload)
             }
             for b in dataset.blocks {
-                try upsertBlock(b)
+                try upsertBlock(b, preload: preload)
             }
             for i in dataset.items {
-                try upsertItem(i)
+                try upsertItem(i, preload: preload)
             }
             for a in dataset.alternatives {
-                try upsertAlternative(a)
+                try upsertAlternative(a, preload: preload)
             }
             for e in dataset.exercises {
-                try upsertExercise(e)
+                try upsertExercise(e, preload: preload)
             }
             for p in dataset.userParameters {
-                try upsertUserParameter(p)
+                try upsertUserParameter(p, preload: preload)
             }
             try modelContext.save()
         } catch {
@@ -325,6 +335,35 @@ public actor WorkoutCacheImpl: WorkoutCache {
     // Per-entity upsert helpers live in `WorkoutCache+Upserts.swift` so
     // the actor body here stays under SwiftLint's `type_body_length` cap.
 
+    // MARK: - Fetch counting
+
+    /// Running total of `modelContext.fetch(_:)` calls made through
+    /// `recordedFetch`. Used by the perf-004 regression test to pin that
+    /// `save(_:)` issues a bounded number of fetches instead of the old
+    /// O(rows) shape. The counter is always on so it's available from
+    /// both debug and release tests — the cost (one integer increment per
+    /// fetch) is noise relative to the fetch itself.
+    private(set) var fetchCallCount: Int = 0
+
+    /// Thin wrapper around `modelContext.fetch` that increments
+    /// `fetchCallCount`. Every SwiftData fetch in the pull path (upsert
+    /// preload, reconcile, detach) routes through here; History / read
+    /// queries do not, because the counter's job is to guard the write
+    /// path against N+1 regressions.
+    @discardableResult
+    internal func recordedFetch<Model: PersistentModel>(
+        _ descriptor: FetchDescriptor<Model>
+    ) throws -> [Model] {
+        fetchCallCount += 1
+        return try modelContext.fetch(descriptor)
+    }
+
+    /// Reset the counter. Tests call this between `save(_:)` invocations
+    /// so each assertion is scoped to the call under test.
+    internal func resetFetchCallCount() {
+        fetchCallCount = 0
+    }
+
     // MARK: - Test hooks
 
     #if DEBUG
@@ -338,11 +377,12 @@ public actor WorkoutCacheImpl: WorkoutCache {
     ) throws {
         struct TestAbort: Error {}
         do {
+            let preload = try preloadModels(for: dataset)
             for w in dataset.workouts {
-                try upsertWorkout(w)
+                try upsertWorkout(w, preload: preload)
             }
             for e in dataset.exercises {
-                try upsertExercise(e)
+                try upsertExercise(e, preload: preload)
             }
             throw TestAbort()
         } catch {

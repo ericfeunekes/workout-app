@@ -668,6 +668,91 @@ def test_push_rejects_cross_tenant_set_log(client, test_engine) -> None:
     assert response.status_code == 404
 
 
+def test_sync_results_mixed_ownership_rejects_foreign_items(
+    client, test_engine, test_user_id
+) -> None:
+    """Batched set_logs: one foreign workout_item mixed with own items must reject all.
+
+    Regression guard for perf-007: the ownership check was refactored from a
+    per-row `db.get(WorkoutItem, ...)` loop into a single batched query that
+    builds an `{item_id: owner_user_id}` map. If the map build drops the
+    tenant check (e.g. forgets to compare against the auth'd user) or the
+    loop forgets to validate on lookup hit, a foreign item could slip in
+    next to a valid own item. The batch must 404 as a whole — not partially
+    commit.
+    """
+    own_exercise_id, own_item_id = _seed_completed_workout(test_engine, test_user_id)
+
+    # Seed a workout for a different user with its own workout_item.
+    with Session(test_engine) as session:
+        session.add(AppUser(id=_OTHER_USER, name="Other"))
+        session.add(Exercise(id=_OHP, name="OHP"))
+        session.flush()
+        foreign_workout = Workout(
+            user_id=_OTHER_USER,
+            name="Other's workout",
+            status="planned",
+            source="claude",
+        )
+        session.add(foreign_workout)
+        session.flush()
+        foreign_block = Block(
+            workout_id=foreign_workout.id,
+            position=0,
+            timing_mode="straight_sets",
+            timing_config_json="{}",
+        )
+        session.add(foreign_block)
+        session.flush()
+        foreign_item = WorkoutItem(
+            block_id=foreign_block.id,
+            position=0,
+            exercise_id=_OHP,
+            prescription_json="{}",
+        )
+        session.add(foreign_item)
+        session.commit()
+        foreign_item_id = foreign_item.id
+
+    own_log_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+    foreign_log_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "set_logs": [
+                {
+                    "id": own_log_id,
+                    "workout_item_id": own_item_id,
+                    "set_index": 1,
+                    "reps": 5,
+                    "weight": 100.0,
+                    "weight_unit": "kg",
+                    "completed_at": "2026-04-20T07:30:00Z",
+                },
+                {
+                    "id": foreign_log_id,
+                    "workout_item_id": foreign_item_id,
+                    "set_index": 1,
+                    "reps": 5,
+                    "weight": 100.0,
+                    "weight_unit": "kg",
+                    "completed_at": "2026-04-20T07:31:00Z",
+                },
+            ],
+            "status_updates": [],
+        },
+    )
+    assert response.status_code == 404, response.text
+    assert foreign_item_id in response.json()["detail"]
+
+    # Neither log must have been persisted — SQLAlchemy's rollback on the
+    # raised HTTPException keeps the whole batch atomic.
+    with Session(test_engine) as session:
+        assert session.get(SetLog, own_log_id) is None
+        assert session.get(SetLog, foreign_log_id) is None
+
+
 def test_sync_results_rejects_malformed_uuid(client, test_user_id):
     """bug-030 regression: posting a non-UUID string in `id` must 422, not silently insert.
 

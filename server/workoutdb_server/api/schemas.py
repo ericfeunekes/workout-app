@@ -73,6 +73,35 @@ UtcDatetime = Annotated[datetime, PlainSerializer(_serialize_utc, return_type=st
 UtcDatetimeIn = Annotated[datetime, BeforeValidator(_require_z_suffix)]
 
 
+def _walk_uuid_fields(data: Any, *, validate: bool = False) -> Any:
+    """Walk `id`/`*_id` string fields on a dict, lowercase them, optionally validate.
+
+    Shared helper for `_UuidReadBase` (lowercase only — DB is trusted) and
+    `_UuidInputBase` (lowercase + UUID format validation — write-time contract).
+    Non-dict values pass through untouched so Pydantic can still run its normal
+    coercion pipeline (e.g. ORM objects flowing through `from_attributes=True`).
+
+    When `validate=True`, a non-UUID string raises `ValueError` — Pydantic
+    translates that into a 422 at the request boundary. See `_UuidInputBase`
+    for the invariant this enforces (bug-030) and `_UuidReadBase` for why
+    egress deliberately skips validation (bug-031).
+    """
+    if not isinstance(data, dict):
+        return data
+    for key, value in list(data.items()):
+        if not isinstance(value, str):
+            continue
+        if key == "id" or key.endswith("_id"):
+            lowered = value.lower()
+            if validate:
+                try:
+                    _uuid.UUID(lowered)
+                except ValueError as exc:
+                    raise ValueError(f"{key} is not a valid UUID: {value!r}") from exc
+            data[key] = lowered
+    return data
+
+
 class _UuidReadBase(BaseModel):
     """Lowercase every `id`/`*_id` field. Trust the DB — no format validation.
 
@@ -87,14 +116,7 @@ class _UuidReadBase(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _lowercase_uuid_fields(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        for key, value in list(data.items()):
-            if not isinstance(value, str):
-                continue
-            if key == "id" or key.endswith("_id"):
-                data[key] = value.lower()
-        return data
+        return _walk_uuid_fields(data, validate=False)
 
 
 class _UuidInputBase(BaseModel):
@@ -117,19 +139,7 @@ class _UuidInputBase(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _lowercase_and_validate_uuid_fields(cls, data: Any) -> Any:
-        if not isinstance(data, dict):
-            return data
-        for key, value in list(data.items()):
-            if not isinstance(value, str):
-                continue
-            if key == "id" or key.endswith("_id"):
-                lowered = value.lower()
-                try:
-                    _uuid.UUID(lowered)
-                except ValueError as exc:
-                    raise ValueError(f"{key} is not a valid UUID: {value!r}") from exc
-                data[key] = lowered
-        return data
+        return _walk_uuid_fields(data, validate=True)
 
 
 # ---------- Users ----------

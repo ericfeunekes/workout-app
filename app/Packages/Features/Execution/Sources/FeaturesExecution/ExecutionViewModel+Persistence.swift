@@ -517,6 +517,16 @@ extension ExecutionViewModel {
     /// Helper invoked from `tickBlockTimer` when the Tabata work window
     /// elapses. v1 logs a placeholder `(reps: 0, rir: nil)` — a later
     /// slice can prompt the user for a real per-round count.
+    ///
+    /// Fires the push-side hook via `enqueueLoggedSet` and the
+    /// `execution.session_mutation(logSet)` telemetry event after the
+    /// state mutation lands — without these the auto-log updates
+    /// SessionState only and the resulting SetLog never reaches the
+    /// server or the event log (qa-050). `tickBlockTimer`'s
+    /// `state.route == .active` guard prevents double-fire on the next
+    /// tick: the `.enterRest` mutation dispatched here flips the route
+    /// to `.rest`, so a second tick within the same work window won't
+    /// re-enter this helper.
     private func autoLogAndRestForTabata() {
         let c = state.cursor
         guard let item = context.item(at: c.blockIndex, itemIndex: c.itemIndex) else {
@@ -527,6 +537,8 @@ extension ExecutionViewModel {
             .logSet(itemID: item.id, setIndex: c.setIndex, loggedReps: 0, loggedRir: nil, now: now),
             .enterRest(durationSec: TabataDriver.restSec, now: now),
         ])
+        emitSessionMutation("logSet")
+        enqueueLoggedSet(item: item, setIndex: c.setIndex, reps: 0, rir: nil)
     }
 
     /// Helper invoked from `tickBlockTimer` when the EMOM block cap elapses
@@ -536,6 +548,12 @@ extension ExecutionViewModel {
     /// follows — the block is terminating on this tick, not entering
     /// another round. Matches the "capture the most user data" contract
     /// (timing-modes.md) for time-capped modes.
+    ///
+    /// Fires the push-side hook via `enqueueLoggedSet` and the
+    /// `execution.session_mutation(logSet)` telemetry event so the
+    /// placeholder lands on the server + in analytics (same fix as
+    /// tabata's qa-050; the EMOM auto-log path was missing the same
+    /// side-effects plumbing).
     private func autoLogPlaceholderForEMOM() {
         let c = state.cursor
         guard let item = context.item(at: c.blockIndex, itemIndex: c.itemIndex) else {
@@ -545,6 +563,8 @@ extension ExecutionViewModel {
         apply([
             .logSet(itemID: item.id, setIndex: c.setIndex, loggedReps: 0, loggedRir: nil, now: now),
         ])
+        emitSessionMutation("logSet")
+        enqueueLoggedSet(item: item, setIndex: c.setIndex, reps: 0, rir: nil)
     }
 
     /// True when the current EMOM cursor points to one of the block's

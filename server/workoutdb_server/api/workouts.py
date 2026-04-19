@@ -29,6 +29,7 @@ from workoutdb_server.sync.prescription_merge import (
     merge_alternatives,
     merge_prescriptions,
 )
+from workoutdb_server.sync.prescription_validate import validate_resolved_prescription
 
 router = APIRouter(prefix="/api/workouts", tags=["workouts"])
 
@@ -76,11 +77,15 @@ def _build_block(payload: BlockIn, db: Session) -> Block:
         rounds_rep_scheme_json=payload.rounds_rep_scheme_json,
         notes=payload.notes,
     )
-    block.workout_items = [_build_item(i, db) for i in payload.workout_items]
+    block.workout_items = [
+        _build_item(i, db, block_position=payload.position) for i in payload.workout_items
+    ]
     return block
 
 
-def _build_item(payload: WorkoutItemIn, db: Session) -> WorkoutItem:
+def _build_item(
+    payload: WorkoutItemIn, db: Session, *, block_position: int
+) -> WorkoutItem:
     """Resolve library defaults into the workout_item's stored prescription.
 
     Looks up the referenced exercise's default_prescription_json / default_
@@ -105,6 +110,16 @@ def _build_item(payload: WorkoutItemIn, db: Session) -> WorkoutItem:
     default_alternatives = exercise.default_alternatives_json
 
     resolved_prescription = merge_prescriptions(default_prescription, payload.prescription_json)
+
+    # qa-017: enforce the v1-shipped subset of autoreg after the merge — catches
+    # both client-authored violations and library-default-induced ones in one
+    # place. Runs before any DB writes so a 422 leaves no partial rows behind.
+    validate_resolved_prescription(
+        resolved_prescription,
+        item_position=payload.position,
+        block_position=block_position,
+    )
+
     raw_canonical = canonicalize(payload.prescription_json)
     prescription_raw = payload.prescription_json if resolved_prescription != raw_canonical else None
 

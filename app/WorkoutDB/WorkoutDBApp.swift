@@ -77,9 +77,15 @@ private enum ShellPhase {
     /// Bootstrap produced view models. `pushFlusher` is the periodic
     /// foreground push cadence — the shell retains it so it survives
     /// view re-renders and can be stopped on server-change.
+    ///
+    /// `executionHolder` is an observable wrapper whose `vm` swaps
+    /// per-workout after save-and-done (qa-002 / qa-003 fix). The shell
+    /// retains the holder — not the raw VM — so post-save VM rebuilds
+    /// performed by `AppBootstrap+Hooks.makeCompletionWriter` are
+    /// visible to `RootTabView`'s body re-evaluation.
     case ready(
         todayVM: TodayViewModel,
-        executionVM: ExecutionViewModel,
+        executionHolder: ExecutionVMHolder,
         pushFlusher: PushFlusher
     )
     /// Bootstrap completed but nothing is cached and the server was
@@ -87,7 +93,12 @@ private enum ShellPhase {
     case empty
     #if DEBUG
     /// DEBUG launch-arg fast-path. Uses the preview seed directly.
-    case debugSeed(todayVM: TodayViewModel, executionVM: ExecutionViewModel)
+    ///
+    /// Wraps the seeded VM in an `ExecutionVMHolder` so RootTabView's
+    /// observation path is the same as production. The debug path
+    /// doesn't exercise VM rebuild (there's no next workout queued in
+    /// the seed), so `holder.vm` stays as the seeded instance forever.
+    case debugSeed(todayVM: TodayViewModel, executionHolder: ExecutionVMHolder)
     #endif
 }
 
@@ -224,12 +235,12 @@ struct RootView: View {
                     }
                 )
 
-            case .ready(let todayVM, let executionVM, _):
-                tabbedView(todayVM: todayVM, executionVM: executionVM)
+            case .ready(let todayVM, let executionHolder, _):
+                tabbedView(todayVM: todayVM, executionHolder: executionHolder)
 
             #if DEBUG
-            case .debugSeed(let todayVM, let executionVM):
-                tabbedView(todayVM: todayVM, executionVM: executionVM)
+            case .debugSeed(let todayVM, let executionHolder):
+                tabbedView(todayVM: todayVM, executionHolder: executionHolder)
             #endif
             }
         }
@@ -250,11 +261,11 @@ struct RootView: View {
     @ViewBuilder
     private func tabbedView(
         todayVM: TodayViewModel,
-        executionVM: ExecutionViewModel
+        executionHolder: ExecutionVMHolder
     ) -> some View {
         RootTabView(
             todayVM: todayVM,
-            executionVM: executionVM,
+            executionHolder: executionHolder,
             historyVM: historyVM
         )
     }
@@ -308,30 +319,31 @@ struct RootView: View {
         }
 
         // Build the Today → Execution start binding up front. It needs a
-        // stable reference to the Execution view model, which doesn't
-        // exist until `AppBootstrap.bootstrap` returns. We capture a
-        // mutable holder so the Today context can dispatch `.start` into
-        // whatever Execution view model the bootstrap produces.
+        // stable reference to the CURRENT Execution view model — which
+        // changes per-workout after save-and-done (qa-002 / qa-003 fix).
+        // `ExecutionVMHolder` (from the Shell package) is the single
+        // observable box both this binding and `RootTabView` read from,
+        // so the post-save VM swap is visible to both.
         //
-        // `executionVMHolder` is captured *strongly* below: the binding
+        // `executionHolder` is captured *strongly* below: the binding
         // outlives this function (it lives inside `TodayContext` inside the
         // `.ready` phase), and a weak capture would drop to nil the moment
         // `runBootstrap()` returns — silent no-op on every "start workout"
         // tap. The holder has no back-reference to the binding, so there
         // is no retain cycle; the holder is freed when `phase` drops the
         // `.ready` case.
-        let executionVMHolder = ExecutionViewModelHolder()
+        let executionHolder = ExecutionVMHolder()
         let binding: @Sendable (SessionMutation) -> Void = { mutation in
             guard case .start = mutation else { return }
             Task { @MainActor in
-                executionVMHolder.vm?.start()
+                executionHolder.vm?.start()
             }
         }
 
         await runBootstrapPipeline(
             connection: connection,
             binding: binding,
-            executionVMHolder: executionVMHolder
+            executionHolder: executionHolder
         )
     }
 
@@ -340,7 +352,7 @@ struct RootView: View {
     private func runBootstrapPipeline(
         connection: (url: URL, token: String),
         binding: @escaping @Sendable (SessionMutation) -> Void,
-        executionVMHolder: ExecutionViewModelHolder
+        executionHolder: ExecutionVMHolder
     ) async {
         // HistoryViewModel is a @MainActor class; closure-captures by
         // reference so a save-and-done write refreshes the SAME instance
@@ -356,18 +368,20 @@ struct RootView: View {
                 afterLocalCompletion: { [historyVM] in
                     await historyVM.load()
                 },
-                historyViewModel: historyVM
+                historyViewModel: historyVM,
+                executionHolder: executionHolder
             )
             switch result {
-            case .ready(let todayVM, let executionVM, let pushFlusher):
-                executionVMHolder.vm = executionVM
-                // Kick off the periodic foreground flusher — per
-                // `docs/sync.md` § "Cadence", every ~60s while
-                // foregrounded.
+            case .ready(let todayVM, let holder, let pushFlusher):
+                // The holder returned from bootstrap IS the one we passed
+                // in — AppBootstrap populated `holder.vm` and wired the
+                // post-save rebuild path. Kick off the periodic foreground
+                // flusher — per `docs/sync.md` § "Cadence", every ~60s
+                // while foregrounded.
                 await pushFlusher.start()
                 phase = .ready(
                     todayVM: todayVM,
-                    executionVM: executionVM,
+                    executionHolder: holder,
                     pushFlusher: pushFlusher
                 )
             case .empty:
@@ -401,9 +415,11 @@ struct RootView: View {
     /// would show the empty state even though the save path works — making
     /// E2E screenshot verification impossible to distinguish from a bug.
     private func applyDebugLaunchArguments(args: [String]) {
-        let (todayVM, executionVM) = buildDebugSeedViewModels()
-        applyDebugLaunchJumps(args: args, executionVM: executionVM)
-        phase = .debugSeed(todayVM: todayVM, executionVM: executionVM)
+        let (todayVM, executionHolder) = buildDebugSeedViewModels()
+        if let vm = executionHolder.vm {
+            applyDebugLaunchJumps(args: args, executionVM: vm)
+        }
+        phase = .debugSeed(todayVM: todayVM, executionHolder: executionHolder)
     }
     #endif
 }
@@ -461,17 +477,6 @@ extension RootView {
         didStartBootstrap = false
         phase = .firstRun(prefill: prefill)
     }
-}
-
-// MARK: - Holder for the Today → Execution binding
-
-/// Tiny mutable box so the `sessionStateBinding` closure (which ships in
-/// the TodayContext before the Execution view model exists) can point at
-/// the Execution view model once it's constructed. Using a class so the
-/// binding closure sees the assignment across the await boundary.
-@MainActor
-private final class ExecutionViewModelHolder {
-    var vm: ExecutionViewModel?
 }
 
 // MARK: - Tiny transient views

@@ -718,6 +718,230 @@ def test_list_pagination(client, test_engine) -> None:
     assert {w["name"] for w in page1}.isdisjoint({w["name"] for w in page2})
 
 
+# ---------- qa-017: autoreg.apply_to server-side validation ----------
+
+
+def _prescription_with_apply_to(apply_to: str) -> str:
+    """Build a minimally-valid autoreg prescription pinned to a given apply_to.
+
+    Uses `target_rir` because the spec makes it required when `autoreg` is
+    present; keeps the fixture below the check we actually care about.
+    """
+    return json.dumps(
+        {
+            "sets": 3,
+            "reps": 5,
+            "load_kg": 100,
+            "target_rir": 2,
+            "autoreg": {
+                "overshoot_at": 2,
+                "overshoot_step_kg": 2.5,
+                "undershoot_at": 2,
+                "undershoot_step_kg": 2.5,
+                "apply_to": apply_to,
+            },
+        }
+    )
+
+
+def test_post_workout_rejects_apply_to_next(client, test_engine) -> None:
+    """qa-017: `apply_to: "next"` is reserved-unimplemented; ingest must 422."""
+    exercise_id = _seed_exercise(test_engine)
+
+    payload = _workout_payload(exercise_id)
+    payload["blocks"][0]["workout_items"][0]["prescription_json"] = (
+        _prescription_with_apply_to("next")
+    )
+
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422, response.text
+    body_text = response.text
+    assert "apply_to" in body_text
+    assert "'next'" in body_text or '"next"' in body_text
+    # Error points at the offending item so the author can find it.
+    assert "blocks[0].workout_items[0]" in body_text
+
+    # Transaction cleanliness: no workout row was committed.
+    with Session(test_engine) as session:
+        from workoutdb_server.models import Workout
+
+        assert session.query(Workout).count() == 0
+
+
+def test_post_workout_accepts_apply_to_remaining(client, test_engine) -> None:
+    """qa-017: `apply_to: "remaining"` is the only shipped value; ingest succeeds."""
+    exercise_id = _seed_exercise(test_engine)
+
+    payload = _workout_payload(exercise_id)
+    payload["blocks"][0]["workout_items"][0]["prescription_json"] = (
+        _prescription_with_apply_to("remaining")
+    )
+
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 200, response.text
+    body = response.json()
+    resolved = json.loads(body["blocks"][0]["workout_items"][0]["prescription_json"])
+    assert resolved["autoreg"]["apply_to"] == "remaining"
+
+
+def test_post_workout_rejects_apply_to_all_future(client, test_engine) -> None:
+    """qa-017: `apply_to: "all-future"` is reserved-unimplemented; ingest must 422."""
+    exercise_id = _seed_exercise(test_engine)
+
+    payload = _workout_payload(exercise_id)
+    payload["blocks"][0]["workout_items"][0]["prescription_json"] = (
+        _prescription_with_apply_to("all-future")
+    )
+
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422, response.text
+    assert "apply_to" in response.text
+    assert "all-future" in response.text
+
+
+def test_post_workout_rejects_apply_to_arbitrary_string(client, test_engine) -> None:
+    """qa-017: an arbitrary string (typo, future value) is also rejected."""
+    exercise_id = _seed_exercise(test_engine)
+
+    payload = _workout_payload(exercise_id)
+    payload["blocks"][0]["workout_items"][0]["prescription_json"] = (
+        _prescription_with_apply_to("everywhere")
+    )
+
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422, response.text
+
+
+def test_post_workout_accepts_workout_with_no_autoreg(client, test_engine) -> None:
+    """qa-017: prescriptions without an `autoreg` block pass through untouched."""
+    exercise_id = _seed_exercise(test_engine)
+
+    # _workout_payload's default prescription has no autoreg sub-object.
+    response = client.post("/api/workouts", json=_workout_payload(exercise_id))
+    assert response.status_code == 200, response.text
+
+
+def test_post_workout_accepts_autoreg_without_apply_to(client, test_engine) -> None:
+    """qa-017: autoreg present but `apply_to` omitted is fine — the app defaults it."""
+    exercise_id = _seed_exercise(test_engine)
+
+    payload = _workout_payload(exercise_id)
+    payload["blocks"][0]["workout_items"][0]["prescription_json"] = json.dumps(
+        {
+            "sets": 3,
+            "reps": 5,
+            "load_kg": 100,
+            "target_rir": 2,
+            "autoreg": {"overshoot_at": 2, "overshoot_step_kg": 2.5},
+        }
+    )
+
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 200, response.text
+
+
+def test_put_workout_rejects_invalid_apply_to(client, test_engine) -> None:
+    """qa-017: the PUT path runs the same merge+validate pipeline; same 422."""
+    exercise_id = _seed_exercise(test_engine)
+    created = client.post("/api/workouts", json=_workout_payload(exercise_id)).json()
+
+    put_payload = {
+        "blocks": [
+            {
+                "position": 0,
+                "timing_mode": "straight_sets",
+                "timing_config_json": "{}",
+                "workout_items": [
+                    {
+                        "position": 0,
+                        "exercise_id": exercise_id,
+                        "prescription_json": _prescription_with_apply_to("next"),
+                        "alternatives": [],
+                    }
+                ],
+            }
+        ]
+    }
+    response = client.put(f"/api/workouts/{created['id']}", json=put_payload)
+    assert response.status_code == 422, response.text
+    assert "apply_to" in response.text
+    assert "blocks[0].workout_items[0]" in response.text
+
+
+def test_post_workout_rejects_apply_to_from_library_default(client, test_engine) -> None:
+    """qa-017: a library-default `apply_to` that violates is caught post-merge.
+
+    Smart-defaults (ADR-2026-04-18) merge library fields into the item's
+    prescription at ingest. The client payload here has no `apply_to`, but
+    the merged result does — and it's invalid. The validator runs AFTER
+    the merge so it catches both authoring paths (client-side + Claude's
+    library defaults) in one place.
+    """
+    library = {
+        "target_rir": 2,
+        "autoreg": {
+            "overshoot_at": 2,
+            "overshoot_step_kg": 2.5,
+            "apply_to": "all-future",  # library-authored violation
+        },
+    }
+    exercise_id = _seed_exercise_with_defaults(
+        test_engine, default_prescription_json=json.dumps(library)
+    )
+
+    payload = _workout_payload(exercise_id)
+    # Client sends a sparse item with no autoreg — the merge pulls it in.
+    payload["blocks"][0]["workout_items"][0]["prescription_json"] = json.dumps(
+        {"sets": 3, "reps": 5, "load_kg": 100}
+    )
+    payload["blocks"][0]["workout_items"][0]["alternatives"] = []
+
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422, response.text
+    assert "apply_to" in response.text
+    assert "all-future" in response.text
+
+
+def test_post_workout_rejects_nested_invalid_apply_to_in_block_item(client, test_engine) -> None:
+    """qa-017: the validator targets the right item inside a multi-block tree.
+
+    A healthy item on block 0 sits alongside a violating item on block 1.
+    The error message must point at block 1 / item 0 so the author can
+    find the offender — NOT just say "somewhere in this workout."
+    """
+    exercise_id = _seed_exercise(test_engine)
+
+    payload = _workout_payload(exercise_id)
+    # Append a second block whose sole item carries the invalid apply_to.
+    payload["blocks"].append(
+        {
+            "position": 1,
+            "name": "Accessories",
+            "timing_mode": "straight_sets",
+            "timing_config_json": "{}",
+            "workout_items": [
+                {
+                    "position": 0,
+                    "exercise_id": exercise_id,
+                    "prescription_json": _prescription_with_apply_to("next"),
+                    "alternatives": [],
+                }
+            ],
+        }
+    )
+
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422, response.text
+    assert "blocks[1].workout_items[0]" in response.text
+    assert "apply_to" in response.text
+
+    # Transaction cleanliness: no partial row from the healthy block 0.
+    with Session(test_engine) as session:
+        from workoutdb_server.models import Workout
+
+        assert session.query(Workout).count() == 0
+
+
 def test_api_workouts_rejects_non_Z_timestamp(client, test_engine) -> None:
     """`UtcDatetimeIn` must reject `+00:00` on workout `completed_at` too.
 

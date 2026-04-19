@@ -12,12 +12,15 @@ import CoreSession
 import FeaturesExecution
 import FeaturesToday
 import Persistence
+import Shell
 
 extension RootView {
 
     /// Build the `.debugSeed` phase's view models backed by
-    /// `ExecutionPreviewSeed.pushA()` + matching Today seed.
-    func buildDebugSeedViewModels() -> (TodayViewModel, ExecutionViewModel) {
+    /// `ExecutionPreviewSeed.pushA()` + matching Today seed. Wraps the
+    /// seeded ExecutionViewModel in an `ExecutionVMHolder` so
+    /// RootTabView's observation path matches production.
+    func buildDebugSeedViewModels() -> (TodayViewModel, ExecutionVMHolder) {
         let cache = persistence.workoutCache
         let telemetry = persistence.telemetryEmitter()
         let context = ExecutionPreviewSeed.pushA()
@@ -35,9 +38,9 @@ extension RootView {
         // Build todayVM FIRST so the executionVM's localCompletionWriter
         // can capture it + a TodayLoader and call `reload` post-save,
         // matching the production bug-036 wiring. The Today → Execution
-        // `.start` binding is wired below via a holder since executionVM
-        // doesn't exist yet.
-        let executionVMHolder = DebugExecutionHolder()
+        // `.start` binding is wired below via the Shell-package
+        // `ExecutionVMHolder` (shared with RootTabView's observation).
+        let executionHolder = ExecutionVMHolder()
         let todayContext = TodayContext(
             workout: todaySeed.workout,
             blocks: todaySeed.blocks,
@@ -46,9 +49,9 @@ extension RootView {
             lastPerformed: todaySeed.lastPerformed,
             lastSessionSummary: todaySeed.lastSessionSummary,
             programTags: todaySeed.programTags,
-            sessionStateBinding: { [executionVMHolder] mutation in
+            sessionStateBinding: { [executionHolder] mutation in
                 guard case .start = mutation else { return }
-                Task { @MainActor in executionVMHolder.vm?.start() }
+                Task { @MainActor in executionHolder.vm?.start() }
             }
         )
         let todayVM = TodayViewModel(context: todayContext, telemetry: telemetry)
@@ -63,8 +66,8 @@ extension RootView {
             },
             telemetry: telemetry
         )
-        executionVMHolder.vm = executionVM
-        return (todayVM, executionVM)
+        executionHolder.vm = executionVM
+        return (todayVM, executionHolder)
     }
 
     /// Honor `--start-active` / `--jump-rest` / `--jump-complete` launch
@@ -87,12 +90,4 @@ extension RootView {
     }
 }
 
-/// Mutable box so the debug-seed `sessionStateBinding` closure (built
-/// with the `TodayContext` before the Execution view model exists) can
-/// point at `executionVM` once it's constructed. Mirrors the production
-/// `ExecutionViewModelHolder` in `WorkoutDBApp.swift`.
-@MainActor
-private final class DebugExecutionHolder {
-    var vm: ExecutionViewModel?
-}
 #endif

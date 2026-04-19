@@ -250,6 +250,26 @@ public final class ExecutionViewModel {
     /// so increments are race-free without a lock.
     var persistenceRevision: UInt64 = 0
 
+    // MARK: - Save & done re-entrancy guard
+    //
+    // Owned and driven by `+SaveAndDone.swift`. Lives on the VM (rather
+    // than in a module-level side-table) because the shell now rebuilds
+    // the VM per workout — a per-instance stored flag is naturally fresh
+    // for each new workout. Previously this was a process-global
+    // `NSMapTable` whose weak-key auto-eviction assumed the VM died after
+    // save; that lifetime model was wrong for the live shell (same VM
+    // retained across multiple workouts), which produced a nil-map crash
+    // as observed in QA runs. See `+SaveAndDone.swift` header for history.
+
+    /// Whether a `saveAndDone` call is currently mid-flight. Flipped `true`
+    /// by the guard in `+SaveAndDone.swift` before `performSaveAndDone`
+    /// runs and left `true` for the rest of this VM's life — by then the
+    /// reducer's `.save` has flipped the route to `.today` and the
+    /// Complete screen is unmounted. A fresh workout gets a fresh VM
+    /// (built by `AppBootstrap.buildExecutionViewModel`), which resets
+    /// the flag to `false` naturally.
+    var saveAndDoneInFlightStorage: Bool = false
+
     // MARK: - Init
 
     public init(

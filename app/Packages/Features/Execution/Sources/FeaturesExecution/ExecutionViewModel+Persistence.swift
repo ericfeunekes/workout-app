@@ -364,6 +364,24 @@ extension ExecutionViewModel {
             // `.complete`, and the auto-log path just flipped us to
             // `.rest` which the cap guard allows.
         }
+        // EMOM block cap: if the user is still on `.active` for the final
+        // interval when the cap hits, auto-log a placeholder so interval N
+        // doesn't silently drop. Without this, an 8-minute EMOM where the
+        // user reaches interval 8 via boundary advance at t=420 but fails
+        // to log before t=480 completes with 7 logs, not 8 (qa-005). The
+        // pattern mirrors Tabata's work-window auto-log above — run BEFORE
+        // the block-cap complete check so the final log is already in
+        // state before we flip to `.complete`. Guarded on `.active` and
+        // EMOM mode so it doesn't re-log when the user already sat the
+        // interval out in `.rest` (skipped log); also guarded on "cursor
+        // is within authored intervals" so a late log that inline-advanced
+        // the cursor PAST the final interval doesn't double-commit.
+        if let ends = state.blockEndsAt, now >= ends, state.route == .active,
+           let block = context.block(at: state.cursor.blockIndex),
+           block.timingMode == .emom,
+           emomCursorIsWithinAuthoredIntervals() {
+            autoLogPlaceholderForEMOM()
+        }
         // Block cap expired → route to complete. Checked AFTER the work
         // window path so the final placeholder log is already in state
         // before we flip to `.complete`.
@@ -395,6 +413,53 @@ extension ExecutionViewModel {
             .logSet(itemID: item.id, setIndex: c.setIndex, loggedReps: 0, loggedRir: nil, now: now),
             .enterRest(durationSec: TabataDriver.restSec, now: now),
         ])
+    }
+
+    /// Helper invoked from `tickBlockTimer` when the EMOM block cap elapses
+    /// while the user is still on `.active` for the final interval. Logs a
+    /// placeholder `(reps: 0, rir: nil)` so the interval is captured before
+    /// the route flips to `.complete`. Unlike Tabata, no `.enterRest`
+    /// follows — the block is terminating on this tick, not entering
+    /// another round. Matches the "capture the most user data" contract
+    /// (timing-modes.md) for time-capped modes.
+    private func autoLogPlaceholderForEMOM() {
+        let c = state.cursor
+        guard let item = context.item(at: c.blockIndex, itemIndex: c.itemIndex) else {
+            return
+        }
+        let now = clock.now
+        apply([
+            .logSet(itemID: item.id, setIndex: c.setIndex, loggedReps: 0, loggedRir: nil, now: now),
+        ])
+    }
+
+    /// True when the current EMOM cursor points to one of the block's
+    /// authored intervals, rather than a past-end sentinel row. A late log
+    /// (user logs after the interval boundary has passed) inline-advances
+    /// the cursor via `.advanceFromRest` to the next seeded row, which for
+    /// an unboundedRoundsSentinel seed can walk past the authored
+    /// `total_minutes` cap. The cap-auto-log must NOT fire on a past-end
+    /// cursor — the user's final log already landed and we'd double-commit
+    /// a placeholder onto a spurious position. Ordinal math matches the
+    /// round-robin cursor:
+    /// `(setIndex-1) * items.count + itemIndex + 1 ∈ [1, totalIntervals]`.
+    private func emomCursorIsWithinAuthoredIntervals() -> Bool {
+        let c = state.cursor
+        guard let block = context.block(at: c.blockIndex) else { return false }
+        guard c.blockIndex >= 0, c.blockIndex < context.itemsByBlock.count else {
+            return false
+        }
+        let items = context.itemsByBlock[c.blockIndex]
+        guard !items.isEmpty else { return false }
+        let parser = PrescriptionParser()
+        guard case .success(let config) = parser.parseTimingConfig(
+            timingMode: block.timingMode.rawValue,
+            configJSON: block.timingConfigJSON
+        ), case .emom(let intervalSec, let totalMinutes) = config,
+            intervalSec > 0 else { return false }
+        let totalIntervals = Int((Double(totalMinutes) * 60.0) / intervalSec)
+        let ordinal = (c.setIndex - 1) * items.count + c.itemIndex + 1
+        return ordinal >= 1 && ordinal <= totalIntervals
     }
 
     /// Pull the authored `time_cap_sec` (or EMOM `total_minutes * 60`)

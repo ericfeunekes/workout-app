@@ -29,7 +29,7 @@ covers:
 ## What it deliberately doesn't do
 - Does NOT show charts, body-weight trends, volume/RIR heatmaps, PR detection (`app/README.md:153`).
 - Does NOT search exercises in the picker (`HistoryByExerciseView.swift:8`).
-- Does NOT render trend line when only 1 session exists (`TrendComputation.swift:91`).
+- Does NOT render trend line when only 1 session exists. Two distinct sessions — keyed off `workoutItemID`, not calendar day — always render (bug qa-006: same-day circuit + AMRAP for one exercise counts as two sessions).
 - Does NOT retrigger autoreg on a corrective edit — History edits mark the SetLog directly via `saveSetLogs` and never pass through the live `SessionReducer` (completed workouts have no live state). Mirrors `SessionReducer.applyEditPastSet`'s `.manual` semantics on the execution side.
 
 ## Edge cases handled in code
@@ -81,12 +81,12 @@ covers:
 ### S6. Trend requires ≥2 sessions
 - **setup:** Exercise with only one completed session.
 - **steps:** Tap that exercise.
-- **expected:** Per-session rows render; trend line string is `nil` (`TrendComputation.swift:91`). No "↑ X KG / Y WK" header.
+- **expected:** Per-session rows render; trend line string is `nil`. No "↑ X KG / Y WK" header. **Session** means a distinct `workoutItemID` — two separate workouts on the same calendar day (e.g. Burpee in a circuit block + Burpee in a later AMRAP block) count as two sessions, not one (bug qa-006).
 
 ### S7. Trend with flat delta
 - **setup:** Same exercise, same top weight across 2 sessions 3 weeks apart.
 - **steps:** Open exercise detail.
-- **expected:** `displayString == "→ 0 KG / 3 WK"` (`TrendComputation.swift:150`).
+- **expected:** `displayString == "→ 0 KG / 3 WK"`. Same-day case: two distinct sessions logged on the same day render `→ 0 KG / 0 WK` (weeks collapses to 0 but the trend line still appears).
 
 ### S8. Mid-workout swap — detail uses performed exercise
 - **setup:** Completed workout where one item has `performedExerciseID != planned exerciseID`.

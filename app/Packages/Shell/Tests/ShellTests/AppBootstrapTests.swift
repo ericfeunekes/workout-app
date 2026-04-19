@@ -45,12 +45,13 @@ final class AppBootstrapTests: XCTestCase {
             transportBuilder: { _ in transport }
         )
 
-        guard case let .ready(todayVM, executionVM, _) = result else {
+        guard case let .ready(todayVM, executionHolder, _) = result else {
             return XCTFail("expected .ready, got \(result)")
         }
 
         XCTAssertEqual(todayVM.programName, "Push A")
         XCTAssertEqual(todayVM.exercises.count, 2)
+        let executionVM = try XCTUnwrap(executionHolder.vm)
         XCTAssertEqual(executionVM.context.workout.name, "Push A")
         XCTAssertEqual(executionVM.context.blocks.count, 1)
         XCTAssertEqual(executionVM.context.itemsByBlock.first?.count, 2)
@@ -138,10 +139,11 @@ final class AppBootstrapTests: XCTestCase {
             now: fixture.scheduledDate,
             transportBuilder: { _ in transport }
         )
-        guard case let .ready(_, executionVM, _) = result else {
+        guard case let .ready(_, executionHolder, _) = result else {
             return XCTFail("expected .ready, got \(result)")
         }
 
+        let executionVM = try XCTUnwrap(executionHolder.vm)
         executionVM.start()
         executionVM.logSet(reps: 5, rir: 2)
 
@@ -186,10 +188,11 @@ final class AppBootstrapTests: XCTestCase {
             now: fixture.scheduledDate,
             transportBuilder: { _ in transport }
         )
-        guard case let .ready(_, executionVM, _) = result else {
+        guard case let .ready(_, executionHolder, _) = result else {
             return XCTFail("expected .ready, got \(result)")
         }
 
+        let executionVM = try XCTUnwrap(executionHolder.vm)
         // Drive the session to completion. Fixture: 1 block, 2 items
         // (4 sets, then 3 sets). The fixture's timing_config_json is
         // empty so `restDuration` is 0 and the view model auto-advances
@@ -219,6 +222,131 @@ final class AppBootstrapTests: XCTestCase {
         let logs = try await factory.workoutCache.loadSetLogs(workoutID: saved.id)
         XCTAssertEqual(logs.count, 7)
         XCTAssertTrue(logs.allSatisfy { $0.reps != nil })
+    }
+
+    // MARK: - Post-save VM rebuild (qa-002 / qa-003)
+
+    /// Regression test for qa-002 / qa-003. After the user completes
+    /// workout A and taps Save & Done, the shell MUST install a fresh
+    /// `ExecutionViewModel` on the holder pointing at workout B. The
+    /// old pre-rebuild behavior re-used the just-emptied VM from A —
+    /// tapping Start on B flipped that VM to `.active` with no items
+    /// and ActiveView rendered its "no active set" defensive fallback.
+    ///
+    /// This test drives A to completion through the wired bootstrap
+    /// path, fires `saveAndDone`, waits for the detached completion
+    /// writer to run, and asserts:
+    ///   1. `holder.vm` is a DIFFERENT instance than the one that
+    ///      completed workout A.
+    ///   2. The new VM's context points at workout B (not A).
+    ///   3. Starting the new VM produces a non-nil `activeContent` —
+    ///      proof the VM is backed by real items, not the empty
+    ///      post-save structure.
+    func testSaveAndDoneRebuildsExecutionViewModelForNextWorkout() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let (workoutA, workoutB) = Fixtures.twoPlannedWorkouts()
+        // Prime the cache with both workouts. Offline path — no transport
+        // fetch needed, bootstrap falls through to the cache.
+        try await factory.workoutCache.save(
+            PulledDataset(
+                workouts: [workoutA.workout, workoutB.workout],
+                blocks: workoutA.blocks + workoutB.blocks,
+                items: workoutA.items + workoutB.items,
+                alternatives: [],
+                exercises: workoutA.exercises + workoutB.exercises,
+                userParameters: []
+            )
+        )
+
+        let transport = ScriptedTransport(getOutcomes: [.error(.network("dns"))])
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: workoutA.workout.scheduledDate!,
+            transportBuilder: { _ in transport }
+        )
+        guard case let .ready(_, holder, _) = result else {
+            return XCTFail("expected .ready, got \(result)")
+        }
+
+        let vmA = try XCTUnwrap(holder.vm)
+        XCTAssertEqual(
+            vmA.context.workout.id, workoutA.workout.id,
+            "bootstrap should select workout A (earlier scheduled date)"
+        )
+
+        // Drive A to completion via the same path the UI takes.
+        vmA.start()
+        // Workout A has 1 block × 1 item × 1 set — single logSet completes.
+        vmA.logSet(reps: 5, rir: 2)
+        XCTAssertEqual(vmA.state.route, .complete, "A should be on Complete")
+
+        vmA.saveAndDone()
+
+        // The completion writer runs on a detached Task — it writes the
+        // cache, reloads Today, then rebuilds the VM. Give it a window
+        // longer than the write + reload path.
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        let vmB = try XCTUnwrap(holder.vm, "holder.vm must not be nil after save")
+        XCTAssertFalse(
+            vmB === vmA,
+            "post-save VM must be a new instance — re-using vmA is the qa-002 bug"
+        )
+        XCTAssertEqual(
+            vmB.context.workout.id, workoutB.workout.id,
+            "post-save VM must be built for the next workout (B)"
+        )
+        XCTAssertEqual(vmB.state.route, .today, "fresh VM starts on Today route")
+
+        // Start the new VM and verify it has real content. The old bug
+        // surfaced as `activeContent == nil` → ActiveView "no active set".
+        vmB.start()
+        XCTAssertEqual(vmB.state.route, .active)
+        XCTAssertNotNil(
+            vmB.activeContent,
+            "new VM must produce non-nil activeContent — nil is the qa-002 symptom"
+        )
+    }
+
+    /// Regression test for the terminal "no more planned workouts" path.
+    /// When the user completes their last queued workout, `TodayLoader`
+    /// returns `nil` and the completion writer must set `holder.vm = nil`
+    /// (rather than leaving the emptied VM in place). Today's empty state
+    /// (isEmpty == true) guards the start button so the nil VM is never
+    /// dispatched to (qa-008 interaction).
+    func testSaveAndDoneLeavesHolderNilWhenNoNextWorkout() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let fixture = Fixtures.sampleWorkoutPayload()
+        let transport = ScriptedTransport(getOutcomes: [.ok(fixture.json)])
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in transport }
+        )
+        guard case let .ready(_, holder, _) = result else {
+            return XCTFail("expected .ready, got \(result)")
+        }
+
+        let vm = try XCTUnwrap(holder.vm)
+        vm.start()
+        // Fixture: 4 sets + 3 sets = 7 logs to finish.
+        for _ in 0..<4 { vm.logSet(reps: 5, rir: 2) }
+        for _ in 0..<3 { vm.logSet(reps: 8, rir: 2) }
+        XCTAssertEqual(vm.state.route, .complete)
+
+        vm.saveAndDone()
+        try await Task.sleep(nanoseconds: 400_000_000)
+
+        XCTAssertNil(
+            holder.vm,
+            "holder.vm must be nil when no next planned workout remains"
+        )
     }
 
     // MARK: - Offline + populated cache → .ready from cache
@@ -252,9 +380,10 @@ final class AppBootstrapTests: XCTestCase {
             now: fixture.scheduledDate,
             transportBuilder: { _ in transport }
         )
-        guard case let .ready(_, executionVM, _) = result else {
+        guard case let .ready(_, executionHolder, _) = result else {
             return XCTFail("expected .ready from cache, got \(result)")
         }
+        let executionVM = try XCTUnwrap(executionHolder.vm)
         XCTAssertEqual(executionVM.context.workout.name, "Push A")
     }
 

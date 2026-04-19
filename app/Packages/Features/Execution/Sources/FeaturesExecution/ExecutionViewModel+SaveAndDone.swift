@@ -16,32 +16,22 @@
 // server, the duplicate bodyweight would live forever. The guard drops
 // the second (and any further) invocation once the first has fired.
 //
-// Why an `@MainActor` module-level `NSMapTable` instead of a stored
-// property on the class: the view model's stored properties live in the
-// main class body in `ExecutionViewModel.swift`, and a parallel subagent
-// is currently editing adjacent extensions there. Keeping the flag
-// module-local avoids a merge collision while still giving SwiftUI a
-// `@MainActor`-reachable check for `.disabled()` bindings. `NSMapTable`
-// with weak keys auto-evicts entries when the view model deallocates,
-// so `ObjectIdentifier` reuse (a new VM reusing the memory address of a
-// just-deallocated one) cannot leak a stale `true` across instances.
+// Lifetime model: the guard is a stored `Bool` on the VM
+// (`saveAndDoneInFlightStorage`), owned by the main class body in
+// `ExecutionViewModel.swift`. Each workout gets a FRESH VM — the shell
+// rebuilds one in the post-save completion writer via
+// `AppBootstrap.buildExecutionViewModel(for:...)`. A per-instance stored
+// flag is therefore naturally reset between workouts.
+//
+// A previous version of this file kept the flag in a process-global
+// `NSMapTable` keyed weakly on the VM, on the assumption that the VM
+// died after save. That assumption was false — the shell retained the
+// same VM for the entire `.ready` phase — and the resulting dangling
+// map was the source of the `NSMapGet: map table argument is NULL`
+// crash captured in the QA-01 recording. The rebuild-per-workout
+// change makes the side table unnecessary (fresh VM ⇒ fresh flag).
 
 import Foundation
-
-/// Sentinel value parked in the in-flight table. The table maps weakly
-/// from a view model to this marker; presence of the mapping ⇒ the
-/// flag is set. We use a reference type rather than `Bool` because
-/// `NSMapTable<AnyObject, NSNumber>` would erase type information and
-/// the sentinel pattern reads more explicitly at the call site.
-private final class SaveAndDoneMarker {}
-
-/// `@MainActor`-isolated table of in-flight guards. Keys are weakly
-/// retained view models so a deallocated VM's entry is evicted
-/// automatically; that's what keeps the guard from leaking across VM
-/// instances when `ObjectIdentifier` recycles memory addresses.
-@MainActor
-private let saveAndDoneInFlightTable: NSMapTable<AnyObject, SaveAndDoneMarker> =
-    NSMapTable.weakToStrongObjects()
 
 extension ExecutionViewModel {
 
@@ -51,15 +41,12 @@ extension ExecutionViewModel {
     /// during the brief window before the reducer's `.save` flips the
     /// route back to `.today` and unmounts the Complete screen.
     ///
-    /// This is a plain computed property (not an `@Observable` stored
-    /// field) because the stored field would have to live on the main
-    /// class body and the double-tap race happens entirely inside a
-    /// single @MainActor synchronous run-loop turn — there is no async
-    /// boundary for SwiftUI to observe across. The `.disabled()` binding
-    /// is belt-and-suspenders defense; the guard in `saveAndDone` is
-    /// the correctness-critical check.
+    /// Computed over the stored `saveAndDoneInFlightStorage` so the
+    /// `@Observable` macro tracks changes through this accessor — SwiftUI
+    /// picks up the `.disabled(...)` flip automatically when the guard
+    /// flips it.
     public var saveAndDoneInFlight: Bool {
-        saveAndDoneInFlightTable.object(forKey: self) != nil
+        saveAndDoneInFlightStorage
     }
 
     /// Save & done. Clears the persisted session and returns to Today.
@@ -67,7 +54,7 @@ extension ExecutionViewModel {
     /// Before the reducer's `.save` wipes the in-memory log, we hand the
     /// completed workout + set_logs to `localCompletionWriter` (if wired).
     /// That writes them into the local `WorkoutCache` so the History tab
-    /// sees the workout immediately — the push queue is the authoritative
+    /// sees them immediately — the push queue is the authoritative
     /// server-side path, but the user shouldn't have to wait for a pull
     /// to see their own just-completed workout. See
     /// `docs/open-questions.md` § "Execution `save & done` doesn't persist
@@ -83,17 +70,15 @@ extension ExecutionViewModel {
     ///     to `POST /api/user-parameters`). Nil means no capture, no
     ///     enqueue.
     ///
-    /// Re-entrancy: the first call sets `saveAndDoneInFlight = true` and
-    /// runs the full committed path; a concurrent second call (double-
-    /// tap, SwiftUI re-render firing the tap action twice) sees the flag
-    /// already set and returns silently. The flag is NOT cleared on the
-    /// happy path — by the time `performSaveAndDone` returns, the reducer
-    /// has flipped the route to `.today` and the Complete screen is
-    /// unmounted, so the view model is effectively single-use for the
-    /// rest of this session. The flag IS cleared for the same
-    /// `ObjectIdentifier` when the view model is deinit'd, via the
-    /// `Self.releaseSaveAndDoneGuard` helper the test suite can call if
-    /// it re-uses an ObjectIdentifier.
+    /// Re-entrancy: the first call flips `saveAndDoneInFlightStorage`
+    /// `true` and runs the full committed path; a concurrent second call
+    /// (double-tap, SwiftUI re-render firing the tap action twice) sees
+    /// the flag already set and returns silently. The flag is NOT cleared
+    /// on the happy path — by the time `performSaveAndDone` returns, the
+    /// reducer has flipped the route to `.today` and the Complete screen
+    /// is unmounted. For the next workout the shell constructs a FRESH
+    /// VM (see `AppBootstrap.buildExecutionViewModel(for:)`) so the flag
+    /// starts `false` there.
     ///
     /// Defaulted parameters preserve the existing call-sites in tests
     /// that predate the capture inputs.
@@ -101,20 +86,20 @@ extension ExecutionViewModel {
         note: String? = nil,
         bodyweightKg: Double? = nil
     ) {
-        if saveAndDoneInFlightTable.object(forKey: self) != nil {
+        if saveAndDoneInFlightStorage {
             return
         }
-        saveAndDoneInFlightTable.setObject(SaveAndDoneMarker(), forKey: self)
+        saveAndDoneInFlightStorage = true
         performSaveAndDone(note: note, bodyweightKg: bodyweightKg)
     }
 
-    /// Test hook: drop the in-flight entry for this view model so a test
-    /// that re-uses the same VM instance across scenarios can reset the
-    /// guard. Production never calls this — the VM is unmounted after
-    /// `saveAndDone` by the route flip to `.today`. Kept `internal` so
-    /// the test target (`@testable import FeaturesExecution`) reaches
-    /// it; invisible to shell callers.
+    /// Test hook: drop the in-flight flag so a test that re-uses the
+    /// same VM instance across scenarios can reset the guard. Production
+    /// never calls this — each workout's VM is single-use and the shell
+    /// builds a fresh one for the next workout. Kept `internal` so the
+    /// test target (`@testable import FeaturesExecution`) reaches it;
+    /// invisible to shell callers.
     func releaseSaveAndDoneGuardForTests() {
-        saveAndDoneInFlightTable.removeObject(forKey: self)
+        saveAndDoneInFlightStorage = false
     }
 }

@@ -89,7 +89,7 @@ Glance screen at the start of a session. `TodayLoader` pulls the `.planned` work
 - **setup:** workout with zero blocks, or blocks with zero items.
 - **steps:** load Today.
 - **expected:** header + optional chip render; exercise list is empty; "start workout" still enabled.
-- **notes:** start is not disabled based on emptiness. This is not built — no guard on `exercises.isEmpty` exists in `TodayView.swift:118-123`.
+- **notes:** start is not disabled based on a workout having zero exercises — `isEmpty` (the VM's empty-shaped flag) is set by `apply(nil)`, not by `exercises.isEmpty`. A pulled workout with zero items still has `isEmpty == false` and keeps the CTA.
 
 ### S9. Same exercise listed twice in one workout
 - **setup:** two items referencing the same `exerciseID`.
@@ -102,8 +102,8 @@ Glance screen at the start of a session. `TodayLoader` pulls the `.planned` work
 - **expected:** `TodayViewModel.workoutID == pullA.id`, `programName == "Pull A"`, and the exercise list re-derives from Pull A's items. `isEmpty == false`.
 - **notes:** This is the bug-036 fix. Previously the VM held the completed workout's `TodayContext` forever until relaunch, so the user saw a stale "start workout" screen for the session they just finished.
 
-### S11. Reload to empty when no planned workouts remain (tested: `testTodayViewModelReloadToEmptyWhenNoPlannedWorkouts`)
+### S11. Reload to empty when no planned workouts remain (tested: `testTodayViewModelReloadToEmptyWhenNoPlannedWorkouts`, `testTodayViewHidesStartButtonWhenEmpty`)
 - **setup:** exactly one `.planned` workout in the cache.
 - **steps:** complete it → save & done → reload.
-- **expected:** loader returns `nil`; `TodayViewModel.isEmpty == true`, `workoutID == nil`, `exercises == []`, `programName == ""`, `lastSessionSummary == nil`, `programTags == []`. The shell renders the existing S8 empty-glance until Claude pushes a new session.
-- **notes:** The shell does NOT flip `phase` back to `.empty` — the VM's empty-shaped state is rendered inside the existing `.ready` phase. If we ever need a full empty-state screen in this case, observe `todayVM.isEmpty` in `RootTabView`.
+- **expected:** loader returns `nil`; `TodayViewModel.isEmpty == true`, `workoutID == nil`, `exercises == []`, `programName == ""`, `lastSessionSummary == nil`, `programTags == []`, `showsStartButton == false`. `TodayView` hides the pinned "start workout" CTA and renders the empty-glance ("no planned workouts / check back after Claude sends a new session") inside the existing `.ready` phase.
+- **notes:** The shell does NOT flip `phase` back to `.empty` — the VM's empty-shaped state is rendered inside the existing `.ready` phase. `showsStartButton` is the gate — it returns `!isEmpty`. qa-008 fix: previously the view unconditionally rendered `startButton`, so an empty Today showed only a disconnected CTA over a black screen.

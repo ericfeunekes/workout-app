@@ -43,13 +43,16 @@ import WorkoutCoreFoundation
 /// must act on it (clear the saved connection) before showing any UI, so
 /// it's modeled as an error.
 public enum BootstrapResult: Sendable {
-    /// Pull (or cache) produced a planned workout — both view models are
-    /// live and wired. The `pushFlusher` owns the periodic push cadence;
-    /// the shell should `await pushFlusher.start()` on ready and
-    /// `stop()` when the connection is wiped.
+    /// Pull (or cache) produced a planned workout — the holder carries
+    /// the initial `ExecutionViewModel` and the post-save completion
+    /// writer reassigns `holder.vm` to a freshly-built VM per-workout.
+    /// `RootTabView` observes the holder so the swap takes effect
+    /// without a relaunch. The `pushFlusher` owns the periodic push
+    /// cadence; the shell should `await pushFlusher.start()` on ready
+    /// and `stop()` when the connection is wiped.
     case ready(
         todayVM: TodayViewModel,
-        executionVM: ExecutionViewModel,
+        executionHolder: ExecutionVMHolder,
         pushFlusher: PushFlusher
     )
     /// Pull failed AND nothing is cached. The shell renders a "no
@@ -81,7 +84,8 @@ public enum AppBootstrap {
         sessionStateBinding: (@Sendable (SessionMutation) -> Void)? = nil,
         telemetryEmitter: TelemetryEmitter = NoopTelemetryEmitter(),
         afterLocalCompletion: (@Sendable () async -> Void)? = nil,
-        historyViewModel: HistoryViewModel? = nil
+        historyViewModel: HistoryViewModel? = nil,
+        executionHolder: ExecutionVMHolder? = nil
     ) async throws -> BootstrapResult {
         // Complete the telemetry emitter → push queue wire-up BEFORE the
         // first emit. `PersistenceFactory.prepareTelemetry()` is idempotent
@@ -116,24 +120,55 @@ public enum AppBootstrap {
             emitBootstrap(telemetryEmitter, name: "bootstrap.empty")
             return .empty
         }
-        let workoutContext = try await buildWorkoutContext(
-            for: todayContext.workout,
-            cache: persistence.workoutCache
-        )
-        emitBootstrap(
-            telemetryEmitter,
-            name: "bootstrap.ready",
-            workoutID: todayContext.workout.id
-        )
-        return buildReady(ReadyInputs(
+        return try await assembleReady(AssembleInputs(
             todayContext: todayContext,
-            workoutContext: workoutContext,
             todayLoader: loader,
-            sessionStore: persistence.sessionStore,
-            workoutCache: persistence.workoutCache,
+            persistence: persistence,
             syncAPI: syncAPI,
             telemetry: telemetryEmitter,
-            afterLocalCompletion: afterLocalCompletion
+            afterLocalCompletion: afterLocalCompletion,
+            executionHolder: executionHolder
+        ))
+    }
+
+    /// Grouped args for `assembleReady`. Keeps the helper under
+    /// SwiftLint's `function_parameter_count` cap.
+    private struct AssembleInputs {
+        let todayContext: TodayContext
+        let todayLoader: TodayLoader
+        let persistence: PersistenceFactory
+        let syncAPI: SyncAPI
+        let telemetry: TelemetryEmitter
+        let afterLocalCompletion: (@Sendable () async -> Void)?
+        let executionHolder: ExecutionVMHolder?
+    }
+
+    /// Post-load assembly. Extracted so `bootstrap(...)` stays under
+    /// SwiftLint's `function_body_length` cap. Builds the execution
+    /// `WorkoutContext`, emits `bootstrap.ready`, and composes the view
+    /// models via `buildReady`.
+    private static func assembleReady(
+        _ inputs: AssembleInputs
+    ) async throws -> BootstrapResult {
+        let workoutContext = try await buildWorkoutContext(
+            for: inputs.todayContext.workout,
+            cache: inputs.persistence.workoutCache
+        )
+        emitBootstrap(
+            inputs.telemetry,
+            name: "bootstrap.ready",
+            workoutID: inputs.todayContext.workout.id
+        )
+        return buildReady(ReadyInputs(
+            todayContext: inputs.todayContext,
+            workoutContext: workoutContext,
+            todayLoader: inputs.todayLoader,
+            sessionStore: inputs.persistence.sessionStore,
+            workoutCache: inputs.persistence.workoutCache,
+            syncAPI: inputs.syncAPI,
+            telemetry: inputs.telemetry,
+            afterLocalCompletion: inputs.afterLocalCompletion,
+            executionHolder: inputs.executionHolder ?? ExecutionVMHolder()
         ))
     }
 
@@ -197,60 +232,9 @@ public enum AppBootstrap {
         ))
     }
 
-    /// Grouped args for `buildReady`. Keeps the function under SwiftLint's
-    /// `function_parameter_count` cap.
-    private struct ReadyInputs {
-        let todayContext: TodayContext
-        let workoutContext: WorkoutContext
-        /// Kept past build time so `makeCompletionWriter` can call
-        /// `todayVM.reload(using:)` after save-and-done — the completed
-        /// workout is no longer `.planned` and Today must advance to the
-        /// next one (bug-036).
-        let todayLoader: TodayLoader
-        let sessionStore: SessionStore
-        let workoutCache: WorkoutCache
-        let syncAPI: SyncAPI
-        let telemetry: TelemetryEmitter
-        let afterLocalCompletion: (@Sendable () async -> Void)?
-    }
-
-    /// Compose the `.ready` tuple. Extracted from `bootstrap(...)` so the
-    /// parent function body stays under SwiftLint's
-    /// `function_body_length` cap. The push wiring is deliberate: every
-    /// hook goes fire-and-forget via the view model's own detached
-    /// `Task`, so a network hiccup never blocks the UI mutation path
-    /// (see `docs/sync.md` § "Cadence" — push is "fire-and-forget from
-    /// the UI's perspective").
-    private static func buildReady(_ inputs: ReadyInputs) -> BootstrapResult {
-        let todayVM = TodayViewModel(
-            context: inputs.todayContext,
-            telemetry: inputs.telemetry
-        )
-        let pushFlusher = PushFlusher(api: inputs.syncAPI)
-        let hooks = makePushHooks(
-            syncAPI: inputs.syncAPI,
-            workoutCache: inputs.workoutCache,
-            pushFlusher: pushFlusher
-        )
-        let completionWriter = makeCompletionWriter(
-            workoutCache: inputs.workoutCache,
-            todayViewModel: todayVM,
-            todayLoader: inputs.todayLoader,
-            afterLocalCompletion: inputs.afterLocalCompletion
-        )
-        let executionVM = ExecutionViewModel(
-            context: inputs.workoutContext,
-            sessionStore: inputs.sessionStore,
-            push: hooks,
-            localCompletionWriter: completionWriter,
-            telemetry: inputs.telemetry
-        )
-        return .ready(
-            todayVM: todayVM,
-            executionVM: executionVM,
-            pushFlusher: pushFlusher
-        )
-    }
+    // `ReadyInputs`, `buildReady`, and `CompletionWriterBox` live in
+    // `AppBootstrap+Hooks.swift` so this main file stays under SwiftLint's
+    // `type_body_length` cap for the enum body.
 
     // MARK: - Pull → cache
 
@@ -292,7 +276,11 @@ public enum AppBootstrap {
     /// `WorkoutContext`. Block order matches `blocks.position`; items
     /// within each block match `items.position`. `cache.loadBlocks` and
     /// `loadItems` already return sorted rows.
-    private static func buildWorkoutContext(
+    ///
+    /// Visible to the `+Hooks.swift` extension so the post-save
+    /// completion writer can reuse the same assembly logic when
+    /// rebuilding the ExecutionViewModel for the next workout.
+    static func buildWorkoutContext(
         for workout: Workout,
         cache: WorkoutCache
     ) async throws -> WorkoutContext {

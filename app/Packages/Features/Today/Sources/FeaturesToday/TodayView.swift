@@ -31,19 +31,29 @@ public struct TodayView: View {
             VStack(spacing: 0) {
                 ScrollView {
                     VStack(alignment: .leading, spacing: DSSpacing.xl) {
-                        header
-                        lastSessionChip
-                        exerciseList
+                        if viewModel.isEmpty {
+                            emptyGlance
+                        } else {
+                            header
+                            lastSessionChip
+                            exerciseList
+                        }
                     }
                     .padding(.horizontal, DSSpacing.xl)
                     .padding(.top, DSSpacing.xxl)
                     .padding(.bottom, DSSpacing.xxl)
                 }
 
-                startButton
-                    .padding(.horizontal, DSSpacing.xl)
-                    .padding(.top, DSSpacing.lg)
-                    .padding(.bottom, DSSpacing.xl)
+                // qa-008: gate the pinned CTA on `showsStartButton`
+                // (false when `isEmpty == true`). An empty Today has no
+                // workout to dispatch, so rendering the button produces
+                // a disconnected CTA over a black screen.
+                if viewModel.showsStartButton {
+                    startButton
+                        .padding(.horizontal, DSSpacing.xl)
+                        .padding(.top, DSSpacing.lg)
+                        .padding(.bottom, DSSpacing.xl)
+                }
             }
         }
     }
@@ -122,6 +132,24 @@ public struct TodayView: View {
             action: { viewModel.start() }
         )
     }
+
+    // qa-008: when `viewModel.isEmpty == true` the VM has no workout to
+    // render — previously the view still displayed the pinned "start
+    // workout" button, producing a black screen with an orphaned CTA.
+    // Per `docs/features/today.md` S11, the empty path should render a
+    // quiet message and no CTA until Claude pushes a new session.
+    private var emptyGlance: some View {
+        VStack(alignment: .leading, spacing: DSSpacing.sm) {
+            Text("no planned workouts")
+                .font(DSTypography.body)
+                .foregroundStyle(DSColors.foregroundMuted)
+            Text("check back after Claude sends a new session.")
+                .font(DSTypography.caption)
+                .foregroundStyle(DSColors.foregroundDim)
+        }
+        .padding(.vertical, DSSpacing.xxl)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
 }
 
 // MARK: - Previews
@@ -139,5 +167,14 @@ public struct TodayView: View {
         context: TodayPreviewSeed.pushA(withLastSession: false)
     ))
     .preferredColorScheme(.dark)
+}
+
+#Preview("Today — empty (nothing planned)") {
+    let vm = TodayViewModel(
+        context: TodayPreviewSeed.pushA(withLastSession: false)
+    )
+    vm.apply(nil)
+    return TodayView(viewModel: vm)
+        .preferredColorScheme(.dark)
 }
 #endif

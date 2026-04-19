@@ -87,12 +87,13 @@ final class ByExerciseUnitAndGroupingTests: XCTestCase {
         // is the hypothetical future where Eric switches to lb for
         // real — the trend should follow the user's actual unit, not
         // get stuck in kg because the tie-break favors it.
-        let itemID = UUID()
+        // Each session is its own WorkoutItem, since `topSetsBySession`
+        // groups on `workoutItemID` (qa-006).
         let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
         let logs = [
             // Week 0: 100 kg (minority unit — excluded).
             SetLog(
-                id: UUID(), workoutItemID: itemID,
+                id: UUID(), workoutItemID: UUID(),
                 performedExerciseID: nil, setIndex: 1,
                 reps: 5, weight: 100, weightUnit: .kg, rir: 2,
                 isWarmup: false, startedAt: nil,
@@ -101,7 +102,7 @@ final class ByExerciseUnitAndGroupingTests: XCTestCase {
             ),
             // Week 1: 205 lb.
             SetLog(
-                id: UUID(), workoutItemID: itemID,
+                id: UUID(), workoutItemID: UUID(),
                 performedExerciseID: nil, setIndex: 1,
                 reps: 5, weight: 205, weightUnit: .lb, rir: 2,
                 isWarmup: false, startedAt: nil,
@@ -110,7 +111,7 @@ final class ByExerciseUnitAndGroupingTests: XCTestCase {
             ),
             // Week 2: 215 lb.
             SetLog(
-                id: UUID(), workoutItemID: itemID,
+                id: UUID(), workoutItemID: UUID(),
                 performedExerciseID: nil, setIndex: 1,
                 reps: 5, weight: 215, weightUnit: .lb, rir: 2,
                 isWarmup: false, startedAt: nil,

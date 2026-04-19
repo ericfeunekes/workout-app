@@ -75,11 +75,19 @@ public final class TodayViewModel {
     /// workout; also convenient for telemetry correlation.
     public internal(set) var workoutID: UUID?
 
+    /// Should the view render the pinned "start workout" button? The
+    /// button only makes sense when there's a workout to start — when
+    /// `isEmpty == true` (reload found nothing planned, per S11) it
+    /// would be a disconnected CTA with nothing to dispatch. Exposed
+    /// as a computed property so tests can assert the gate directly
+    /// without view-tree inspection. See qa-008.
+    public var showsStartButton: Bool { !isEmpty }
+
     // MARK: - Dependencies for reload
     //
     // `sessionStateBinding` survives reload unchanged — the holder it
-    // points at is stable across bootstrap (see `WorkoutDBApp`'s
-    // `ExecutionViewModelHolder`). `lastPerformed` / `lastSessionSummary`
+    // points at is stable across bootstrap (see Shell's
+    // `ExecutionVMHolder`). `lastPerformed` / `lastSessionSummary`
     // / `programTags` are pass-through defaults from the original init;
     // they stay `nil` / `[:]` on reload until the history query API lands.
 

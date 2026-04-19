@@ -239,6 +239,54 @@ final class TodayViewModelTests: XCTestCase {
         XCTAssertEqual(vm.exercises.first?.name, "Squat")
     }
 
+    /// qa-008 regression: the VM must expose `showsStartButton` that
+    /// tracks `!isEmpty`. The view uses this to gate the pinned CTA —
+    /// previously, the start button rendered even when `isEmpty == true`,
+    /// producing a black screen with a disconnected "start workout"
+    /// button after the last planned workout was completed.
+    func testTodayViewShowsStartButtonWhenContextPresent() {
+        let workoutID = UUID()
+        let ctx = TodayContext(
+            workout: Workout(
+                id: workoutID, userID: UUID(), name: "Push A",
+                scheduledDate: Date(), status: .planned, source: .claude,
+                notes: nil, createdAt: Date(), updatedAt: Date(),
+                completedAt: nil, tagsJSON: nil
+            ),
+            blocks: [],
+            items: [],
+            exercises: [:],
+            lastPerformed: [:]
+        )
+        let vm = TodayViewModel(context: ctx)
+        XCTAssertFalse(vm.isEmpty)
+        XCTAssertTrue(vm.showsStartButton)
+    }
+
+    /// qa-008 regression: `showsStartButton` is `false` when the VM is
+    /// in its empty-shaped state (S11 — reload returned `nil`). The
+    /// view must hide the pinned "start workout" button in this case.
+    func testTodayViewHidesStartButtonWhenEmpty() {
+        let workoutID = UUID()
+        let ctx = TodayContext(
+            workout: Workout(
+                id: workoutID, userID: UUID(), name: "Push A",
+                scheduledDate: Date(), status: .planned, source: .claude,
+                notes: nil, createdAt: Date(), updatedAt: Date(),
+                completedAt: nil, tagsJSON: nil
+            ),
+            blocks: [],
+            items: [],
+            exercises: [:],
+            lastPerformed: [:]
+        )
+        let vm = TodayViewModel(context: ctx)
+        // Flip to empty-shaped state — models reload-to-empty (S11).
+        vm.apply(nil)
+        XCTAssertTrue(vm.isEmpty)
+        XCTAssertFalse(vm.showsStartButton)
+    }
+
     /// Seed a single planned workout, complete it, and reload. The
     /// loader returns nil; the VM must flip to empty-shaped so the UI
     /// renders the "nothing scheduled" glance.
@@ -289,6 +337,9 @@ final class TodayViewModelTests: XCTestCase {
         XCTAssertEqual(vm.programName, "")
         XCTAssertNil(vm.lastSessionSummary)
         XCTAssertEqual(vm.programTags, [])
+        // qa-008: the pinned "start workout" CTA must be hidden in
+        // this state — rendering it produces an orphaned button.
+        XCTAssertFalse(vm.showsStartButton)
     }
 }
 

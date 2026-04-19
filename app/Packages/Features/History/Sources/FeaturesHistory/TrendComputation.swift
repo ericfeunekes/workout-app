@@ -6,21 +6,29 @@
 // numbers so a future chart can reuse them.
 //
 // Approach:
-//   • Group set_logs by calendar day AND by weight unit. Cross-unit
-//     comparisons are meaningless ("100 lb > 50 kg" — numerically yes,
-//     but 100 lb ≈ 45 kg so the lb row is the lighter one). The dominant
-//     unit wins: whichever unit accounts for more data points drives the
-//     trend. Ties fall to kg — v0 is kg-only for Eric's real data, so
-//     the tie-break prefers it. All other unit rows are dropped from
-//     the trend series (they'd still show up in the recent-sessions
-//     list via `ExerciseDetailViewModel.buildRecentRows`, which is a
-//     separate surface).
+//   • Group set_logs by session (`workoutItemID`) AND by weight unit.
+//     Cross-unit comparisons are meaningless ("100 lb > 50 kg" —
+//     numerically yes, but 100 lb ≈ 45 kg so the lb row is the lighter
+//     one). The dominant unit wins: whichever unit accounts for more
+//     data points drives the trend. Ties fall to kg — v0 is kg-only for
+//     Eric's real data, so the tie-break prefers it. All other unit
+//     rows are dropped from the trend series (they'd still show up in
+//     the recent-sessions list via
+//     `ExerciseDetailViewModel.buildRecentRows`, which is a separate
+//     surface).
 //   • For each session in the dominant unit, "top set" is the heaviest
 //     logged weight. Ties on weight break by reps (higher reps wins).
+//     Grouping on `workoutItemID` (rather than calendar day) is load-
+//     bearing: two separate workouts on the same day that both include
+//     the same exercise (e.g. a circuit + AMRAP on a modal day) must
+//     register as two sessions, not one. Same rule as
+//     `ExerciseDetailViewModel.buildRecentRows`. bug qa-006.
 //   • Produce a simple total delta: (last top weight) - (first top weight).
 //     Not a regression — the design reference shows a one-number
 //     indicator, not a slope. If the two endpoints are the same, the
-//     arrow flattens (→) and delta is 0.
+//     arrow flattens (→) and delta is 0. Same-day sessions produce a
+//     0-week span → "→ 0 KG / 0 WK", which matches the flat-delta
+//     rendering the spec already defines (history.md S7).
 //
 // Rationale for "total delta" over regression: the v1 surface is a
 // single-line summary. A regression would hide weeks where the user was
@@ -100,20 +108,20 @@ public enum TrendComputation {
     ) -> Trend {
         let dominant = dominantUnit(setLogs: setLogs) ?? .kg
         let filteredLogs = setLogs.filter { effectiveUnit($0) == dominant }
-        let topByDay = topSetsByDay(
+        let topBySession = topSetsBySession(
             setLogs: filteredLogs,
             unit: dominant,
             calendar: calendar
         )
-        guard topByDay.count >= 2,
-              let first = topByDay.first,
-              let last = topByDay.last else {
+        guard topBySession.count >= 2,
+              let first = topBySession.first,
+              let last = topBySession.last else {
             // Still include the single data point if we have one — the
             // view renders the recent-sessions list either way; the
             // trend line just doesn't show.
             return Trend(
-                topSets: topByDay,
-                unit: topByDay.isEmpty ? nil : dominant,
+                topSets: topBySession,
+                unit: topBySession.isEmpty ? nil : dominant,
                 weeks: 0,
                 delta: 0,
                 displayString: nil
@@ -123,7 +131,7 @@ public enum TrendComputation {
         let weeks = weeksBetween(first.date, last.date, calendar: calendar)
         let display = formatTrend(delta: delta, unit: dominant, weeks: weeks)
         return Trend(
-            topSets: topByDay,
+            topSets: topBySession,
             unit: dominant,
             weeks: weeks,
             delta: delta,
@@ -150,26 +158,38 @@ public enum TrendComputation {
         return lb > kg ? .lb : .kg
     }
 
-    /// Bucket the set_logs by calendar day, pick the top set per day,
-    /// return chronologically (oldest first). All logs passed in are
-    /// assumed to share the supplied `unit` — `compute(setLogs:)`
-    /// filters before calling.
-    static func topSetsByDay(
+    /// Bucket the set_logs by session (`workoutItemID`), pick the top
+    /// set per session, return chronologically (oldest first). All logs
+    /// passed in are assumed to share the supplied `unit` —
+    /// `compute(setLogs:)` filters before calling.
+    ///
+    /// Session key is `workoutItemID` — two workouts completed on the
+    /// same calendar day have separate WorkoutItems for the same
+    /// exercise (e.g. Burpee in a circuit block and Burpee in a later
+    /// AMRAP block are two different items). Grouping by day would
+    /// collapse them into one data point and drop the trend line per
+    /// bug qa-006. This matches how `buildRecentRows` keys the
+    /// recent-sessions list.
+    ///
+    /// `calendar` is kept in the signature for API stability / future
+    /// per-day fallbacks, but is unused by the current implementation.
+    static func topSetsBySession(
         setLogs: [SetLog],
         unit: WeightUnit,
         calendar: Calendar
     ) -> [TopSet] {
-        var best: [Date: (weight: Double, reps: Int, at: Date)] = [:]
+        _ = calendar
+        var best: [UUID: (weight: Double, reps: Int, at: Date)] = [:]
         for log in setLogs {
             guard let weight = log.weight, let reps = log.reps else { continue }
-            let day = calendar.startOfDay(for: log.completedAt)
-            if let current = best[day] {
+            let key = log.workoutItemID
+            if let current = best[key] {
                 if weight > current.weight
                     || (weight == current.weight && reps > current.reps) {
-                    best[day] = (weight, reps, log.completedAt)
+                    best[key] = (weight, reps, log.completedAt)
                 }
             } else {
-                best[day] = (weight, reps, log.completedAt)
+                best[key] = (weight, reps, log.completedAt)
             }
         }
         return best

@@ -1,16 +1,18 @@
 // RootTabView.swift
 //
 // The three-tab root view surfaced once bootstrap produces a live
-// TodayViewModel + ExecutionViewModel. Kept here (not in WorkoutDBApp)
+// TodayViewModel + ExecutionVMHolder. Kept here (not in WorkoutDBApp)
 // because Shell is the one place allowed to see multiple Features at
 // once — the SwiftLint rule `no_feature_cross_import` forbids anyone
 // else from wiring Today + History + Settings into the same view.
 //
-// The app shell calls `RootTabView(todayVM:executionVM:historyVM:
+// The app shell calls `RootTabView(todayVM:executionHolder:historyVM:
 // settingsVM:)` and renders the returned view inside its `WindowGroup`.
-// This lets the parallel concurrency-fix slice stay focused on
-// WorkoutDBApp.swift's routing logic; when both slices land, the
-// `routedView(todayVM:executionVM:)` call becomes `RootTabView(...)`.
+// `executionHolder` is observed through `@Bindable` so the shell can
+// swap `holder.vm` after save-and-done and the view re-evaluates the
+// routing switch against the NEW vm's `.state.route` (qa-002 / qa-003
+// root cause: previously the view held a stale VM reference and the
+// shell's `holder.vm = newVM` was unobserved).
 //
 // Tab entries (matches docs/design/components/meta.jsx TabBar):
 //   • today    — TodayView or ExecutionView based on session route
@@ -36,7 +38,10 @@ public enum RootTab: Sendable, Hashable {
 public struct RootTabView: View {
     @State private var tab: RootTab
     private let todayVM: TodayViewModel
-    private let executionVM: ExecutionViewModel
+    /// Observable holder whose `.vm` swaps per-workout after save-and-done.
+    /// `@Bindable` lets the view track `holder.vm` changes so the swap
+    /// flips the rendered routing branch onto the fresh VM.
+    @Bindable private var executionHolder: ExecutionVMHolder
     private let historyVM: HistoryViewModel
     private let settingsVM: SettingsViewModel?
 
@@ -45,13 +50,13 @@ public struct RootTabView: View {
     public init(
         initial: RootTab = .today,
         todayVM: TodayViewModel,
-        executionVM: ExecutionViewModel,
+        executionHolder: ExecutionVMHolder,
         historyVM: HistoryViewModel,
         settingsVM: SettingsViewModel? = nil
     ) {
         _tab = State(initialValue: initial)
         self.todayVM = todayVM
-        self.executionVM = executionVM
+        self.executionHolder = executionHolder
         self.historyVM = historyVM
         self.settingsVM = settingsVM
     }
@@ -88,13 +93,25 @@ public struct RootTabView: View {
 
     /// Route the "today" tab's content based on session route — same
     /// rule as the non-tab shell in WorkoutDBApp.routedView.
+    ///
+    /// Reads `executionHolder.vm` so a post-save VM swap (new workout
+    /// constructed by the completion writer) flips the rendered branch
+    /// without a relaunch. When `vm` is `nil` — the "no next planned
+    /// workout" terminal state — Today's `isEmpty == true` state hides
+    /// the start button, so the nil branch is never dispatched to.
     @ViewBuilder
     private var todayTab: some View {
-        switch executionVM.state.route {
-        case .today:
+        if let executionVM = executionHolder.vm {
+            switch executionVM.state.route {
+            case .today:
+                TodayView(viewModel: todayVM)
+            case .active, .rest, .complete:
+                ExecutionView(viewModel: executionVM)
+            }
+        } else {
+            // No active execution VM → user has no planned workouts
+            // queued. TodayView renders its own empty state.
             TodayView(viewModel: todayVM)
-        case .active, .rest, .complete:
-            ExecutionView(viewModel: executionVM)
         }
     }
 }

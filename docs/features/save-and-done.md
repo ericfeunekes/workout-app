@@ -82,8 +82,8 @@ On the `.complete` route the user sees a per-exercise ledger, an optional body-w
 ### S5. Rapid double-tap on save & done (R2.11)
 - **setup:** Normal completion.
 - **steps:** Tap save & done twice within ~100ms.
-- **expected:** First tap flips `saveAndDoneInFlight` to `true` and runs the full path; the second tap hits the re-entrancy guard (`ExecutionViewModel+SaveAndDone.swift:104-108`) and returns silently. Exactly one `status_update`, exactly one bodyweight `UserParameter`, exactly one local-cache write.
-- **notes:** The guard is the correctness check; `.disabled(viewModel.saveAndDoneInFlight)` on the button is belt-and-suspenders. The `@MainActor`-isolated `NSMapTable` with weak VM keys auto-evicts so recycled `ObjectIdentifier`s can't leak a stale `true` across VM instances.
+- **expected:** First tap flips `saveAndDoneInFlight` to `true` and runs the full path; the second tap hits the re-entrancy guard (`ExecutionViewModel+SaveAndDone.swift`) and returns silently. Exactly one `status_update`, exactly one bodyweight `UserParameter`, exactly one local-cache write.
+- **notes:** The guard is the correctness check; `.disabled(viewModel.saveAndDoneInFlight)` on the button is belt-and-suspenders. The flag is a per-VM stored `Bool` (`saveAndDoneInFlightStorage`) — the shell rebuilds a fresh VM per workout via `AppBootstrap+Hooks.makeCompletionWriter`, so the flag is naturally reset between workouts (qa-002 / qa-003 fix).
 
 ### S6. Server returns 404 on status_update (stale workoutID)
 - **setup:** Force the server to 404 the status push.

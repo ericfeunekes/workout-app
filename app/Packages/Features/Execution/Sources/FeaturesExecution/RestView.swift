@@ -198,10 +198,22 @@ struct RestView: View {
     /// Caption for the load pill on the "just logged" row. Returns the
     /// SetPlan's unit in uppercase ("KG", "LB"); falls back to "KG" when
     /// no set is logged yet (the pill shows "—" in that state, so the
-    /// caption is cosmetic). Exposed as a static so unit tests can pin
-    /// the R2.10 unit-thread contract without building a SwiftUI view.
-    static func loadPillCaption(for set: SetPlan?) -> String {
-        (set?.unit.rawValue ?? "kg").uppercased()
+    /// caption is cosmetic). Returns `nil` when the logged set is
+    /// loadless (`SetPlan.loadKg == nil`, i.e. bodyweight) so the pill
+    /// value "BW" is not stacked over a misleading "KG" / "LB" caption
+    /// (qa-007). The bodyweight contract from bug-053 is explicit:
+    /// `loadKg == nil` renders as "BW" with no unit, distinct from a
+    /// genuine 0 which renders as "0 KG" / "0 LB". Exposed as a static
+    /// so unit tests can pin the R2.10 unit-thread + loadless contracts
+    /// without building a SwiftUI view.
+    static func loadPillCaption(for set: SetPlan?) -> String? {
+        guard let set else {
+            return "KG"
+        }
+        if set.loadKg == nil {
+            return nil
+        }
+        return set.unit.rawValue.uppercased()
     }
 
     /// Unit string for the autoreg banner's DSWeightLabel. The proposal

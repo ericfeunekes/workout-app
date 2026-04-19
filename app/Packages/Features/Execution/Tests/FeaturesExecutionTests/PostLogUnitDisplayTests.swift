@@ -83,6 +83,33 @@ final class PostLogUnitDisplayTests: XCTestCase {
         XCTAssertEqual(RestView.loadPillCaption(for: nil), "KG")
     }
 
+    func testLoadlessSetRendersJustBWNoUnit() {
+        // qa-007: for a loadless SetPlan (`loadKg == nil`, i.e. the
+        // user is performing a bodyweight exercise), the DSPill value
+        // renders "BW" — but the caption must be `nil` so the pill
+        // does not stack a misleading "KG" / "LB" beneath. The bug-053
+        // bodyweight contract says `nil` load is pure "BW" with no
+        // unit; the previous caption helper was unit-unconditional
+        // and produced a "BW / LB" visual ("BW LB") on lb-prescribed
+        // loadless rows (chin-ups, dips, push-ups, etc.).
+        let lbSet = makeSet(load: nil, unit: .lb, reps: 10, rir: nil)
+        XCTAssertNil(RestView.loadPillCaption(for: lbSet))
+
+        let kgSet = makeSet(load: nil, unit: .kg, reps: 10, rir: nil)
+        XCTAssertNil(RestView.loadPillCaption(for: kgSet))
+    }
+
+    func testZeroLoadSetStillRendersUnitCaption() {
+        // Regression guard: a genuine 0-load set (explicit 0 kg / 0 lb
+        // warm-up) renders as "0 KG" / "0 LB" per the bug-053 contract —
+        // ONLY `nil` is BW. Caption must still be the unit here.
+        let kgSet = makeSet(load: 0, unit: .kg, reps: 5, rir: 2)
+        XCTAssertEqual(RestView.loadPillCaption(for: kgSet), "KG")
+
+        let lbSet = makeSet(load: 0, unit: .lb, reps: 5, rir: 2)
+        XCTAssertEqual(RestView.loadPillCaption(for: lbSet), "LB")
+    }
+
     // MARK: - 2) Autoreg banner unit inheritance
 
     func testRestBannerAutoregRendersUnitFromProposal() {

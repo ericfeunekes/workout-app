@@ -51,8 +51,42 @@ final class FakeHistoryCache: WorkoutCache, @unchecked Sendable {
     }
 
     func loadItems(blockID: BlockID) async throws -> [WorkoutItem] {
-        itemsByBlock[blockID] ?? []
+        loadItemsCallCount += 1
+        return itemsByBlock[blockID] ?? []
     }
+
+    func loadItems(
+        workoutIDs: [WorkoutID]
+    ) async throws -> [WorkoutID: [WorkoutItem]] {
+        loadItemsBulkCallCount += 1
+        guard !workoutIDs.isEmpty else { return [:] }
+        let wanted = Set(workoutIDs)
+        var out: [WorkoutID: [WorkoutItem]] = [:]
+        for (workoutID, blocks) in blocksByWorkout where wanted.contains(workoutID) {
+            var items: [WorkoutItem] = []
+            // Emit in (block position, item position) order so the
+            // real `WorkoutCacheImpl.loadItems(workoutIDs:)` contract
+            // and the fake agree.
+            let orderedBlocks = blocks.sorted { $0.position < $1.position }
+            for block in orderedBlocks {
+                let blockItems = (itemsByBlock[block.id] ?? [])
+                    .sorted { $0.position < $1.position }
+                items.append(contentsOf: blockItems)
+            }
+            if !items.isEmpty {
+                out[workoutID] = items
+            }
+        }
+        return out
+    }
+
+    /// Per-block single fetch counter — the old per-session path drove
+    /// this N_blocks times per loaded workout. Post-perf-003 it MUST
+    /// stay at zero over a full `HistoryViewModel.load()`.
+    var loadItemsCallCount: Int = 0
+    /// Bulk fetch counter — `load()` should fire this at most twice
+    /// (once for completed sessions, once for current program).
+    var loadItemsBulkCallCount: Int = 0
 
     func loadAlternatives(workoutItemID: WorkoutItemID) async throws -> [ExerciseAlternative] {
         []

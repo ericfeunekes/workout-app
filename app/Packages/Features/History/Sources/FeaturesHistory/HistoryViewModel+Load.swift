@@ -53,10 +53,20 @@ extension HistoryViewModel {
             key: "bodyweight_kg"
         )
 
+        // Single bulk fetch replaces the per-workout block-and-item
+        // walk. For N completed workouts with ~3 blocks each the prior
+        // shape issued ~4N cache round-trips just to build
+        // `plannedExerciseByItem`; this is 2 total regardless of N.
+        let itemsByWorkout = try await cache.loadItems(
+            workoutIDs: completed.map(\.id)
+        )
+
         var sessions: [SessionDetail] = []
+        sessions.reserveCapacity(completed.count)
         for workout in completed {
             let session = try await buildSession(
                 for: workout,
+                items: itemsByWorkout[workout.id] ?? [],
                 bodyweightHistory: bodyweightHistory
             )
             sessions.append(session)
@@ -65,18 +75,18 @@ extension HistoryViewModel {
     }
 
     /// Fetch per-workout data (set_logs + item lookup) for one workout.
+    /// `items` comes from the bulk `loadItems(workoutIDs:)` fetch in
+    /// `loadCompleted` so this path is a single set_logs round-trip.
     private func buildSession(
         for workout: Workout,
+        items: [WorkoutItem],
         bodyweightHistory: [UserParameter]
     ) async throws -> SessionDetail {
         let logs = try await cache.loadSetLogs(workoutID: workout.id)
-        let blocks = try await cache.loadBlocks(workoutID: workout.id)
         var lookup: [WorkoutItemID: ExerciseID] = [:]
-        for block in blocks {
-            let items = try await cache.loadItems(blockID: block.id)
-            for item in items {
-                lookup[item.id] = item.exerciseID
-            }
+        lookup.reserveCapacity(items.count)
+        for item in items {
+            lookup[item.id] = item.exerciseID
         }
         let bodyweight = Self.bodyweight(
             for: workout,
@@ -129,14 +139,19 @@ extension HistoryViewModel {
             status: .planned,
             since: nil
         )
+        guard !planned.isEmpty else {
+            currentProgramExerciseIDs = []
+            return
+        }
+        // Bulk fetch every planned item in two cache round-trips instead
+        // of `1 + N_blocks` per workout.
+        let itemsByWorkout = try await cache.loadItems(
+            workoutIDs: planned.map(\.id)
+        )
         var currentIDs: Set<ExerciseID> = []
-        for workout in planned {
-            let blocks = try await cache.loadBlocks(workoutID: workout.id)
-            for block in blocks {
-                let items = try await cache.loadItems(blockID: block.id)
-                for item in items {
-                    currentIDs.insert(item.exerciseID)
-                }
+        for items in itemsByWorkout.values {
+            for item in items {
+                currentIDs.insert(item.exerciseID)
             }
         }
         currentProgramExerciseIDs = currentIDs

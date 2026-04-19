@@ -358,6 +358,22 @@ private final class MutableFakeCache: WorkoutCache, @unchecked Sendable {
         itemsByBlock[blockID] ?? []
     }
 
+    func loadItems(
+        workoutIDs: [WorkoutID]
+    ) async throws -> [WorkoutID: [WorkoutItem]] {
+        guard !workoutIDs.isEmpty else { return [:] }
+        let wanted = Set(workoutIDs)
+        var out: [WorkoutID: [WorkoutItem]] = [:]
+        for (workoutID, blocks) in blocksByWorkout where wanted.contains(workoutID) {
+            var items: [WorkoutItem] = []
+            for block in blocks.sorted(by: { $0.position < $1.position }) {
+                items.append(contentsOf: itemsByBlock[block.id] ?? [])
+            }
+            if !items.isEmpty { out[workoutID] = items }
+        }
+        return out
+    }
+
     func loadAlternatives(workoutItemID: WorkoutItemID) async throws -> [ExerciseAlternative] {
         []
     }

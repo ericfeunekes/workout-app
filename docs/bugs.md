@@ -36,7 +36,7 @@ Fixed bugs are removed from this file once closed — the fix, the regression te
 
 ## Active
 
-As of 2026-04-18: **zero open P0/P1/P2 bugs.** The R1 + R2 + P2 cutover (bug-043 – bug-060) closed the backlog; see `scratch/codex-reviews/SYNTHESIS.md` for the wave log and `docs/spec.md` § "Current focus" for the summary.
+As of 2026-04-19 (post-QA campaign): **zero open P0/P1 bugs** after 32 fixes across 6 fix-it rounds driven by a 14-scenario Codex QA campaign. See `scratch/qa-runs/_campaign-tracker.md` for the run log and `scratch/qa-runs/BUGS.md` for the full campaign bug report (all closed rows retained there for evidence; not migrated here per "closed bugs live in git" convention).
 
 ### P0 — blocks v1
 
@@ -48,11 +48,20 @@ _None._
 |---|---|---|---|---|
 | bug-019 | SwiftData `ModelContext.transaction` doesn't rollback on throw (iOS 17.x) | [persistence](features/persistence.md) | `wontfix (platform)` | Platform bug. Mitigated in app code via explicit do/catch/rollback pattern. Documented in `docs/architecture/hotspots.md`. Regression-tested by WorkoutCacheTests. |
 
-### P2 — cosmetic / polish
+### P2 — cosmetic / polish / feature-gap
 
 | ID | Title | Affected feature | Status | Notes |
 |---|---|---|---|---|
 | bug-029 | Tab bar accessibility IDs missing | QA | `deferred (v1.1+)` | SwiftUI TabView doesn't propagate accessibilityIdentifier. Workaround: coordinate-tap. Real fix needs a custom tab bar or UIKit bridge — tracked in `docs/open-questions.md` § "Tab bar accessibility IDs missing (harder than expected)". |
+| bug-061 | Cluster sets (`sub_sets` / `intra_set_rest_sec`) render as plain sets at execution | [execute-loop](features/execute-loop.md) | `deferred (v1.1+)` | Prescription shape parses. Today card renders "4 × (3 × 5) @ 20 kg" correctly. Active screen ignores the cluster structure and treats it as a plain straight-set block. Feature-gap, not regression. Driver-side wiring deferred. From qa-042. |
+| bug-062 | Visual distortion on scenePhase resume during live block timer | [timing-modes](features/timing-modes.md) | `watchlist` | EMOM / Tabata / time-capped blocks backgrounded mid-interval may show a brief distorted floating-window frame on return before snapping back to fullscreen. Not testable via swift test — needs SwiftUI scene-phase harness. From qa-046. |
+| bug-063 | Numeric-input flash / transient value on keypad entry | [execute-loop](features/execute-loop.md) | `watchlist` | img-ask observed "100" → "10" transient on reps entry, and double-number overlays during log-sheet transitions. Could be NumPadSheet buffer rendering during input. Not reproducible from QA flow alone; needs a dedicated input-timing test. From qa-011. |
+| bug-064 | UI transition flickers on log → rest and advance paths | [execute-loop](features/execute-loop.md) | `watchlist` | Minor flicker between state transitions observed via img-ask across multiple QA runs. From qa-009, qa-012, qa-013. Visually noticeable but not data-affecting. Defer unless user reports. |
+| bug-065 | CompleteView capture/note section spacing too tight | [save-and-done](features/save-and-done.md) | `watchlist` | Field titles nearly touch their placeholder text. Cosmetic. From qa-031. |
+| bug-066 | Rest-pill RIR `--` placeholder off-center | [execute-loop](features/execute-loop.md) | `watchlist` | Dashes vertically misaligned vs numeric values in sibling pills. Cosmetic. From qa-032. |
+| bug-067 | Rest-banner secondary text too close to bottom border | [autoreg](features/autoreg.md) | `watchlist` | Reason text padding asymmetric. Cosmetic. From qa-033. |
+
+**ID allocation:** bug-061 onwards reserved for post-QA-campaign findings. bug-001–060 remain closed in git history. `qa-001`–`qa-047` are the campaign's internal tracking ids; the ones that survived as open bugs are migrated here with bug-NNN numbers. The full campaign BUGS.md is preserved at `scratch/qa-runs/BUGS.md` for evidence.
 
 ---
 

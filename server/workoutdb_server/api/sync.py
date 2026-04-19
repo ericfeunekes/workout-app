@@ -171,11 +171,25 @@ def sync_results(payload: SyncResultsIn, db: DbSession, user_id: CurrentUserId) 
     for workout_items belonging to another user are rejected; status updates for
     another user's workouts 404.
     """
-    # Resolve each set_log's owner via its workout_item → block → workout → user_id
-    # chain, rejecting anything that crosses the tenant boundary.
+    # Resolve every referenced workout_item's owner in a single query instead of
+    # one `db.get(WorkoutItem, ...)` per set_log (which also lazy-loaded
+    # Block.workout per row). For a 50-set_log payload that's 50+ extra
+    # roundtrips; with this map it stays at one SELECT regardless of batch size.
+    referenced_item_ids = {log.workout_item_id for log in payload.set_logs}
+    if referenced_item_ids:
+        ownership_rows = db.execute(
+            select(WorkoutItem.id, Workout.user_id)
+            .join(Block, Block.id == WorkoutItem.block_id)
+            .join(Workout, Workout.id == Block.workout_id)
+            .where(WorkoutItem.id.in_(referenced_item_ids))
+        ).all()
+        item_owner_by_id: dict[str, str] = {row[0]: row[1] for row in ownership_rows}
+    else:
+        item_owner_by_id = {}
+
     for log in payload.set_logs:
-        item = db.get(WorkoutItem, log.workout_item_id)
-        if item is None or item.block.workout.user_id != user_id:
+        owner = item_owner_by_id.get(log.workout_item_id)
+        if owner is None or owner != user_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"workout_item {log.workout_item_id} not found",

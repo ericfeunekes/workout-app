@@ -53,6 +53,33 @@ public struct PushItem: Sendable, Equatable {
                 return 1
             }
         }
+
+        /// Stable string key that identifies the logical row this payload
+        /// represents. `nil` means the payload does not participate in
+        /// dedup (multi-log batch set_logs and telemetry events are both
+        /// nil — see `PushQueue+Dedup.swift` for the matching rules).
+        ///
+        /// Persisted on `PushItemModel.dedupKey` so `PushQueue+Dedup.swift`
+        /// can drop prior matching rows with a single `FetchDescriptor`
+        /// predicate instead of scanning + decoding the whole queue. The
+        /// shape of the key is an internal contract between Sync and the
+        /// store — callers never parse it, they just pass it through.
+        public var dedupKey: String? {
+            switch self {
+            case .setLogs(let logs):
+                // Only single-log payloads dedup; batch completion pushes
+                // are a distinct logical unit. Matches the rule in
+                // `PushQueue+Dedup.dropExistingSetLog`.
+                guard logs.count == 1 else { return nil }
+                return "setLog:\(logs[0].id.uuidString.lowercased())"
+            case .statusUpdate(let workoutID, let status, _, _):
+                return "status:\(workoutID.uuidString.lowercased()):\(status.rawValue)"
+            case .userParameter(let param):
+                return "userParam:\(param.id.uuidString.lowercased())"
+            case .events:
+                return nil
+            }
+        }
     }
 
     public let id: PushItemID
@@ -63,6 +90,9 @@ public struct PushItem: Sendable, Equatable {
     /// `PushFlusher` / sorting paths don't need to re-match on the enum
     /// every comparison. Derived, not user-supplied.
     public let priority: Int
+    /// Cached dedup key — see `Payload.dedupKey`. Nil for payloads that
+    /// don't participate in dedup.
+    public let dedupKey: String?
 
     public init(
         id: PushItemID = UUID(),
@@ -75,6 +105,7 @@ public struct PushItem: Sendable, Equatable {
         self.enqueuedAt = enqueuedAt
         self.attempts = attempts
         self.priority = payload.priority
+        self.dedupKey = payload.dedupKey
     }
 
     /// Returns a copy with `attempts` incremented. Used by `PushQueue` on
@@ -107,6 +138,15 @@ public protocol PushQueueStore: Sendable {
     /// Replace an existing row with an updated copy (typically with a bumped
     /// `attempts` counter). No-op for unknown IDs.
     func update(_ item: PushItem) async throws
+
+    /// Remove every queued row whose persisted dedup key equals `key`.
+    /// Returns the number of rows removed. The production implementation
+    /// uses a scoped `FetchDescriptor` predicate on a persisted
+    /// `dedupKey` column, so one enqueue triggers one scoped fetch — not
+    /// a full-table scan + in-memory decode pass. `PushQueue+Dedup.swift`
+    /// builds the key via `PushItem.Payload.dedupKey` and calls this;
+    /// callers never parse the string themselves.
+    func removeMatchingDedupKey(_ key: String) async throws -> Int
 
     /// Whether the queue has zero items pending.
     func isEmpty() async throws -> Bool

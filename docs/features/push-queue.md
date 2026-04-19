@@ -29,8 +29,8 @@ Durable SwiftData-backed FIFO queue for outbound writes. Three payload shapes: `
 ## What it does have now (bug-060)
 - **Exponential backoff** via `PushBackoff.schedule = [10, 30, 60, 120, 300]`s. `PushFlusher` consults the schedule against the consecutive-failure counter.
 - **Dead-letter after 5 consecutive non-401 4xx.** Drops the item and emits `execution.push_item_dead_lettered` with `setLogID` / `workoutID` / `userParameterID` correlation id so the event can be joined to the dropped payload.
-- **Priority-weighted FIFO** (bug-056): `peek` sorts by `(priority, enqueuedAt)`. `results` (SetLog / status / UserParameter) are priority 0; `telemetry` is priority 1. Telemetry backlog can't starve set_log pushes.
-- **Logical dedup** (bug-055): dedup on `SetLog.id` / `(workoutID, status)` / `UserParameter.id`. Idempotent enqueue also still replaces by `PushItemID`.
+- **Priority-weighted FIFO** (bug-056): `peek` sorts by `(priority, enqueuedAt)`. `results` (SetLog / status / UserParameter) are priority 0; `telemetry` is priority 1. Telemetry backlog can't starve set_log pushes. perf-002 persisted `priority` on `PushItemModel` (V4) so SwiftData resolves the sort against a SQLite index with `fetchLimit: batchSize` instead of decoding every row on every flush.
+- **Logical dedup** (bug-055): dedup on `SetLog.id` / `(workoutID, status)` / `UserParameter.id`. Idempotent enqueue also still replaces by `PushItemID`. perf-002 persisted `dedupKey: String?` on `PushItemModel` (V4) so dedup resolves via a scoped `FetchDescriptor` predicate — one scoped fetch per enqueue, not a full-table peek + decode.
 - **Tolerant peek**: one unknown envelope kind (forward-versioned row) is skipped instead of throwing. Startup sweep via `pruneUndecodableRows()` removes anything the decoder consistently rejects.
 
 ## Edge cases handled in code
@@ -43,13 +43,14 @@ Durable SwiftData-backed FIFO queue for outbound writes. Three payload shapes: `
 - `PushFlusher.start()` is idempotent — second call no-ops if task exists (`PushFlusher.swift:46-47`)
 - `PushFlusher.stop()` is safe to call multiple times (`:97-100`)
 - `flushNow()` swallows all errors — UI callers never await for correctness (`:86-94`)
-- FIFO by `enqueuedAt` ascending (`PushQueueStoreImpl.swift:48`)
+- `(priority, enqueuedAt)` sort + `fetchLimit: max` (`PushQueueStoreImpl.swift` `peek(max:)`) — server-side order, no whole-queue decode
 - Telemetry events UUID-lowercased at encode time (`PushQueue.swift:243, :245, :249, :250`)
 
 ## Known issues / gaps
 - Closed: `/api/sync/results` UUID case mismatch (bug-004 / bug-030 / bug-031 / bug-045). Every outbound UUID routes through `UUID.wireID` (lowercase); server accepts only lowercase on input.
 - Closed: saveAndDone status_update (bug-005 / bug-006) with re-entrancy guard (bug-044).
 - Closed: unbounded retry / no priority ordering / no dedup / no backoff — all shipped in bug-060 + bug-056 + bug-055 + bug-044. See "What it does have now" above.
+- Closed: `peek` decoded the whole queue on every flush and every dedup pass (perf-002). `PushItemModel` V4 persists `priority` + `dedupKey` so `peek` uses a `(priority, enqueuedAt)` sort + `fetchLimit`, and dedup uses `removeMatchingDedupKey` with a scoped predicate.
 - Closed: `.userParameter` idempotency (bug-044) — client-owned deterministic id (MD5 of `userID|key|observedAt`); server enforces tenant guard (403 on duplicate id from different user).
 - Open: `docs/sync.md` § "Offline completion atomicity" — set_logs and status_update are separate items; partial flush can leave server in "logs against active workout" state.
 - Open: no background-push — if user logs a set, locks phone, set never gets pushed until next foreground.

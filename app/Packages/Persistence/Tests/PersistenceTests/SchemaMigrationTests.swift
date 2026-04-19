@@ -7,23 +7,28 @@
 // from the server.
 //
 // Covers:
-//   • V1 → V3 — pre-006 store opens under the R1.4 schema. This is the
-//     multi-hop case SwiftData's migration planner stitches together.
-//   • V2 → V3 — post-006 store opens under R1.4 AND the SetLog
+//   • V1 → V4 — pre-006 store opens under the current schema. The
+//     planner chains V1→V2→V3→V4 lightweight stages.
+//   • V2 → V4 — post-006, pre-R1.4 store opens under V4 AND the SetLog
 //     denormalization backfill resolves `workoutID` + `plannedExerciseID`
 //     from the parent WorkoutItem → Block chain for rows that predate
 //     the column.
+//   • V3 → V4 — R1.4-era store opens under the perf-002 schema AND the
+//     PushItem priority + dedupKey backfill populates the new columns
+//     from each row's decoded envelope.
 //
 // Strategy per test: spin up an on-disk ModelContainer scoped to the old
 // version, insert a few rows via the shadow types, tear the container
-// down, then reopen the same on-disk URL with a V3-configured container
-// (migration plan runs on open). Read the rows back through the V3
-// models and the backfill helper.
+// down, then reopen the same on-disk URL with a V4-configured container
+// (migration plan runs on open). Read the rows back through the V4
+// models and the backfill helper(s).
 
 import XCTest
 import SwiftData
 import CoreDomain
+import CoreTelemetry
 import WorkoutCoreFoundation
+import Sync
 @testable import Persistence
 
 final class SchemaMigrationTests: XCTestCase {
@@ -86,10 +91,12 @@ final class SchemaMigrationTests: XCTestCase {
         )
     }
 
-    /// Build a V3 ModelContainer pointing at the same on-disk URL, with
+    /// Build a V4 ModelContainer pointing at the same on-disk URL, with
     /// the full migration plan so the appropriate stage(s) fire at open.
-    private func makeV3Container(at url: URL) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV3.self)
+    /// V4 is the current runtime schema (per `SchemaVersions.swift`);
+    /// older stores chain forward through the plan.
+    private func makeV4Container(at url: URL) throws -> ModelContainer {
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV4.self)
         let configuration = ModelConfiguration(schema: schema, url: url)
         return try ModelContainer(
             for: schema,
@@ -288,10 +295,10 @@ final class SchemaMigrationTests: XCTestCase {
             try seedV1Store(at: url, ids: ids)
         }
 
-        // 2. Reopen as V3. The planner chains V1→V2 (lightweight) and
-        //    V2→V3 (lightweight + backfill) automatically.
-        let v3Container = try makeV3Container(at: url)
-        let context = ModelContext(v3Container)
+        // 2. Reopen as V4 — the current runtime schema. The planner
+        //    chains V1→V2→V3→V4 lightweight stages automatically.
+        let v4Container = try makeV4Container(at: url)
+        let context = ModelContext(v4Container)
 
         // 3. Read back the Exercise row and confirm V1 data survived
         //    with the new-in-V2 fields defaulted to nil.
@@ -438,8 +445,8 @@ final class SchemaMigrationTests: XCTestCase {
             )
         }
 
-        let v3Container = try makeV3Container(at: url)
-        let context = ModelContext(v3Container)
+        let v4Container = try makeV4Container(at: url)
+        let context = ModelContext(v4Container)
         try backfillSetLogDenormalization(context: context)
 
         let setLogs = try context.fetch(FetchDescriptor<SetLogModel>())
@@ -489,11 +496,11 @@ final class SchemaMigrationTests: XCTestCase {
             try seedV2Store(at: url, ids: ids)
         }
 
-        // 2. Reopen as V3. The V2→V3 lightweight stage adds the two
+        // 2. Reopen as V4. The V2→V3 lightweight stage adds the two
         //    nullable columns; the rows land with both nil until the
         //    backfill runs.
-        let v3Container = try makeV3Container(at: url)
-        let context = ModelContext(v3Container)
+        let v4Container = try makeV4Container(at: url)
+        let context = ModelContext(v4Container)
 
         // 3. Drive the backfill helper (the factory runs this once at
         //    open time; here we call it directly so the test owns the
@@ -529,5 +536,224 @@ final class SchemaMigrationTests: XCTestCase {
         let byWorkoutID = try context.fetch(descriptor)
         XCTAssertEqual(byWorkoutID.count, 1)
         XCTAssertEqual(byWorkoutID.first?.id, ids.setLogID)
+    }
+
+    // MARK: - V3 → V4 backfill (perf-002)
+
+    /// Build a V3-only ModelContainer (no migration plan). Simulates an
+    /// R1.4-era, pre-perf-002 store.
+    private func makeV3OnlyContainer(at url: URL) throws -> ModelContainer {
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV3.self)
+        let configuration = ModelConfiguration(schema: schema, url: url)
+        return try ModelContainer(
+            for: schema,
+            migrationPlan: nil,
+            configurations: [configuration]
+        )
+    }
+
+    /// Seed a V3-shaped store with three `PushItemModel` rows — one for
+    /// each dedup class (single-log setLog, statusUpdate, userParameter)
+    /// — plus one batch setLog and one telemetry event to exercise the
+    /// "no dedup key" side of the backfill. The rows are written via the
+    /// V3 shadow type which has no `priority` or `dedupKey` columns, so
+    /// the V4 migration must introduce them and the backfill must
+    /// populate them from each row's encoded envelope.
+    private func seedV3PushItemStore(
+        at url: URL,
+        singleLogEnvelope: Data,
+        singleLogID: UUID,
+        statusEnvelope: Data,
+        statusID: UUID,
+        userParamEnvelope: Data,
+        userParamID: UUID,
+        batchEnvelope: Data,
+        batchID: UUID,
+        eventsEnvelope: Data,
+        eventsID: UUID,
+        baseDate: Date
+    ) throws {
+        let container = try makeV3OnlyContainer(at: url)
+        let context = ModelContext(container)
+        context.insert(WorkoutDBSchemaV3.PushItemModel(
+            id: singleLogID,
+            enqueuedAt: baseDate.addingTimeInterval(1),
+            attempts: 0,
+            payloadJSON: singleLogEnvelope
+        ))
+        context.insert(WorkoutDBSchemaV3.PushItemModel(
+            id: statusID,
+            enqueuedAt: baseDate.addingTimeInterval(2),
+            attempts: 0,
+            payloadJSON: statusEnvelope
+        ))
+        context.insert(WorkoutDBSchemaV3.PushItemModel(
+            id: userParamID,
+            enqueuedAt: baseDate.addingTimeInterval(3),
+            attempts: 0,
+            payloadJSON: userParamEnvelope
+        ))
+        context.insert(WorkoutDBSchemaV3.PushItemModel(
+            id: batchID,
+            enqueuedAt: baseDate.addingTimeInterval(4),
+            attempts: 0,
+            payloadJSON: batchEnvelope
+        ))
+        context.insert(WorkoutDBSchemaV3.PushItemModel(
+            id: eventsID,
+            enqueuedAt: baseDate.addingTimeInterval(5),
+            attempts: 0,
+            payloadJSON: eventsEnvelope
+        ))
+        try context.save()
+    }
+
+    @MainActor
+    func testV3toV4UpgradeBackfillsPushItemPriorityAndDedupKey() async throws {
+        let url = try XCTUnwrap(storeURL)
+        let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
+
+        // Build the five envelopes via the real payload coder (the same
+        // code that writes them at enqueue time). This is important:
+        // the backfill decodes via the same coder, so a round-trip via
+        // the public API is the tightest regression guard.
+        let singleLogID = UUID()
+        let singleLogSetLogID = UUID()
+        let singleLog = CoreDomain.SetLog(
+            id: singleLogSetLogID,
+            workoutItemID: UUID(),
+            performedExerciseID: nil,
+            setIndex: 1,
+            reps: 5,
+            weight: 100,
+            weightUnit: .lb,
+            rir: 2,
+            completedAt: baseDate
+        )
+        let singleLogEnvelope = try PushQueuePayloadCoding.encode(
+            .setLogs([singleLog])
+        )
+
+        let statusID = UUID()
+        let statusWorkoutID = UUID()
+        let statusEnvelope = try PushQueuePayloadCoding.encode(
+            .statusUpdate(
+                workoutID: statusWorkoutID,
+                status: .completed,
+                completedAt: baseDate,
+                notes: nil
+            )
+        )
+
+        let userParamID = UUID()
+        let userParamLogicalID = UUID()
+        let userParamEnvelope = try PushQueuePayloadCoding.encode(
+            .userParameter(CoreDomain.UserParameter(
+                id: userParamLogicalID,
+                userID: UUID(),
+                key: "bodyweight_lb",
+                value: "185.0",
+                updatedAt: baseDate,
+                source: .appLog
+            ))
+        )
+
+        let batchID = UUID()
+        let batchEnvelope = try PushQueuePayloadCoding.encode(
+            .setLogs([
+                CoreDomain.SetLog(
+                    id: UUID(),
+                    workoutItemID: UUID(),
+                    performedExerciseID: nil,
+                    setIndex: 1,
+                    reps: 5,
+                    weight: 100,
+                    weightUnit: .lb,
+                    rir: 2,
+                    completedAt: baseDate
+                ),
+                CoreDomain.SetLog(
+                    id: UUID(),
+                    workoutItemID: UUID(),
+                    performedExerciseID: nil,
+                    setIndex: 2,
+                    reps: 5,
+                    weight: 100,
+                    weightUnit: .lb,
+                    rir: 2,
+                    completedAt: baseDate
+                ),
+            ])
+        )
+
+        let eventsID = UUID()
+        let eventsEnvelope = try PushQueuePayloadCoding.encode(
+            .events([CoreTelemetry.Event(
+                sessionID: UUID(), kind: "state", name: "ev"
+            )])
+        )
+
+        // 1. Seed a V3-shaped store with no priority / dedupKey columns.
+        do {
+            try seedV3PushItemStore(
+                at: url,
+                singleLogEnvelope: singleLogEnvelope,
+                singleLogID: singleLogID,
+                statusEnvelope: statusEnvelope,
+                statusID: statusID,
+                userParamEnvelope: userParamEnvelope,
+                userParamID: userParamID,
+                batchEnvelope: batchEnvelope,
+                batchID: batchID,
+                eventsEnvelope: eventsEnvelope,
+                eventsID: eventsID,
+                baseDate: baseDate
+            )
+        }
+
+        // 2. Reopen as V4. The V3→V4 lightweight stage adds the two
+        //    columns with defaults (priority=0, dedupKey=nil); the
+        //    backfill then rewrites them from each envelope.
+        let v4Container = try makeV4Container(at: url)
+        let context = ModelContext(v4Container)
+
+        // 3. Drive the backfill helper directly — same pattern as the
+        //    V2→V3 test above. The factory runs this once at open time
+        //    in production.
+        try backfillPushItemPriorityAndDedupKey(context: context)
+
+        // 4. Read every row back and assert priority + dedupKey.
+        let rows = try context.fetch(FetchDescriptor<PushItemModel>())
+        XCTAssertEqual(rows.count, 5, "All five V3 rows must survive V4 migration")
+        let byID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
+
+        let single = try XCTUnwrap(byID[singleLogID])
+        XCTAssertEqual(single.priority, 0, "single-log setLog is a result (priority 0)")
+        XCTAssertEqual(
+            single.dedupKey,
+            "setLog:\(singleLogSetLogID.uuidString.lowercased())"
+        )
+
+        let status = try XCTUnwrap(byID[statusID])
+        XCTAssertEqual(status.priority, 0, "statusUpdate is a result (priority 0)")
+        XCTAssertEqual(
+            status.dedupKey,
+            "status:\(statusWorkoutID.uuidString.lowercased()):completed"
+        )
+
+        let userParam = try XCTUnwrap(byID[userParamID])
+        XCTAssertEqual(userParam.priority, 0, "userParameter is a result (priority 0)")
+        XCTAssertEqual(
+            userParam.dedupKey,
+            "userParam:\(userParamLogicalID.uuidString.lowercased())"
+        )
+
+        let batch = try XCTUnwrap(byID[batchID])
+        XCTAssertEqual(batch.priority, 0, "batch setLogs still priority 0 (result)")
+        XCTAssertNil(batch.dedupKey, "batch setLogs do not dedup — key stays nil")
+
+        let events = try XCTUnwrap(byID[eventsID])
+        XCTAssertEqual(events.priority, 1, "events are telemetry — priority 1")
+        XCTAssertNil(events.dedupKey, "events do not dedup — key stays nil")
     }
 }

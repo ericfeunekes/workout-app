@@ -15,6 +15,14 @@
 // single-device this window is usually milliseconds — but it still
 // violates the invariant that the freshest enqueue is the one that
 // wins. See PushQueue.swift header for the full correctness argument.
+//
+// Performance: every dedup pass issues exactly one scoped fetch against
+// the store's `dedupKey` index — NOT a full-table peek + decode. The
+// store persists `PushItem.Payload.dedupKey` as a column on
+// `PushItemModel`, so the `FetchDescriptor` predicate narrows to rows
+// carrying that one logical identity. This is the perf-002 fix: the
+// pre-perf-002 code decoded the entire queue on every enqueue, which
+// scaled linearly with queue depth.
 
 import Foundation
 import CoreDomain
@@ -22,31 +30,15 @@ import WorkoutCoreFoundation
 
 extension PushQueue {
 
-    /// Cap used for the unbounded peek that each dedup pass issues. The
-    /// queue is bounded in practice (single digits of rows in steady
-    /// state, thousands in the pathological recovery case) so one fetch
-    /// per enqueue is negligible next to the push round-trip. The peek
-    /// is tolerant (`PushQueueStoreImpl.peek` skips undecodable rows),
-    /// so a forward-versioned poison row cannot stall the dedup pass.
-    static var dedupPeekCap: Int { 10_000 }
-
     /// Drop every queued row whose payload is a single-log `.setLogs`
     /// carrying `id`. Batch payloads (multi-log arrays) are NOT deduped —
     /// a workout-completion batch is a distinct logical unit and
-    /// shouldn't shadow individual single-log enqueues.
+    /// shouldn't shadow individual single-log enqueues. The batch payload
+    /// never gets a persisted `dedupKey` (see `Payload.dedupKey`) so the
+    /// scoped fetch below cannot accidentally catch it.
     func dropExistingSetLog(id: UUID) async throws {
-        let all = try await store.peek(max: Self.dedupPeekCap)
-        var doomed: [PushItemID] = []
-        for item in all {
-            if case .setLogs(let logs) = item.payload,
-               logs.count == 1,
-               logs[0].id == id {
-                doomed.append(item.id)
-            }
-        }
-        if !doomed.isEmpty {
-            try await store.remove(ids: doomed)
-        }
+        let key = "setLog:\(id.uuidString.lowercased())"
+        _ = try await store.removeMatchingDedupKey(key)
     }
 
     /// Drop every queued row whose payload is a `.statusUpdate` matching
@@ -58,18 +50,8 @@ extension PushQueue {
         workoutID: WorkoutID,
         status: CoreDomain.WorkoutStatus
     ) async throws {
-        let all = try await store.peek(max: Self.dedupPeekCap)
-        var doomed: [PushItemID] = []
-        for item in all {
-            if case .statusUpdate(let queuedID, let queuedStatus, _, _) = item.payload,
-               queuedID == workoutID,
-               queuedStatus == status {
-                doomed.append(item.id)
-            }
-        }
-        if !doomed.isEmpty {
-            try await store.remove(ids: doomed)
-        }
+        let key = "status:\(workoutID.uuidString.lowercased()):\(status.rawValue)"
+        _ = try await store.removeMatchingDedupKey(key)
     }
 
     /// Drop every queued row whose payload is a `.userParameter` with the
@@ -77,15 +59,7 @@ extension PushQueue {
     /// first push flushes — we want the latest value to win, not a
     /// stale-then-fresh sequence that transiently overwrites the server.
     func dropExistingUserParameter(id: UUID) async throws {
-        let all = try await store.peek(max: Self.dedupPeekCap)
-        var doomed: [PushItemID] = []
-        for item in all {
-            if case .userParameter(let param) = item.payload, param.id == id {
-                doomed.append(item.id)
-            }
-        }
-        if !doomed.isEmpty {
-            try await store.remove(ids: doomed)
-        }
+        let key = "userParam:\(id.uuidString.lowercased())"
+        _ = try await store.removeMatchingDedupKey(key)
     }
 }

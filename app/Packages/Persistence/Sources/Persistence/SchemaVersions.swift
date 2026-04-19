@@ -1,19 +1,19 @@
 // SchemaVersions.swift
 //
 // Versioned SwiftData schema. The runtime uses the LATEST version
-// (`WorkoutDBSchemaV3`). Older versions are preserved here so SwiftData
+// (`WorkoutDBSchemaV4`). Older versions are preserved here so SwiftData
 // can migrate a store that was written by a previous app build — without
 // the version enum for the old shape, SwiftData has nothing to compare
 // the on-disk store's metadata against and will fail (or, worse, corrupt)
 // the store when the shape doesn't match the single declared schema.
 //
 // Shape contract: every version lists its own `@Model` snapshot. Each
-// snapshot's model classes use the SAME simple name as the live V3 types
+// snapshot's model classes use the SAME simple name as the live V4 types
 // (`WorkoutModel`, `ExerciseModel`, …) so the CoreData entity name is
 // stable across versions — that's what SwiftData diffs to decide whether
 // a migration applies. Nesting the snapshots inside the version enum
 // keeps the Swift-type namespace clear; the rest of the package reads
-// the file-scope V3 types unqualified.
+// the file-scope V4 types unqualified.
 //
 // V1 → V2 is lightweight: V2 only adds optional-nullable `String` columns
 // (`defaultPrescriptionJSON`, `defaultAlternativesJSON` on Exercise;
@@ -27,19 +27,26 @@
 // introduces them as nil; `backfillSetLogDenormalization(context:)` runs
 // once at factory open after a V2 store has been migrated and resolves
 // each nil `workoutID` / `plannedExerciseID` via the parent WorkoutItem
-// → Block chain. Keeping both columns nullable (rather than doing a
-// custom stage with a forced default) avoids fighting SwiftData's
-// non-null contract during the entity rewrite and keeps the schema
-// self-describing: a nil workoutID literally means "this row's parent
-// chain was broken at backfill time" (only possible for the handful of
-// R1.3-era detach-on-reconcile orphans — production writes after R1.4
-// ships always populate both fields). See the R1.4 fix-it for the full
-// rationale (history queries must not lose set_logs when reconcile
-// removes a parent item).
+// → Block chain.
 //
-// Shadow @Model types for V1 and V2 live in `SchemaVersionsV1Models.swift`
-// and `SchemaVersionsV2Models.swift` so the version enum bodies stay
-// under SwiftLint's `type_body_length` cap.
+// V3 → V4 is lightweight + post-open backfill (perf-002): adds two
+// columns to `PushItemModel` — `priority: Int` (non-optional, default
+// derived from envelope kind) and `dedupKey: String?` (nullable). The
+// lightweight stage introduces them with SwiftData's default values
+// (0 / nil); `backfillPushItemPriorityAndDedupKey(context:)` then
+// decodes each row's payload envelope and populates both columns from
+// `PushItem.Payload.priority` / `.dedupKey`. Rows whose payload can no
+// longer be decoded are left at the defaults — the startup
+// `pruneUndecodableRows` sweep eventually removes them, and the
+// intermediate state is harmless (priority 0 is the safe lane, nil
+// dedupKey just means the row won't collide with future enqueues).
+// Non-optional integer columns must be lightweight-safe for SwiftData:
+// the default value is synthesized automatically, so we don't fight the
+// non-null contract with a custom stage here.
+//
+// Shadow @Model types for V1 / V2 / V3 live in their dedicated
+// `SchemaVersionsV{N}Models.swift` files so the version enum bodies
+// stay under SwiftLint's `type_body_length` cap.
 
 import Foundation
 import SwiftData
@@ -74,10 +81,32 @@ public enum WorkoutDBSchemaV2: VersionedSchema {
     }
 }
 
-// MARK: - V3 (current, R1.4) — SetLog denormalization
+// MARK: - V3 (R1.4, pre-perf-002) — SetLog denormalization
 
 public enum WorkoutDBSchemaV3: VersionedSchema {
     public static var versionIdentifier: Schema.Version { Schema.Version(3, 0, 0) }
+
+    public static var models: [any PersistentModel.Type] {
+        [
+            WorkoutModel.self,
+            BlockModel.self,
+            WorkoutItemModel.self,
+            ExerciseModel.self,
+            ExerciseAlternativeModel.self,
+            SetLogModel.self,
+            UserParameterModel.self,
+            AppUserModel.self,
+            SessionSnapshotModel.self,
+            PushItemModel.self,
+            EventModel.self,
+        ]
+    }
+}
+
+// MARK: - V4 (current, perf-002) — PushItem priority + dedupKey columns
+
+public enum WorkoutDBSchemaV4: VersionedSchema {
+    public static var versionIdentifier: Schema.Version { Schema.Version(4, 0, 0) }
 
     public static var models: [any PersistentModel.Type] {
         [
@@ -100,7 +129,12 @@ public enum WorkoutDBSchemaV3: VersionedSchema {
 
 public enum WorkoutDBMigrationPlan: SchemaMigrationPlan {
     public static var schemas: [any VersionedSchema.Type] {
-        [WorkoutDBSchemaV1.self, WorkoutDBSchemaV2.self, WorkoutDBSchemaV3.self]
+        [
+            WorkoutDBSchemaV1.self,
+            WorkoutDBSchemaV2.self,
+            WorkoutDBSchemaV3.self,
+            WorkoutDBSchemaV4.self,
+        ]
     }
 
     public static var stages: [MigrationStage] {
@@ -119,12 +153,20 @@ public enum WorkoutDBMigrationPlan: SchemaMigrationPlan {
             // stage introduces them as nil; `PersistenceFactory` runs
             // `backfillSetLogDenormalization` once on the first open
             // after migration to resolve each nil from the parent
-            // WorkoutItem → Block chain. Splitting the data move out
-            // of the schema stage avoids fighting SwiftData's
-            // non-null contract during entity rewrite.
+            // WorkoutItem → Block chain.
             .lightweight(
                 fromVersion: WorkoutDBSchemaV2.self,
                 toVersion: WorkoutDBSchemaV3.self
+            ),
+            // V3 → V4 adds `priority: Int` (non-optional, default 0) and
+            // `dedupKey: String?` (nullable) to `PushItemModel`. The
+            // lightweight stage introduces both with SwiftData's defaults;
+            // `backfillPushItemPriorityAndDedupKey` then decodes each
+            // row's payload envelope and populates the real values. See
+            // the file header for the rationale.
+            .lightweight(
+                fromVersion: WorkoutDBSchemaV3.self,
+                toVersion: WorkoutDBSchemaV4.self
             ),
         ]
     }
@@ -156,7 +198,7 @@ public enum WorkoutDBMigrationPlan: SchemaMigrationPlan {
 /// Called from `PersistenceFactory` after the container opens. Safe to
 /// call on every app launch — the fast path is one descriptor fetch
 /// that returns an empty result once the backfill has run. Public so
-/// tests can drive it directly against an open V3 container seeded
+/// tests can drive it directly against an open V4 container seeded
 /// from a V2 fixture.
 public func backfillSetLogDenormalization(context: ModelContext) throws {
     // Fast path — only scan rows that still need backfill. SwiftData
@@ -217,4 +259,58 @@ private func buildItemResolutionMap(context: ModelContext) throws -> [UUID: Item
         )
     }
     return out
+}
+
+// MARK: - V4 backfill
+
+/// Populate `priority` + `dedupKey` on every `PushItemModel` row that
+/// still carries the V3 defaults (priority==0, dedupKey==nil). The
+/// V3→V4 lightweight stage introduces both columns with SwiftData's
+/// defaults; this backfill then decodes each row's envelope and
+/// rewrites the columns to the real values derived from
+/// `PushItem.Payload.priority` / `.dedupKey`.
+///
+/// Idempotence: a row is skipped if its `dedupKey` is already set OR
+/// its decoded payload genuinely has no dedup key AND its priority is
+/// already correct. The function can be called on every launch; after
+/// the first pass the scan still runs but no writes fire.
+///
+/// Forgiving to poison rows: if an envelope fails to decode we leave
+/// the row at its defaults. The startup `pruneUndecodableRows` sweep
+/// (see `PushQueueStoreImpl`) removes such rows eventually; an
+/// in-between launch that carries them at priority 0 / dedupKey nil is
+/// harmless — priority 0 is the safe (results-first) lane and a nil
+/// dedupKey just means the row won't collide with future enqueues of
+/// the same logical identity. Losing one collision window for a row
+/// that's about to be pruned anyway is the right trade.
+///
+/// Single-user note: queue depth in the real system is single digits
+/// steady state, thousands worst case. A one-shot O(n) decode on
+/// launch is negligible. Called from `PersistenceFactory` once per
+/// container open.
+public func backfillPushItemPriorityAndDedupKey(context: ModelContext) throws {
+    let descriptor = FetchDescriptor<PushItemModel>()
+    let rows = try context.fetch(descriptor)
+    guard !rows.isEmpty else { return }
+    var mutated = false
+    for row in rows {
+        guard let payload = try? PushQueuePayloadCoding.decode(row.payloadJSON) else {
+            // Leave poison rows at the defaults — pruneUndecodableRows
+            // will sweep them. See the function header for the rationale.
+            continue
+        }
+        let expectedPriority = payload.priority
+        let expectedDedupKey = payload.dedupKey
+        if row.priority != expectedPriority {
+            row.priority = expectedPriority
+            mutated = true
+        }
+        if row.dedupKey != expectedDedupKey {
+            row.dedupKey = expectedDedupKey
+            mutated = true
+        }
+    }
+    if mutated {
+        try context.save()
+    }
 }

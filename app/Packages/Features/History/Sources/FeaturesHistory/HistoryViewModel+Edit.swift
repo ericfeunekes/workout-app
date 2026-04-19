@@ -121,18 +121,23 @@ extension HistoryViewModel {
     }
 
     /// Emit a single `history.past_set_edited` telemetry event tagged
-    /// with the workout and the SetLog it mutated. Payload carries the
-    /// composite key so an analyst can join the event back to the
-    /// updated row. Parallels
+    /// with the workout and the SetLog it mutated. Payload carries
+    /// `{itemID, setIndex, setLogID}` — the same shape as
+    /// `execution.past_set_edited` — so an analyst can join either
+    /// surface's edit events through the item the set belongs to.
+    /// The event itself is still tagged with `workoutID` at the row
+    /// level (via `Event.workoutID`) so the event_log row is reachable
+    /// per workout without the payload having to duplicate that column.
+    /// Parallels
     /// `ExecutionViewModel.emitPastSetEdited(itemID:setIndex:setLogID:)`.
     ///
-    /// Both ids are written via `.wireID` so the payload obeys the
+    /// All ids are written via `.wireID` so the payload obeys the
     /// "every id on the wire is lowercase UUID" invariant (Codex R1.3).
     /// Encoded via a typed `Encodable` struct rather than hand-formatted
     /// — one less place to forget the lowercasing.
     func emitPastSetEdited(workoutID: WorkoutID, setLog: SetLog) {
         let payload = HistoryPastSetEditedEventPayload(
-            workoutID: workoutID.wireID,
+            itemID: setLog.workoutItemID.wireID,
             setLogID: setLog.id.wireID,
             setIndex: setLog.setIndex
         )
@@ -155,13 +160,14 @@ extension HistoryViewModel {
 
 // MARK: - Telemetry payload
 
-/// Payload for `history.past_set_edited`. CamelCase field names match the
-/// existing shape of this event — `ExecutionViewModel.emitPastSetEdited`
-/// uses the same convention, and the two surfaces compose into one event
-/// stream that an analyst joins by `setLogID`. The R1.3 fix is about
-/// lowercasing UUIDs, not renaming the payload fields.
+/// Payload for `history.past_set_edited`. CamelCase field names match
+/// `execution.past_set_edited` so the two surfaces compose into one
+/// event stream — an analyst joins by `itemID` + `setLogID` without
+/// caring which UI emitted the edit. The R1.3 fix landed the lowercase-
+/// UUID invariant; qa-036 swapped the misspelled `workoutID` to the
+/// documented `itemID` so the shape actually matches the contract.
 private struct HistoryPastSetEditedEventPayload: Encodable {
-    let workoutID: String
+    let itemID: String
     let setLogID: String
     let setIndex: Int
 }

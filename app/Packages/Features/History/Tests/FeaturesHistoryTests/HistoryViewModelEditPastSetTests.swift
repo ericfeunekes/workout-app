@@ -154,14 +154,18 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
     func testHistoryEditEmitsTelemetry() async throws {
         // Bug-015 parallel to bug-017 (execution.past_set_edited): every
         // History edit emits a dedicated `history.past_set_edited` event
-        // tagged with workoutID + setLogID. The payload carries setIndex
-        // so an analyst can join the event back to the updated row.
+        // tagged with workoutID + setLogID. Payload shape is
+        // `{itemID, setIndex, setLogID}` per `docs/features/telemetry.md`
+        // — matches `execution.past_set_edited` so the two surfaces'
+        // edit trails compose on a single join key. qa-036 fixed a drift
+        // where the payload emitted `workoutID` instead of `itemID`; the
+        // event's row-level workoutID tag still rides on `Event.workoutID`.
         //
-        // Wire-casing (R1.3): `workoutID` / `setLogID` in the dataJSON
-        // payload must be LOWERCASE — the "every id + *_id on the wire
-        // is a lowercase UUID" invariant. Pin a known-lowercase setLogID
-        // and workoutID so the assertion can match the payload verbatim
-        // (Swift `UUID().uuidString` is uppercase, so a naive
+        // Wire-casing (R1.3): ids in the dataJSON payload must be
+        // LOWERCASE — the "every id + *_id on the wire is a lowercase
+        // UUID" invariant. Pin a known-lowercase setLogID so the
+        // assertion can match the payload verbatim (Swift
+        // `UUID().uuidString` is uppercase, so a naive
         // `contains(uuidString)` would pass either casing).
         // swiftlint:disable:next force_unwrapping
         let seededSetLogID = UUID(uuidString: "aaaabbbb-1111-4222-8333-444444444444")!
@@ -197,9 +201,13 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         )
         XCTAssertTrue(
             payload.contains(
-                "\"workoutID\":\"\(firstLog.workoutID.uuidString.lowercased())\""
+                "\"itemID\":\"\(firstLog.setLog.workoutItemID.uuidString.lowercased())\""
             ),
-            "payload must carry EXACT lowercase workoutID — got \(payload)"
+            "payload must carry EXACT lowercase itemID — got \(payload)"
+        )
+        XCTAssertFalse(
+            payload.contains("\"workoutID\""),
+            "payload must NOT carry workoutID — the shape is {itemID, setIndex, setLogID}; got \(payload)"
         )
         // Any UUID-shaped substring in the payload must be all-lowercase.
         // Extract every UUID-shaped match, then assert it equals its own
@@ -220,6 +228,56 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
                 "payload leaked an uppercase UUID: \(substr) in \(payload)"
             )
         }
+    }
+
+    /// qa-036 — pin the payload SHAPE, not just the individual keys.
+    /// Runtime QA found a drift where the live payload was
+    /// `{setIndex, setLogID, workoutID}` instead of the documented
+    /// `{itemID, setIndex, setLogID}`. This test decodes the emitted
+    /// dataJSON and asserts the exact three-key shape — any future
+    /// drift (extra key, missing key, renamed key) flips the test red.
+    func testHistoryPastSetEditedPayloadShape() async throws {
+        let (cache, firstLog) = try makeSingleLogFixture()
+        let telemetry = HistoryTelemetryRecorder()
+        let vm = HistoryViewModel(
+            cache: cache,
+            calendar: utcCalendar,
+            now: { [now] in now },
+            telemetry: telemetry
+        )
+        await vm.load()
+
+        await vm.editPastSet(
+            workoutID: firstLog.workoutID,
+            setLogID: firstLog.setLog.id,
+            reps: 7,
+            rir: .preserve,
+            load: nil
+        )
+
+        let event = try XCTUnwrap(
+            telemetry.events.first { $0.name == "history.past_set_edited" }
+        )
+        let payloadString = try XCTUnwrap(event.dataJSON)
+        let data = try XCTUnwrap(payloadString.data(using: .utf8))
+        let decoded = try JSONSerialization.jsonObject(with: data)
+        let obj = try XCTUnwrap(decoded as? [String: Any])
+
+        XCTAssertEqual(
+            Set(obj.keys),
+            Set(["itemID", "setIndex", "setLogID"]),
+            "qa-036: payload must have EXACTLY {itemID, setIndex, setLogID}; got \(obj.keys)"
+        )
+        XCTAssertEqual(
+            obj["itemID"] as? String,
+            firstLog.setLog.workoutItemID.uuidString.lowercased(),
+            "itemID must be the SetLog's workoutItemID, lowercased"
+        )
+        XCTAssertEqual(
+            obj["setLogID"] as? String,
+            firstLog.setLog.id.uuidString.lowercased()
+        )
+        XCTAssertEqual(obj["setIndex"] as? Int, firstLog.setLog.setIndex)
     }
 
     // MARK: - Fixtures

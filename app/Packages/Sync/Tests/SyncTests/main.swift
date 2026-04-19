@@ -1208,6 +1208,195 @@ runAsyncCase("PushFlusherDeadLettersPersistent4xxAfter5Attempts — 422 drops + 
     )
 }
 
+runAsyncCase("testDeadLetterEventCarriesCorrelationIDForStatusUpdate — workout_id rides on the dropped status push") {
+    // qa-037: a dead-lettered status update must surface its workoutID
+    // so an operator can trace which workout's completion never landed.
+    // The prior shape dropped only `{payload_kind, http_status, attempts}`.
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: Array(
+        repeating: FakeOutcome.response(HTTPResponse(status: 422, body: Data())),
+        count: 6
+    ))
+    let recorder = RecordingTelemetryEmitter()
+    let queue = PushQueue(
+        store: store,
+        transport: transport,
+        telemetry: recorder
+    )
+    let workoutID = uuid("c0de0001-0000-4000-8000-000000000001")
+    try await queue.enqueueStatusUpdate(
+        workoutID: workoutID,
+        status: .completed,
+        completedAt: iso8601("2026-04-17T08:30:00Z"),
+        notes: nil
+    )
+
+    for _ in 0..<PushBackoff.deadLetterThreshold {
+        _ = try await queue.flush(bearerToken: "tok")
+    }
+
+    let deadLetters = recorder.events().filter {
+        $0.name == "execution.push_item_dead_lettered"
+    }
+    try expectEqual(deadLetters.count, 1, "one dead-letter event")
+    guard let json = deadLetters[0].dataJSON else {
+        try expect(false, "dead-letter event must carry dataJSON")
+        return
+    }
+    try expect(
+        json.contains("\"payload_kind\":\"status_update\""),
+        "dead-letter data must name status_update payload kind: \(json)"
+    )
+    try expect(
+        json.contains("\"workout_id\":\"\(workoutID.wireID)\""),
+        "dead-letter data must carry workout_id for correlation: \(json)"
+    )
+}
+
+runAsyncCase("testDeadLetterEventCarriesCorrelationIDForUserParameter — user_parameter_id rides on the dropped row") {
+    // qa-037: a dead-lettered user_parameter push must surface its id
+    // (the append-only log keeps the id stable end-to-end).
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: Array(
+        repeating: FakeOutcome.response(HTTPResponse(status: 422, body: Data())),
+        count: 6
+    ))
+    let recorder = RecordingTelemetryEmitter()
+    let queue = PushQueue(
+        store: store,
+        transport: transport,
+        telemetry: recorder
+    )
+    let paramID = uuid("c0de0002-0000-4000-8000-000000000002")
+    let param = CoreDomain.UserParameter(
+        id: paramID,
+        userID: uuid("00000000-0000-4000-8000-000000000001"),
+        key: "bodyweight_kg",
+        value: "80.0",
+        updatedAt: iso8601("2026-04-17T08:30:00Z"),
+        source: .appLog
+    )
+    try await queue.enqueueUserParameter(param)
+
+    for _ in 0..<PushBackoff.deadLetterThreshold {
+        _ = try await queue.flush(bearerToken: "tok")
+    }
+
+    let deadLetters = recorder.events().filter {
+        $0.name == "execution.push_item_dead_lettered"
+    }
+    try expectEqual(deadLetters.count, 1, "one dead-letter event")
+    guard let json = deadLetters[0].dataJSON else {
+        try expect(false, "dead-letter event must carry dataJSON")
+        return
+    }
+    try expect(
+        json.contains("\"payload_kind\":\"user_parameter\""),
+        "dead-letter data must name user_parameter payload kind: \(json)"
+    )
+    try expect(
+        json.contains("\"user_parameter_id\":\"\(paramID.wireID)\""),
+        "dead-letter data must carry user_parameter_id for correlation: \(json)"
+    )
+}
+
+runAsyncCase("testDeadLetterEventCarriesCorrelationIDForEventsBatch — setLogID-tagged event surfaces as correlation") {
+    // qa-037: `.events` batches were previously always emitted without
+    // any correlation — the dropped today.start_tap in the QA run had
+    // both `workout_id` and `set_log_id` empty. The fix prefers the
+    // first event's `setLogID`; when no setLogID is present we fall
+    // back to its `workoutID` so the drop is still traceable.
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: Array(
+        repeating: FakeOutcome.response(HTTPResponse(status: 422, body: Data())),
+        count: 6
+    ))
+    let recorder = RecordingTelemetryEmitter()
+    let queue = PushQueue(
+        store: store,
+        transport: transport,
+        telemetry: recorder
+    )
+    let setLogID = uuid("c0de0003-0000-4000-8000-000000000003")
+    let event = CoreTelemetry.Event(
+        sessionID: UUID(),
+        kind: "state",
+        name: "execution.log_set",
+        dataJSON: nil,
+        workoutID: uuid("c0de0004-0000-4000-8000-000000000004"),
+        setLogID: setLogID
+    )
+    try await queue.enqueueEvents([event])
+
+    for _ in 0..<PushBackoff.deadLetterThreshold {
+        _ = try await queue.flush(bearerToken: "tok")
+    }
+
+    let deadLetters = recorder.events().filter {
+        $0.name == "execution.push_item_dead_lettered"
+    }
+    try expectEqual(deadLetters.count, 1, "one dead-letter event")
+    guard let json = deadLetters[0].dataJSON else {
+        try expect(false, "dead-letter event must carry dataJSON")
+        return
+    }
+    try expect(
+        json.contains("\"payload_kind\":\"events\""),
+        "dead-letter data must name events payload kind: \(json)"
+    )
+    try expect(
+        json.contains("\"set_log_id\":\"\(setLogID.wireID)\""),
+        "events dead-letter prefers first event's set_log_id: \(json)"
+    )
+}
+
+runAsyncCase("testDeadLetterEventCarriesCorrelationIDForEventsWorkoutFallback — workout_id when no setLogID") {
+    // qa-037 specific scenario: today.start_tap events carry workoutID
+    // but no setLogID. The dead-letter must still surface workout_id.
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: Array(
+        repeating: FakeOutcome.response(HTTPResponse(status: 422, body: Data())),
+        count: 6
+    ))
+    let recorder = RecordingTelemetryEmitter()
+    let queue = PushQueue(
+        store: store,
+        transport: transport,
+        telemetry: recorder
+    )
+    let workoutID = uuid("c0de0005-0000-4000-8000-000000000005")
+    let event = CoreTelemetry.Event(
+        sessionID: UUID(),
+        kind: "interaction",
+        name: "today.start_tap",
+        dataJSON: nil,
+        workoutID: workoutID,
+        setLogID: nil
+    )
+    try await queue.enqueueEvents([event])
+
+    for _ in 0..<PushBackoff.deadLetterThreshold {
+        _ = try await queue.flush(bearerToken: "tok")
+    }
+
+    let deadLetters = recorder.events().filter {
+        $0.name == "execution.push_item_dead_lettered"
+    }
+    try expectEqual(deadLetters.count, 1, "one dead-letter event")
+    guard let json = deadLetters[0].dataJSON else {
+        try expect(false, "dead-letter event must carry dataJSON")
+        return
+    }
+    try expect(
+        json.contains("\"workout_id\":\"\(workoutID.wireID)\""),
+        "events dead-letter falls back to first event's workout_id when no set_log_id: \(json)"
+    )
+    try expect(
+        !json.contains("\"set_log_id\""),
+        "events dead-letter must NOT carry set_log_id when the event has none: \(json)"
+    )
+}
+
 runAsyncCase("PushFlusherResetsBackoffOnFreshEnqueue — new item starts with a fresh counter") {
     // After several 422s on one item, enqueue a fresh item. The new item
     // has its own PushItem.id, so its dead-letter counter starts at 0 —

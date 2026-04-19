@@ -283,13 +283,58 @@ public final class FirstRunViewModel {
 
 // MARK: - Decoding probes
 
-/// Minimal shape of `GET /api/version`. We only care that it decodes —
-/// the actual value is ignored. Matching the server's `VersionInfo` keys
-/// (snake_case) via `CodingKeys`.
+/// WorkoutDB-specific shape of `GET /api/version`. The combination of
+/// `server_version` + `applied_migrations` is the discriminator that
+/// separates a real workoutdb server from a generic 200 at the target
+/// URL (e.g. a misconfigured reverse proxy returning `{"hello":"world"}`,
+/// another app's health endpoint). Both are REQUIRED; decode fails if
+/// either is missing or typed wrong, which flips the view model to
+/// `.decode` and the user sees the "shape didn't match" banner.
+///
+/// `schema_version` mirrors the server's `str | None` typing — it's
+/// present in the payload but may be explicitly null pre-migration, so
+/// we accept nullability while still requiring the key exists. The
+/// `CodingKeys` enum forces every listed key to be present.
+///
+/// qa-038: the previous probe made `server_version` optional, which let
+/// any 200-with-JSON body pass. `JSONDecoder` ignores unknown keys by
+/// default, so adding a new server field later does not break this
+/// probe — only removing one would.
 private struct VersionProbe: Decodable {
-    let serverVersion: String?
+    let schemaVersion: String?
+    let serverVersion: String
+    let appliedMigrations: [String]
 
     private enum CodingKeys: String, CodingKey {
+        case schemaVersion = "schema_version"
         case serverVersion = "server_version"
+        case appliedMigrations = "applied_migrations"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // `decodeIfPresent` on `schemaVersion` still requires the key to
+        // exist (it returns nil only when the value is explicit null or
+        // the key is absent). Force the presence check by asking for the
+        // key list first — decodeIfPresent alone would pass on a body
+        // that omits the key entirely.
+        guard container.contains(.schemaVersion) else {
+            throw DecodingError.keyNotFound(
+                CodingKeys.schemaVersion,
+                DecodingError.Context(
+                    codingPath: container.codingPath,
+                    debugDescription: "schema_version key missing"
+                )
+            )
+        }
+        self.schemaVersion = try container.decodeIfPresent(
+            String.self, forKey: .schemaVersion
+        )
+        self.serverVersion = try container.decode(
+            String.self, forKey: .serverVersion
+        )
+        self.appliedMigrations = try container.decode(
+            [String].self, forKey: .appliedMigrations
+        )
     }
 }

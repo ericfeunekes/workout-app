@@ -37,7 +37,7 @@ final class FirstRunHandoffTests: XCTestCase {
         let transport = FakeHTTPTransport()
         transport.enqueue(.response(HTTPResponse(
             status: 200,
-            body: Data(#"{"server_version":"0.0.1"}"#.utf8)
+            body: Data(#"{"schema_version":null,"server_version":"0.0.1","applied_migrations":[]}"#.utf8)
         )))
         let vm = FirstRunViewModel(
             tokenStore: store,
@@ -86,7 +86,7 @@ final class FirstRunHandoffTests: XCTestCase {
         let transport = FakeHTTPTransport()
         transport.enqueue(.response(HTTPResponse(
             status: 200,
-            body: Data(#"{"server_version":"0.0.1"}"#.utf8)
+            body: Data(#"{"schema_version":null,"server_version":"0.0.1","applied_migrations":[]}"#.utf8)
         )))
         let vm = FirstRunViewModel(
             tokenStore: store,

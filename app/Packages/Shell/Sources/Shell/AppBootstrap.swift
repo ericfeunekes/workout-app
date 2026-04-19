@@ -196,14 +196,26 @@ public enum AppBootstrap {
             let result = try await syncAPI.pullLatest(since: lastSyncAt)
             try await savePull(result, into: persistence.workoutCache)
             // Persist the per-exercise "LAST · …" chip map alongside the
-            // workout rows (qa-001 + qa-020). The server sends the full
-            // snapshot on every pull so we rewrite it authoritatively —
-            // prior entries that no longer appear in the response are
-            // dropped on purpose.
-            let lastPerformedMap = LastPerformedFormatter.buildMap(
-                from: result.lastPerformed
-            )
-            await persistence.lastPerformedStore.save(lastPerformedMap)
+            // workout rows (qa-001 + qa-020). The server's contract is a
+            // full snapshot over all exercises referenced by the user's
+            // non-completed workouts (see `api/sync.py::_build_last_performed`),
+            // so a non-empty response is authoritative — we rewrite.
+            //
+            // An EMPTY `result.lastPerformed`, however, can also legitimately
+            // mean "no completed history yet for any visible exercise" on a
+            // fresh account. To tell the two apart we'd need a richer
+            // contract; instead we take the conservative route and keep
+            // whatever's already stored when the server sent nothing. That
+            // way a transient server regression (or an old server that
+            // still scopes by delta) can't wipe the chips. The cost is a
+            // stale chip after all completed history is server-deleted,
+            // which is acceptable — the next real pull rewrites.
+            if !result.lastPerformed.isEmpty {
+                let lastPerformedMap = LastPerformedFormatter.buildMap(
+                    from: result.lastPerformed
+                )
+                await persistence.lastPerformedStore.save(lastPerformedMap)
+            }
             await persistence.syncMetadataStore.setLastSyncAt(result.serverTime)
         } catch SyncError.tokenRejected {
             telemetry.emit(Event(

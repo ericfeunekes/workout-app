@@ -51,9 +51,18 @@ extension PushQueue {
     }
 
     /// Correlation field (`"key":"uuid"`) for a payload, or `nil` when
-    /// the payload has no single id (e.g. `.events`). IDs are rendered
-    /// via `.wireID` so the dead-letter event matches every other
-    /// outbound id's lowercasing convention.
+    /// the payload has no single id we can surface. IDs are rendered via
+    /// `.wireID` so the dead-letter event matches every other outbound
+    /// id's lowercasing convention.
+    ///
+    /// `.events` was previously always nil, which made QA11 dead-letter
+    /// rows untraceable (qa-037 — payload landed as
+    /// `{payload_kind, http_status, attempts}` only). The first event's
+    /// `setLogID` is preferred correlation when present; failing that,
+    /// `workoutID` lets the operator at least trace the drop back to
+    /// the workout the event was tagged with. Batches with neither id
+    /// still return nil — we do not synthesize correlation out of thin
+    /// air.
     private func correlationField(for payload: PushItem.Payload) -> String? {
         switch payload {
         case .setLogs(let logs):
@@ -63,7 +72,14 @@ extension PushQueue {
             return #""workout_id":"\#(workoutID.wireID)""#
         case .userParameter(let param):
             return #""user_parameter_id":"\#(param.id.wireID)""#
-        case .events:
+        case .events(let events):
+            guard let first = events.first else { return nil }
+            if let setLogID = first.setLogID {
+                return #""set_log_id":"\#(setLogID.wireID)""#
+            }
+            if let workoutID = first.workoutID {
+                return #""workout_id":"\#(workoutID.wireID)""#
+            }
             return nil
         }
     }

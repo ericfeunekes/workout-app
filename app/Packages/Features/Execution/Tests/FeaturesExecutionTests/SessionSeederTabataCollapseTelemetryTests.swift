@@ -11,8 +11,15 @@
 // The VM now:
 //   - seeds through `SessionSeeder.seedWithNormalization` which returns
 //     a manifest of drops alongside the state;
-//   - emits one `execution.tabata_multi_item_collapsed` event per
-//     affected block, carrying block_index + dropped_item_count +
+//   - stashes the collapse manifest and emits one
+//     `execution.tabata_multi_item_collapsed` event per affected block
+//     when the user calls `.start()`, NOT at `init` (qa-035). Emitting
+//     at init time fires during the PREVIOUS workout's save transition
+//     because the shell rebuilds the VM for the next workout as part
+//     of save cleanup; the event then misreports "user started a
+//     collapsed Tabata workout" on every save, and when the user
+//     actually starts the Tabata there's no event at all.
+//   - each event carries block_index + dropped_item_count +
 //     dropped_exercise_ids (lowercase via `.wireID`).
 //
 // The pure seeder path (`SessionSeeder.seed(context:)`) stays side-
@@ -69,12 +76,23 @@ final class SessionSeederTabataCollapseTelemetryTests: XCTestCase {
         )
 
         let recorder = TelemetryRecorder()
-        _ = ExecutionViewModel(context: ctx, telemetry: recorder)
+        let vm = ExecutionViewModel(context: ctx, telemetry: recorder)
+
+        // qa-035: before start, construction alone must NOT emit the
+        // collapse event — the VM is frequently rebuilt during a prior
+        // workout's save cleanup and we cannot report "user started this
+        // collapsed Tabata workout" until they actually did.
+        XCTAssertTrue(
+            recorder.events.allSatisfy { $0.name != "execution.tabata_multi_item_collapsed" },
+            "collapse event must not fire on init"
+        )
+
+        vm.start()
 
         let collapseEvents = recorder.events.filter {
             $0.name == "execution.tabata_multi_item_collapsed"
         }
-        XCTAssertEqual(collapseEvents.count, 1, "exactly one collapse event for the one affected block")
+        XCTAssertEqual(collapseEvents.count, 1, "exactly one collapse event fired on start")
 
         let event = try XCTUnwrap(collapseEvents.first)
         XCTAssertEqual(event.workoutID, workoutID, "event is tagged with the owning workout")
@@ -142,13 +160,83 @@ final class SessionSeederTabataCollapseTelemetryTests: XCTestCase {
         )
 
         let recorder = TelemetryRecorder()
-        _ = ExecutionViewModel(context: ctx, telemetry: recorder)
+        let vm = ExecutionViewModel(context: ctx, telemetry: recorder)
+        vm.start()
 
         let collapseEvents = recorder.events.filter {
             $0.name == "execution.tabata_multi_item_collapsed"
         }
         XCTAssertTrue(collapseEvents.isEmpty,
                       "no collapse event when nothing was dropped")
+    }
+
+    /// qa-035 — emit is tied to `.start()`, not to seed. Constructing a
+    /// VM with a collapse-shaped context must NOT emit; starting the
+    /// workout later emits exactly once.
+    func testTabataCollapseEmitsOnStartNotOnSeed() throws {
+        let workoutID = UUID()
+        let blockID = UUID()
+        let e0 = UUID(); let e1 = UUID()
+        let i0 = UUID(); let i1 = UUID()
+        let now = Date()
+
+        let workout = Workout(
+            id: workoutID, userID: UUID(), name: "tabata-on-start",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil, createdAt: now, updatedAt: now,
+            completedAt: nil, tagsJSON: nil
+        )
+        let block = Block(
+            id: blockID, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: nil, timingMode: .tabata,
+            timingConfigJSON: "{}",
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let items = [
+            WorkoutItem(id: i0, blockID: blockID, position: 0,
+                        exerciseID: e0, prescriptionJSON: #"{"reps":20}"#),
+            WorkoutItem(id: i1, blockID: blockID, position: 1,
+                        exerciseID: e1, prescriptionJSON: #"{"reps":20}"#),
+        ]
+        let ctx = WorkoutContext(
+            workout: workout,
+            blocks: [block],
+            itemsByBlock: [items],
+            exercises: [e0: Exercise(id: e0, name: "A"),
+                        e1: Exercise(id: e1, name: "B")]
+        )
+
+        let recorder = TelemetryRecorder()
+        let vm = ExecutionViewModel(context: ctx, telemetry: recorder)
+
+        let preStartCollapses = recorder.events.filter {
+            $0.name == "execution.tabata_multi_item_collapsed"
+        }
+        XCTAssertTrue(
+            preStartCollapses.isEmpty,
+            "constructing a collapse-shaped VM must not emit before start; got \(preStartCollapses.count)"
+        )
+
+        vm.start()
+
+        let afterStart = recorder.events.filter {
+            $0.name == "execution.tabata_multi_item_collapsed"
+        }
+        XCTAssertEqual(
+            afterStart.count, 1,
+            "start must emit exactly one collapse event; got \(afterStart.count)"
+        )
+
+        // Calling start again (defensive — real shells only call it
+        // once) must not re-emit; the pending manifest is cleared.
+        vm.start()
+        let afterSecondStart = recorder.events.filter {
+            $0.name == "execution.tabata_multi_item_collapsed"
+        }
+        XCTAssertEqual(
+            afterSecondStart.count, 1,
+            "second start must not re-emit the collapse event"
+        )
     }
 
     func testSeedWithNormalizationReturnsCollapseManifest() {

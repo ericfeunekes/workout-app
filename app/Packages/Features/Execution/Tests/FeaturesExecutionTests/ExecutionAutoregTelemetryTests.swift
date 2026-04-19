@@ -119,6 +119,61 @@ final class ExecutionAutoregTelemetryTests: XCTestCase {
         )
     }
 
+    /// The production RestView "next" button wires to `vm.advance()` — NOT
+    /// `vm.acceptAutoreg()`. qa-034 showed the banner-accept event never
+    /// fired in the field because no production path emitted from
+    /// `advance()`. Covers the implicit-accept contract: if a proposal is
+    /// live when the user advances, the banner was accepted and the event
+    /// must fire.
+    func testAdvanceEmitsAutoregAcceptedWhenProposalIsLive() throws {
+        let (ctx, _) = Self.context(targetRir: 2)
+        let telemetry = TelemetryRecorder()
+        let vm = ExecutionViewModel(context: ctx, telemetry: telemetry)
+        vm.start()
+
+        // Overshoot log → banner presents; user advances off rest instead
+        // of tapping undo.
+        vm.logSet(reps: 5, rir: 4)
+        XCTAssertNotNil(vm.currentProposal, "overshoot must seed a proposal")
+
+        vm.advance()
+
+        let accepted = telemetry.events.filter {
+            $0.name == "execution.autoreg_accepted"
+        }
+        XCTAssertEqual(
+            accepted.count, 1,
+            "advance off a live proposal must emit one autoreg_accepted"
+        )
+        let event = try XCTUnwrap(accepted.first)
+        XCTAssertEqual(event.workoutID, ctx.workout.id)
+        XCTAssertNil(vm.currentProposal, "advance clears the live proposal")
+    }
+
+    /// Advance without a live proposal must NOT emit `autoreg_accepted` —
+    /// that would over-count accept signals and misattribute plain
+    /// "next set" taps as autoreg decisions.
+    func testAdvanceWithoutProposalDoesNotEmitAutoregAccepted() {
+        let (ctx, _) = Self.context(targetRir: 2)
+        let telemetry = TelemetryRecorder()
+        let vm = ExecutionViewModel(context: ctx, telemetry: telemetry)
+        vm.start()
+
+        // Clean log at target RIR → no proposal.
+        vm.logSet(reps: 5, rir: 2)
+        XCTAssertNil(vm.currentProposal, "target RIR must not propose")
+
+        vm.advance()
+
+        let accepted = telemetry.events.filter {
+            $0.name == "execution.autoreg_accepted"
+        }
+        XCTAssertTrue(
+            accepted.isEmpty,
+            "plain advance emits no autoreg_accepted; got \(accepted.count) events"
+        )
+    }
+
     /// Accepting the banner emits `execution.autoreg_accepted` tagged with
     /// the current workoutID. The emit path in `acceptAutoreg()` was live
     /// in code but had no pinning test — a regression that silently dropped

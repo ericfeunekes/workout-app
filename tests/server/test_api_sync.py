@@ -574,6 +574,39 @@ def test_pull_last_performed_covers_alternatives(client, test_engine, test_user_
     )
 
 
+def test_incremental_pull_still_returns_last_performed(
+    client, test_engine, test_user_id
+) -> None:
+    """qa-001 regression: an incremental pull with no delta workouts must still include
+    `last_performed` for every exercise in the user's catalog.
+
+    Earlier the snapshot was scoped to the workouts returned by the delta, so a pull
+    with `since >= latest_updated_at` (the steady state when the user hasn't asked
+    Claude for new work yet) returned an empty list. The iOS client's cold-launch
+    save path overwrote its local store with that empty list, erasing every "LAST · …"
+    chip until a full pull was forced.
+    """
+    # Seed one completed workout so there's history to surface.
+    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
+
+    # Full pull establishes a baseline `server_time`.
+    first = client.get("/api/sync/pull").json()
+    assert any(lp["exercise_id"] == exercise_id for lp in first["last_performed"])
+    baseline_server_time = first["server_time"]
+
+    # Incremental pull with `since = server_time`. No workouts changed in the
+    # interval, so `workouts` should be empty. `last_performed` must NOT be —
+    # the client relies on this snapshot to rebuild its chip map every launch.
+    second = client.get(f"/api/sync/pull?since={baseline_server_time}").json()
+    assert second["workouts"] == [], (
+        "setup sanity: with no updates since baseline, the delta must be empty"
+    )
+    assert any(lp["exercise_id"] == exercise_id for lp in second["last_performed"]), (
+        "incremental pull must still include last_performed for prior exercises; "
+        "returning [] erases every LAST · chip on the client"
+    )
+
+
 def test_push_set_log_for_missing_workout_item_404(client) -> None:
     """A set_log referencing a non-existent workout_item_id must 404, not silently drop."""
     response = client.post(

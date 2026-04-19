@@ -128,3 +128,9 @@ Pinned by `testFirstRunHandsOffToBootstrapWithoutSecondPull` (FirstRun target) +
 - **steps:** return to foreground after 10s
 - **expected:** depends on URLSession task lifecycle — not explicitly handled. Likely lands in `.failed(.unreachable)` if the task was killed, or `.complete` if it finished.
 - **notes:** unclear from code — no explicit background-task handling
+
+### S16. Bearer-token paste does not surface "Save Password" (qa-040)
+- **setup:** iOS simulator or device, fresh install, no stored passwords for the target domain.
+- **steps:** paste a 64-char bearer token into the bearer field. Do not submit.
+- **expected:** no "Would you like to save this password?" modal appears. The token field still renders as dots and hides on background.
+- **notes:** manual-only — iOS's save-password heuristic is not reproducible in a unit test. The fix is `.textContentType(.oneTimeCode)` on the SecureField (see `FirstRunView.swift`); removing that modifier would regress this scenario. The field keeps its secure-rendering behaviour because that comes from `SecureField`, not from `textContentType`.

@@ -76,7 +76,7 @@ def sync_pull(
         params_stmt = params_stmt.where(latest_subq.c.ts > since)
     user_parameters = list(db.execute(params_stmt).scalars().all())
 
-    last_performed = _build_last_performed(db, user_id, workouts)
+    last_performed = _build_last_performed(db, user_id)
 
     return SyncPullOut(
         workouts=workouts,  # type: ignore[arg-type]
@@ -90,9 +90,20 @@ def sync_pull(
 def _build_last_performed(
     db: DbSession,
     user_id: str,
-    pulled_workouts: list[Workout],
 ) -> list[ExerciseLastPerformed]:
-    """For every exercise present in the pulled workouts, attach the user's most recent set_logs.
+    """For every exercise present in any of the user's workouts, attach the user's most
+    recent set_logs.
+
+    The snapshot is authoritative: the app overwrites its local chip map with whatever this
+    returns, so an incremental pull (with `since`) must still cover every exercise the UI needs
+    to render, not just those touched by the delta.
+
+    qa-001 regression: earlier versions scoped exercise_ids to the `pulled_workouts` list
+    (the same delta used for the `workouts` response); when the delta was empty (nothing
+    changed since last sync) the snapshot came back `[]` and the app cheerfully overwrote
+    its store with nothing, erasing every "LAST · …" chip on next launch. Scoping the
+    exercise set to the full user catalog fixes that without changing the incremental
+    workouts-delta behaviour.
 
     Two queries total regardless of exercise count:
       1. A ranked join finds the latest completed workout_item per exercise_id.
@@ -100,8 +111,20 @@ def _build_last_performed(
     """
     # Include exercises referenced both directly and via alternatives — the app must
     # be able to display history for any exercise the user can swap to mid-workout.
+    # Scope to every user workout regardless of status: the client overwrites its
+    # chip map with whatever we return, so a pull right after the user's only planned
+    # workout is completed (no more planned/active rows, but the just-written history
+    # is still interesting) must still produce a non-empty snapshot. The ranked join
+    # below already filters set_logs to completed workouts only.
+    all_workouts_stmt = (
+        select(Workout)
+        .options(workout_tree_loader())
+        .where(Workout.user_id == user_id)
+    )
+    all_workouts = list(db.execute(all_workouts_stmt).scalars().all())
+
     exercise_ids: set[str] = set()
-    for workout in pulled_workouts:
+    for workout in all_workouts:
         for block in workout.blocks:
             for item in block.workout_items:
                 exercise_ids.add(item.exercise_id)

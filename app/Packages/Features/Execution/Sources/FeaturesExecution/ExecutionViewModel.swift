@@ -270,6 +270,16 @@ public final class ExecutionViewModel {
     /// the flag to `false` naturally.
     var saveAndDoneInFlightStorage: Bool = false
 
+    /// Pending tabata multi-item collapse records captured at seed time.
+    /// Held until `.start()` actually fires — qa-035 showed emitting at
+    /// seed time fires during the PREVIOUS workout's save transition
+    /// (when the shell rebuilds this VM for the NEXT workout), not when
+    /// the user starts the Tabata session. Per `docs/features/telemetry.md`
+    /// the collapse event is a "user actually started this workout"
+    /// signal, so `.start()` is the correct fire point. `nil` after
+    /// emit so subsequent `.start()` calls (if any) are no-ops.
+    var pendingTabataCollapses: [SessionSeeder.TabataCollapse]?
+
     // MARK: - Init
 
     public init(
@@ -291,11 +301,13 @@ public final class ExecutionViewModel {
         // Seed through the normalization-aware path so any seed-time drops
         // (tabata multi-item collapse today) surface as telemetry. The
         // pure `SessionSeeder.seed(context:)` stays side-effect-free for
-        // tests that exercise the seeder directly; the telemetry emit
-        // runs after all stored props are set, on `+Push.swift`.
+        // tests that exercise the seeder directly; the telemetry emit is
+        // deferred to `.start()` — emitting at seed time fires during the
+        // PREVIOUS workout's save transition (qa-035), which misreports
+        // "user started a collapsed Tabata workout" on every VM rebuild.
         let seed = SessionSeeder.seedWithNormalization(context: context)
         self.state = seed.state
-        emitSeedNormalizationTelemetry(seed.tabataCollapses)
+        self.pendingTabataCollapses = seed.tabataCollapses.isEmpty ? nil : seed.tabataCollapses
     }
 
     // MARK: - Intents
@@ -308,6 +320,14 @@ public final class ExecutionViewModel {
     /// duration. See `RestBlockDriver` for the cursor-model rationale.
     public func start() {
         emitSessionMutation("start")
+        // Deferred seed-normalization telemetry fires here — NOT at
+        // `init` — so the Tabata multi-item collapse event is anchored
+        // to the moment the user actually started THIS workout. See
+        // qa-035 + the `pendingTabataCollapses` doc.
+        if let pending = pendingTabataCollapses, !pending.isEmpty {
+            emitSeedNormalizationTelemetry(pending)
+        }
+        pendingTabataCollapses = nil
         // `apply(_:)` stamps `state.workStartedAt = clock.now` on the
         // `.start` mutation — so the FIRST set's `startedAt` anchor is
         // the session-start instant, not nil. See `SessionState.workStartedAt`.
@@ -390,6 +410,20 @@ public final class ExecutionViewModel {
     /// the cursor-model rationale.
     public func advance() {
         emitSessionMutation("advance")
+        // An active proposal at advance time is an implicit accept — the
+        // user dismissed the banner by moving on rather than tapping undo.
+        // Per `docs/features/telemetry.md`, analytics needs the
+        // `execution.autoreg_accepted` signal for BOTH the explicit-accept
+        // code path (future UI) and this implicit-advance path. The
+        // production "next" button wires to `advance()`, NOT
+        // `acceptAutoreg()`; qa-034 showed the event never fired in the
+        // field because no production path emitted from here. Emit
+        // before clearing the proposal so the tagging (workoutID) still
+        // matches. `acceptAutoreg()` continues to exist for symmetry
+        // and for a potentially-explicit future accept button.
+        if currentProposal != nil {
+            emitAutoreg("execution.autoreg_accepted")
+        }
         // `apply(_:)` stamps `state.workStartedAt = clock.now` on the
         // `.advanceFromRest` mutation — next set's `startedAt` reflects
         // "when rest ended", NOT "when prior set completed". See

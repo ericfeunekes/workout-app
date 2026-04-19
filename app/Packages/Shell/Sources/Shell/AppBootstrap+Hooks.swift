@@ -18,13 +18,25 @@ import Sync
 extension AppBootstrap {
 
     /// qa-027: no planned workout selected. Before returning `.empty`
-    /// (which drops the app into the full-screen "No workouts yet" shell
-    /// and hides the History tab), check whether the local cache has
-    /// ANY workout at all — including completed ones. When it does,
-    /// stay in `.ready` with an empty-glance TodayVM so the user can
-    /// still reach their History tab. Only truly-empty caches (first
-    /// launch that failed to pull, or server-scrubbed user) warrant
-    /// `.empty`.
+    /// (which drops the app into the full-screen "No workouts yet"
+    /// shell and hides the History tab), check whether the local cache
+    /// has any COMPLETED workouts. When it does, stay in `.ready` with
+    /// an empty-glance TodayVM so the user can still reach their
+    /// History tab. Only caches with zero history warrant `.empty` — a
+    /// first-run that pulled nothing, a server-scrubbed user, or a
+    /// fresh install with a successful-but-empty pull.
+    ///
+    /// qa-039: tightened from "any workout at all (any status)" to
+    /// "completed workouts specifically." The prior check ran
+    /// `loadWorkouts(status: nil, since: nil)` which returns every
+    /// status including `.planned` — if a planned workout survived
+    /// TodayLoader's filter for some edge reason (e.g. no
+    /// `scheduled_date`, or a subtle sort difference), the fallback
+    /// returned `.ready_empty_today` instead of `.empty`, stranding
+    /// the user on Today with no way back to FirstRun. Keying on
+    /// completed-history specifically matches the actual stranded-from-
+    /// History use case qa-027 was solving and closes the qa-039 gap
+    /// with one narrower query.
     ///
     /// Lives in `+Hooks.swift` so the main enum body in
     /// `AppBootstrap.swift` stays under SwiftLint's `type_body_length`
@@ -37,10 +49,10 @@ extension AppBootstrap {
         sessionStateBinding: (@Sendable (SessionMutation) -> Void)?,
         executionHolder: ExecutionVMHolder?
     ) async throws -> BootstrapResult {
-        let anyCached = try await persistence.workoutCache.loadWorkouts(
-            status: nil, since: nil
+        let completed = try await persistence.workoutCache.loadWorkouts(
+            status: .completed, since: nil
         )
-        if anyCached.isEmpty {
+        if completed.isEmpty {
             emitBootstrap(telemetry, name: "bootstrap.empty")
             return .empty
         }

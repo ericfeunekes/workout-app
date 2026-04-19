@@ -101,6 +101,22 @@ struct WelcomeCard: View {
                     isSecure: true
                 )
                 #if os(iOS)
+                // qa-040: without an explicit textContentType, iOS
+                // classifies a SecureField as a password and offers to
+                // "Save Password" on paste / submit. Bearer tokens are
+                // not user passwords — storing them in iCloud Keychain
+                // alongside real credentials is both wrong framing for
+                // the user ("did I just save a password for my server?")
+                // and a modal interruption mid-paste. `.oneTimeCode`
+                // classifies the field as ephemeral, which suppresses
+                // the "Save Password" prompt while still keeping the
+                // secure-field dots rendering and the iOS-wide "hide
+                // on backgrounding" behaviour.
+                //
+                // Verified visually via the "Welcome — 64-char token
+                // pasted" preview at the bottom of this file — pasting
+                // a token no longer surfaces the save-password sheet.
+                .textContentType(.oneTimeCode)
                 .textInputAutocapitalization(.never)
                 .autocorrectionDisabled(true)
                 #endif

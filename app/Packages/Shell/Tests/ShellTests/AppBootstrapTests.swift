@@ -148,6 +148,133 @@ final class AppBootstrapTests: XCTestCase {
         XCTAssertTrue(anyWorkouts.isEmpty)
     }
 
+    /// qa-039 regression: a fresh install whose first `/api/sync/pull`
+    /// succeeds with an EMPTY body (no workouts, no exercises, no
+    /// user_parameters, no last_performed — server just hasn't had
+    /// anything pushed to it yet) MUST land on `.empty`. This is the
+    /// shell's cue to render the full-screen "no workouts yet" state
+    /// with the "change server" escape hatch (S10 of `bootstrap.md`).
+    ///
+    /// `resolveNoPlannedWorkout` now keys on completed history (not
+    /// "any workout at all"), so an empty cache + empty pull correctly
+    /// drops to `.empty` without the stale-planned-workout hazard the
+    /// prior "any status" check carried.
+    ///
+    /// Distinct from `testBootstrapWithEmptyCacheReturnsEmpty` above:
+    /// that test exercises the OFFLINE path (pull throws network). This
+    /// one exercises the SUCCESSFUL-but-EMPTY pull path — which would
+    /// otherwise not be covered and is exactly the qa-039 repro.
+    func testTrulyEmptyCacheGoesToEmptyPhaseAfterPull() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let emptyPull = """
+        {
+          "workouts": [],
+          "exercises": [],
+          "user_parameters": [],
+          "last_performed": [],
+          "server_time": "2026-04-19T12:00:00Z"
+        }
+        """.data(using: .utf8)!
+
+        let transport = ScriptedTransport(
+            getOutcomes: [.ok(emptyPull)]
+        )
+
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: Date(),
+            transportBuilder: { _ in transport }
+        )
+        XCTAssertEqual(
+            result, .empty,
+            "fresh install + empty successful pull must land on .empty " +
+            "so the shell renders the change-server escape hatch"
+        )
+
+        // Belt + braces: confirm the cache is still empty after the
+        // save-pull path ran. `savePull` with empty arrays should be a
+        // no-op; if a migration-era quirk started writing an empty-row
+        // marker, that would trip `resolveNoPlannedWorkout`'s "anyCached"
+        // branch and resurrect the qa-039 behaviour.
+        let anyWorkouts = try await factory.workoutCache.loadWorkouts(
+            status: nil, since: nil
+        )
+        XCTAssertTrue(
+            anyWorkouts.isEmpty,
+            "empty pull must not leave any WorkoutModel rows in the cache"
+        )
+    }
+
+    /// qa-039 investigation-option-2 guard: a successful pull that
+    /// brings non-workout payload (exercises, user_parameters — e.g. a
+    /// server that has a Claude-curated catalog but no workouts pushed
+    /// yet) must STILL land on `.empty`. `resolveNoPlannedWorkout` now
+    /// queries `loadWorkouts(status: .completed, since: nil)`;
+    /// exercises and user_parameters live in different model classes
+    /// and the completed-row count is zero for a catalog-only pull. If
+    /// a future refactor seeds phantom completed-workout rows from a
+    /// user_parameters sync, this test goes red first.
+    func testPullWithOnlyExercisesAndParamsStillLandsInEmpty() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let exerciseID = UUID(uuidString: "cccccccc-cccc-cccc-cccc-cccccccccccc")!
+        let userID = UUID(uuidString: "dddddddd-dddd-dddd-dddd-dddddddddddd")!
+        let paramID = UUID(uuidString: "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")!
+        let pullWithCatalogOnly = """
+        {
+          "workouts": [],
+          "exercises": [
+            {
+              "id": "\(exerciseID.uuidString.lowercased())",
+              "name": "Barbell Bench Press",
+              "notes": null,
+              "demo_url": null
+            }
+          ],
+          "user_parameters": [
+            {
+              "id": "\(paramID.uuidString.lowercased())",
+              "user_id": "\(userID.uuidString.lowercased())",
+              "key": "bodyweight_kg",
+              "value": "82.5",
+              "updated_at": "2026-04-19T10:00:00Z",
+              "source": "manual"
+            }
+          ],
+          "last_performed": [],
+          "server_time": "2026-04-19T12:00:00Z"
+        }
+        """.data(using: .utf8)!
+
+        let transport = ScriptedTransport(
+            getOutcomes: [.ok(pullWithCatalogOnly)]
+        )
+
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: Date(),
+            transportBuilder: { _ in transport }
+        )
+        XCTAssertEqual(
+            result, .empty,
+            "catalog-only pull (no workouts) must still land on .empty — " +
+            "the WorkoutModel table is what drives the anyCached check"
+        )
+
+        // Sanity: the pull actually wrote the catalog rows. If this
+        // fails, we're not actually exercising the "non-workout data
+        // arrived" scenario.
+        let exercises = try await factory.workoutCache.loadExercises()
+        XCTAssertEqual(exercises.count, 1)
+        let params = try await factory.workoutCache.loadUserParameters(key: "bodyweight_kg")
+        XCTAssertEqual(params.count, 1)
+    }
+
     // MARK: - qa-027 · completed-only cache stays in .ready
 
     /// qa-027: cold-launch after the user has completed all planned
@@ -774,6 +901,59 @@ final class AppBootstrapTests: XCTestCase {
         XCTAssertEqual(
             executionVM.context.lastPerformed[benchID],
             "4×5 @ 100 kg · RIR 2"
+        )
+    }
+
+    /// qa-001 reopen regression — an incremental pull that returns an EMPTY
+    /// `last_performed` array (e.g. a pre-fix server that scoped it to the
+    /// delta, or a transient server regression) must NOT erase the chips
+    /// the store already has. The previous behavior overwrote the store
+    /// with whatever the pull returned, so the first empty response wiped
+    /// every "LAST TIME" chip on the next Today render.
+    ///
+    /// This test seeds the store, runs a successful pull whose payload has
+    /// `last_performed: []`, and asserts the store (and the VM) still
+    /// surface the prior chip. Server-side fix in `api/sync.py` should
+    /// make `[]` rare in practice, but the client stays defensive.
+    func testBootstrapKeepsExistingLastPerformedWhenPullReturnsEmpty() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        // includeLastPerformed: false → fixture.json carries "last_performed": []
+        let fixture = Fixtures.sampleWorkoutPayload()
+        let benchID = fixture.domainExercises[0].id
+
+        // Seed the store as if a prior successful pull had populated it.
+        await factory.lastPerformedStore.save([
+            benchID: "4×5 @ 100 kg · RIR 2",
+        ])
+
+        let transport = ScriptedTransport(
+            getOutcomes: [.ok(fixture.json)]
+        )
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in transport }
+        )
+        guard case let .ready(todayVM, _, _) = result else {
+            return XCTFail("expected .ready, got \(result)")
+        }
+
+        // The seeded chip survives the pull — the empty response does NOT
+        // overwrite the store.
+        let stored = await factory.lastPerformedStore.load()
+        XCTAssertEqual(
+            stored[benchID],
+            "4×5 @ 100 kg · RIR 2",
+            "empty last_performed in pull must not erase prior chip map"
+        )
+        let benchRow = todayVM.exercises.first { $0.name == "Barbell Bench Press" }
+        XCTAssertEqual(
+            benchRow?.lastTime,
+            "4×5 @ 100 kg · RIR 2",
+            "Today VM must render the prior chip when the pull returned []"
         )
     }
 

@@ -152,6 +152,42 @@ final class FirstRunViewModelTests: XCTestCase {
         XCTAssertNil(store.saved)
     }
 
+    /// qa-038 regression: a server that answers 200 on `/api/version`
+    /// with valid JSON but the WRONG shape (no `server_version`,
+    /// `applied_migrations`, or `schema_version`) must surface as
+    /// `.decode`. Previously the probe had an all-optional shape so
+    /// `{"hello":"world"}` decoded successfully and the user landed on
+    /// a bootstrapped-but-empty app with no banner.
+    ///
+    /// Scenarios this catches:
+    ///   • Reverse-proxy misconfig that points at a different app's
+    ///     health endpoint.
+    ///   • A prior-generation server that answered `/api/version` with
+    ///     a different shape entirely.
+    ///   • Any arbitrary JSON body at the target URL that happens to
+    ///     200 and 401-gate the bearer.
+    func testConnectRejectsWrongShapeServer() async {
+        let store = FakeTokenStore()
+        let transport = FakeHTTPTransport()
+
+        // Wrong-shape body: valid JSON, 200 OK, valid bearer — but no
+        // WorkoutDB discriminator fields. Must decode-fail.
+        transport.enqueue(.response(HTTPResponse(
+            status: 200,
+            body: Data(#"{"hello":"world"}"#.utf8)
+        )))
+
+        let vm = makeViewModel(store: store, transport: transport)
+        vm.url = "https://host.ts.net"
+        vm.token = "tok"
+
+        await vm.connect()
+
+        XCTAssertEqual(vm.state, .failed(reason: .decode))
+        XCTAssertNil(store.saved,
+                     "wrong-shape server must not persist a connection")
+    }
+
     // MARK: - 5xx
 
     func testConnectWith500YieldsUnreachable() async {
@@ -284,10 +320,16 @@ final class FirstRunViewModelTests: XCTestCase {
 /// Queues exactly one successful `/api/version` response. FirstRun no
 /// longer calls `/api/sync/pull`, so the happy-path script is a single
 /// 200 now.
+///
+/// qa-038: the body must carry the full WorkoutDB handshake shape
+/// (`schema_version` + `server_version` + `applied_migrations`) or the
+/// strict decode in `VersionProbe` fails. `schema_version` is modeled
+/// as `str | None` on the server so we keep it null here to exercise
+/// that leniency — the key's presence, not its value, is load-bearing.
 private func enqueueHappyPath(_ transport: FakeHTTPTransport) {
     transport.enqueue(.response(HTTPResponse(
         status: 200,
-        body: Data(#"{"server_version":"0.0.1"}"#.utf8)
+        body: Data(#"{"schema_version":null,"server_version":"0.0.1","applied_migrations":[]}"#.utf8)
     )))
 }
 

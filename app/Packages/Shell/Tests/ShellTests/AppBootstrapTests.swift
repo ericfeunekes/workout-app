@@ -460,6 +460,116 @@ final class AppBootstrapTests: XCTestCase {
         )
     }
 
+    // MARK: - qa-001 / qa-020 — lastPerformed threaded pull → UI
+
+    /// When the pull carries a `last_performed` snapshot, the bootstrap
+    /// must (a) persist it into the `LastPerformedStore` for offline
+    /// restart, (b) thread the resulting `[UUID: String]` map onto the
+    /// initial `TodayViewModel.exercises[*].lastTime` chips, and (c)
+    /// surface the same map on `ExecutionViewModel.context.lastPerformed`
+    /// so SwapSheet's "LAST · …" row resolves per-alternative. The
+    /// threading was missing even though `PullService.lastPerformed`
+    /// decoded correctly (bug-009 era); the pulled snapshot landed
+    /// nowhere and both UI surfaces rendered blank.
+    func testBootstrapThreadsLastPerformedToTodayAndExecution() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let fixture = Fixtures.sampleWorkoutPayload(includeLastPerformed: true)
+        let transport = ScriptedTransport(
+            getOutcomes: [.ok(fixture.json)]
+        )
+
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in transport }
+        )
+        guard case let .ready(todayVM, executionHolder, _) = result else {
+            return XCTFail("expected .ready, got \(result)")
+        }
+
+        // Fixture emits lastPerformed for both Push A exercises: bench
+        // (1 set × 5 @ 100 kg · RIR 2 → single working set) and row
+        // (3 working sets × 8 @ 77.5 kg · RIR 1). The formatter picks
+        // the heaviest working set as the representative line, so both
+        // rows should surface non-nil chip strings.
+        let benchID = fixture.domainExercises[0].id
+        let rowID = fixture.domainExercises[1].id
+        let todayBench = todayVM.exercises.first { $0.name == "Barbell Bench Press" }
+        let todayRow = todayVM.exercises.first { $0.name == "Barbell Row" }
+        XCTAssertEqual(todayBench?.lastTime, "1×5 @ 100 kg · RIR 2")
+        XCTAssertEqual(todayRow?.lastTime, "3×8 @ 77.5 kg · RIR 1")
+
+        // The ExecutionViewModel's context carries the same map.
+        let executionVM = try XCTUnwrap(executionHolder.vm)
+        XCTAssertEqual(
+            executionVM.context.lastPerformed[benchID],
+            "1×5 @ 100 kg · RIR 2"
+        )
+        XCTAssertEqual(
+            executionVM.context.lastPerformed[rowID],
+            "3×8 @ 77.5 kg · RIR 1"
+        )
+
+        // Persisted copy survives into the store so an offline restart
+        // (pull fails, cache hydrates) still renders the chips.
+        let stored = await factory.lastPerformedStore.load()
+        XCTAssertEqual(stored[benchID], "1×5 @ 100 kg · RIR 2")
+        XCTAssertEqual(stored[rowID], "3×8 @ 77.5 kg · RIR 1")
+    }
+
+    /// Offline restart after a previous successful pull. The bootstrap's
+    /// transport throws `.network`, but the cache + lastPerformed store
+    /// are both populated from a prior run. The chips must still render.
+    func testBootstrapHydratesLastPerformedFromStoreWhenOffline() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let fixture = Fixtures.sampleWorkoutPayload()
+        // Prime the cache with the workout shape only — last_performed
+        // payload on the fixture is unused here because we're writing
+        // the store directly (mirrors what a prior successful bootstrap
+        // would have left on disk).
+        try await factory.workoutCache.save(
+            PulledDataset(
+                workouts: [fixture.domainWorkout],
+                blocks: fixture.domainBlocks,
+                items: fixture.domainItems,
+                alternatives: [],
+                exercises: fixture.domainExercises,
+                userParameters: []
+            )
+        )
+        let benchID = fixture.domainExercises[0].id
+        await factory.lastPerformedStore.save([
+            benchID: "4×5 @ 100 kg · RIR 2",
+        ])
+
+        let transport = ScriptedTransport(
+            getOutcomes: [.error(.network("dns"))]
+        )
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in transport }
+        )
+        guard case let .ready(todayVM, executionHolder, _) = result else {
+            return XCTFail("expected .ready from cache, got \(result)")
+        }
+
+        let benchRow = todayVM.exercises.first { $0.name == "Barbell Bench Press" }
+        XCTAssertEqual(benchRow?.lastTime, "4×5 @ 100 kg · RIR 2")
+
+        let executionVM = try XCTUnwrap(executionHolder.vm)
+        XCTAssertEqual(
+            executionVM.context.lastPerformed[benchID],
+            "4×5 @ 100 kg · RIR 2"
+        )
+    }
+
     // MARK: - Helpers
 
     private func uniqueService() -> String {

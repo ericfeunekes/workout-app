@@ -131,7 +131,9 @@ enum Fixtures {
     /// (bench + row). Returned both as a JSON payload (what the
     /// transport hands back) and as CoreDomain values (what the cache
     /// would hold after a successful pull → save).
-    static func sampleWorkoutPayload() -> WorkoutPayload {
+    static func sampleWorkoutPayload(
+        includeLastPerformed: Bool = false
+    ) -> WorkoutPayload {
         let userID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
         let workoutID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
         let blockID = UUID(uuidString: "33333333-3333-3333-3333-333333333333")!
@@ -153,6 +155,112 @@ enum Fixtures {
 
         let createdAtString = "2026-04-17T07:00:00Z"
         let createdAt = ISO8601DateFormatter().date(from: createdAtString)!
+
+        // `last_performed` section. Empty by default to keep existing
+        // tests unchanged; the qa-001/qa-020 regression test passes
+        // `includeLastPerformed: true` so the server response carries
+        // one snapshot per exercise the workout references.
+        let lastPerformedJSON: String
+        if includeLastPerformed {
+            lastPerformedJSON = """
+            [
+              {
+                "exercise_id": "\(benchID.uuidString.lowercased())",
+                "last_set_logs": [
+                  {
+                    "id": "aaaaaaaa-0000-0000-0000-000000000001",
+                    "workout_item_id": "aaaaaaaa-0000-0000-0000-000000000002",
+                    "performed_exercise_id": null,
+                    "set_index": 1,
+                    "reps": 5,
+                    "weight": 100.0,
+                    "weight_unit": "kg",
+                    "duration_sec": null,
+                    "distance_m": null,
+                    "rir": 2,
+                    "is_warmup": false,
+                    "started_at": null,
+                    "completed_at": "2026-04-10T07:15:00Z",
+                    "hr_avg_bpm": null,
+                    "hr_max_bpm": null,
+                    "cadence_avg_spm": null,
+                    "motion_samples_ref": null,
+                    "notes": null
+                  }
+                ],
+                "prescription_json": "{\\"sets\\":5,\\"reps\\":5,\\"load_kg\\":100}"
+              },
+              {
+                "exercise_id": "\(rowID.uuidString.lowercased())",
+                "last_set_logs": [
+                  {
+                    "id": "bbbbbbbb-0000-0000-0000-000000000001",
+                    "workout_item_id": "bbbbbbbb-0000-0000-0000-000000000002",
+                    "performed_exercise_id": null,
+                    "set_index": 1,
+                    "reps": 8,
+                    "weight": 77.5,
+                    "weight_unit": "kg",
+                    "duration_sec": null,
+                    "distance_m": null,
+                    "rir": 1,
+                    "is_warmup": false,
+                    "started_at": null,
+                    "completed_at": "2026-04-10T07:25:00Z",
+                    "hr_avg_bpm": null,
+                    "hr_max_bpm": null,
+                    "cadence_avg_spm": null,
+                    "motion_samples_ref": null,
+                    "notes": null
+                  },
+                  {
+                    "id": "bbbbbbbb-0000-0000-0000-000000000003",
+                    "workout_item_id": "bbbbbbbb-0000-0000-0000-000000000002",
+                    "performed_exercise_id": null,
+                    "set_index": 2,
+                    "reps": 8,
+                    "weight": 77.5,
+                    "weight_unit": "kg",
+                    "duration_sec": null,
+                    "distance_m": null,
+                    "rir": 1,
+                    "is_warmup": false,
+                    "started_at": null,
+                    "completed_at": "2026-04-10T07:27:00Z",
+                    "hr_avg_bpm": null,
+                    "hr_max_bpm": null,
+                    "cadence_avg_spm": null,
+                    "motion_samples_ref": null,
+                    "notes": null
+                  },
+                  {
+                    "id": "bbbbbbbb-0000-0000-0000-000000000004",
+                    "workout_item_id": "bbbbbbbb-0000-0000-0000-000000000002",
+                    "performed_exercise_id": null,
+                    "set_index": 3,
+                    "reps": 8,
+                    "weight": 77.5,
+                    "weight_unit": "kg",
+                    "duration_sec": null,
+                    "distance_m": null,
+                    "rir": 1,
+                    "is_warmup": false,
+                    "started_at": null,
+                    "completed_at": "2026-04-10T07:29:00Z",
+                    "hr_avg_bpm": null,
+                    "hr_max_bpm": null,
+                    "cadence_avg_spm": null,
+                    "motion_samples_ref": null,
+                    "notes": null
+                  }
+                ],
+                "prescription_json": "{\\"sets\\":3,\\"reps\\":8,\\"load_kg\\":77.5}"
+              }
+            ]
+            """
+        } else {
+            lastPerformedJSON = "[]"
+        }
 
         let json = """
         {
@@ -215,7 +323,7 @@ enum Fixtures {
             }
           ],
           "user_parameters": [],
-          "last_performed": [],
+          "last_performed": \(lastPerformedJSON),
           "server_time": "2026-04-17T08:00:00Z"
         }
         """.data(using: .utf8)!

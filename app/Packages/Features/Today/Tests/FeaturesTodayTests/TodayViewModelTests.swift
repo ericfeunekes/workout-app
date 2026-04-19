@@ -287,6 +287,106 @@ final class TodayViewModelTests: XCTestCase {
         XCTAssertFalse(vm.showsStartButton)
     }
 
+    // MARK: - qa-001 — lastPerformed sourced from LastPerformedStore
+
+    /// Regression for qa-001 — `TodayLoader.load()` used to default
+    /// `lastPerformed` to `[:]`, so even when a pull successfully
+    /// returned a snapshot it never reached the VM. The loader now
+    /// pulls from an injected `LastPerformedStore`; this test proves
+    /// the derived chip strings appear on `vm.exercises[*].lastTime`.
+    func testTodayViewRendersLastChipWhenLastPerformedPresent() async throws {
+        let userID = UUID()
+        let workoutID = UUID()
+        let blockID = UUID()
+        let benchID = UUID()
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+        let workout = Workout(
+            id: workoutID, userID: userID, name: "Push A",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil, createdAt: now, updatedAt: now,
+            completedAt: nil, tagsJSON: nil
+        )
+        let block = Block(
+            id: blockID, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: nil, timingMode: .straightSets,
+            timingConfigJSON: "{}", rounds: nil,
+            roundsRepSchemeJSON: nil, notes: nil
+        )
+        let item = WorkoutItem(
+            id: UUID(), blockID: blockID, position: 0,
+            exerciseID: benchID,
+            prescriptionJSON: #"{"sets":4,"reps":5,"load_kg":100}"#
+        )
+
+        let cache = MutableFakeCache(
+            workouts: [workout],
+            blocks: [workoutID: [block]],
+            items: [blockID: [item]],
+            exercises: [Exercise(id: benchID, name: "Bench")]
+        )
+        let store = FakeLastPerformedStore(
+            initial: [benchID: "5×5 @ 100 kg · RIR 2"]
+        )
+        let loader = TodayLoader(
+            cache: cache,
+            lastPerformedStore: store,
+            clock: { now }
+        )
+
+        let loaded = try await loader.load()
+        let ctx = try XCTUnwrap(loaded)
+        let vm = TodayViewModel(context: ctx)
+        XCTAssertEqual(vm.exercises.count, 1)
+        XCTAssertEqual(vm.exercises.first?.lastTime, "5×5 @ 100 kg · RIR 2")
+    }
+
+    /// Same shape but the store is empty — the chip must be nil so the
+    /// UI hides the "LAST TIME" row rather than rendering a blank chip
+    /// (qa-001 symptom).
+    func testTodayViewHidesLastChipWhenStoreEmpty() async throws {
+        let userID = UUID()
+        let workoutID = UUID()
+        let blockID = UUID()
+        let benchID = UUID()
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+
+        let workout = Workout(
+            id: workoutID, userID: userID, name: "Push A",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil, createdAt: now, updatedAt: now,
+            completedAt: nil, tagsJSON: nil
+        )
+        let block = Block(
+            id: blockID, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: nil, timingMode: .straightSets,
+            timingConfigJSON: "{}", rounds: nil,
+            roundsRepSchemeJSON: nil, notes: nil
+        )
+        let item = WorkoutItem(
+            id: UUID(), blockID: blockID, position: 0,
+            exerciseID: benchID,
+            prescriptionJSON: #"{"sets":4,"reps":5,"load_kg":100}"#
+        )
+        let cache = MutableFakeCache(
+            workouts: [workout],
+            blocks: [workoutID: [block]],
+            items: [blockID: [item]],
+            exercises: [Exercise(id: benchID, name: "Bench")]
+        )
+        let store = FakeLastPerformedStore(initial: [:])
+        let loader = TodayLoader(
+            cache: cache,
+            lastPerformedStore: store,
+            clock: { now }
+        )
+
+        let loaded = try await loader.load()
+        let ctx = try XCTUnwrap(loaded)
+        let vm = TodayViewModel(context: ctx)
+        XCTAssertNil(vm.exercises.first?.lastTime)
+    }
+
     /// Seed a single planned workout, complete it, and reload. The
     /// loader returns nil; the VM must flip to empty-shaped so the UI
     /// renders the "nothing scheduled" glance.
@@ -470,4 +570,29 @@ private final class MutableFakeCache: WorkoutCache, @unchecked Sendable {
     func saveUserParameter(_ param: UserParameter) async throws {}
 
     func clear() async throws {}
+}
+
+/// In-memory `LastPerformedStore` for the qa-001 regression tests.
+/// Mirrors the UserDefaults-backed `LastPerformedStoreImpl` without
+/// depending on the host's standardUserDefaults (keeps the test target
+/// hermetic — see FeaturesToday Package.swift's "Swift code only" note).
+private final class FakeLastPerformedStore: LastPerformedStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [UUID: String]
+
+    init(initial: [UUID: String]) {
+        self.entries = initial
+    }
+
+    func load() async -> [UUID: String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return entries
+    }
+
+    func save(_ entries: [UUID: String]) async {
+        lock.lock()
+        defer { lock.unlock() }
+        self.entries = entries
+    }
 }

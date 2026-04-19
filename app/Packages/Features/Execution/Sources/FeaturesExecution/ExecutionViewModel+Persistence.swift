@@ -395,8 +395,29 @@ extension ExecutionViewModel {
         // interval_sec`; log-time does NOT re-anchor. This is the
         // minute-boundary semantic EMOM requires — drift-free regardless of
         // how early or late inside the minute the user logged.
-        if state.route == .rest, emomBoundaryReached(now: now) {
-            advance()
+        //
+        // Two entry paths:
+        // * `.rest` — user logged inside the interval, rest ring is
+        //   counting down to the boundary. At the boundary, advance the
+        //   cursor (the user's log is already in state).
+        // * `.active` — user never logged this interval (qa-018 root
+        //   cause). Auto-log a `(reps: 0, rir: nil)` placeholder so the
+        //   skipped interval still produces a server-visible row, then
+        //   advance. Mirrors `autoLogAndRestForTabata` / the cap-edge
+        //   `autoLogPlaceholderForEMOM` — "capture the most user data"
+        //   per `docs/features/timing-modes.md`.
+        //
+        // Run AFTER the cap-complete path so a final interval at the cap
+        // edge doesn't double-advance (the cap-complete branch returns
+        // before this point).
+        if emomBoundaryReached(now: now) {
+            if state.route == .rest {
+                advance()
+            } else if state.route == .active,
+                      emomCursorIsWithinAuthoredIntervals() {
+                autoLogPlaceholderForEMOM()
+                advance()
+            }
         }
     }
 
@@ -537,10 +558,15 @@ extension ExecutionViewModel {
     }
 
     /// Compute the rest duration for an EMOM log — the wall-clock time until
-    /// the END of the current interval (`cursor.setIndex`). Anchored to the
-    /// block's `intervalAnchorAt`, NOT the log-time. A log at 0:15 inside
-    /// interval 1 rests 45s; a log at 0:55 rests 5s; a late log that blew
-    /// past the boundary rests 0s (caller advances immediately).
+    /// the END of the current interval. Anchored to the block's
+    /// `intervalAnchorAt`, NOT the log-time. A log at 0:15 inside interval
+    /// 1 rests 45s; a log at 0:55 rests 5s; a late log that blew past the
+    /// boundary rests 0s (caller advances immediately).
+    ///
+    /// Multi-item EMOM: the 1-based interval ordinal is
+    /// `(setIndex - 1) * items.count + itemIndex + 1`; boundary of interval
+    /// N is `anchor + N * intervalSec`. For single-item EMOM the ordinal
+    /// collapses to `setIndex` so the pre-fix formula is preserved.
     ///
     /// Falls back to the driver's native `interval_sec` when the anchor is
     /// missing (e.g. the config is malformed so the VM didn't stamp on
@@ -555,11 +581,16 @@ extension ExecutionViewModel {
         }
         let intervalSec = emomIntervalSec(for: postLogState)
         guard intervalSec > 0 else { return 0 }
-        // `postLogState.cursor.setIndex` is the interval the user just
-        // logged (the reducer does NOT advance cursor on `.logSet`). The
-        // boundary is the END of that interval.
-        let setIndex = postLogState.cursor.setIndex
-        let boundary = anchor.addingTimeInterval(Double(setIndex) * intervalSec)
+        let b = postLogState.cursor.blockIndex
+        guard b >= 0, b < context.itemsByBlock.count else { return 0 }
+        let items = context.itemsByBlock[b]
+        guard !items.isEmpty else { return 0 }
+        let c = postLogState.cursor
+        // `postLogState.cursor` is the interval the user just logged (the
+        // reducer does NOT advance on `.logSet`). The boundary is the END
+        // of that interval.
+        let ordinal = (c.setIndex - 1) * items.count + c.itemIndex + 1
+        let boundary = anchor.addingTimeInterval(Double(ordinal) * intervalSec)
         return max(0, boundary.timeIntervalSince(now))
     }
 
@@ -567,6 +598,19 @@ extension ExecutionViewModel {
     /// to `now`. Read by `tickBlockTimer` to auto-advance on the minute
     /// mark regardless of the user's interaction with the rest screen.
     /// Returns false outside EMOM or when the anchor is missing.
+    ///
+    /// Multi-item EMOM: the cursor is round-robin — `setIndex` is the ROUND,
+    /// `itemIndex` is the position within the round. Each interval maps to
+    /// a unique `(setIndex, itemIndex)` pair; the 1-based interval ordinal
+    /// is `(setIndex - 1) * items.count + itemIndex + 1` and the boundary
+    /// of interval ordinal N is `anchor + N * intervalSec`. For single-
+    /// item EMOM the ordinal collapses to `setIndex` and the math matches
+    /// the pre-fix formula, preserving single-item semantics. qa-018
+    /// pre-fix used `setIndex * intervalSec`, which for a 2-item EMOM
+    /// reported interval 2's boundary identical to interval 1's (both
+    /// setIndex=1) and interval 3's identical to interval 2's (both
+    /// setIndex=2), causing `tickBlockTimer` to either fire too early on
+    /// advance-into-an-interval or never fire at the authored boundary.
     private func emomBoundaryReached(now: Date) -> Bool {
         let b = state.cursor.blockIndex
         guard let block = context.block(at: b), block.timingMode == .emom else {
@@ -575,8 +619,12 @@ extension ExecutionViewModel {
         guard let anchor = state.intervalAnchorAt else { return false }
         let intervalSec = emomIntervalSec(for: state)
         guard intervalSec > 0 else { return false }
-        let setIndex = state.cursor.setIndex
-        let boundary = anchor.addingTimeInterval(Double(setIndex) * intervalSec)
+        guard b >= 0, b < context.itemsByBlock.count else { return false }
+        let items = context.itemsByBlock[b]
+        guard !items.isEmpty else { return false }
+        let c = state.cursor
+        let ordinal = (c.setIndex - 1) * items.count + c.itemIndex + 1
+        let boundary = anchor.addingTimeInterval(Double(ordinal) * intervalSec)
         return now >= boundary
     }
 

@@ -426,6 +426,156 @@ final class EMOMBoundaryTests: XCTestCase {
             "EMOM must complete when total_minutes elapses")
     }
 
+    /// Regression for qa-018 (post-log path): a 2-item EMOM, user logs
+    /// interval 1 (item 0) mid-minute, then waits past the minute boundary
+    /// without interacting. `tickBlockTimer` must auto-advance the cursor
+    /// to interval 2 (item 1) purely via wall-clock — no late-log inline
+    /// advance. Tick fires from `.rest` → `advance()`.
+    ///
+    /// Distinct from `testEMOM8MinuteWorkoutLogs8Intervals`: that test logs
+    /// at intervalStart+10 on each minute, which means interval 2's log at
+    /// t=70 is "late" relative to boundary=start+60 (cursor setIndex stayed
+    /// at 1 across the round-robin bump) and takes the inline-advance path
+    /// in `buildLogMutations` instead of the tick-driven path. qa-018 only
+    /// exercises interval 1 → interval 2 and the user never logs past the
+    /// boundary — the ONLY advance mechanism is the tick.
+    func testEMOMBoundaryTickAdvancesCursorForTwoItemBlock() {
+        let start = Date(timeIntervalSince1970: 9_000_000)
+        let clock = MutableBoundaryClock(now: start)
+        let (ctx, itemA, itemB) = makeTwoItemEMOMContext(totalMinutes: 3)
+        let vm = ExecutionViewModel(context: ctx, clock: clock)
+        vm.start()
+
+        // Cursor starts on item 0 (Row — analogous to qa-018's Push Press).
+        XCTAssertEqual(vm.state.cursor.itemIndex, 0)
+        XCTAssertEqual(vm.state.cursor.setIndex, 1)
+
+        // Log interval 1 at 0:15.
+        clock.now = start.addingTimeInterval(15)
+        vm.logSet(reps: 10, rir: nil)
+        XCTAssertEqual(vm.state.route, .rest,
+            "early log inside interval 1 must enter .rest until the minute boundary")
+        XCTAssertEqual(
+            vm.state.restEndsAt?.timeIntervalSince1970,
+            start.timeIntervalSince1970 + 60,
+            "rest anchors to the minute boundary (start + 60), not log + interval"
+        )
+
+        // Clock rolls to the boundary. User does nothing — the tick is the
+        // only thing that can advance the cursor here. Pre-fix qa-018: the
+        // cursor stays on (0, 0, 1) and the ring keeps reading REST 1:00 on
+        // item A.
+        clock.now = start.addingTimeInterval(60)
+        vm.tickBlockTimer()
+
+        XCTAssertEqual(vm.state.route, .active,
+            "minute boundary tick must flip route back to .active")
+        XCTAssertEqual(vm.state.cursor.itemIndex, 1,
+            "minute boundary tick must round-robin to item 1 (Jump Rope)")
+        XCTAssertEqual(vm.state.cursor.setIndex, 1,
+            "setIndex stays at round 1 when advancing within the round")
+
+        // Sanity: item A holds the 1 logged set; item B still has none.
+        let logA = vm.state.items.first { $0.itemID == itemA }
+        let logB = vm.state.items.first { $0.itemID == itemB }
+        XCTAssertEqual(logA?.sets.filter { $0.done }.count, 1,
+            "item A (interval 1) log landed")
+        XCTAssertEqual(logB?.sets.filter { $0.done }.count, 0,
+            "item B must not have a log yet — the boundary advance "
+                + "does not auto-log, only the cap does")
+    }
+
+    /// qa-018 root cause: a 2-item EMOM, user NEVER logs interval 1.
+    /// The "SET 1 OF 3 · REST 1:00" display from the QA report is the
+    /// `ActiveView.metaLine` format — the user is on `.active`, not
+    /// `.rest`. The tick's EMOM boundary-advance guard required
+    /// `state.route == .rest`, so on `.active` past the boundary NOTHING
+    /// advanced the cursor. Pre-fix: cursor stuck on (0, 0, 1) forever;
+    /// user forced to manually recover via tapping "next" or editing
+    /// past-sets, which produced 12 spurious set_logs in the QA run.
+    ///
+    /// Post-fix: `tickBlockTimer` auto-logs a `(reps: 0, rir: nil)`
+    /// placeholder for the current interval and advances the cursor when
+    /// the boundary passes on `.active`. Mirrors Tabata's work-window
+    /// auto-log pattern (`autoLogAndRestForTabata`) — "capture the most
+    /// user data" per `docs/features/timing-modes.md`.
+    func testEMOMBoundaryTickAdvancesEvenWhenUserNeverLogsOnActive() {
+        let start = Date(timeIntervalSince1970: 10_000_000)
+        let clock = MutableBoundaryClock(now: start)
+        let (ctx, itemA, itemB) = makeTwoItemEMOMContext(totalMinutes: 3)
+        let vm = ExecutionViewModel(context: ctx, clock: clock)
+        vm.start()
+
+        XCTAssertEqual(vm.state.cursor.itemIndex, 0)
+        XCTAssertEqual(vm.state.route, .active)
+
+        // User watches Push Press for the full minute without tapping log.
+        // Clock rolls to the minute boundary. Tick must auto-log a 0-rep
+        // placeholder and advance the cursor to item 1 (Jump Rope).
+        clock.now = start.addingTimeInterval(60)
+        vm.tickBlockTimer()
+
+        XCTAssertEqual(vm.state.cursor.itemIndex, 1,
+            "boundary tick on .active must advance cursor to item 1 (Jump Rope)")
+        XCTAssertEqual(vm.state.cursor.setIndex, 1,
+            "setIndex stays at round 1 when advancing within the round")
+        XCTAssertEqual(vm.state.route, .active,
+            "advance lands on .active for the next interval")
+
+        // Auto-log placeholder landed on item A (the skipped interval).
+        let logA = vm.state.items.first { $0.itemID == itemA }
+        XCTAssertEqual(logA?.sets.filter { $0.done }.count, 1,
+            "skipped interval 1 must have a 0-rep placeholder log so the "
+                + "server reflects an intent row per EMOM interval")
+        XCTAssertEqual(logA?.sets.first(where: { $0.done })?.reps, 0,
+            "placeholder log reports 0 reps — the user did not report a value")
+
+        // Item B has nothing yet — interval 2 is just beginning.
+        let logB = vm.state.items.first { $0.itemID == itemB }
+        XCTAssertEqual(logB?.sets.filter { $0.done }.count, 0,
+            "item B has not been reached for a log yet")
+    }
+
+    /// qa-018 continued: after the boundary tick lands the user on item 1
+    /// (interval 2), they should be able to log and re-enter rest keyed to
+    /// the next boundary (2:00), and a second boundary tick should advance
+    /// again. This pins the end-to-end rhythm for a 2-item EMOM driven
+    /// entirely by ticks — no late-log inline advances.
+    func testEMOMBoundaryTickRhythmAcrossMultipleIntervals() {
+        let start = Date(timeIntervalSince1970: 9_500_000)
+        let clock = MutableBoundaryClock(now: start)
+        let (ctx, _, _) = makeTwoItemEMOMContext(totalMinutes: 3)
+        let vm = ExecutionViewModel(context: ctx, clock: clock)
+        vm.start()
+
+        // Interval 1: log at 0:15, tick at 1:00 → advance to item 1.
+        clock.now = start.addingTimeInterval(15)
+        vm.logSet(reps: 10, rir: nil)
+        clock.now = start.addingTimeInterval(60)
+        vm.tickBlockTimer()
+        XCTAssertEqual(vm.state.cursor.itemIndex, 1)
+        XCTAssertEqual(vm.state.route, .active)
+
+        // Interval 2: log at 1:15, rest anchors to 2:00, tick at 2:00 →
+        // advance to round 2 item 0.
+        clock.now = start.addingTimeInterval(75)
+        vm.logSet(reps: 10, rir: nil)
+        XCTAssertEqual(vm.state.route, .rest,
+            "early log inside interval 2 must enter .rest, not late-log inline-advance")
+        XCTAssertEqual(
+            vm.state.restEndsAt?.timeIntervalSince1970,
+            start.timeIntervalSince1970 + 120,
+            "interval 2 rest anchors to start + 120"
+        )
+        clock.now = start.addingTimeInterval(120)
+        vm.tickBlockTimer()
+        XCTAssertEqual(vm.state.cursor.itemIndex, 0,
+            "interval 3 wraps round-robin back to item 0")
+        XCTAssertEqual(vm.state.cursor.setIndex, 2,
+            "interval 3 bumps setIndex to round 2")
+        XCTAssertEqual(vm.state.route, .active)
+    }
+
     /// qa-005 regression, second angle: a user who logs at T=479.5s — 0.5s
     /// before the 8-minute cap — must land the 8th interval's log. Before
     /// the fix this was already fine (the log committed, then the cap

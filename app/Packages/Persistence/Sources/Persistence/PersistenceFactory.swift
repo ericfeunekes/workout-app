@@ -21,6 +21,11 @@ public struct PersistenceFactory {
     public let pushQueueStore: PushQueueStore
     public let tokenStore: TokenStore
     public let syncMetadataStore: SyncMetadataStore
+    /// Pre-formatted per-exercise "LAST · …" summary map. Populated by
+    /// the Shell composition after a successful pull; read back by
+    /// `TodayLoader` and by `AppBootstrap.buildWorkoutContext` so the
+    /// chips survive offline restarts (qa-001 + qa-020).
+    public let lastPerformedStore: LastPerformedStore
     /// Telemetry emitter. Shell gets it via `telemetryEmitter()` and threads
     /// it into `AppBootstrap.bootstrap` so view models receive it. The
     /// emitter is wired to the same `pushQueueStore` so every emitted event
@@ -63,7 +68,8 @@ public struct PersistenceFactory {
         return PersistenceFactory(
             container: container,
             tokenStore: TokenStoreImpl(serviceName: tokenServiceName),
-            syncMetadataStore: SyncMetadataStoreImpl()
+            syncMetadataStore: SyncMetadataStoreImpl(),
+            lastPerformedStore: LastPerformedStoreImpl()
         )
     }
 
@@ -86,7 +92,8 @@ public struct PersistenceFactory {
         return PersistenceFactory(
             container: container,
             tokenStore: TokenStoreImpl(serviceName: tokenServiceName),
-            syncMetadataStore: SyncMetadataStoreImpl(defaults: defaults)
+            syncMetadataStore: SyncMetadataStoreImpl(defaults: defaults),
+            lastPerformedStore: LastPerformedStoreImpl(defaults: defaults)
         )
     }
 
@@ -110,7 +117,8 @@ public struct PersistenceFactory {
     public init(
         container: ModelContainer,
         tokenStore: TokenStore,
-        syncMetadataStore: SyncMetadataStore = SyncMetadataStoreImpl()
+        syncMetadataStore: SyncMetadataStore = SyncMetadataStoreImpl(),
+        lastPerformedStore: LastPerformedStore = LastPerformedStoreImpl()
     ) {
         self.container = container
         self.workoutCache = WorkoutCacheImpl(modelContainer: container)
@@ -120,6 +128,7 @@ public struct PersistenceFactory {
         self.pushQueueStoreImpl = pushQueueStore
         self.tokenStore = tokenStore
         self.syncMetadataStore = syncMetadataStore
+        self.lastPerformedStore = lastPerformedStore
         // Build the emitter but do NOT attach from init. The old code fired
         // a detached `Task { await emitter.attach(...) }` and returned, which
         // meant any caller that ran `emit(_:)` *before* that detached task

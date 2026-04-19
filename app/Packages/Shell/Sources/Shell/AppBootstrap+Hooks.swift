@@ -29,6 +29,11 @@ extension AppBootstrap {
         let todayLoader: TodayLoader
         let sessionStore: SessionStore
         let workoutCache: WorkoutCache
+        /// "LAST · …" chip map store. Threaded through to the per-
+        /// workout rebuild path (qa-001 + qa-020) so the next workout's
+        /// `WorkoutContext.lastPerformed` carries the same pulled
+        /// snapshot Today is already rendering.
+        let lastPerformedStore: LastPerformedStore?
         let syncAPI: SyncAPI
         let telemetry: TelemetryEmitter
         let afterLocalCompletion: (@Sendable () async -> Void)?
@@ -80,17 +85,52 @@ extension AppBootstrap {
             workoutCache: inputs.workoutCache,
             pushFlusher: pushFlusher
         )
-        let executionHolder = inputs.executionHolder
-        // The completion writer must install a FRESH VM onto the holder
-        // after each save-and-done, AND that fresh VM must carry the same
-        // completion writer so it rebuilds again after its own save.
-        // Resolve the self-reference by binding the writer to a shared
-        // box that gets populated immediately below — the closure reads
-        // `writerBox.value` lazily, so the late assign is safe.
+        let rebuildVM = makeRebuildVM(
+            hooks: hooks,
+            sessionStore: inputs.sessionStore,
+            telemetry: inputs.telemetry
+        )
+        rebuildVM.writerBox.value = makeCompletionWriter(
+            inputs: CompletionWriterInputs(
+                workoutCache: inputs.workoutCache,
+                lastPerformedStore: inputs.lastPerformedStore,
+                todayViewModel: todayVM,
+                todayLoader: inputs.todayLoader,
+                afterLocalCompletion: inputs.afterLocalCompletion,
+                executionHolder: inputs.executionHolder,
+                rebuild: rebuildVM.factory
+            )
+        )
+        inputs.executionHolder.vm = rebuildVM.factory(inputs.workoutContext)
+        return .ready(
+            todayVM: todayVM,
+            executionHolder: inputs.executionHolder,
+            pushFlusher: pushFlusher
+        )
+    }
+
+    /// Bundle of the rebuild factory closure + the shared
+    /// `CompletionWriterBox` the closure reads lazily. Extracted so
+    /// `buildReady` stays under SwiftLint's `function_body_length` cap
+    /// after the qa-001 `lastPerformedStore` plumbing pushed it over.
+    struct RebuildHarness {
+        let factory: @Sendable @MainActor (WorkoutContext) -> ExecutionViewModel
+        let writerBox: CompletionWriterBox
+    }
+
+    /// Build the per-workout VM factory closure (used both for the
+    /// initial VM and for each save-and-done rebuild). The closure
+    /// captures a fresh `CompletionWriterBox` whose `value` is set
+    /// immediately after this returns — the late assign is safe because
+    /// the box is read lazily inside the closure.
+    static func makeRebuildVM(
+        hooks: ExecutionPushHooks,
+        sessionStore: SessionStore,
+        telemetry: TelemetryEmitter
+    ) -> RebuildHarness {
         let writerBox = CompletionWriterBox()
-        let sessionStore = inputs.sessionStore
-        let telemetry = inputs.telemetry
-        let rebuildVM: @Sendable @MainActor (WorkoutContext) -> ExecutionViewModel = { [hooks, sessionStore, telemetry, writerBox] ctx in
+        let factory: @Sendable @MainActor (WorkoutContext) -> ExecutionViewModel
+        factory = { [hooks, sessionStore, telemetry, writerBox] ctx in
             ExecutionViewModel(
                 context: ctx,
                 sessionStore: sessionStore,
@@ -99,23 +139,7 @@ extension AppBootstrap {
                 telemetry: telemetry
             )
         }
-        writerBox.value = makeCompletionWriter(
-            inputs: CompletionWriterInputs(
-                workoutCache: inputs.workoutCache,
-                todayViewModel: todayVM,
-                todayLoader: inputs.todayLoader,
-                afterLocalCompletion: inputs.afterLocalCompletion,
-                executionHolder: executionHolder,
-                rebuild: rebuildVM
-            )
-        )
-        let executionVM = rebuildVM(inputs.workoutContext)
-        executionHolder.vm = executionVM
-        return .ready(
-            todayVM: todayVM,
-            executionHolder: executionHolder,
-            pushFlusher: pushFlusher
-        )
+        return RebuildHarness(factory: factory, writerBox: writerBox)
     }
 
     /// Build the push-hook bundle handed to `ExecutionViewModel`.
@@ -202,6 +226,7 @@ extension AppBootstrap {
             await inputs.afterLocalCompletion?()
             await rebuildExecutionVMForNextWorkout(
                 workoutCache: inputs.workoutCache,
+                lastPerformedStore: inputs.lastPerformedStore,
                 todayLoader: inputs.todayLoader,
                 executionHolder: inputs.executionHolder,
                 rebuild: inputs.rebuild
@@ -213,6 +238,7 @@ extension AppBootstrap {
     /// SwiftLint's `function_parameter_count` cap.
     struct CompletionWriterInputs: Sendable {
         let workoutCache: WorkoutCache
+        let lastPerformedStore: LastPerformedStore?
         let todayViewModel: TodayViewModel
         let todayLoader: TodayLoader
         let afterLocalCompletion: (@Sendable () async -> Void)?
@@ -230,6 +256,7 @@ extension AppBootstrap {
     /// `AppBootstrap.bootstrap` recovers into a clean state either way.
     private static func rebuildExecutionVMForNextWorkout(
         workoutCache: WorkoutCache,
+        lastPerformedStore: LastPerformedStore?,
         todayLoader: TodayLoader,
         executionHolder: ExecutionVMHolder,
         rebuild: @escaping @Sendable @MainActor (WorkoutContext) -> ExecutionViewModel
@@ -251,7 +278,8 @@ extension AppBootstrap {
         do {
             workoutContext = try await AppBootstrap.buildWorkoutContext(
                 for: ctx.workout,
-                cache: workoutCache
+                cache: workoutCache,
+                lastPerformedStore: lastPerformedStore
             )
         } catch {
             return

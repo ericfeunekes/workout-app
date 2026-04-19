@@ -6,10 +6,13 @@
 // future" — matches the single-user "there's one workout in flight"
 // assumption from the architecture doc.
 //
-// `lastPerformed` and `lastSessionSummary` are placeholders here — the
-// history store to pull them from doesn't exist yet (no set_log query
-// API on the cache). The loader takes pre-computed values via init so
-// the app shell can drive seeding while history lands in a later slice.
+// `lastPerformed` is sourced from `LastPerformedStore` (populated by
+// Shell after each pull per ADR-2026-04-17-ux-scope § 3 — the server
+// piggybacks the per-exercise snapshot on `GET /api/sync/pull`). The
+// store is optional-injected so callers that don't have it (tests,
+// previews) get an empty map and the chip simply hides. The
+// `lastSessionSummary` remains a pass-through until a dedicated
+// summariser lands.
 
 import Foundation
 import CoreDomain
@@ -22,14 +25,21 @@ public struct TodayLoader: Sendable {
     /// The upstream cache — protocol-typed so tests can hand in a fake.
     private let cache: WorkoutCache
 
+    /// Injected "LAST · …" chip store. Optional so tests / previews that
+    /// don't care about the chip can skip wiring it — `load` then treats
+    /// the map as empty and the UI hides the chip.
+    private let lastPerformedStore: LastPerformedStore?
+
     /// Inject "now" so tests are deterministic without date-freezing.
     private let clock: @Sendable () -> Date
 
     public init(
         cache: WorkoutCache,
+        lastPerformedStore: LastPerformedStore? = nil,
         clock: @escaping @Sendable () -> Date = { Date() }
     ) {
         self.cache = cache
+        self.lastPerformedStore = lastPerformedStore
         self.clock = clock
     }
 
@@ -37,10 +47,12 @@ public struct TodayLoader: Sendable {
     /// cached. Callers render a "no workout scheduled" state in that
     /// case — out of scope for this slice.
     ///
-    /// `lastPerformed` and `lastSessionSummary` are pass-throughs until
-    /// the history query API lands.
+    /// `lastPerformed` is read from the injected `LastPerformedStore`
+    /// when present; callers may still pass an explicit override to
+    /// force a specific map (tests, previews). `lastSessionSummary` is
+    /// a pass-through until a dedicated summariser lands.
     public func load(
-        lastPerformed: [UUID: String] = [:],
+        lastPerformed: [UUID: String]? = nil,
         lastSessionSummary: String? = nil,
         programTags: [String] = [],
         sessionStateBinding: (@Sendable (SessionMutation) -> Void)? = nil
@@ -66,12 +78,24 @@ public struct TodayLoader: Sendable {
                 .map { ($0.id, $0) }
         )
 
+        // Resolve `lastPerformed`: caller override wins (tests, previews
+        // that want determinism); otherwise read the pulled snapshot
+        // from the store. No store + no override ⇒ empty map, chip hides.
+        let resolvedLastPerformed: [UUID: String]
+        if let override = lastPerformed {
+            resolvedLastPerformed = override
+        } else if let store = lastPerformedStore {
+            resolvedLastPerformed = await store.load()
+        } else {
+            resolvedLastPerformed = [:]
+        }
+
         return TodayContext(
             workout: workout,
             blocks: blocks,
             items: items,
             exercises: exercises,
-            lastPerformed: lastPerformed,
+            lastPerformed: resolvedLastPerformed,
             lastSessionSummary: lastSessionSummary,
             programTags: programTags,
             sessionStateBinding: sessionStateBinding

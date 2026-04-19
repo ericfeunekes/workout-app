@@ -239,6 +239,14 @@ struct DSInputField: View {
         }
         .font(DSTypography.mono)
         .foregroundStyle(DSColors.foreground)
+        // Pin the field to the container's full width so a long paste
+        // (64+ char bearer token) can't blow out the enclosing card
+        // horizontally — qa-023. `lineLimit(1)` + `truncationMode(.middle)`
+        // keep the displayed text inside the clip shape; the underlying
+        // value is untouched, and SecureField already renders as dots.
+        .lineLimit(1)
+        .truncationMode(.middle)
+        .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.horizontal, DSSpacing.lg)
         .padding(.vertical, DSSpacing.lg)
         .background(DSColors.surfaceElevated)
@@ -285,6 +293,19 @@ struct DSInputField: View {
     vm.url = "https://host.ts.net"
     vm.token = "bad"
     vm.state = .failed(reason: .tokenRejected)
+    return FirstRunView(viewModel: vm).preferredColorScheme(.dark)
+}
+
+/// Visual regression check for qa-023: long bearer token must not blow
+/// out the input field horizontally. Token is 64 chars of hex.
+#Preview("Welcome — 64-char token pasted") {
+    let vm = FirstRunViewModel(
+        tokenStore: PreviewTokenStore(),
+        transportBuilder: { _ in PreviewTransport() },
+        onComplete: {}
+    )
+    vm.url = "https://very-long-tailnet-name.example.ts.net"
+    vm.token = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
     return FirstRunView(viewModel: vm).preferredColorScheme(.dark)
 }
 

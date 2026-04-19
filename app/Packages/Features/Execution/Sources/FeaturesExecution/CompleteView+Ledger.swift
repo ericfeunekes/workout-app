@@ -35,17 +35,32 @@ extension CompleteView {
 
     /// Collect the per-item ledger entries from the session state.
     func allLedgerEntries() -> [LedgerEntry] {
+        CompleteView.ledgerEntries(
+            context: viewModel.context,
+            items: viewModel.state.items
+        )
+    }
+
+    /// Pure-swift entry point exposed for unit tests. Walks the workout
+    /// shape (blocks → items) and pairs each item with the matching
+    /// `ItemLog`, preferring `log.performedExerciseID` for the title so
+    /// a mid-workout swap renders under the performed exercise's name
+    /// (exercise-swap.md S12). Items without a log are skipped.
+    static func ledgerEntries(
+        context: WorkoutContext,
+        items: [SessionState.ItemLog]
+    ) -> [LedgerEntry] {
         var out: [LedgerEntry] = []
-        for blockItems in viewModel.context.itemsByBlock {
+        for blockItems in context.itemsByBlock {
             for item in blockItems {
-                guard let log = viewModel.state.items.first(where: { $0.itemID == item.id }) else {
+                guard let log = items.first(where: { $0.itemID == item.id }) else {
                     continue
                 }
-                let name = viewModel.context.exerciseName(
+                let name = context.exerciseName(
                     for: item,
                     performedExerciseID: log.performedExerciseID
                 )
-                out.append(LedgerEntry(name: name, summary: summary(for: log)))
+                out.append(LedgerEntry(name: name, summary: ledgerSummary(for: log)))
             }
         }
         return out

@@ -113,7 +113,11 @@ public enum AppBootstrap {
             telemetry: telemetryEmitter
         )
 
-        let loader = TodayLoader(cache: persistence.workoutCache, clock: { now })
+        let loader = TodayLoader(
+            cache: persistence.workoutCache,
+            lastPerformedStore: persistence.lastPerformedStore,
+            clock: { now }
+        )
         guard let todayContext = try await loader.load(
             sessionStateBinding: sessionStateBinding
         ) else {
@@ -152,7 +156,8 @@ public enum AppBootstrap {
     ) async throws -> BootstrapResult {
         let workoutContext = try await buildWorkoutContext(
             for: inputs.todayContext.workout,
-            cache: inputs.persistence.workoutCache
+            cache: inputs.persistence.workoutCache,
+            lastPerformedStore: inputs.persistence.lastPerformedStore
         )
         emitBootstrap(
             inputs.telemetry,
@@ -165,6 +170,7 @@ public enum AppBootstrap {
             todayLoader: inputs.todayLoader,
             sessionStore: inputs.persistence.sessionStore,
             workoutCache: inputs.persistence.workoutCache,
+            lastPerformedStore: inputs.persistence.lastPerformedStore,
             syncAPI: inputs.syncAPI,
             telemetry: inputs.telemetry,
             afterLocalCompletion: inputs.afterLocalCompletion,
@@ -185,6 +191,15 @@ public enum AppBootstrap {
             let lastSyncAt = await persistence.syncMetadataStore.getLastSyncAt()
             let result = try await syncAPI.pullLatest(since: lastSyncAt)
             try await savePull(result, into: persistence.workoutCache)
+            // Persist the per-exercise "LAST · …" chip map alongside the
+            // workout rows (qa-001 + qa-020). The server sends the full
+            // snapshot on every pull so we rewrite it authoritatively —
+            // prior entries that no longer appear in the response are
+            // dropped on purpose.
+            let lastPerformedMap = LastPerformedFormatter.buildMap(
+                from: result.lastPerformed
+            )
+            await persistence.lastPerformedStore.save(lastPerformedMap)
             await persistence.syncMetadataStore.setLastSyncAt(result.serverTime)
         } catch SyncError.tokenRejected {
             telemetry.emit(Event(
@@ -277,12 +292,19 @@ public enum AppBootstrap {
     /// within each block match `items.position`. `cache.loadBlocks` and
     /// `loadItems` already return sorted rows.
     ///
+    /// `lastPerformedStore` is optional so tests / previews that don't
+    /// care about the chip can skip wiring it — the SwapSheet "LAST ·
+    /// …" line and ActiveView's last-time chip both render off
+    /// `WorkoutContext.lastPerformed`, which simply stays empty when
+    /// the store is absent (qa-001 + qa-020).
+    ///
     /// Visible to the `+Hooks.swift` extension so the post-save
     /// completion writer can reuse the same assembly logic when
     /// rebuilding the ExecutionViewModel for the next workout.
     static func buildWorkoutContext(
         for workout: Workout,
-        cache: WorkoutCache
+        cache: WorkoutCache,
+        lastPerformedStore: LastPerformedStore? = nil
     ) async throws -> WorkoutContext {
         let blocks = try await cache.loadBlocks(workoutID: workout.id)
         let loaded = try await loadItemsAndAlternatives(blocks: blocks, cache: cache)
@@ -292,11 +314,13 @@ public enum AppBootstrap {
                 .filter { loaded.allExerciseIDs.contains($0.id) }
                 .map { ($0.id, $0) }
         )
+        let lastPerformed = await lastPerformedStore?.load() ?? [:]
         return WorkoutContext(
             workout: workout,
             blocks: blocks,
             itemsByBlock: loaded.itemsByBlock,
             exercises: exercises,
+            lastPerformed: lastPerformed,
             alternativesByItem: loaded.alternativesByItem
         )
     }

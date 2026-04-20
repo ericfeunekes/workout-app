@@ -24,6 +24,11 @@
 	<string>Reads heart rate and cadence during workouts for set logging.</string>
 	<key>NSHealthUpdateUsageDescription</key>
 	<string>Writes workout data to Apple Health so sessions appear in Fitness.</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>

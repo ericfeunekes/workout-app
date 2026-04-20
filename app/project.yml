@@ -28,7 +28,7 @@ settings:
     # Leave empty — Eric fills in his Apple Developer Team ID in Xcode
     # (Signing & Capabilities panel) or via an xcconfig override. The
     # simulator build works without a team; device deploy requires one.
-    DEVELOPMENT_TEAM: ""
+    DEVELOPMENT_TEAM: TVKR339CEB
     CODE_SIGN_STYLE: Automatic
     ENABLE_USER_SCRIPT_SANDBOXING: YES
   configs:

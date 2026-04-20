@@ -84,28 +84,16 @@ db-restore:  ## Restore FILE=... over $$WORKOUTDB_DB_PATH (prompts y/N). Stop th
 	   *) echo "aborted"; exit 1;; \
 	 esac
 
-# ---------- Deploy / ops (stubs — fleshed out once the release layout is in place) ----------
+# ---------- Deploy / ops ----------
 
-deploy:  ## TODO: full deploy flow to $$HOST (tailnet). See docs/infrastructure/home-server.md.
-	@echo "TODO: full deploy flow — not yet implemented."
-	@echo "Planned steps (override HOST=... to target):"
-	@echo "  1. git push origin $(TAG)"
-	@echo "  2. ssh $(HOST) 'cd /opt/workoutdb && \\"
-	@echo "         make db-backup &&                                  # snapshot current"
-	@echo "         git fetch --all && git checkout $(TAG) &&"
-	@echo "         release=releases/\$$(git rev-parse --short HEAD) && mkdir -p \$$release &&"
-	@echo "         rsync -a --exclude .git . \$$release/ &&"
-	@echo "         (cd \$$release && uv sync --no-dev) &&"
-	@echo "         ln -sfn \$$release current &&                       # atomic symlink flip"
-	@echo "         systemctl --user restart workoutdb-server &&"
-	@echo "         curl -fsSL http://localhost:\$${WORKOUTDB_PORT:-8080}/health/ready'"
-	@echo "  3. report last deploy timestamp + sha"
+deploy:  ## Deploy to $$HOST (tailnet). Rsync, install, symlink flip, restart. Override TAG= for a specific ref.
+	./deploy/deploy.sh $(HOST) $(TAG)
 
-deploy-rollback:  ## TODO: flip $$HOST's current symlink to the previous release dir.
-	@echo "TODO: ssh $(HOST) flip /opt/workoutdb/current to previous releases/<sha> and restart."
+deploy-rollback:  ## Roll back $$HOST to the previous release dir.
+	./deploy/rollback.sh $(HOST)
 
-server-status:  ## Show systemd status + /api/version via SSH to $$HOST.
-	ssh $(HOST) 'systemctl --user status workoutdb-server; curl -fsSL http://localhost:$${WORKOUTDB_PORT:-8080}/api/version || echo "api unreachable"'
+server-status:  ## Show systemd status + /health/ready via SSH to $$HOST.
+	ssh $(HOST) 'sudo systemctl status workoutdb-server; curl -fsSL http://localhost:$${WORKOUTDB_PORT:-8080}/health/ready || echo "api unreachable"'
 
 server-logs:  ## Tail the journald logs for the workoutdb-server unit on $$HOST.
-	ssh $(HOST) 'journalctl --user -u workoutdb-server -n 200 -f'
+	ssh $(HOST) 'sudo journalctl -u workoutdb-server -n 200 -f'

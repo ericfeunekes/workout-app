@@ -27,14 +27,9 @@ This is the list of things that must happen outside the codebase before the syst
 
 Closed 2026-04-18. `SetLog`, `status_update`, `user_parameter`, and `telemetry.events` all route through `PushQueue` with deterministic client-owned UUIDs, exponential backoff `[10,30,60,120,300]`s, dead-letter after 5 consecutive non-401 4xx, priority-weighted FIFO (results before telemetry), logical dedup. See `docs/features/push-queue.md`.
 
-### 1. Systemd unit scope decision (Eric-action, ~1 minute)
+### 1. Systemd unit scope decision (Eric-action, ~1 minute) — DONE
 
-See `docs/open-questions.md` § "Systemd unit scope — user vs system (server deploy)". Two viable options:
-
-- **User-scope** (`systemctl --user`, `loginctl enable-linger workoutdb`, `/opt/workoutdb/current/.venv/...`): matches the release-dir layout in `docs/infrastructure/home-server.md`, no `sudo` in deploy path, logs via `journalctl --user`.
-- **System-scope** (`systemctl`, `User=workoutdb` in unit file, `WantedBy=multi-user.target`): matches the existing checked-in `deploy/workoutdb-server.service`, survives lingering edge cases, but requires `sudo` for every operation.
-
-Eric picks. Claude updates either the unit file OR the docs to match.
+Decided 2026-04-20: **system-scope**. Auto-starts on boot without any login, survives power outages. `deploy/workoutdb-server.service` updated, `make deploy` / `make server-status` / `make server-logs` use `sudo systemctl`. Infrastructure docs updated to match.
 
 ### 2. First-time server bootstrap (Eric-action, ~20 minutes)
 
@@ -49,11 +44,9 @@ Follow `docs/infrastructure/home-server.md` § "First-time server bootstrap":
 
 Once these steps pass, the server is ready to accept pushes from the app.
 
-### 3. `make deploy` flesh-out (Claude-action)
+### 3. `make deploy` flesh-out (Claude-action) — DONE
 
-Currently `make deploy` prints the planned flow. After step 1 is decided, Claude fills in the real shell: ssh + git clone to release dir + uv sync + DB backup + migrations + symlink flip + systemctl restart + verify + rollback-on-fail.
-
-**Time:** ~30 minutes of scripting, with an end-to-end dry run against the Tailscale host. Scope-creep risks: retry/backoff policy, release pruning, migration-failure rollback — all documented in the runbook but worth keeping minimal for the first pass.
+Closed 2026-04-20. `deploy/deploy.sh` rsyncs server code to a release dir, installs deps, flips symlink, restarts systemd unit, verifies health. `deploy/rollback.sh` flips back to the previous release. `make deploy HOST=...` and `make deploy-rollback HOST=...` are the entry points.
 
 ### 4. Apple Developer Team ID paste (Eric-action, 30 seconds)
 
@@ -115,7 +108,7 @@ Each of these has its own entry in `docs/open-questions.md` with a disposition.
 
 Eric, before the first real workout:
 
-- [ ] Decide systemd scope (step 1 — user vs system).
+- [x] Decide systemd scope (step 1 — system-scope, decided 2026-04-20).
 - [ ] Bootstrap the server machine (step 2).
 - [ ] Paste Apple Developer Team ID into `app/project.yml` (step 4).
 - [ ] Install the app on the physical phone (step 5).
@@ -125,7 +118,7 @@ Eric, before the first real workout:
 Claude, in between:
 
 - [x] Finish push-queue wiring (step 0) — closed 2026-04-18.
-- [ ] Flesh out `make deploy` after step 1 decided (step 3).
+- [x] Flesh out `make deploy` after step 1 decided (step 3) — closed 2026-04-20.
 - [x] Drive end-to-end simulator verification of the tap-through path — MCP-validated 2026-04-18: Push A hypertrophy + metcon AMRAP + Tabata round advance + exercise-swap (see `docs/spec.md` § "Feature status matrix").
 - [x] Final cross-link sweep of docs after the last wave of changes — closeout pass 2026-04-18.
 - [ ] Stage a commit that groups the four waves sensibly so git history reflects the delivery cadence.

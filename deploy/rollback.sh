@@ -1,18 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Rollback WorkoutDB server to the previous release on the home machine.
+# Rollback WorkoutDB server to the previous release on a macOS home machine.
 #
 # Usage:
 #   ./deploy/rollback.sh <host> [release-sha]
-#
-# Without a release-sha, picks the second-most-recent release dir (the one
-# before current). With a sha, rolls back to that specific release.
 
 HOST="${1:?usage: rollback.sh <host> [release-sha]}"
 TARGET_SHA="${2:-}"
 REMOTE_BASE="/opt/workoutdb"
 PORT="${WORKOUTDB_PORT:-8080}"
+PLIST_LABEL="com.ericfeunekes.workoutdb"
 
 if [ -z "$TARGET_SHA" ]; then
   echo "==> Finding previous release on $HOST"
@@ -28,21 +26,22 @@ fi
 
 REMOTE_RELEASE="$REMOTE_BASE/releases/$TARGET_SHA"
 
-# Verify the target release dir exists
 ssh "$HOST" "test -d $REMOTE_RELEASE" || {
   echo "ERROR: release dir not found: $REMOTE_RELEASE"
   exit 1
 }
 
-# Flip symlink
 echo "==> Flipping symlink: current -> releases/$TARGET_SHA"
-ssh "$HOST" "sudo -u workoutdb ln -sfn $REMOTE_RELEASE $REMOTE_BASE/current"
+ssh "$HOST" "ln -sfn $REMOTE_RELEASE $REMOTE_BASE/current"
 
-# Restart
-echo "==> Restarting workoutdb-server"
-ssh "$HOST" "sudo systemctl restart workoutdb-server"
+echo "==> Restarting $PLIST_LABEL"
+ssh "$HOST" "
+  if sudo launchctl list | grep -q $PLIST_LABEL; then
+    sudo launchctl bootout system/$PLIST_LABEL 2>/dev/null || true
+  fi
+  sudo launchctl bootstrap system /Library/LaunchDaemons/$PLIST_LABEL.plist
+"
 
-# Health check
 echo "==> Verifying health"
 for i in 1 2 3; do
   if ssh "$HOST" "curl -fsSL http://localhost:$PORT/health/ready" 2>/dev/null; then
@@ -54,5 +53,5 @@ for i in 1 2 3; do
 done
 
 echo "ERROR: health check failed after rollback. Check logs:"
-echo "  ssh $HOST 'sudo journalctl -u workoutdb-server -n 50'"
+echo "  ssh $HOST 'tail -50 $REMOTE_BASE/shared/logs/stderr.log'"
 exit 1

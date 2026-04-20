@@ -92,8 +92,8 @@ deploy:  ## Deploy to $$HOST (tailnet). Rsync, install, symlink flip, restart. O
 deploy-rollback:  ## Roll back $$HOST to the previous release dir.
 	./deploy/rollback.sh $(HOST)
 
-server-status:  ## Show systemd status + /health/ready via SSH to $$HOST.
-	ssh $(HOST) 'sudo systemctl status workoutdb-server; curl -fsSL http://localhost:$${WORKOUTDB_PORT:-8080}/health/ready || echo "api unreachable"'
+server-status:  ## Show launchd status + /health/ready via SSH to $$HOST.
+	ssh $(HOST) 'sudo launchctl print system/com.ericfeunekes.workoutdb 2>/dev/null || echo "service not loaded"; curl -fsSL http://localhost:$${WORKOUTDB_PORT:-8080}/health/ready || echo "api unreachable"'
 
-server-logs:  ## Tail the journald logs for the workoutdb-server unit on $$HOST.
-	ssh $(HOST) 'sudo journalctl -u workoutdb-server -n 200 -f'
+server-logs:  ## Tail the server logs on $$HOST.
+	ssh $(HOST) 'tail -200 -f /opt/workoutdb/shared/logs/stderr.log'

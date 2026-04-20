@@ -27,9 +27,9 @@ This is the list of things that must happen outside the codebase before the syst
 
 Closed 2026-04-18. `SetLog`, `status_update`, `user_parameter`, and `telemetry.events` all route through `PushQueue` with deterministic client-owned UUIDs, exponential backoff `[10,30,60,120,300]`s, dead-letter after 5 consecutive non-401 4xx, priority-weighted FIFO (results before telemetry), logical dedup. See `docs/features/push-queue.md`.
 
-### 1. Systemd unit scope decision (Eric-action, ~1 minute) — DONE
+### 1. Service management decision (Eric-action, ~1 minute) — DONE
 
-Decided 2026-04-20: **system-scope**. Auto-starts on boot without any login, survives power outages. `deploy/workoutdb-server.service` updated, `make deploy` / `make server-status` / `make server-logs` use `sudo systemctl`. Infrastructure docs updated to match.
+Decided 2026-04-20: **macOS launchd LaunchDaemon** (system-scope). Server machine is robie-imac (macOS). Auto-starts on boot without login, survives power outages, runs as `eric`. Plist at `deploy/com.ericfeunekes.workoutdb.plist`, wrapper at `deploy/run.sh`. Infrastructure docs updated to match.
 
 ### 2. First-time server bootstrap (Eric-action, ~20 minutes)
 

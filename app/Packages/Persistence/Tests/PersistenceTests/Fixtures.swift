@@ -46,7 +46,8 @@ enum Fixtures {
             timingConfigJSON: "{\"rest_between_sets_sec\":120}",
             rounds: nil,
             roundsRepSchemeJSON: nil,
-            notes: nil
+            notes: nil,
+            intent: "Controlled strength work"
         )
     }
 
@@ -116,6 +117,8 @@ enum Fixtures {
             distanceM: nil,
             rir: 2,
             isWarmup: false,
+            skipped: true,
+            side: .right,
             startedAt: baseDate,
             completedAt: baseDate.addingTimeInterval(60),
             hrAvgBpm: 140,

@@ -142,6 +142,7 @@ public struct Block: Codable, Sendable, Equatable {
     public let rounds: Int?
     public let roundsRepSchemeJson: String?
     public let notes: String?
+    public let intent: String?
     public let workoutItems: [WorkoutItem]
 
     enum CodingKeys: String, CodingKey {
@@ -154,6 +155,7 @@ public struct Block: Codable, Sendable, Equatable {
         case rounds
         case roundsRepSchemeJson = "rounds_rep_scheme_json"
         case notes
+        case intent
         case workoutItems = "workout_items"
     }
 
@@ -167,6 +169,7 @@ public struct Block: Codable, Sendable, Equatable {
         rounds: Int? = nil,
         roundsRepSchemeJson: String? = nil,
         notes: String? = nil,
+        intent: String? = nil,
         workoutItems: [WorkoutItem] = []
     ) {
         self.id = id
@@ -178,6 +181,7 @@ public struct Block: Codable, Sendable, Equatable {
         self.rounds = rounds
         self.roundsRepSchemeJson = roundsRepSchemeJson
         self.notes = notes
+        self.intent = intent
         self.workoutItems = workoutItems
     }
 }
@@ -252,6 +256,8 @@ public struct SetLog: Codable, Sendable, Equatable {
     public let distanceM: Double?
     public let rir: Int?
     public let isWarmup: Bool
+    public let skipped: Bool
+    public let side: SetLogSide
     public let startedAt: Date?
     public let completedAt: Date
     public let hrAvgBpm: Int?
@@ -272,6 +278,8 @@ public struct SetLog: Codable, Sendable, Equatable {
         case distanceM = "distance_m"
         case rir
         case isWarmup = "is_warmup"
+        case skipped
+        case side
         case startedAt = "started_at"
         case completedAt = "completed_at"
         case hrAvgBpm = "hr_avg_bpm"
@@ -293,6 +301,8 @@ public struct SetLog: Codable, Sendable, Equatable {
         distanceM: Double? = nil,
         rir: Int? = nil,
         isWarmup: Bool = false,
+        skipped: Bool = false,
+        side: SetLogSide = .bilateral,
         startedAt: Date? = nil,
         completedAt: Date,
         hrAvgBpm: Int? = nil,
@@ -312,6 +322,8 @@ public struct SetLog: Codable, Sendable, Equatable {
         self.distanceM = distanceM
         self.rir = rir
         self.isWarmup = isWarmup
+        self.skipped = skipped
+        self.side = side
         self.startedAt = startedAt
         self.completedAt = completedAt
         self.hrAvgBpm = hrAvgBpm

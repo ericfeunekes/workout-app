@@ -853,6 +853,17 @@
             ],
             "title": "Notes"
           },
+          "intent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent"
+          },
           "workout_items": {
             "items": {
               "$ref": "#/components/schemas/WorkoutItemIn"
@@ -942,6 +953,17 @@
             ],
             "title": "Notes"
           },
+          "intent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent"
+          },
           "workout_items": {
             "items": {
               "$ref": "#/components/schemas/WorkoutItemRead"
@@ -961,6 +983,7 @@
           "rounds",
           "rounds_rep_scheme_json",
           "notes",
+          "intent",
           "workout_items"
         ],
         "title": "BlockRead"
@@ -1315,6 +1338,21 @@
             "title": "Is Warmup",
             "default": false
           },
+          "skipped": {
+            "type": "boolean",
+            "title": "Skipped",
+            "default": false
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "left",
+              "right",
+              "bilateral"
+            ],
+            "title": "Side",
+            "default": "bilateral"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -1492,6 +1530,14 @@
             "type": "boolean",
             "title": "Is Warmup"
           },
+          "skipped": {
+            "type": "boolean",
+            "title": "Skipped"
+          },
+          "side": {
+            "type": "string",
+            "title": "Side"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -1576,6 +1622,8 @@
           "distance_m",
           "rir",
           "is_warmup",
+          "skipped",
+          "side",
           "started_at",
           "completed_at",
           "hr_avg_bpm",

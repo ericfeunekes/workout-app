@@ -79,7 +79,8 @@ extension DTOMapping {
                 timingConfigJSON: dto.timingConfigJson,
                 rounds: dto.rounds,
                 roundsRepSchemeJSON: dto.roundsRepSchemeJson,
-                notes: dto.notes
+                notes: dto.notes,
+                intent: dto.intent
             )
             return .success((block, children.items, children.alternatives))
         case .failure(let err):

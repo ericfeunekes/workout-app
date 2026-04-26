@@ -34,6 +34,8 @@
           "distance_m": null,
           "rir": 2,
           "is_warmup": false,
+          "skipped": false,
+          "side": "bilateral",
           "started_at": null,
           "completed_at": "2026-04-10T07:15:00Z",
           "hr_avg_bpm": 142,

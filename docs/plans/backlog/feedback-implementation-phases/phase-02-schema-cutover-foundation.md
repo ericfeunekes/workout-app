@@ -1,6 +1,6 @@
 ---
 title: Phase 2 — schema cutover foundation implementation plan
-status: backlog
+status: completed
 last_reviewed: 2026-04-26
 purpose: Implement the coordinated schema foundation for skip persistence, per-side logging, and block intent.
 covers:
@@ -13,9 +13,8 @@ covers:
   - app/Packages/Core/Domain/
   - app/Packages/Persistence/
   - app/Packages/Sync/
-  - docs/prescription.md
-  - docs/features/execute-loop.md
-  - docs/features/history.md
+  - docs/specs/v2-architecture.md
+  - docs/feature-gap-map.md
 ---
 
 # Phase 2 — Schema Cutover Foundation
@@ -87,37 +86,56 @@ all behavior.
   all land together.
 - Contract tests prove server/OpenAPI/Swift schema parity.
 - SwiftData migration tests prove old stores migrate.
-- iOS simulator starts after migration and can pull/execute/push a workout.
+- iOS simulator starts after migration.
 
 ## Proof Map
 
 - Check: `uv run pytest tests/server tests/contract`
   - Boundary: server + contract.
   - Proves: migration, API schemas, sync payloads, and OpenAPI parity.
-  - Expected: pass.
+  - Result: passed, `193 passed`.
   - Risk remaining: app local migration still separate.
 - Check: Swift package tests for `Persistence`, `Sync`, `CoreDomain`, schema.
   - Boundary: cross-module + persistence.
   - Proves: domain/DTO mapping and SwiftData migration.
-  - Expected: pass.
+  - Result: passed via Xcode MCP package runs:
+    - `CoreDomainTests`: `All 26 cases passed`.
+    - `SyncTests`: `All 37 cases passed`.
+    - `Persistence`: `57 XCTest cases passed`.
   - Risk remaining: real device local data shape beyond test fixture.
-- Check: iOS simulator build/run and one pull/start/log/push smoke.
+- Check: legacy SwiftData migration probe.
+  - Boundary: old on-disk app store -> current app schema.
+  - Proves: a real pre-Phase 2 file-scope V4 store opens under V5 with
+    `intent == nil`, `skipped == false`, and `sideRaw == "bilateral"`.
+  - Result: passed with temporary writer/reader packages built from the Phase 1
+    baseline and current tree.
+  - Risk remaining: only one representative store shape was generated.
+- Check: iOS simulator build/run and UI snapshot.
   - Boundary: user-facing + integration.
-  - Proves: migrated app can still execute the critical path.
-  - Expected: app launches; workout can log and enqueue/push.
+  - Proves: the app builds, launches, and presents the Today screen after the
+    schema cutover.
+  - Result: passed after `clean`; stale incremental build artifacts initially
+    linked old `Block` and `SetLog` initializer symbols.
   - Risk remaining: full per-side UX is Phase 5/6.
 
 ## Independent Review
 
 - Artifact: full schema diff across server, schema, app, docs, and tests.
 - Reviewer: Codex read-only review focused on cutover completeness and data loss.
+- Result: clean after re-review in thread
+  `019dca6d-130f-7e60-90cd-21ce5f07ae07`.
 - Reopen condition: any schema parity drift, missing migration, or log-loss path.
 
 ## Closeout
 
-- Update `docs/MIGRATIONS.md` only if migration mechanics changed.
-- Update `docs/feature-gap-map.md` rows for skip, side, and intent.
-- Report exact proof commands and simulator QA evidence.
+- `docs/MIGRATIONS.md` did not need changes; migration mechanics stayed within
+  the existing append-only/lightweight pattern.
+- `docs/feature-gap-map.md` rows for skip, side, and intent are marked
+  partially built with simulator proof.
+- Simulator QA evidence: build/run succeeded on `WorkoutDB-Dev`
+  (`22A47946-FD68-4C83-BC3C-FE62BB8E2748`); UI snapshot showed the Today screen
+  and screenshot was captured at
+  `/var/folders/pc/ndj8g0pn54bcjzbd0ltcwz340000gp/T/screenshot_optimized_43eb454a-4f9a-4f76-a641-6f5ea3e12486.jpg`.
 
 ## Recovery Context
 

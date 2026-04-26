@@ -81,6 +81,11 @@ def test_weight_unit_parity(swift_source: str) -> None:
     assert swift == {"kg", "lb"}
 
 
+def test_set_log_side_parity(swift_source: str) -> None:
+    swift = _extract_enum_cases(swift_source, "SetLogSide")
+    assert swift == {"left", "right", "bilateral"}
+
+
 def test_user_parameter_source_parity(swift_source: str) -> None:
     swift = _extract_enum_cases(swift_source, "UserParameterSource")
     assert swift == {"claude", "app_log", "manual"}

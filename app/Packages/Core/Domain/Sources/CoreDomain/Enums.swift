@@ -48,6 +48,13 @@ public enum WeightUnit: String, Sendable, CaseIterable, Hashable {
     case lb
 }
 
+/// Side represented by a set log row.
+public enum SetLogSide: String, Sendable, CaseIterable, Hashable {
+    case left
+    case right
+    case bilateral
+}
+
 /// Who authored a workout row.
 ///
 /// Scoped to workouts only — the spec (`docs/specs/v2-architecture.md`

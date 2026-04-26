@@ -57,7 +57,7 @@ public struct PersistenceFactory {
     public static func makeDefault(
         tokenServiceName: String = "com.ericfeunekes.WorkoutDB.token"
     ) throws -> PersistenceFactory {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV4.self)
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV5.self)
         let configuration = ModelConfiguration(schema: schema)
         let container = try ModelContainer(
             for: schema,
@@ -77,7 +77,7 @@ public struct PersistenceFactory {
     public static func makeInMemory(
         tokenServiceName: String = "com.ericfeunekes.WorkoutDB.token.test"
     ) throws -> PersistenceFactory {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV4.self)
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV5.self)
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(
             for: schema,

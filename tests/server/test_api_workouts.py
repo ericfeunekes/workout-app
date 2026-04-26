@@ -35,6 +35,7 @@ def _workout_payload(exercise_id: str, **overrides) -> dict:
                 "name": "Main",
                 "timing_mode": "straight_sets",
                 "timing_config_json": '{"rest_between_sets_sec": 180}',
+                "intent": "Keep the main lift crisp",
                 "rounds": None,
                 "workout_items": [
                     {
@@ -66,6 +67,7 @@ def test_create_nested_workout(client, test_engine, test_user_id) -> None:
     assert body["name"] == "Tuesday Legs"
     assert body["user_id"] == test_user_id
     assert len(body["blocks"]) == 1
+    assert body["blocks"][0]["intent"] == "Keep the main lift crisp"
     assert len(body["blocks"][0]["workout_items"]) == 1
     assert len(body["blocks"][0]["workout_items"][0]["alternatives"]) == 1
 

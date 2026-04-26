@@ -70,6 +70,7 @@ def test_full_round_trip(session: Session) -> None:
         name="Main",
         timing_mode="straight_sets",
         timing_config_json='{"rest_between_sets_sec": 180}',
+        intent="Keep bar speed high",
     )
     session.add(block)
     session.flush()
@@ -105,6 +106,8 @@ def test_full_round_trip(session: Session) -> None:
         completed_at=datetime(2026, 4, 17, 7, 30),
         hr_avg_bpm=142,
         hr_max_bpm=168,
+        skipped=True,
+        side="right",
     )
     session.add(log)
     session.commit()
@@ -114,8 +117,11 @@ def test_full_round_trip(session: Session) -> None:
     assert fetched.name == "Tuesday Legs"
     assert len(fetched.blocks) == 1
     assert fetched.blocks[0].workout_items[0].exercise.name == "Back Squat"
+    assert fetched.blocks[0].intent == "Keep bar speed high"
     assert fetched.blocks[0].workout_items[0].alternatives[0].reason == "bar taken"
     assert fetched.blocks[0].workout_items[0].set_logs[0].weight == 100.0
+    assert fetched.blocks[0].workout_items[0].set_logs[0].skipped is True
+    assert fetched.blocks[0].workout_items[0].set_logs[0].side == "right"
 
 
 def test_cascade_delete_workout(session: Session) -> None:

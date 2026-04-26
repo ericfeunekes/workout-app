@@ -73,6 +73,7 @@ private func encodedFixture() -> Data {
               "rounds": null,
               "rounds_rep_scheme_json": null,
               "notes": null,
+              "intent": null,
               "workout_items": [
                 {
                   "id": "\(iid)",
@@ -120,6 +121,8 @@ private func encodedFixture() -> Data {
               "distance_m": null,
               "rir": 2,
               "is_warmup": false,
+              "skipped": false,
+              "side": "bilateral",
               "started_at": null,
               "completed_at": "2026-04-10T07:15:00Z",
               "hr_avg_bpm": 142,

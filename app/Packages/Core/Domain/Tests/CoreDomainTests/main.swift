@@ -62,6 +62,24 @@ runCase("WeightUnit raw values are non-empty and unique") {
     }
 }
 
+runCase("SetLogSide has left, right, and bilateral") {
+    try expectEqual(SetLogSide.allCases.count, 3)
+    try expectEqual(
+        Set(SetLogSide.allCases.map(\.rawValue)),
+        ["left", "right", "bilateral"]
+    )
+    try expectEqual(SetLogSide(rawValue: "bilateral"), .bilateral)
+}
+
+runCase("SetLogSide raw values are non-empty and unique") {
+    let raws = SetLogSide.allCases.map(\.rawValue)
+    try expectEqual(Set(raws).count, raws.count)
+    for raw in raws {
+        try expect(!raw.isEmpty, "empty rawValue")
+        try expect(raw == raw.lowercased(), "expected lowercase, got \(raw)")
+    }
+}
+
 runCase("WorkoutSource has exactly claude and manual") {
     // Spec (docs/specs/v2-architecture.md line 147) restricts workout.source
     // to {claude, manual}. The separate WorkoutSource type (vs the unified
@@ -146,6 +164,27 @@ runCase("SetLog Equatable: differing rir breaks equality") {
     try expectNotEqual(makeSetLog(rir: 2), makeSetLog(rir: 3))
 }
 
+runCase("SetLog defaults to non-skipped bilateral") {
+    let log = makeSetLog()
+    try expectEqual(log.skipped, false)
+    try expectEqual(log.side, .bilateral)
+}
+
+runCase("SetLog preserves skipped per-side values") {
+    let log = SetLog(
+        id: UUID(uuidString: "00000000-0000-0000-0000-000000000003")!,
+        workoutItemID: UUID(uuidString: "00000000-0000-0000-0000-000000000004")!,
+        setIndex: 2,
+        reps: nil,
+        weight: nil,
+        skipped: true,
+        side: .left,
+        completedAt: Date(timeIntervalSince1970: 1_700_000_000)
+    )
+    try expectEqual(log.skipped, true)
+    try expectEqual(log.side, .left)
+}
+
 // ---- Hashable: usable in Sets --------------------------------------------
 
 runCase("WorkoutID works in a Set") {
@@ -210,11 +249,13 @@ runCase("Block round-trips JSON fields unchanged") {
         timingMode: .forTime,
         timingConfigJSON: "{\"time_cap_sec\":600}",
         rounds: 3,
-        roundsRepSchemeJSON: "[21,15,9]"
+        roundsRepSchemeJSON: "[21,15,9]",
+        intent: "Move steady"
     )
     try expectEqual(block.timingConfigJSON, "{\"time_cap_sec\":600}")
     try expectEqual(block.roundsRepSchemeJSON, "[21,15,9]")
     try expectEqual(block.timingMode, .forTime)
+    try expectEqual(block.intent, "Move steady")
 }
 
 // ---- UserParameter append-only shape -------------------------------------

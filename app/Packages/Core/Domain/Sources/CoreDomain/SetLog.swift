@@ -27,6 +27,8 @@ public struct SetLog: Sendable, Hashable {
     /// Reps in Reserve, 0–5. See type doc.
     public var rir: Int?
     public var isWarmup: Bool
+    public var skipped: Bool
+    public var side: SetLogSide
     public var startedAt: Date?
     public var completedAt: Date
     public var hrAvgBpm: Int?
@@ -48,6 +50,8 @@ public struct SetLog: Sendable, Hashable {
         distanceM: Double? = nil,
         rir: Int? = nil,
         isWarmup: Bool = false,
+        skipped: Bool = false,
+        side: SetLogSide = .bilateral,
         startedAt: Date? = nil,
         completedAt: Date,
         hrAvgBpm: Int? = nil,
@@ -67,6 +71,8 @@ public struct SetLog: Sendable, Hashable {
         self.distanceM = distanceM
         self.rir = rir
         self.isWarmup = isWarmup
+        self.skipped = skipped
+        self.side = side
         self.startedAt = startedAt
         self.completedAt = completedAt
         self.hrAvgBpm = hrAvgBpm

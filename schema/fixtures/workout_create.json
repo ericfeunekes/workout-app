@@ -21,6 +21,7 @@
       "rounds": null,
       "rounds_rep_scheme_json": null,
       "notes": null,
+      "intent": null,
       "workout_items": [
         {
           "id": "44444444-4444-4444-4444-444444444444",

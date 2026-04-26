@@ -7,15 +7,16 @@
 // from the server.
 //
 // Covers:
-//   • V1 → V4 — pre-006 store opens under the current schema. The
-//     planner chains V1→V2→V3→V4 lightweight stages.
-//   • V2 → V4 — post-006, pre-R1.4 store opens under V4 AND the SetLog
+//   • V1 → V5 — pre-006 store opens under the current schema. The
+//     planner chains V1→V2→V3→V4→V5 lightweight stages.
+//   • V2 → V5 — post-006, pre-R1.4 store opens under V5 AND the SetLog
 //     denormalization backfill resolves `workoutID` + `plannedExerciseID`
 //     from the parent WorkoutItem → Block chain for rows that predate
 //     the column.
-//   • V3 → V4 — R1.4-era store opens under the perf-002 schema AND the
+//   • V3 → V5 — R1.4-era store opens under the current schema AND the
 //     PushItem priority + dedupKey backfill populates the new columns
 //     from each row's decoded envelope.
+//   • V4 → V5 — perf-002-era store opens with skipped/side/intent defaults.
 //
 // Strategy per test: spin up an on-disk ModelContainer scoped to the old
 // version, insert a few rows via the shadow types, tear the container
@@ -91,12 +92,12 @@ final class SchemaMigrationTests: XCTestCase {
         )
     }
 
-    /// Build a V4 ModelContainer pointing at the same on-disk URL, with
+    /// Build a current ModelContainer pointing at the same on-disk URL, with
     /// the full migration plan so the appropriate stage(s) fire at open.
-    /// V4 is the current runtime schema (per `SchemaVersions.swift`);
+    /// V5 is the current runtime schema (per `SchemaVersions.swift`);
     /// older stores chain forward through the plan.
     private func makeV4Container(at url: URL) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV4.self)
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV5.self)
         let configuration = ModelConfiguration(schema: schema, url: url)
         return try ModelContainer(
             for: schema,
@@ -295,8 +296,8 @@ final class SchemaMigrationTests: XCTestCase {
             try seedV1Store(at: url, ids: ids)
         }
 
-        // 2. Reopen as V4 — the current runtime schema. The planner
-        //    chains V1→V2→V3→V4 lightweight stages automatically.
+        // 2. Reopen as V5 — the current runtime schema. The planner
+        //    chains V1→V2→V3→V4→V5 lightweight stages automatically.
         let v4Container = try makeV4Container(at: url)
         let context = ModelContext(v4Container)
 
@@ -496,7 +497,7 @@ final class SchemaMigrationTests: XCTestCase {
             try seedV2Store(at: url, ids: ids)
         }
 
-        // 2. Reopen as V4. The V2→V3 lightweight stage adds the two
+        // 2. Reopen as V5. The V2→V3 lightweight stage adds the two
         //    nullable columns; the rows land with both nil until the
         //    backfill runs.
         let v4Container = try makeV4Container(at: url)
@@ -544,6 +545,18 @@ final class SchemaMigrationTests: XCTestCase {
     /// R1.4-era, pre-perf-002 store.
     private func makeV3OnlyContainer(at url: URL) throws -> ModelContainer {
         let schema = Schema(versionedSchema: WorkoutDBSchemaV3.self)
+        let configuration = ModelConfiguration(schema: schema, url: url)
+        return try ModelContainer(
+            for: schema,
+            migrationPlan: nil,
+            configurations: [configuration]
+        )
+    }
+
+    /// Build a V4-only ModelContainer (no migration plan). Simulates the
+    /// perf-002 build immediately before the skipped/side/intent cutover.
+    private func makeV4OnlyContainer(at url: URL) throws -> ModelContainer {
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV4.self)
         let configuration = ModelConfiguration(schema: schema, url: url)
         return try ModelContainer(
             for: schema,
@@ -711,7 +724,7 @@ final class SchemaMigrationTests: XCTestCase {
             )
         }
 
-        // 2. Reopen as V4. The V3→V4 lightweight stage adds the two
+        // 2. Reopen as V5. The V3→V4 lightweight stage adds the two
         //    columns with defaults (priority=0, dedupKey=nil); the
         //    backfill then rewrites them from each envelope.
         let v4Container = try makeV4Container(at: url)
@@ -755,5 +768,102 @@ final class SchemaMigrationTests: XCTestCase {
         let events = try XCTUnwrap(byID[eventsID])
         XCTAssertEqual(events.priority, 1, "events are telemetry — priority 1")
         XCTAssertNil(events.dedupKey, "events do not dedup — key stays nil")
+    }
+
+    // MARK: - V4 → V5 skipped/side/intent defaults
+
+    private func seedV4WorkoutAndSetLogStore(at url: URL, ids: FixtureIDs) throws {
+        let container = try makeV4OnlyContainer(at: url)
+        let context = ModelContext(container)
+        context.insert(WorkoutDBSchemaV4.WorkoutModel(
+            id: ids.workoutID,
+            userID: ids.userID,
+            name: "Pre-schema-2026-04-26 workout",
+            scheduledDate: ids.baseDate,
+            statusRaw: WorkoutStatus.completed.rawValue,
+            sourceRaw: WorkoutSource.claude.rawValue,
+            notes: nil,
+            createdAt: ids.baseDate,
+            updatedAt: ids.baseDate,
+            completedAt: ids.baseDate.addingTimeInterval(3_600),
+            tagsJSON: nil
+        ))
+        context.insert(WorkoutDBSchemaV4.BlockModel(
+            id: ids.blockID,
+            workoutID: ids.workoutID,
+            parentBlockID: nil,
+            position: 0,
+            name: "Main",
+            timingModeRaw: TimingMode.straightSets.rawValue,
+            timingConfigJSON: "{\"rest_between_sets_sec\":120}",
+            rounds: nil,
+            roundsRepSchemeJSON: nil,
+            notes: nil
+        ))
+        context.insert(WorkoutDBSchemaV4.WorkoutItemModel(
+            id: ids.itemID,
+            blockID: ids.blockID,
+            position: 0,
+            exerciseID: ids.exerciseID,
+            prescriptionJSON: "{\"sets\":5,\"reps\":5}",
+            prescriptionJSONRaw: nil
+        ))
+        context.insert(WorkoutDBSchemaV4.ExerciseModel(
+            id: ids.exerciseID,
+            name: "Back Squat",
+            notes: nil,
+            demoURLString: nil,
+            defaultPrescriptionJSON: nil,
+            defaultAlternativesJSON: nil
+        ))
+        context.insert(WorkoutDBSchemaV4.SetLogModel(
+            id: ids.setLogID,
+            workoutItemID: ids.itemID,
+            workoutID: ids.workoutID,
+            plannedExerciseID: ids.exerciseID,
+            performedExerciseID: nil,
+            setIndex: 1,
+            reps: 5,
+            weight: 100.0,
+            weightUnitRaw: "kg",
+            durationSec: nil,
+            distanceM: nil,
+            rir: 2,
+            isWarmup: false,
+            startedAt: ids.baseDate,
+            completedAt: ids.baseDate.addingTimeInterval(60),
+            hrAvgBpm: nil,
+            hrMaxBpm: nil,
+            cadenceAvgSpm: nil,
+            motionSamplesRef: nil,
+            notes: nil
+        ))
+        try context.save()
+    }
+
+    @MainActor
+    func testV4toV5UpgradeDefaultsSkippedSideAndIntent() async throws {
+        let url = try XCTUnwrap(storeURL)
+        let ids = FixtureIDs.make()
+
+        do {
+            try seedV4WorkoutAndSetLogStore(at: url, ids: ids)
+        }
+
+        let v5Container = try makeV4Container(at: url)
+        let context = ModelContext(v5Container)
+
+        let blocks = try context.fetch(FetchDescriptor<BlockModel>())
+        XCTAssertEqual(blocks.count, 1, "V4 Block row must survive V5 migration")
+        let block = try XCTUnwrap(blocks.first)
+        XCTAssertEqual(block.id, ids.blockID)
+        XCTAssertNil(block.intent, "Existing blocks default to no intent")
+
+        let setLogs = try context.fetch(FetchDescriptor<SetLogModel>())
+        XCTAssertEqual(setLogs.count, 1, "V4 SetLog row must survive V5 migration")
+        let setLog = try XCTUnwrap(setLogs.first)
+        XCTAssertEqual(setLog.id, ids.setLogID)
+        XCTAssertFalse(setLog.skipped, "Existing logs default to non-skipped")
+        XCTAssertEqual(setLog.sideRaw, SetLogSide.bilateral.rawValue)
     }
 }

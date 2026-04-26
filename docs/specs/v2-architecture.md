@@ -74,7 +74,9 @@ A group of exercises with a timing contract. Blocks nest.
 | `timing_mode` | Enum | See timing modes below |
 | `timing_config_json` | String | Mode-specific config |
 | `rounds` | Int? | Number of times through this block (null = 1) |
+| `rounds_rep_scheme_json` | String? | JSON array for block-level descending/ascending rep schemes such as `[21,15,9]`. |
 | `notes` | String? | |
+| `intent` | String? | Freeform coach-authored purpose for the block. Null means the app renders no intent copy. |
 
 **Timing modes** (the key feature):
 
@@ -171,6 +173,8 @@ What actually happened. One row per set performed.
 | `distance_m` | Float? | |
 | `rir` | Int? | Reps in Reserve (0–5 scale). 0 = failure, 5 = very easy. See `docs/prescription.md` § "RIR" for the full scale and `docs/decisions/ADR-2026-04-17-rir-autoreg-sync.md` for why this replaced RPE. |
 | `is_warmup` | Bool | |
+| `skipped` | Bool | True when the user explicitly skipped the planned work unit. Existing/migrated rows default false. |
+| `side` | Enum | `left`, `right`, or `bilateral`. Existing/migrated rows default `bilateral`; full per-side UX and aggregation live in later feature phases. |
 | `started_at` | Timestamp? | When the user tapped "start set" or the timed set began (watch) |
 | `completed_at` | Timestamp | |
 | `hr_avg_bpm` | Integer? | Average HR during the set (from HealthKit) |

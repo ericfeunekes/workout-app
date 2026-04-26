@@ -76,6 +76,7 @@ def _build_block(payload: BlockIn, db: Session) -> Block:
         rounds=payload.rounds,
         rounds_rep_scheme_json=payload.rounds_rep_scheme_json,
         notes=payload.notes,
+        intent=payload.intent,
     )
     block.workout_items = [
         _build_item(i, db, block_position=payload.position) for i in payload.workout_items

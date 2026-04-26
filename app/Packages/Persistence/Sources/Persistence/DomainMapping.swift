@@ -75,7 +75,8 @@ extension BlockModel {
             timingConfigJSON: timingConfigJSON,
             rounds: rounds,
             roundsRepSchemeJSON: roundsRepSchemeJSON,
-            notes: notes
+            notes: notes,
+            intent: intent
         )
     }
 
@@ -90,7 +91,8 @@ extension BlockModel {
             timingConfigJSON: b.timingConfigJSON,
             rounds: b.rounds,
             roundsRepSchemeJSON: b.roundsRepSchemeJSON,
-            notes: b.notes
+            notes: b.notes,
+            intent: b.intent
         )
     }
 
@@ -104,6 +106,7 @@ extension BlockModel {
         rounds = b.rounds
         roundsRepSchemeJSON = b.roundsRepSchemeJSON
         notes = b.notes
+        intent = b.intent
     }
 }
 
@@ -214,6 +217,8 @@ extension SetLogModel {
             distanceM: distanceM,
             rir: rir,
             isWarmup: isWarmup,
+            skipped: skipped,
+            side: SetLogSide(rawValue: sideRaw) ?? .bilateral,
             startedAt: startedAt,
             completedAt: completedAt,
             hrAvgBpm: hrAvgBpm,
@@ -252,6 +257,8 @@ extension SetLogModel {
             distanceM: s.distanceM,
             rir: s.rir,
             isWarmup: s.isWarmup,
+            skipped: s.skipped,
+            sideRaw: s.side.rawValue,
             startedAt: s.startedAt,
             completedAt: s.completedAt,
             hrAvgBpm: s.hrAvgBpm,
@@ -278,6 +285,8 @@ extension SetLogModel {
         distanceM = s.distanceM
         rir = s.rir
         isWarmup = s.isWarmup
+        skipped = s.skipped
+        sideRaw = s.side.rawValue
         startedAt = s.startedAt
         completedAt = s.completedAt
         hrAvgBpm = s.hrAvgBpm

@@ -152,6 +152,8 @@ def test_push_set_logs_and_status(client, test_engine, test_user_id) -> None:
                     "weight": 105.0,
                     "weight_unit": "kg",
                     "rir": 2,
+                    "skipped": True,
+                    "side": "left",
                     "completed_at": "2026-04-20T07:30:00Z",
                 }
             ],

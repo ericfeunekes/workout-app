@@ -21,13 +21,13 @@
 //     overwrites on UUID); we do not want those overwrites to cascade into
 //     historical set_logs. Keep the link loose.
 //
-// These file-scope classes are the `WorkoutDBSchemaV4` shape
+// These file-scope classes are the latest `WorkoutDBSchemaV5` shape
 // (post-perf-002 PushItem `priority` + `dedupKey` columns). The V1
 // (pre-006), V2 (post-006, pre-R1.4), and V3 (R1.4, pre-perf-002)
 // shapes are preserved as shadow @Model types inside their respective
 // `WorkoutDBSchemaVN` enums in their dedicated models files so
 // SwiftData can diff and migrate an older store in place. Future
-// schema bumps add a `WorkoutDBSchemaV5` snapshot there and register a
+// schema bumps add a new snapshot there and register a
 // `MigrationPlan` stage.
 
 import Foundation
@@ -96,6 +96,7 @@ public final class BlockModel {
     public var rounds: Int?
     public var roundsRepSchemeJSON: String?
     public var notes: String?
+    public var intent: String?
 
     /// Inverse of WorkoutModel.blocks. Not optional in the data sense — every
     /// block belongs to a workout — but SwiftData requires optional inverses
@@ -115,7 +116,8 @@ public final class BlockModel {
         timingConfigJSON: String,
         rounds: Int?,
         roundsRepSchemeJSON: String?,
-        notes: String?
+        notes: String?,
+        intent: String? = nil
     ) {
         self.id = id
         self.workoutID = workoutID
@@ -127,6 +129,7 @@ public final class BlockModel {
         self.rounds = rounds
         self.roundsRepSchemeJSON = roundsRepSchemeJSON
         self.notes = notes
+        self.intent = intent
     }
 }
 
@@ -271,6 +274,8 @@ public final class SetLogModel {
     public var distanceM: Double?
     public var rir: Int?
     public var isWarmup: Bool
+    public var skipped: Bool = false
+    public var sideRaw: String = "bilateral"
     public var startedAt: Date?
     public var completedAt: Date
     public var hrAvgBpm: Int?
@@ -295,6 +300,8 @@ public final class SetLogModel {
         distanceM: Double?,
         rir: Int?,
         isWarmup: Bool,
+        skipped: Bool = false,
+        sideRaw: String = "bilateral",
         startedAt: Date?,
         completedAt: Date,
         hrAvgBpm: Int?,
@@ -316,6 +323,8 @@ public final class SetLogModel {
         self.distanceM = distanceM
         self.rir = rir
         self.isWarmup = isWarmup
+        self.skipped = skipped
+        self.sideRaw = sideRaw
         self.startedAt = startedAt
         self.completedAt = completedAt
         self.hrAvgBpm = hrAvgBpm

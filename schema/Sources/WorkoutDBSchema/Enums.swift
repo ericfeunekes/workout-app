@@ -37,6 +37,12 @@ public enum WeightUnit: String, Codable, Sendable, CaseIterable {
     case lb
 }
 
+public enum SetLogSide: String, Codable, Sendable, CaseIterable {
+    case left
+    case right
+    case bilateral
+}
+
 public enum UserParameterSource: String, Codable, Sendable, CaseIterable {
     case claude
     case appLog = "app_log"

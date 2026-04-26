@@ -51,6 +51,27 @@ def test_migrations_idempotent(tmp_engine) -> None:
     assert second == []
 
 
+def test_schema_2026_04_26_columns_have_defaults(tmp_engine) -> None:
+    apply_migrations(tmp_engine)
+
+    with Session(tmp_engine) as session:
+        set_log_columns = {
+            row[1]: row
+            for row in session.execute(text("PRAGMA table_info(set_log)")).fetchall()
+        }
+        block_columns = {
+            row[1]: row
+            for row in session.execute(text("PRAGMA table_info(block)")).fetchall()
+        }
+
+    assert set_log_columns["skipped"][3] == 1
+    assert set_log_columns["skipped"][4] == "0"
+    assert set_log_columns["side"][3] == 1
+    assert set_log_columns["side"][4] == "'bilateral'"
+    assert "intent" in block_columns
+    assert block_columns["intent"][3] == 0
+
+
 def test_schema_migrations_records_applied(tmp_engine) -> None:
     applied = apply_migrations(tmp_engine)
 

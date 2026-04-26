@@ -24,6 +24,7 @@ public struct Block: Sendable, Hashable {
     public var rounds: Int?
     public var roundsRepSchemeJSON: String?
     public var notes: String?
+    public var intent: String?
 
     public init(
         id: BlockID,
@@ -35,7 +36,8 @@ public struct Block: Sendable, Hashable {
         timingConfigJSON: String,
         rounds: Int? = nil,
         roundsRepSchemeJSON: String? = nil,
-        notes: String? = nil
+        notes: String? = nil,
+        intent: String? = nil
     ) {
         self.id = id
         self.workoutID = workoutID
@@ -47,5 +49,6 @@ public struct Block: Sendable, Hashable {
         self.rounds = rounds
         self.roundsRepSchemeJSON = roundsRepSchemeJSON
         self.notes = notes
+        self.intent = intent
     }
 }

@@ -291,6 +291,7 @@ class BlockIn(_UuidInputBase):
     rounds: int | None = None
     rounds_rep_scheme_json: str | None = None
     notes: str | None = None
+    intent: str | None = None
     workout_items: list[WorkoutItemIn] = Field(default_factory=list)
 
 
@@ -306,6 +307,7 @@ class BlockRead(_UuidReadBase):
     rounds: int | None
     rounds_rep_scheme_json: str | None
     notes: str | None
+    intent: str | None
     workout_items: list[WorkoutItemRead]
 
 
@@ -372,6 +374,8 @@ class SetLogIn(_UuidInputBase):
     distance_m: float | None = None
     rir: int | None = Field(default=None, ge=0, le=5)
     is_warmup: bool = False
+    skipped: bool = False
+    side: Literal["left", "right", "bilateral"] = "bilateral"
     started_at: UtcDatetimeIn | None = None
     completed_at: UtcDatetimeIn
     hr_avg_bpm: int | None = None
@@ -395,6 +399,8 @@ class SetLogRead(_UuidReadBase):
     distance_m: float | None
     rir: int | None
     is_warmup: bool
+    skipped: bool
+    side: str
     started_at: UtcDatetime | None
     completed_at: UtcDatetime
     hr_avg_bpm: int | None

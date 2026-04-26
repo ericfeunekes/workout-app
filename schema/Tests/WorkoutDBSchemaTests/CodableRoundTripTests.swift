@@ -105,6 +105,10 @@ struct CodableRoundTripTests {
         #expect(WeightUnit.allCases.map(\.rawValue).sorted() == ["kg", "lb"])
     }
 
+    @Test func setLogSideEnumValues() {
+        #expect(SetLogSide.allCases.map(\.rawValue).sorted() == ["bilateral", "left", "right"])
+    }
+
     @Test func userParameterSourceEnumValues() {
         #expect(
             UserParameterSource.allCases.map(\.rawValue).sorted()
@@ -130,6 +134,7 @@ struct CodableRoundTripTests {
                     position: 0,
                     timingMode: .straightSets,
                     timingConfigJson: #"{"rest_between_sets_sec":180}"#,
+                    intent: "Keep the main lift crisp",
                     workoutItems: [
                         WorkoutItem(
                             id: kWorkoutItemID,
@@ -162,6 +167,8 @@ struct CodableRoundTripTests {
             weight: 100.0,
             weightUnit: .kg,
             rir: 2,
+            skipped: true,
+            side: .left,
             completedAt: Date(timeIntervalSince1970: 1_744_000_000),
             hrAvgBpm: 142,
             hrMaxBpm: 168,
@@ -170,6 +177,8 @@ struct CodableRoundTripTests {
         let data = try encoder.encode(log)
         let decoded = try decoder.decode(SetLog.self, from: data)
         #expect(decoded == log)
+        #expect(decoded.skipped == true)
+        #expect(decoded.side == .left)
     }
 
     @Test func userParameterSourceSnakeCase() throws {

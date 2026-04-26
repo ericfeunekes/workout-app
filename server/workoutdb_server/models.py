@@ -14,7 +14,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Float, ForeignKey, Index, Integer, String, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 if TYPE_CHECKING:
@@ -127,6 +127,7 @@ class Block(Base):
     rounds: Mapped[int | None] = mapped_column(Integer)
     rounds_rep_scheme_json: Mapped[str | None] = mapped_column(String)
     notes: Mapped[str | None] = mapped_column(String)
+    intent: Mapped[str | None] = mapped_column(String)
 
     workout: Mapped[Workout] = relationship(back_populates="blocks")
     parent: Mapped[Block | None] = relationship(back_populates="children", remote_side="Block.id")
@@ -218,6 +219,8 @@ class SetLog(Base):
     distance_m: Mapped[float | None] = mapped_column(Float)
     rir: Mapped[int | None] = mapped_column(Integer)
     is_warmup: Mapped[bool] = mapped_column(Integer, nullable=False, default=0)
+    skipped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    side: Mapped[str] = mapped_column(String, nullable=False, default="bilateral")
     started_at: Mapped[datetime | None] = mapped_column(DateTime)
     completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
     hr_avg_bpm: Mapped[int | None] = mapped_column(Integer)
@@ -231,6 +234,8 @@ class SetLog(Base):
     __table_args__ = (
         CheckConstraint("weight_unit IN ('kg', 'lb') OR weight_unit IS NULL"),
         CheckConstraint("is_warmup IN (0, 1)"),
+        CheckConstraint("skipped IN (0, 1)"),
+        CheckConstraint("side IN ('left', 'right', 'bilateral')", name="set_log_side_check"),
         CheckConstraint("rir IS NULL OR (rir >= 0 AND rir <= 5)"),
         Index("idx_set_log_item", "workout_item_id"),
         Index(

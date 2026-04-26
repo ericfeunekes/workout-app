@@ -14,6 +14,8 @@ public enum SetEditField: String, CaseIterable, Sendable, Equatable {
     case side
     case distance
     case duration
+    case skipped
+    case notes
     case carryLoad
     case carryDistance
 }
@@ -28,6 +30,11 @@ public enum SetEditRIR: Sendable, Equatable {
     case preserve
     case clear
     case set(Int)
+}
+
+public enum SetEditNotes: Sendable, Equatable {
+    case preserve
+    case set(String?)
 }
 
 public enum SetEditScope: String, CaseIterable, Sendable, Equatable {
@@ -47,6 +54,8 @@ public struct SetEditIntent: Sendable, Equatable {
     public let distance: Double?
     public let distanceUnit: String?
     public let durationSeconds: Double?
+    public let skipped: Bool?
+    public let notes: SetEditNotes
     public let carryLoad: Double?
     public let carryLoadUnit: String?
     public let carryDistance: Double?
@@ -64,6 +73,8 @@ public struct SetEditIntent: Sendable, Equatable {
         distance: Double?,
         distanceUnit: String?,
         durationSeconds: Double?,
+        skipped: Bool?,
+        notes: SetEditNotes,
         carryLoad: Double?,
         carryLoadUnit: String?,
         carryDistance: Double?,
@@ -80,6 +91,8 @@ public struct SetEditIntent: Sendable, Equatable {
         self.distance = distance
         self.distanceUnit = distanceUnit
         self.durationSeconds = durationSeconds
+        self.skipped = skipped
+        self.notes = notes
         self.carryLoad = carryLoad
         self.carryLoadUnit = carryLoadUnit
         self.carryDistance = carryDistance
@@ -101,6 +114,8 @@ public final class SetEditSheetModel {
     private var distanceValue: Double?
     private var distanceUnitValue: String?
     private var durationSecondsValue: Double?
+    private var skippedValue: Bool?
+    private var notesValue: SetEditNotes = .preserve
     private var carryLoadValue: Double?
     private var carryLoadUnitValue: String?
     private var carryDistanceValue: Double?
@@ -161,6 +176,17 @@ public final class SetEditSheetModel {
         durationSecondsValue = max(0, seconds)
     }
 
+    public func setSkipped(_ skipped: Bool) {
+        guard availableFields.contains(.skipped) else { return }
+        skippedValue = skipped
+    }
+
+    public func setNotes(_ notes: String?) {
+        guard availableFields.contains(.notes) else { return }
+        let trimmed = notes?.trimmingCharacters(in: .whitespacesAndNewlines)
+        notesValue = .set(trimmed?.isEmpty == true ? nil : notes)
+    }
+
     public func setCarry(load: Double, loadUnit: String, distance: Double, distanceUnit: String) {
         guard availableFields.contains(.carryLoad),
               availableFields.contains(.carryDistance) else { return }
@@ -183,6 +209,8 @@ public final class SetEditSheetModel {
             distance: distanceValue,
             distanceUnit: distanceUnitValue,
             durationSeconds: durationSecondsValue,
+            skipped: skippedValue,
+            notes: notesValue,
             carryLoad: carryLoadValue,
             carryLoadUnit: carryLoadUnitValue,
             carryDistance: carryDistanceValue,

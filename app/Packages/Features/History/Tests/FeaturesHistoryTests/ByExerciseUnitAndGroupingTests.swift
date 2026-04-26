@@ -236,4 +236,48 @@ final class ByExerciseUnitAndGroupingTests: XCTestCase {
         XCTAssertTrue(rows[0].display.contains("225 lb × 5"),
                       "lb session display must carry 'lb' — got \(rows[0].display)")
     }
+
+    func testRecentRowIgnoresSkippedSets() {
+        let itemID = UUID()
+        let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let performed1 = SetLog(
+            id: UUID(), workoutItemID: itemID,
+            performedExerciseID: nil, setIndex: 1,
+            reps: 5, weight: 100, weightUnit: .kg, rir: 2,
+            isWarmup: false, startedAt: nil,
+            completedAt: baseDate,
+            notes: nil
+        )
+        let performed2 = SetLog(
+            id: UUID(), workoutItemID: itemID,
+            performedExerciseID: nil, setIndex: 2,
+            reps: 5, weight: 100, weightUnit: .kg, rir: 4,
+            isWarmup: false, startedAt: nil,
+            completedAt: baseDate.addingTimeInterval(60),
+            notes: nil
+        )
+        let skipped = SetLog(
+            id: UUID(), workoutItemID: itemID,
+            performedExerciseID: nil, setIndex: 3,
+            reps: nil, weight: nil, weightUnit: nil, rir: nil,
+            isWarmup: false,
+            skipped: true,
+            startedAt: nil,
+            completedAt: baseDate.addingTimeInterval(120),
+            notes: nil
+        )
+
+        let rows = ExerciseDetailViewModel.buildRecentRows(
+            setLogs: [performed1, performed2, skipped],
+            calendar: utcCalendar
+        )
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertTrue(rows[0].display.contains("2 × 100 kg × 5"),
+                      "skipped set must not count as performed volume — got \(rows[0].display)")
+        XCTAssertFalse(rows[0].display.contains("3 ×"),
+                       "skipped set must not inflate set count — got \(rows[0].display)")
+        XCTAssertTrue(rows[0].display.contains("RIR 3.0"),
+                      "skipped set must not affect RIR mean — got \(rows[0].display)")
+    }
 }

@@ -81,7 +81,7 @@ extension HistoryViewModel {
             for id in session.performedExerciseIDs {
                 counts[id, default: 0] += 1
             }
-            for log in session.setLogs {
+            for log in session.setLogs where !log.skipped {
                 let displayID = log.performedExerciseID
                     ?? session.plannedExerciseByItem[log.workoutItemID]
                 guard let displayID, let weight = log.weight else { continue }

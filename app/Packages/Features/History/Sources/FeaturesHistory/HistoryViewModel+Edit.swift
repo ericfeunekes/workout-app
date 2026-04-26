@@ -17,14 +17,13 @@
 //   - Corrective edits NEVER retrigger autoreg — History writes the
 //     updated SetLog directly and the reducer path is bypassed entirely.
 //
-// Weight-unit correctness: the load override arrives as an
-// `EditPastSetLoadCommit` carrying both the numeric value AND the unit
-// the user typed in. We write the SetLog's `weight` / `weightUnit`
-// together — the unit is preserved as what the user just confirmed,
-// not silently stamped as `.kg`. That prevents the footgun where a
-// `.lb` row gets corrected and becomes a `.kg` row numerically equal
-// to the old pounds (a 100 lb row "corrected" would read as 100 kg,
-// twice the actual load).
+// Weight-unit correctness: the shared `SetEditIntent` carries both the
+// numeric load and its unit. We write the SetLog's `weight` /
+// `weightUnit` together — the unit is preserved as what the user just
+// confirmed, not silently stamped as `.kg`. That prevents the footgun
+// where a `.lb` row gets corrected and becomes a `.kg` row numerically
+// equal to the old pounds (a 100 lb row "corrected" would read as
+// 100 kg, twice the actual load).
 //
 // RIR three-state: the commit carries `.preserve` / `.clear` / `.set(n)`
 // so the edit can distinguish "user didn't touch RIR" (leave existing)
@@ -42,6 +41,7 @@
 import Foundation
 import CoreDomain
 import CoreTelemetry
+import DesignSystem
 import WorkoutCoreFoundation
 
 extension HistoryViewModel {
@@ -64,9 +64,7 @@ extension HistoryViewModel {
     public func editPastSet(
         workoutID: WorkoutID,
         setLogID: SetLogID,
-        reps: Int?,
-        rir: EditPastSetRirCommit,
-        load loadCommit: EditPastSetLoadCommit?
+        intent: SetEditIntent
     ) async {
         guard let session = rawSessions.first(where: { $0.workout.id == workoutID }),
               let existing = session.setLogs.first(where: { $0.id == setLogID }) else {
@@ -78,8 +76,8 @@ extension HistoryViewModel {
         // are all preserved untouched — an edit is corrective, not
         // identity-changing.
         var edited = existing
-        if let reps { edited.reps = reps }
-        switch rir {
+        if let reps = intent.reps { edited.reps = reps }
+        switch intent.rir {
         case .preserve:
             break
         case .clear:
@@ -87,12 +85,45 @@ extension HistoryViewModel {
         case .set(let value):
             edited.rir = value
         }
-        if let loadCommit {
-            edited.weight = loadCommit.value
+        if let load = intent.load {
+            edited.weight = load
             // Always stamp the unit the user just confirmed. Never
             // default to `.kg` when a concrete unit is in hand —
             // doing so silently corrupts lb-stored rows.
-            edited.weightUnit = loadCommit.unit
+            edited.weightUnit = intent.loadUnit.flatMap(WeightUnit.init(rawValue:))
+                ?? edited.weightUnit
+                ?? .kg
+        }
+        if let duration = intent.durationSeconds {
+            edited.durationSec = duration
+        }
+        if let distance = intent.distance {
+            edited.distanceM = distance
+        }
+        if let side = intent.side,
+           let mapped = SetLogSide(rawValue: side.rawValue) {
+            edited.side = mapped
+        }
+        switch intent.notes {
+        case .preserve:
+            break
+        case .set(let value):
+            edited.notes = value?.nilIfBlank
+        }
+        if let skipped = intent.skipped {
+            edited.skipped = skipped
+        }
+        if edited.skipped {
+            edited.reps = nil
+            edited.weight = nil
+            edited.weightUnit = nil
+            edited.durationSec = nil
+            edited.distanceM = nil
+            edited.rir = nil
+            edited.hrAvgBpm = nil
+            edited.hrMaxBpm = nil
+            edited.cadenceAvgSpm = nil
+            edited.motionSamplesRef = nil
         }
 
         do {
@@ -206,4 +237,11 @@ private struct HistoryPastSetEditedEventPayload: Encodable {
     let itemID: String
     let setLogID: String
     let setIndex: Int
+}
+
+private extension String {
+    var nilIfBlank: String? {
+        let trimmed = trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : self
+    }
 }

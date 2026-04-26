@@ -15,6 +15,7 @@
 import XCTest
 import CoreDomain
 import CoreTelemetry
+import DesignSystem
 import WorkoutCoreFoundation
 @testable import FeaturesHistory
 
@@ -53,9 +54,7 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         await vm.editPastSet(
             workoutID: firstLog.workoutID,
             setLogID: firstLog.setLog.id,
-            reps: 4,
-            rir: .set(1),
-            load: nil
+            intent: makeIntent(reps: 4, rir: .set(1))
         )
 
         let pushed = await recorder.pushed
@@ -96,9 +95,7 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         await vm.editPastSet(
             workoutID: firstLog.workoutID,
             setLogID: knownID,
-            reps: 5,
-            rir: .preserve,
-            load: nil
+            intent: makeIntent(reps: 5)
         )
 
         let pushed = await recorder.pushed
@@ -133,9 +130,7 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         await vm.editPastSet(
             workoutID: firstLog.workoutID,
             setLogID: firstLog.setLog.id,
-            reps: 4,
-            rir: .set(1),
-            load: EditPastSetLoadCommit(value: 97.5, unit: .kg)
+            intent: makeIntent(reps: 4, rir: .set(1), load: 97.5, loadUnit: "kg")
         )
 
         // Post-edit: `detail(for:)` builds a fresh VM from `rawSessions`,
@@ -182,9 +177,7 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         await vm.editPastSet(
             workoutID: firstLog.workoutID,
             setLogID: firstLog.setLog.id,
-            reps: 3,
-            rir: .preserve,
-            load: nil
+            intent: makeIntent(reps: 3)
         )
 
         let events = telemetry.events.filter { $0.name == "history.past_set_edited" }
@@ -250,9 +243,7 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         await vm.editPastSet(
             workoutID: firstLog.workoutID,
             setLogID: firstLog.setLog.id,
-            reps: 7,
-            rir: .preserve,
-            load: nil
+            intent: makeIntent(reps: 7)
         )
 
         let event = try XCTUnwrap(
@@ -314,7 +305,143 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         )
     }
 
+    func testHistoryEditCorrectsFullFieldSetInPlace() async throws {
+        let (cache, firstLog) = try makeSingleLogFixture()
+        let recorder = EditRecorder()
+        let hook: HistorySetLogEditHook = { [recorder] log in
+            await recorder.append(log)
+        }
+        let vm = HistoryViewModel(
+            cache: cache,
+            calendar: utcCalendar,
+            now: { [now] in now },
+            onSetLogEdited: hook
+        )
+        await vm.load()
+
+        await vm.editPastSet(
+            workoutID: firstLog.workoutID,
+            setLogID: firstLog.setLog.id,
+            intent: makeIntent(
+                reps: 8,
+                rir: .clear,
+                load: 42.5,
+                loadUnit: "lb",
+                durationSeconds: 75,
+                distance: 400,
+                side: .left,
+                notes: .set("watch missed first rep")
+            )
+        )
+
+        let pushedLogs = await recorder.pushed
+        let pushed = try XCTUnwrap(pushedLogs.first)
+        XCTAssertEqual(pushed.id, firstLog.setLog.id)
+        XCTAssertEqual(pushed.reps, 8)
+        XCTAssertEqual(pushed.rir, nil)
+        XCTAssertEqual(pushed.weight, 42.5)
+        XCTAssertEqual(pushed.weightUnit, .lb)
+        XCTAssertEqual(pushed.durationSec, 75)
+        XCTAssertEqual(pushed.distanceM, 400)
+        XCTAssertEqual(pushed.side, .left)
+        XCTAssertEqual(pushed.notes, "watch missed first rep")
+    }
+
+    func testHistoryEditMarkSkippedClearsPerformanceMetrics() async throws {
+        let (cache, firstLog) = try makeSingleLogFixture()
+        let recorder = EditRecorder()
+        let hook: HistorySetLogEditHook = { [recorder] log in
+            await recorder.append(log)
+        }
+        let vm = HistoryViewModel(
+            cache: cache,
+            calendar: utcCalendar,
+            now: { [now] in now },
+            onSetLogEdited: hook
+        )
+        await vm.load()
+
+        await vm.editPastSet(
+            workoutID: firstLog.workoutID,
+            setLogID: firstLog.setLog.id,
+            intent: makeIntent(skipped: true)
+        )
+
+        let pushedLogs = await recorder.pushed
+        let pushed = try XCTUnwrap(pushedLogs.first)
+        XCTAssertTrue(pushed.skipped)
+        XCTAssertNil(pushed.reps)
+        XCTAssertNil(pushed.weight)
+        XCTAssertNil(pushed.weightUnit)
+        XCTAssertNil(pushed.durationSec)
+        XCTAssertNil(pushed.distanceM)
+        XCTAssertNil(pushed.rir)
+    }
+
+    func testHistoryEditPreservesSkippedRowsWithoutPerformanceMetrics() async throws {
+        let (cache, firstLog) = try makeSingleLogFixture(skipped: true)
+        let recorder = EditRecorder()
+        let hook: HistorySetLogEditHook = { [recorder] log in
+            await recorder.append(log)
+        }
+        let vm = HistoryViewModel(
+            cache: cache,
+            calendar: utcCalendar,
+            now: { [now] in now },
+            onSetLogEdited: hook
+        )
+        await vm.load()
+
+        await vm.editPastSet(
+            workoutID: firstLog.workoutID,
+            setLogID: firstLog.setLog.id,
+            intent: makeIntent(reps: 8, load: 120, loadUnit: "kg", durationSeconds: 90, distance: 400)
+        )
+
+        let pushedLogs = await recorder.pushed
+        let pushed = try XCTUnwrap(pushedLogs.first)
+        XCTAssertTrue(pushed.skipped)
+        XCTAssertNil(pushed.reps)
+        XCTAssertNil(pushed.weight)
+        XCTAssertNil(pushed.weightUnit)
+        XCTAssertNil(pushed.durationSec)
+        XCTAssertNil(pushed.distanceM)
+        XCTAssertNil(pushed.rir)
+    }
+
     // MARK: - Fixtures
+
+    private func makeIntent(
+        reps: Int? = nil,
+        rir: SetEditRIR = .preserve,
+        load: Double? = nil,
+        loadUnit: String? = nil,
+        durationSeconds: Double? = nil,
+        distance: Double? = nil,
+        skipped: Bool? = nil,
+        side: SetEditSide? = nil,
+        notes: SetEditNotes = .preserve
+    ) -> SetEditIntent {
+        SetEditIntent(
+            scope: .current,
+            load: load,
+            loadUnit: loadUnit,
+            reps: reps,
+            rir: rir,
+            bodyweight: nil,
+            bodyweightUnit: nil,
+            side: side,
+            distance: distance,
+            distanceUnit: distance == nil ? nil : "m",
+            durationSeconds: durationSeconds,
+            skipped: skipped,
+            notes: notes,
+            carryLoad: nil,
+            carryLoadUnit: nil,
+            carryDistance: nil,
+            carryDistanceUnit: nil
+        )
+    }
 
     /// Build a cache with one completed workout, one exercise, one
     /// SetLog. Returns the cache and a handle to the first log +
@@ -325,7 +452,8 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
     /// uses that to assert the edit push carries the ORIGINAL id rather
     /// than a freshly generated one (bug-040).
     private func makeSingleLogFixture(
-        setLogID: UUID = UUID()
+        setLogID: UUID = UUID(),
+        skipped: Bool = false
     ) throws -> (FakeHistoryCache, LogHandle) {
         let (userID, workoutID, blockID, itemID, exerciseID) =
             (UUID(), UUID(), UUID(), UUID(), UUID())
@@ -353,6 +481,7 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
             id: setLogID, workoutItemID: itemID, performedExerciseID: nil,
             setIndex: 1, reps: 5, weight: 100, weightUnit: .kg, rir: 2,
             isWarmup: false,
+            skipped: skipped,
             startedAt: completedAt.addingTimeInterval(-60),
             completedAt: completedAt,
             notes: nil

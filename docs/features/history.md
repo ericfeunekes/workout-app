@@ -32,7 +32,7 @@ audit-grade today: the current server contract overwrites the row in place and
 does not store a field-level edit trail.
 
 ## Current implementation
-`HistoryViewModel.load()` pulls completed workouts (limit 200) from `WorkoutCache.loadCompletedWorkouts` newest-first by `completedAt` (`WorkoutCache+History.swift:39`), plus their set_logs and item lookups, into `rawSessions` (`HistoryViewModel+Load.swift:34`). Derivation filters by `activeSplit`, groups by `(year, weekOfYear)` into `WeekGroup`s with headers "THIS WEEK" / "LAST WEEK" / "APR · WEEK 15" (`HistoryViewModel+Derivation.swift:198`). `HistoryListView` renders groups in a `DSCard` of `NavigationLink(value: workoutID)` rows (`HistoryListView.swift:74`). Tap → `HistorySessionDetailView` bound to a `SessionDetailViewModel` that buckets set_logs by `performedExerciseID ?? plannedExerciseByItem[itemID] ?? workoutItemID` (`SessionDetailViewModel.swift:116`) and renders "N · weight × reps · RIR" set rows (`:146`). A "BY EXERCISE →" chip flips `tab` to `.byExercise` → current-program-first picker → per-exercise detail with `TrendComputation.compute` producing "↑ 12.5 KG / 12 WK" (`TrendComputation.swift:82`).
+`HistoryViewModel.load()` pulls completed workouts (limit 200) from `WorkoutCache.loadCompletedWorkouts` newest-first by `completedAt` (`WorkoutCache+History.swift:39`), plus their set_logs and item lookups, into `rawSessions` (`HistoryViewModel+Load.swift:34`). Derivation filters by `activeSplit`, groups by `(year, weekOfYear)` into `WeekGroup`s with headers "THIS WEEK" / "LAST WEEK" / "APR · WEEK 15" (`HistoryViewModel+Derivation.swift:198`). `HistoryListView` renders groups in a `DSCard` of `NavigationLink(value: workoutID)` rows (`HistoryListView.swift:74`). Tap → `HistorySessionDetailView` bound to a `SessionDetailViewModel` that buckets set_logs by `performedExerciseID ?? plannedExerciseByItem[itemID] ?? workoutItemID` (`SessionDetailViewModel.swift:116`) and renders set rows using the logged shape: strength rows include load/reps/RIR, cardio and carry rows include duration/distance/load where present, and skipped rows render `SKIPPED`. Tapping a set row opens `EditSetSheet`, which emits the shared `SetEditIntent` and lets History correct load/unit, reps, duration, distance, RIR set/clear, skipped/performed state, side round-trip, and notes on the existing set-log row. A "BY EXERCISE →" chip flips `tab` to `.byExercise` → current-program-first picker → per-exercise detail with `TrendComputation.compute` producing "↑ 12.5 KG / 12 WK" (`TrendComputation.swift:82`). Skipped rows are excluded from by-exercise picker, top-set, trend, and average-RIR aggregation.
 
 ## State surface
 - **Inputs:** `WorkoutCache` (completed workouts, blocks, items, set_logs, exercises, planned workouts), `calendar`, `now`, `telemetry: TelemetryEmitter`, `onSetLogEdited: HistorySetLogEditHook?` (shell-wired to `SyncAPI.pushLog`), `onWorkoutReset: HistoryWorkoutResetHook?` (shell-wired to `SyncAPI.resetWorkout`).
@@ -56,15 +56,14 @@ does not store a field-level edit trail.
 
 ## Current gaps
 
-- Full-field post-workout correction is not complete until the shared edit
-  shell covers load, reps, RIR, bodyweight, distance, duration, skipped state,
-  and carry/load-plus-distance details for the relevant mode-specific editor
-  families.
+- Full-field post-workout correction is complete for set-log fields in this
+  phase scope: load/unit, reps, RIR set/clear, duration, distance,
+  skipped/performed state, side round-trip, and notes. Bodyweight correction is
+  a separate `user_parameters` editing problem, not a set-log correction.
 - Unilateral history display should use exercise-level identity unless a later
   taxonomy phase adds a stronger canonical link between left/right variants.
   `set_log.side` exists as a shipped/reserved field, not the active history
   grouping model.
-- Duration/distance/carry corrections need parity with active logging.
 - Post-workout correction is same-row overwrite and is not audit-grade: there is
   no `set_log.updated_at`, no field-diff telemetry event, no durable History
   edit log, and event-log retention is not enough to reconstruct corrections
@@ -73,7 +72,7 @@ does not store a field-level edit trail.
   intent is null.
 - Set-index render bug (bug-020) closed — `formatSetRow` now uses `setIndex` as-is; runtime pipeline is 1-based throughout.
 - `SessionDetail.bodyweightKg` now hydrates from `WorkoutCache.loadUserParameters(key: "bodyweight_kg")` with a ±2min window around `completedAt` (bug-060). HistoryPreviewSeed includes a bodyweight sample so the chip exercises in previews too.
-- `EditSetSheet` is unit-aware (bug-051): labels per source `weightUnit`, carries the unit through the write path via `formatLoad(weight:unit:)`, caps reps at 999, and exposes RIR clear via an explicit enum state instead of a nil-sentinel.
+- `EditSetSheet` is unit-aware (bug-051): labels per source `weightUnit`, carries the unit through the write path via `formatLoad(weight:unit:)`, caps reps at 999, and exposes RIR clear via an explicit enum state instead of a nil-sentinel. It also supports duration, distance, skipped/performed state, side round-trip, and notes for completed set-log correction.
 - Recent-sessions grouping keys off `workoutID` (the R1.3b-v2 denormalized column on `SetLogModel`) rather than `workoutItemID`, so same-day workouts no longer collapse into one session.
 - By-exercise detail no longer mixes `lb` and `kg` numerically — top-set and trend deltas render in the source unit (bug-051 / bug-059).
 - Post-save refresh is wired end-to-end. The shell's `afterLocalCompletion` closure calls `historyViewModel.load()` after the local cache write + today-loader rerun (ordering: cache write → TodayLoader reload → History reload). Post-pull refresh still relies on `.task` on `HistoryView` re-firing.
@@ -96,11 +95,11 @@ does not store a field-level edit trail.
 - **steps:** Tap each chip in order: ALL / PUSH / PULL / LEGS.
 - **expected:** ALL shows all 4. PUSH shows only the push_day row. LEGS shows only the leg_day row. **Untagged workout is only visible under ALL** (`SessionDetail.swift:81` — empty tag set).
 
-### S4. Set index cosmetic bug (watchlist)
+### S4. Set index display
 - **setup:** Any completed session with ≥2 sets on one exercise.
 - **steps:** Tap row → session detail.
-- **expected:** **Currently renders "2, 3, 4, ..."** instead of "1, 2, 3, ..." (`docs/open-questions.md:285`). Expected-after-fix: "1..N".
-- **notes:** Cosmetic; doesn't affect any aggregate math.
+- **expected:** Rows render with their stored 1-based `setIndex`: "1, 2, 3, ...".
+- **notes:** bug-020 closed; keep this scenario as a regression guard.
 
 ### S5. By-exercise picker — current program first
 - **setup:** Planned workout includes bench press; past history includes bench + discontinued exercise.
@@ -141,8 +140,13 @@ does not store a field-level edit trail.
 ### S12. Set row tap — opens edit sheet (bug-015 fix)
 - **setup:** Any session detail with a completed workout.
 - **steps:** Tap a set row.
-- **expected:** Row flashes accent highlight; `EditSetSheet` slides up. Sheet has two numpad tiles (REPS / LOAD KG) prefilled with the row's current values, a RIR row, and a "save" commit key on the keypad. Commit calls `HistoryViewModel.editPastSet(...)`, which (1) writes the updated SetLog via `WorkoutCache.saveSetLogs([edited])` with the SAME UUID as the original (server-side upsert-in-place), (2) emits `history.past_set_edited` telemetry, (3) fires the shell-wired `onSetLogEdited` hook → `SyncAPI.pushLog([edited])`, (4) calls `load()` so the detail view re-renders with the corrected row. Dismissing without commit leaves the row untouched.
+- **expected:** Row flashes accent highlight; `EditSetSheet` slides up. Sheet exposes the row's applicable fields: reps, load/unit, duration, distance, skipped/performed state, side round-trip, notes, and RIR set/clear. Commit calls `HistoryViewModel.editPastSet(...)`, which (1) writes the updated SetLog via `WorkoutCache.saveSetLogs([edited])` with the SAME UUID as the original (server-side upsert-in-place), (2) emits `history.past_set_edited` telemetry, (3) fires the shell-wired `onSetLogEdited` hook → `SyncAPI.pushLog([edited])`, (4) calls `load()` so the detail view re-renders with the corrected row. Dismissing without commit leaves the row untouched.
 - **notes:** Fields left untouched by the user (empty numpad buffer, no RIR tap) are passed as `nil` and `editPastSet` preserves the existing value. Edits do NOT retrigger autoreg (completed workouts have no live SessionState).
+
+### S12A. Skipped correction clears metrics and aggregates
+- **setup:** Completed workout with one logged strength row.
+- **steps:** Open History → session detail → tap the set row → mark it skipped → save → open BY EXERCISE.
+- **expected:** The session detail row renders `N · SKIPPED`; performance metrics and RIR no longer render for that row. If that row was the exercise's only performed row, the exercise is absent from the by-exercise picker and trend/top-set aggregation.
 
 ### S13. Post-save refresh (R1.6 / R1.3b)
 - **setup:** Complete a workout via save & done.

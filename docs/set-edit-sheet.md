@@ -1,6 +1,6 @@
 ---
 title: SetEditSheet
-status: planned
+status: built with current gaps
 last_reviewed: 2026-04-26
 purpose: Shared edit-surface contract for preview, active-session, and history corrections.
 covers:
@@ -38,6 +38,8 @@ allows them:
 - side, only when an explicit caller owns that shipped/reserved field
 - distance
 - duration
+- skipped/performed state for logged rows
+- notes
 - carry/load-plus-distance details
 
 Fields that do not apply to the source prescription should be absent, not
@@ -72,19 +74,22 @@ the shell/model can express the fields.
 ## Current gaps
 
 - `DesignSystem.SetEditSheetModel` now defines the shared edit intent contract
-  for load, reps, RIR, bodyweight, side, distance, duration, and carry fields.
-  Side remains a shipped/reserved field, not the active unilateral authoring
-  model.
+  for load, reps, RIR, bodyweight, side, distance, duration,
+  skipped/performed state, notes, and carry fields. Side remains a
+  shipped/reserved field, not the active unilateral authoring model.
 - Existing visual edit surfaces are still split across preview/detail, active
   rest pills, and the History `EditSetSheet`.
-- History's legacy sheet must migrate onto the shared contract or be deleted by
-  the Phase 6/history-edit work; until then, it remains the compatibility
-  adapter for past corrections.
+- History's visual sheet now emits the shared intent and is proven for set-log
+  correction fields: load/unit, reps, RIR set/clear, duration, distance,
+  skipped/performed state, side round-trip, and notes.
 - Apply-to-remaining scope for preview/future and active setup edits is not yet
   implemented or proven.
-- Distance, duration, bodyweight, side, and carry fields are contract-tested at
-  the shared model layer but do not yet have visual proof across their
-  mode-specific active, preview, and history contexts.
+- Bodyweight remains contract-level and display-level only for History; editing
+  it is a separate `user_parameters` correction problem.
+- Distance, duration, side, skipped state, notes, and carry/load-plus-distance
+  are contract-tested at the shared model layer and proven in History where they
+  are set-log fields. They do not yet have visual proof across all
+  mode-specific active and preview contexts.
 - Visual proof is required for small-phone layout and disabled/available field
   contrast.
 

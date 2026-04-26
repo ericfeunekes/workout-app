@@ -51,6 +51,11 @@ struct HistorySessionDetailView: View {
                 initialReps: editing.setLog.reps,
                 initialRir: editing.setLog.rir,
                 initialLoad: editing.setLog.weight,
+                initialDurationSec: editing.setLog.durationSec,
+                initialDistanceM: editing.setLog.distanceM,
+                initialSkipped: editing.setLog.skipped,
+                initialSide: editing.setLog.side,
+                initialNotes: editing.setLog.notes,
                 // `weightUnit` defaults to `.kg` for rows that predate the
                 // column being populated — today's writers always set it,
                 // but the SetLog type allows nil so we collapse defensively
@@ -58,10 +63,10 @@ struct HistorySessionDetailView: View {
                 // invariant. Once we're confident, make the field
                 // non-optional upstream and delete this fallback.
                 weightUnit: editing.setLog.weightUnit ?? .kg,
-                onCommit: { reps, rir, load in
+                onCommit: { intent in
                     commitEdit(
                         setLogID: editing.setLog.id,
-                        reps: reps, rir: rir, load: load
+                        intent: intent
                     )
                 }
             )
@@ -192,9 +197,7 @@ struct HistorySessionDetailView: View {
 
     private func commitEdit(
         setLogID: UUID,
-        reps: Int?,
-        rir: EditPastSetRirCommit,
-        load: EditPastSetLoadCommit?
+        intent: SetEditIntent
     ) {
         let workoutID = viewModel.workoutID
         let historyVM = historyViewModel
@@ -203,9 +206,7 @@ struct HistorySessionDetailView: View {
             await historyVM.editPastSet(
                 workoutID: workoutID,
                 setLogID: setLogID,
-                reps: reps,
-                rir: rir,
-                load: load
+                intent: intent
             )
         }
         // Dismiss the sheet + clear highlight immediately so the UI

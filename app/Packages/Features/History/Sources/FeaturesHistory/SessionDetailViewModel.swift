@@ -152,7 +152,8 @@ public final class SessionDetailViewModel {
     }
 
     /// "1 · 100 kg × 5 · RIR 2" — or "1 · 225 lb × 5 · RIR 2" when the
-    /// set was logged in lb.
+    /// set was logged in lb. Skipped and cardio-shaped rows get their own
+    /// compact summaries so History does not render them as loadless strength.
     /// - setIndex is 1-based both in storage and in display — the rest
     ///   of the session pipeline (SessionSeeder, cursor math, reducer)
     ///   emits 1-based indexes, so no off-by-one shift is needed here.
@@ -162,14 +163,50 @@ public final class SessionDetailViewModel {
     /// - RIR is omitted when not logged.
     static func formatSetRow(_ log: SetLog) -> String {
         var parts: [String] = [String(log.setIndex)]
+        if log.skipped {
+            parts.append("SKIPPED")
+            appendSide(log.side, to: &parts)
+            return parts.joined(separator: " · ")
+        }
+        if log.durationSec != nil || log.distanceM != nil,
+           log.weight == nil,
+           log.reps == nil {
+            parts.append(formatCardioSummary(
+                durationSec: log.durationSec,
+                distanceM: log.distanceM
+            ).uppercased())
+            appendSide(log.side, to: &parts)
+            if let rir = log.rir {
+                parts.append("RIR \(rir)")
+            }
+            return parts.joined(separator: " · ")
+        }
         let unit: LoadUnit = log.weightUnit.flatMap { LoadUnit(rawValue: $0.rawValue) } ?? .kg
         let load = formatLoad(weight: log.weight, unit: unit)
         let reps = log.reps.map(String.init) ?? "—"
         parts.append("\(load) × \(reps)")
+        if let duration = log.durationSec, duration > 0 {
+            parts.append(formatDuration(seconds: duration))
+        }
+        if let distance = log.distanceM, distance > 0 {
+            parts.append(formatCardioDistance(distance))
+        }
+        appendSide(log.side, to: &parts)
         if let rir = log.rir {
             parts.append("RIR \(rir)")
         }
         return parts.joined(separator: " · ")
+    }
+
+    private static func appendSide(_ side: SetLogSide, to parts: inout [String]) {
+        switch side {
+        case .bilateral:
+            return
+        case .left:
+            parts.append("LEFT")
+        case .right:
+            parts.append("RIGHT")
+        }
     }
 
     /// Concatenate non-empty `notes` fields from the logs. Separator is

@@ -70,12 +70,13 @@ public struct SessionDetail: Sendable, Equatable {
         self.bodyweightKg = bodyweightKg
     }
 
-    /// All exercise ids that appear in this session, counting both
-    /// swapped (`performedExerciseID`) and planned (resolved via the
-    /// item lookup) exercises. Empty when neither source has data.
+    /// All non-skipped exercise ids that appear in this session,
+    /// counting both swapped (`performedExerciseID`) and planned
+    /// (resolved via the item lookup) exercises. Empty when neither
+    /// source has data.
     public var performedExerciseIDs: Set<ExerciseID> {
         var out: Set<ExerciseID> = []
-        for log in setLogs {
+        for log in setLogs where !log.skipped {
             if let swap = log.performedExerciseID {
                 out.insert(swap)
             } else if let planned = plannedExerciseByItem[log.workoutItemID] {
@@ -106,7 +107,7 @@ public struct SessionDetail: Sendable, Equatable {
     /// Average RIR across all set_logs that recorded one. Nil when no
     /// set recorded RIR.
     public var avgRIR: Double? {
-        let rirValues = setLogs.compactMap(\.rir)
+        let rirValues = setLogs.filter { !$0.skipped }.compactMap(\.rir)
         guard !rirValues.isEmpty else { return nil }
         let sum = rirValues.reduce(0, +)
         return Double(sum) / Double(rirValues.count)

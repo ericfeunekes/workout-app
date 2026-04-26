@@ -4,10 +4,11 @@
 // bug-015 — the stub at `HistorySessionDetailView.swift:89` that used
 // to flash a highlight and do nothing.
 //
-// Shape parity with `FeaturesExecution.LogSetSheet`:
-//   - reps numpad on top, RIR row in the middle, load numpad on bottom
+// Shape parity with the shared SetEditSheet contract:
+//   - reps/load/duration/distance use the same keypad
+//   - skipped, side, notes, and RIR are explicit controls
 //   - inline "save" commit key on the keypad (one-thumb flow)
-//   - both fields optional: committing without touching a field means
+//   - every field is optional: committing without touching a field means
 //     "preserve the existing value" — HistoryViewModel.editPastSet
 //     applies only the overrides the user actually changed.
 //
@@ -23,9 +24,8 @@
 // value toggles it off) AND explicit "CLEAR" chip at the end. The commit
 // path distinguishes "user didn't touch RIR" (preserve existing) from
 // "user explicitly cleared" (set nil) via an internal `rirTouched`
-// flag — see `commit()`. `EditPastSetRirCommit` encodes both states at
-// the callback boundary so `HistoryViewModel.editPastSet` can tell them
-// apart.
+// flag — see `commit()`. The shared `SetEditIntent.rir` enum carries
+// the distinction to `HistoryViewModel.editPastSet`.
 //
 // Reps cap: the numpad handler clamps the reps buffer at 999. Typing
 // a fourth digit is rejected silently — the buffer stops at "999" and
@@ -50,34 +50,9 @@ import SwiftUI
 import CoreDomain
 import DesignSystem
 
-// MARK: - Commit types
-
-/// Load value + unit the user typed. `value` is in the `unit`'s native
-/// scale — no conversion is performed by the sheet. `nil` commit means
-/// "user didn't touch load; preserve existing".
-public struct EditPastSetLoadCommit: Sendable, Equatable {
-    public let value: Double
-    public let unit: WeightUnit
-
-    public init(value: Double, unit: WeightUnit) {
-        self.value = value
-        self.unit = unit
-    }
-}
-
-/// Three-state RIR commit: preserve (user didn't touch), clear (user
-/// explicitly zeroed out), or set to a specific value.
-public enum EditPastSetRirCommit: Sendable, Equatable {
-    /// User did not touch the RIR row — preserve existing value.
-    case preserve
-    /// User explicitly cleared RIR — write `nil` onto the SetLog.
-    case clear
-    /// User picked a new RIR value.
-    case set(Int)
-}
-
 // MARK: - Model
 
+@Observable
 @MainActor
 public final class EditSetSheetModel {
 
@@ -95,6 +70,11 @@ public final class EditSetSheetModel {
     public let initialReps: Int?
     public let initialRir: Int?
     public let initialLoad: Double?
+    public let initialDurationSec: Double?
+    public let initialDistanceM: Double?
+    public let initialSkipped: Bool
+    public let initialSide: SetLogSide
+    public let initialNotes: String?
     /// Unit the loaded SetLog was recorded in. Defaults to `.kg` when
     /// the SetLog has `weightUnit == nil` (older rows before the field
     /// was populated). The sheet renders / commits in this unit verbatim.
@@ -104,14 +84,22 @@ public final class EditSetSheetModel {
     /// only the fields the user actually changed — unchanged fields pass
     /// as nil/`.preserve` so `HistoryViewModel.editPastSet` preserves the
     /// existing value instead of overwriting with the prefill.
-    public let onCommit: (_ reps: Int?, _ rir: EditPastSetRirCommit, _ load: EditPastSetLoadCommit?) -> Void
+    public let onCommit: (_ intent: SetEditIntent) -> Void
 
     /// reps buffer. `""` = user hasn't touched it; commit returns nil
     /// for reps so the existing value is preserved.
     public private(set) var repsBuffer: String = ""
     /// load buffer. Same convention as reps.
     public private(set) var loadBuffer: String = ""
-    /// `.reps` or `.load` — which numpad the on-screen keypad drives.
+    public private(set) var durationBuffer: String = ""
+    public private(set) var distanceBuffer: String = ""
+    public private(set) var notesText: String = ""
+    public private(set) var notesTouched: Bool = false
+    public private(set) var skippedValue: Bool
+    public private(set) var skippedTouched: Bool = false
+    public private(set) var sideValue: SetLogSide
+    public private(set) var sideTouched: Bool = false
+    /// Which field the on-screen keypad drives.
     public private(set) var activeField: Field = .reps
     /// Picked RIR. nil = user didn't touch the row OR explicitly cleared;
     /// disambiguated by `rirTouched`.
@@ -125,6 +113,8 @@ public final class EditSetSheetModel {
     public enum Field: Sendable, Equatable {
         case reps
         case load
+        case duration
+        case distance
     }
 
     public init(
@@ -132,15 +122,29 @@ public final class EditSetSheetModel {
         initialReps: Int?,
         initialRir: Int?,
         initialLoad: Double?,
+        initialDurationSec: Double?,
+        initialDistanceM: Double?,
+        initialSkipped: Bool,
+        initialSide: SetLogSide,
+        initialNotes: String?,
         weightUnit: WeightUnit,
-        onCommit: @escaping (Int?, EditPastSetRirCommit, EditPastSetLoadCommit?) -> Void
+        onCommit: @escaping (SetEditIntent) -> Void
     ) {
         self.setIndex = setIndex
         self.initialReps = initialReps
         self.initialRir = initialRir
         self.initialLoad = initialLoad
+        self.initialDurationSec = initialDurationSec
+        self.initialDistanceM = initialDistanceM
+        self.initialSkipped = initialSkipped
+        self.initialSide = initialSide
+        self.initialNotes = initialNotes
         self.weightUnit = weightUnit
         self.onCommit = onCommit
+        self.notesText = initialNotes ?? ""
+        self.skippedValue = initialSkipped
+        self.sideValue = initialSide
+        self.pickedRir = initialRir
     }
 
     /// ALL-CAPS label for the load tile: "LOAD KG" when the SetLog was
@@ -174,6 +178,26 @@ public final class EditSetSheetModel {
         return "—"
     }
 
+    public var durationDisplay: String {
+        if !durationBuffer.isEmpty { return durationBuffer }
+        if let value = initialDurationSec {
+            return formatNumber(value)
+        }
+        return "—"
+    }
+
+    public var distanceDisplay: String {
+        if !distanceBuffer.isEmpty { return distanceBuffer }
+        if let value = initialDistanceM {
+            return formatNumber(value)
+        }
+        return "—"
+    }
+
+    public var skippedLabel: String {
+        skippedValue ? "SKIPPED" : "PERFORMED"
+    }
+
     public func selectField(_ field: Field) {
         activeField = field
     }
@@ -184,20 +208,32 @@ public final class EditSetSheetModel {
             appendRepsDigit(digit)
         case .load:
             appendDigitTo(&loadBuffer, digit: digit, allowsDecimal: true)
+        case .duration:
+            appendDigitTo(&durationBuffer, digit: digit, allowsDecimal: true)
+        case .distance:
+            appendDigitTo(&distanceBuffer, digit: digit, allowsDecimal: true)
         }
     }
 
     public func pressDecimal() {
-        guard activeField == .load else { return }
-        if loadBuffer.contains(".") { return }
-        if loadBuffer.isEmpty { loadBuffer = "0" }
-        loadBuffer.append(".")
+        switch activeField {
+        case .reps:
+            return
+        case .load:
+            appendDecimal(to: &loadBuffer)
+        case .duration:
+            appendDecimal(to: &durationBuffer)
+        case .distance:
+            appendDecimal(to: &distanceBuffer)
+        }
     }
 
     public func pressDelete() {
         switch activeField {
         case .reps: pressDeleteOn(&repsBuffer)
         case .load: pressDeleteOn(&loadBuffer)
+        case .duration: pressDeleteOn(&durationBuffer)
+        case .distance: pressDeleteOn(&distanceBuffer)
         }
     }
 
@@ -220,17 +256,58 @@ public final class EditSetSheetModel {
         pickedRir = nil
     }
 
+    public func setSkipped(_ skipped: Bool) {
+        skippedTouched = true
+        skippedValue = skipped
+    }
+
+    public func setSide(_ side: SetLogSide) {
+        sideTouched = true
+        sideValue = side
+    }
+
+    public func setNotes(_ notes: String) {
+        notesTouched = true
+        notesText = notes
+    }
+
     public func commit() {
-        let reps = parsedReps()
-        let load = parsedLoad()
-        let rir: EditPastSetRirCommit = {
-            guard rirTouched else { return .preserve }
+        let contract = DesignSystem.SetEditSheetModel(
+            availableFields: [
+                .load, .reps, .rir, .distance, .duration,
+                .skipped, .side, .notes,
+            ]
+        )
+        if let reps = parsedReps() {
+            contract.setReps(reps)
+        }
+        if let load = parsedLoad() {
+            contract.setLoad(load.value, unit: load.unit.rawValue)
+        }
+        if let duration = parsedDuration() {
+            contract.setDuration(seconds: duration)
+        }
+        if let distance = parsedDistance() {
+            contract.setDistance(distance, unit: "m")
+        }
+        if rirTouched {
             if let picked = pickedRir {
-                return .set(picked)
+                contract.setRIR(picked)
+            } else {
+                contract.clearRIR()
             }
-            return .clear
-        }()
-        onCommit(reps, rir, load)
+        }
+        if skippedTouched {
+            contract.setSkipped(skippedValue)
+        }
+        if sideTouched,
+           let side = SetEditSide(rawValue: sideValue.rawValue) {
+            contract.setSide(side)
+        }
+        if notesTouched {
+            contract.setNotes(notesText)
+        }
+        onCommit(contract.commit())
     }
 
     // MARK: - Private
@@ -244,9 +321,19 @@ public final class EditSetSheetModel {
         return min(max(0, value), Self.maxReps)
     }
 
-    private func parsedLoad() -> EditPastSetLoadCommit? {
+    private func parsedLoad() -> (value: Double, unit: WeightUnit)? {
         guard let value = Double(loadBuffer) else { return nil }
-        return EditPastSetLoadCommit(value: value, unit: weightUnit)
+        return (value, weightUnit)
+    }
+
+    private func parsedDuration() -> Double? {
+        guard let value = Double(durationBuffer) else { return nil }
+        return max(0, value)
+    }
+
+    private func parsedDistance() -> Double? {
+        guard let value = Double(distanceBuffer) else { return nil }
+        return max(0, value)
     }
 
     /// Append a digit to the reps buffer, rejecting the input when the
@@ -282,9 +369,20 @@ public final class EditSetSheetModel {
         _ = allowsDecimal
     }
 
+    private func appendDecimal(to buffer: inout String) {
+        if buffer.contains(".") { return }
+        if buffer.isEmpty { buffer = "0" }
+        buffer.append(".")
+    }
+
     private func pressDeleteOn(_ buffer: inout String) {
         guard !buffer.isEmpty else { return }
         buffer.removeLast()
+    }
+
+    private func formatNumber(_ value: Double) -> String {
+        let whole = value.rounded() == value
+        return whole ? String(Int(value)) : String(value)
     }
 }
 
@@ -307,14 +405,24 @@ struct EditSetSheet: View {
         initialReps: Int?,
         initialRir: Int?,
         initialLoad: Double?,
+        initialDurationSec: Double?,
+        initialDistanceM: Double?,
+        initialSkipped: Bool,
+        initialSide: SetLogSide,
+        initialNotes: String?,
         weightUnit: WeightUnit,
-        onCommit: @escaping (Int?, EditPastSetRirCommit, EditPastSetLoadCommit?) -> Void
+        onCommit: @escaping (SetEditIntent) -> Void
     ) {
         _model = State(initialValue: EditSetSheetModel(
             setIndex: setIndex,
             initialReps: initialReps,
             initialRir: initialRir,
             initialLoad: initialLoad,
+            initialDurationSec: initialDurationSec,
+            initialDistanceM: initialDistanceM,
+            initialSkipped: initialSkipped,
+            initialSide: initialSide,
+            initialNotes: initialNotes,
             weightUnit: weightUnit,
             onCommit: onCommit
         ))
@@ -326,11 +434,15 @@ struct EditSetSheet: View {
             VStack(alignment: .leading, spacing: DSSpacing.lg) {
                 header
                 fieldRow
+                cardioFieldRow
+                statusRow
+                sideRow
+                notesField
                 rirRow
                 DSKeypad(
                     onDigit: { model.pressDigit($0) },
                     onDelete: { model.pressDelete() },
-                    onDecimal: model.activeField == .load ? { model.pressDecimal() } : nil,
+                    onDecimal: model.activeField == .reps ? nil : { model.pressDecimal() },
                     onDone: { model.commit() },
                     doneLabel: "save"
                 )
@@ -357,6 +469,86 @@ struct EditSetSheet: View {
             fieldTile(title: "REPS", display: model.repsDisplay, field: .reps)
             fieldTile(title: model.loadLabel, display: model.loadDisplay, field: .load)
         }
+    }
+
+    private var cardioFieldRow: some View {
+        HStack(spacing: DSSpacing.md) {
+            fieldTile(title: "DURATION S", display: model.durationDisplay, field: .duration)
+            fieldTile(title: "DISTANCE M", display: model.distanceDisplay, field: .distance)
+        }
+    }
+
+    private var statusRow: some View {
+        HStack(spacing: DSSpacing.sm) {
+            statusButton(title: "PERFORMED", skipped: false)
+            statusButton(title: "SKIPPED", skipped: true)
+        }
+    }
+
+    private func statusButton(title: String, skipped: Bool) -> some View {
+        let selected = model.skippedValue == skipped
+        return Button(action: { model.setSkipped(skipped) }, label: {
+            Text(title)
+                .font(DSTypography.subLabel)
+                .tracking(1.2)
+                .foregroundStyle(selected ? DSColors.accentInk : DSColors.foregroundMuted)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, DSSpacing.sm)
+                .background(selected ? DSColors.accentMuted : DSColors.surfaceElevated)
+                .overlay(
+                    RoundedRectangle(cornerRadius: DSRadius.control, style: .continuous)
+                        .strokeBorder(selected ? DSColors.accent : DSColors.border, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: DSRadius.control, style: .continuous))
+        })
+        .buttonStyle(.plain)
+    }
+
+    private var sideRow: some View {
+        HStack(spacing: DSSpacing.sm) {
+            sideButton(title: "BILAT", side: .bilateral)
+            sideButton(title: "LEFT", side: .left)
+            sideButton(title: "RIGHT", side: .right)
+        }
+    }
+
+    private func sideButton(title: String, side: SetLogSide) -> some View {
+        let selected = model.sideValue == side
+        return Button(action: { model.setSide(side) }, label: {
+            Text(title)
+                .font(DSTypography.subLabel)
+                .tracking(1.2)
+                .foregroundStyle(selected ? DSColors.accentInk : DSColors.foregroundMuted)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, DSSpacing.sm)
+                .background(selected ? DSColors.accentMuted : DSColors.surfaceElevated)
+                .overlay(
+                    RoundedRectangle(cornerRadius: DSRadius.control, style: .continuous)
+                        .strokeBorder(selected ? DSColors.accent : DSColors.border, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: DSRadius.control, style: .continuous))
+        })
+        .buttonStyle(.plain)
+    }
+
+    private var notesField: some View {
+        TextField(
+            "NOTE",
+            text: Binding(
+                get: { model.notesText },
+                set: { model.setNotes($0) }
+            ),
+            axis: .vertical
+        )
+        .font(DSTypography.body)
+        .foregroundStyle(DSColors.foreground)
+        .padding(DSSpacing.md)
+        .background(DSColors.surfaceElevated)
+        .overlay(
+            RoundedRectangle(cornerRadius: DSRadius.control, style: .continuous)
+                .strokeBorder(DSColors.border, lineWidth: 1)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: DSRadius.control, style: .continuous))
     }
 
     private func fieldTile(title: String, display: String, field: EditSetSheetModel.Field) -> some View {

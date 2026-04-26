@@ -1,6 +1,7 @@
 ---
 title: Open questions
 status: living
+last_reviewed: 2026-04-26
 purpose: The living gap register. Items that emerged from consistency passes that aren't yet decided, or are deferred past v1. Each item names what is unresolved, our current working assumption (if any), and the disposition — decide now / defer / resolve in code.
 covers:
   - docs/
@@ -30,7 +31,7 @@ Docs say v1 doesn't support delete. If a user eventually needs it, soft-delete (
 
 ### `workout.updated_at` vs prescription-change cascade
 A PUT on a workout replaces nested blocks/items. The original concern was that set logs referencing removed `workout_item_id` rows might become orphans.
-- **Current behavior:** cascade delete removes set logs when their parent block/item is replaced via whole-tree PUT. The initial migration defines `set_log.workout_item_id REFERENCES workout_item(id) ON DELETE CASCADE`, and the workout update path clears old blocks before inserting the replacement tree.
+- **Current behavior:** cascade delete removes set logs when their parent block/item is replaced via whole-tree PUT (verified 2026-04-26, H2 probe). The initial migration defines `set_log.workout_item_id REFERENCES workout_item(id) ON DELETE CASCADE`, and the workout update path clears old blocks before inserting the replacement tree.
 - **Assumption:** deletion is acceptable for planned-workout replacement before execution logs exist.
 - **Disposition:** decide-next if preservation is desired. Preservation is a separate schema/API decision: options include soft-deleting blocks/items, nullable FK plus archived item metadata, an archive table, or forbidding replacement of items that already have set logs.
 

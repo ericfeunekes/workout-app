@@ -137,6 +137,36 @@ final class TrendComputationTests: XCTestCase {
         XCTAssertEqual(trend.weeks, 0)
     }
 
+    func testSkippedRowsDoNotContributeToTrend() {
+        let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let logs = [
+            SetLog(
+                id: UUID(), workoutItemID: UUID(),
+                performedExerciseID: nil, setIndex: 0,
+                reps: 5, weight: 100, weightUnit: .kg, rir: 2,
+                isWarmup: false, startedAt: nil,
+                completedAt: baseDate,
+                notes: nil
+            ),
+            SetLog(
+                id: UUID(), workoutItemID: UUID(),
+                performedExerciseID: nil, setIndex: 0,
+                reps: 5, weight: 200, weightUnit: .kg, rir: 2,
+                isWarmup: false,
+                skipped: true,
+                startedAt: nil,
+                completedAt: baseDate.addingTimeInterval(7 * 86_400),
+                notes: nil
+            ),
+        ]
+
+        let trend = TrendComputation.compute(setLogs: logs, calendar: utcCalendar)
+
+        XCTAssertEqual(trend.topSets.count, 1)
+        XCTAssertEqual(trend.topSets.first?.weight, 100)
+        XCTAssertNil(trend.displayString)
+    }
+
     /// qa-006 regression: two completed sessions on the same calendar
     /// day (e.g. Burpee in a circuit block and Burpee in a later AMRAP
     /// block during scenario 01's simulator run) must render the trend

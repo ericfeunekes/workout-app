@@ -88,6 +88,59 @@ final class HistoryViewModelTests: XCTestCase {
         XCTAssertEqual(squatRow?.sessionSummary, "1 SESSION")
     }
 
+    func testPickerRowsIgnoreSkippedOnlySessions() async {
+        let (cache, ids) = makeFixtures()
+        let skippedID = UUID()
+        cache.exercises.append(Exercise(id: skippedID, name: "Skipped Curl"))
+        attachSkippedOnlySession(
+            cache: cache,
+            userID: ids.userID,
+            exerciseID: skippedID
+        )
+
+        let vm = HistoryViewModel(
+            cache: cache,
+            calendar: utcCalendar,
+            now: { [now] in now }
+        )
+        await vm.load()
+
+        XCTAssertNil(
+            vm.pickerRows.first { $0.id == skippedID },
+            "skipped-only exercise must not appear as a performed picker row"
+        )
+    }
+
+    func testSessionDetailExerciseIDsIgnoreSkippedLogs() {
+        let workout = makeCompletedWorkout(
+            name: "Skipped Only",
+            userID: UUID(),
+            offset: 0,
+            tags: nil
+        )
+        let itemID = UUID()
+        let exerciseID = UUID()
+        let log = SetLog(
+            id: UUID(), workoutItemID: itemID,
+            performedExerciseID: nil, setIndex: 1,
+            reps: 10, weight: 20, weightUnit: .kg, rir: 2,
+            isWarmup: false,
+            skipped: true,
+            startedAt: nil,
+            completedAt: now,
+            notes: nil
+        )
+
+        let detail = SessionDetail(
+            workout: workout,
+            setLogs: [log],
+            plannedExerciseByItem: [itemID: exerciseID]
+        )
+
+        XCTAssertTrue(detail.performedExerciseIDs.isEmpty)
+        XCTAssertNil(detail.avgRIR)
+    }
+
     func testHistoryLoadUsesSingleItemFetchPerLoad() async {
         // perf-003 guard: the old shape fired `1 + N_blocks` item/block
         // fetches per loaded workout. With 3 seeded completed workouts
@@ -303,5 +356,48 @@ final class HistoryViewModelTests: XCTestCase {
             ))
         }
         cache.setLogsByWorkout[workout.id] = logs
+    }
+
+    private func attachSkippedOnlySession(
+        cache: FakeHistoryCache,
+        userID: UUID,
+        exerciseID: UUID
+    ) {
+        let workout = makeCompletedWorkout(
+            name: "Skipped Only",
+            userID: userID,
+            offset: -259_200,
+            tags: nil
+        )
+        cache.workouts.append(workout)
+        let blockID = UUID()
+        let itemID = UUID()
+        cache.blocksByWorkout[workout.id] = [
+            Block(
+                id: blockID, workoutID: workout.id, parentBlockID: nil,
+                position: 0, name: nil, timingMode: .straightSets,
+                timingConfigJSON: "{}", rounds: nil,
+                roundsRepSchemeJSON: nil, notes: nil
+            ),
+        ]
+        cache.itemsByBlock[blockID] = [
+            WorkoutItem(
+                id: itemID, blockID: blockID, position: 0,
+                exerciseID: exerciseID,
+                prescriptionJSON: #"{"sets":1,"reps":10,"load_kg":20}"#
+            ),
+        ]
+        cache.setLogsByWorkout[workout.id] = [
+            SetLog(
+                id: UUID(), workoutItemID: itemID,
+                performedExerciseID: nil, setIndex: 1,
+                reps: 10, weight: 20, weightUnit: .kg, rir: 2,
+                isWarmup: false,
+                skipped: true,
+                startedAt: workout.completedAt?.addingTimeInterval(-60),
+                completedAt: workout.completedAt ?? now,
+                notes: nil
+            ),
+        ]
     }
 }

@@ -143,7 +143,7 @@ public final class ExerciseDetailViewModel {
     }
 
     /// "MON APR 14 · 4 × 100 kg × 5 · RIR 1.5".
-    /// - Count is number of non-warmup sets in the session.
+    /// - Count is number of performed non-warmup sets in the session.
     /// - Weight + reps are the top set's values (heaviest weight,
     ///   tie-break by reps; same rule as TrendComputation).
     /// - Weight unit comes from the top set's own `weightUnit`,
@@ -160,7 +160,7 @@ public final class ExerciseDetailViewModel {
         formatter.dateFormat = "EEE MMM d"
         let dateStr = formatter.string(from: latestAt).uppercased()
 
-        let workingSets = logs.filter { !$0.isWarmup }
+        let workingSets = logs.filter { !$0.isWarmup && !$0.skipped }
         let count = workingSets.count
         // Restrict the top-set search to the session's dominant unit.
         // Single-unit sessions (the 100% common case) reduce to the

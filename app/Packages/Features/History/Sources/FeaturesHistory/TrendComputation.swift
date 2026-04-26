@@ -106,8 +106,9 @@ public enum TrendComputation {
         setLogs: [SetLog],
         calendar: Calendar = .current
     ) -> Trend {
-        let dominant = dominantUnit(setLogs: setLogs) ?? .kg
-        let filteredLogs = setLogs.filter { effectiveUnit($0) == dominant }
+        let performedLogs = setLogs.filter { !$0.skipped }
+        let dominant = dominantUnit(setLogs: performedLogs) ?? .kg
+        let filteredLogs = performedLogs.filter { effectiveUnit($0) == dominant }
         let topBySession = topSetsBySession(
             setLogs: filteredLogs,
             unit: dominant,
@@ -180,7 +181,7 @@ public enum TrendComputation {
     ) -> [TopSet] {
         _ = calendar
         var best: [UUID: (weight: Double, reps: Int, at: Date)] = [:]
-        for log in setLogs {
+        for log in setLogs where !log.skipped {
             guard let weight = log.weight, let reps = log.reps else { continue }
             let key = log.workoutItemID
             if let current = best[key] {

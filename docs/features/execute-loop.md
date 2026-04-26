@@ -125,10 +125,11 @@ Do not regress to the old pattern where Active renders `REST 0:00` while a block
   simulator with `transition_setup`.
 - Superset logging is proven at round rest, not mid-superset.
 - Rest timer continuity requires simulator or pinned UI proof.
-- Unilateral logging and carry/distance/duration logging need
-  active/log/history parity. Do not infer unilateral grouping from
-  `set_log.side`; that field is shipped/reserved unless a later phase promotes
-  it.
+- Unilateral logging remains exercise/workout-item authored. Do not infer
+  unilateral grouping from `set_log.side`; that field is shipped/reserved unless
+  a later phase promotes it. Carry/distance/duration active logging and History
+  correction parity are built; remaining work is preview/active edit
+  unification and broader mode-specific proof.
 - ETA remaining remains later polish.
 - Set-index render (bug-020) closed — `formatSetRow` uses `setIndex` as-is; pipeline is 1-based throughout.
 - `SetPlan.loadKg` is now `Double?` (nil means bodyweight / loadless — bug-053). Drivers, formatters, and CompleteView+Ledger render "BW" on nil; only nil (not 0) is treated as BW so a genuine 0 lb / 0 kg authored row renders with the unit.

@@ -101,4 +101,54 @@ final class SessionDetailViewModelFormatTests: XCTestCase {
             "nil-unit row should fall back to kg; got: \(row)"
         )
     }
+
+    func testSessionDetailRowRendersSkippedWithoutPhantomLoad() {
+        let log = SetLog(
+            id: SetLogID(),
+            workoutItemID: WorkoutItemID(),
+            setIndex: 2,
+            reps: nil,
+            weight: nil,
+            weightUnit: nil,
+            rir: nil,
+            skipped: true,
+            completedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        let row = SessionDetailViewModel.formatSetRow(log)
+
+        XCTAssertEqual(row, "2 · SKIPPED")
+    }
+
+    func testSessionDetailRowRendersCardioFields() {
+        let log = SetLog(
+            id: SetLogID(),
+            workoutItemID: WorkoutItemID(),
+            setIndex: 1,
+            durationSec: 270,
+            distanceM: 1000,
+            completedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        let row = SessionDetailViewModel.formatSetRow(log)
+
+        XCTAssertEqual(row, "1 · 4:30 AT 4:30 / KM")
+    }
+
+    func testSessionDetailRowRendersExplicitSideWhenPresent() {
+        let log = SetLog(
+            id: SetLogID(),
+            workoutItemID: WorkoutItemID(),
+            setIndex: 1,
+            reps: 10,
+            weight: 20,
+            weightUnit: .kg,
+            side: .left,
+            completedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        let row = SessionDetailViewModel.formatSetRow(log)
+
+        XCTAssertEqual(row, "1 · 20 kg × 10 · LEFT")
+    }
 }

@@ -21,6 +21,7 @@
 
 import XCTest
 import CoreDomain
+import DesignSystem
 @testable import FeaturesHistory
 
 @MainActor
@@ -49,14 +50,19 @@ final class EditSetSheetModelTests: XCTestCase {
         // writes `weightUnit = commit.unit` verbatim onto the SetLog,
         // so this is the only safety net between the user's intent and
         // the persisted row.
-        var captured: EditPastSetLoadCommit?
+        var captured: SetEditIntent?
         let model = EditSetSheetModel(
             setIndex: 1,
             initialReps: 5,
             initialRir: 2,
             initialLoad: 45,
+            initialDurationSec: nil,
+            initialDistanceM: nil,
+            initialSkipped: false,
+            initialSide: .bilateral,
+            initialNotes: nil,
             weightUnit: .lb,
-            onCommit: { _, _, load in captured = load }
+            onCommit: { intent in captured = intent }
         )
         model.selectField(.load)
         // User clears the prefill and types "100".
@@ -68,8 +74,8 @@ final class EditSetSheetModelTests: XCTestCase {
         model.commit()
 
         let commit = try? XCTUnwrap(captured)
-        XCTAssertEqual(commit?.value, 100)
-        XCTAssertEqual(commit?.unit, .lb,
+        XCTAssertEqual(commit?.load, 100)
+        XCTAssertEqual(commit?.loadUnit, "lb",
                        "commit must preserve the unit the SetLog was recorded in")
     }
 
@@ -81,19 +87,24 @@ final class EditSetSheetModelTests: XCTestCase {
         // `.preserve` (which would leave the existing 3 intact) and not
         // `.set(nil)` (which the enum doesn't allow). Ensures the
         // edit sheet can zero out a stale RIR value.
-        var capturedRir: EditPastSetRirCommit?
+        var captured: SetEditIntent?
         let model = EditSetSheetModel(
             setIndex: 1,
             initialReps: 5,
             initialRir: 3,
             initialLoad: 100,
+            initialDurationSec: nil,
+            initialDistanceM: nil,
+            initialSkipped: false,
+            initialSide: .bilateral,
+            initialNotes: nil,
             weightUnit: .kg,
-            onCommit: { _, rir, _ in capturedRir = rir }
+            onCommit: { intent in captured = intent }
         )
         model.clearRir()
         model.commit()
 
-        XCTAssertEqual(capturedRir, .clear,
+        XCTAssertEqual(captured?.rir, .clear,
                        "clearRir + commit must emit .clear so editPastSet writes nil")
     }
 
@@ -101,17 +112,22 @@ final class EditSetSheetModelTests: XCTestCase {
         // Belt-and-braces companion: if the user never touches the RIR
         // row, the commit must emit `.preserve`. Otherwise every edit
         // would overwrite RIR with nil, destroying data.
-        var capturedRir: EditPastSetRirCommit?
+        var captured: SetEditIntent?
         let model = EditSetSheetModel(
             setIndex: 1,
             initialReps: 5,
             initialRir: 3,
             initialLoad: 100,
+            initialDurationSec: nil,
+            initialDistanceM: nil,
+            initialSkipped: false,
+            initialSide: .bilateral,
+            initialNotes: nil,
             weightUnit: .kg,
-            onCommit: { _, rir, _ in capturedRir = rir }
+            onCommit: { intent in captured = intent }
         )
         model.commit()
-        XCTAssertEqual(capturedRir, .preserve)
+        XCTAssertEqual(captured?.rir, .preserve)
     }
 
     // MARK: - Reps cap
@@ -146,6 +162,42 @@ final class EditSetSheetModelTests: XCTestCase {
                        "digits past the 999 cap must be no-ops")
     }
 
+    func testEditSheetEmitsFullFieldIntent() {
+        var captured: SetEditIntent?
+        let model = EditSetSheetModel(
+            setIndex: 1,
+            initialReps: nil,
+            initialRir: nil,
+            initialLoad: nil,
+            initialDurationSec: nil,
+            initialDistanceM: nil,
+            initialSkipped: false,
+            initialSide: .bilateral,
+            initialNotes: nil,
+            weightUnit: .kg,
+            onCommit: { intent in captured = intent }
+        )
+
+        model.selectField(.duration)
+        model.pressDigit(7)
+        model.pressDigit(5)
+        model.selectField(.distance)
+        model.pressDigit(4)
+        model.pressDigit(0)
+        model.pressDigit(0)
+        model.setSkipped(true)
+        model.setSide(.left)
+        model.setNotes("missed by watch")
+        model.commit()
+
+        XCTAssertEqual(captured?.durationSeconds, 75)
+        XCTAssertEqual(captured?.distance, 400)
+        XCTAssertEqual(captured?.distanceUnit, "m")
+        XCTAssertEqual(captured?.skipped, true)
+        XCTAssertEqual(captured?.side, .left)
+        XCTAssertEqual(captured?.notes, .set("missed by watch"))
+    }
+
     // MARK: - Helpers
 
     private func makeModel(weightUnit: WeightUnit) -> EditSetSheetModel {
@@ -154,8 +206,13 @@ final class EditSetSheetModelTests: XCTestCase {
             initialReps: 5,
             initialRir: nil,
             initialLoad: 100,
+            initialDurationSec: nil,
+            initialDistanceM: nil,
+            initialSkipped: false,
+            initialSide: .bilateral,
+            initialNotes: nil,
             weightUnit: weightUnit,
-            onCommit: { _, _, _ in }
+            onCommit: { _ in }
         )
     }
 }

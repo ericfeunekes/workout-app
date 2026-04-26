@@ -84,12 +84,16 @@ runCase("SetEditSheetModel emits only supported touched fields") {
     model.setLoad(100, unit: "kg")
     model.setReps(8)
     model.clearRIR()
+    model.setSkipped(true)
+    model.setNotes("bad plate math")
     let intent = model.commit()
 
     try expectEqual(intent.reps, 8)
     try expectEqual(intent.rir, .clear)
     try expectEqual(intent.load, nil)
     try expectEqual(intent.loadUnit, nil)
+    try expectEqual(intent.skipped, nil)
+    try expectEqual(intent.notes, .preserve)
 }
 
 runCase("SetEditSheetModel supports target field vocabulary") {
@@ -101,6 +105,8 @@ runCase("SetEditSheetModel supports target field vocabulary") {
     model.setSide(.left)
     model.setDistance(400, unit: "m")
     model.setDuration(seconds: 75)
+    model.setSkipped(true)
+    model.setNotes("corrected after workout")
     model.setCarry(load: 32, loadUnit: "kg", distance: 40, distanceUnit: "m")
     let intent = model.commit()
 
@@ -115,6 +121,8 @@ runCase("SetEditSheetModel supports target field vocabulary") {
     try expectEqual(intent.distance, 400)
     try expectEqual(intent.distanceUnit, "m")
     try expectEqual(intent.durationSeconds, 75)
+    try expectEqual(intent.skipped, true)
+    try expectEqual(intent.notes, .set("corrected after workout"))
     try expectEqual(intent.carryLoad, 32)
     try expectEqual(intent.carryLoadUnit, "kg")
     try expectEqual(intent.carryDistance, 40)

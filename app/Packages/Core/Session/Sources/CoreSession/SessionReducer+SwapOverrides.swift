@@ -32,7 +32,8 @@ extension SessionReducer {
     /// done count wins.
     ///
     /// `allowSetsResize` is false for blocks whose advancement policy is
-    /// not `.setMajor` (superset / circuit / AMRAP / EMOM / Tabata / forTime).
+    /// not `.setMajor` (superset / circuit / AMRAP / EMOM / Tabata / forTime
+    /// / accumulate).
     /// In round-robin blocks the per-item `sets` counts are a shared
     /// `rounds` invariant — mutating one item's count would either skew
     /// the cursor walk or implicitly collapse/extend the whole block.
@@ -65,9 +66,20 @@ extension SessionReducer {
                 loadKg: newLoad,
                 unit: newUnit,
                 reps: newReps,
+                workTarget: set.workTarget.map { target in
+                    target.kind == .reps ? .reps(newReps) : target
+                },
                 done: set.done,
                 adjust: set.adjust,
-                rir: set.rir
+                rir: set.rir,
+                completedAt: set.completedAt,
+                durationSec: set.durationSec,
+                distanceM: set.distanceM,
+                hrAvgBpm: set.hrAvgBpm,
+                cadenceAvgSpm: set.cadenceAvgSpm,
+                startedAt: set.startedAt,
+                skipped: set.skipped,
+                side: set.side
             )
         }
         guard allowSetsResize, let target = overrides.sets else { return mirrored }
@@ -103,6 +115,7 @@ extension SessionReducer {
                     loadKg: seedLoad,
                     unit: seedUnit,
                     reps: seedReps,
+                    workTarget: .reps(seedReps),
                     done: false,
                     adjust: nil
                 ))

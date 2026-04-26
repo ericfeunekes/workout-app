@@ -1,10 +1,10 @@
 // TodayLoader.swift
 //
-// Assembles a `TodayContext` by querying `Persistence.WorkoutCache` for
-// today's planned workout. Selection rule is "the planned workout with
-// the scheduled_date closest to today, preferring today-or-past over
-// future" — matches the single-user "there's one workout in flight"
-// assumption from the architecture doc.
+// Assembles Today read models by querying `Persistence.WorkoutCache`.
+// `load()` preserves the execution contract: select one planned workout
+// for the active `ExecutionViewModel`. `loadPlan()` adds the read-side
+// plan queue around that selected workout so Today can expose missed,
+// today, and upcoming plans without making the app a plan editor.
 //
 // `lastPerformed` is sourced from `LastPerformedStore` (populated by
 // Shell after each pull per ADR-2026-04-17-ux-scope § 3 — the server
@@ -102,6 +102,37 @@ public struct TodayLoader: Sendable {
         )
     }
 
+    /// Produce the read-side plan queue plus the one selected workout
+    /// that remains wired for execution. This is intentionally a superset
+    /// of `load()`: the app can show missed/upcoming workouts without
+    /// mutating prescriptions or switching the execution VM.
+    public func loadPlan(
+        lastPerformed: [UUID: String]? = nil,
+        lastSessionSummary: String? = nil,
+        programTags: [String] = [],
+        sessionStateBinding: (@Sendable (SessionMutation) -> Void)? = nil
+    ) async throws -> TodayPlanContext? {
+        let planned = try await cache.loadWorkouts(status: .planned, since: nil)
+        let now = clock()
+        guard let selectedWorkout = Self.pickClosest(to: now, from: planned) else {
+            return nil
+        }
+
+        let orderedWorkouts = Self.sortPlanQueue(to: now, workouts: planned)
+        let contexts = try await contextsForWorkouts(
+            orderedWorkouts,
+            selectedWorkoutID: selectedWorkout.id,
+            lastPerformed: lastPerformed,
+            lastSessionSummary: lastSessionSummary,
+            programTags: programTags,
+            sessionStateBinding: sessionStateBinding
+        )
+        guard let selected = contexts.first(where: { $0.workout.id == selectedWorkout.id }) else {
+            return nil
+        }
+        return TodayPlanContext(selected: selected, workouts: contexts)
+    }
+
     // MARK: - Selection
 
     /// Prefer the planned workout whose `scheduledDate` is closest to
@@ -124,5 +155,87 @@ public struct TodayLoader: Sendable {
             return abs(da) < abs(db)
         }
         return sortedByProximity.first?.0 ?? workouts.first
+    }
+
+    /// Sort for the plan queue: missed/today first, nearest to now first,
+    /// then upcoming in chronological order. Workouts without a
+    /// `scheduledDate` fall to the end.
+    static func sortPlanQueue(to now: Date, workouts: [Workout]) -> [Workout] {
+        workouts.sorted { lhs, rhs in
+            switch (lhs.scheduledDate, rhs.scheduledDate) {
+            case (.some(let lDate), .some(let rDate)):
+                let lPast = lDate.timeIntervalSince(now) <= 0
+                let rPast = rDate.timeIntervalSince(now) <= 0
+                if lPast != rPast { return lPast }
+                if lPast {
+                    return abs(lDate.timeIntervalSince(now)) < abs(rDate.timeIntervalSince(now))
+                }
+                return lDate < rDate
+            case (.some, .none):
+                return true
+            case (.none, .some):
+                return false
+            case (.none, .none):
+                return lhs.createdAt < rhs.createdAt
+            }
+        }
+    }
+
+    private func contextsForWorkouts(
+        _ workouts: [Workout],
+        selectedWorkoutID: WorkoutID,
+        lastPerformed: [UUID: String]?,
+        lastSessionSummary: String?,
+        programTags: [String],
+        sessionStateBinding: (@Sendable (SessionMutation) -> Void)?
+    ) async throws -> [TodayContext] {
+        var blocksByWorkout: [WorkoutID: [Block]] = [:]
+        var itemsByBlock: [BlockID: [WorkoutItem]] = [:]
+        var exerciseIDs: Set<ExerciseID> = []
+
+        for workout in workouts {
+            let blocks = try await cache.loadBlocks(workoutID: workout.id)
+            blocksByWorkout[workout.id] = blocks
+            for block in blocks {
+                let blockItems = try await cache.loadItems(blockID: block.id)
+                itemsByBlock[block.id] = blockItems
+                exerciseIDs.formUnion(blockItems.map(\.exerciseID))
+            }
+        }
+
+        let catalog = try await cache.loadExercises()
+        let exercises = Dictionary(
+            uniqueKeysWithValues: catalog
+                .filter { exerciseIDs.contains($0.id) }
+                .map { ($0.id, $0) }
+        )
+        let resolvedLastPerformed = await resolveLastPerformed(lastPerformed)
+
+        return workouts.map { workout in
+            let blocks = blocksByWorkout[workout.id] ?? []
+            let items = blocks
+                .sorted { $0.position < $1.position }
+                .flatMap { itemsByBlock[$0.id] ?? [] }
+            return TodayContext(
+                workout: workout,
+                blocks: blocks,
+                items: items,
+                exercises: exercises,
+                lastPerformed: resolvedLastPerformed,
+                lastSessionSummary: workout.id == selectedWorkoutID ? lastSessionSummary : nil,
+                programTags: programTags,
+                sessionStateBinding: sessionStateBinding
+            )
+        }
+    }
+
+    private func resolveLastPerformed(_ override: [UUID: String]?) async -> [UUID: String] {
+        if let override {
+            return override
+        } else if let store = lastPerformedStore {
+            return await store.load()
+        } else {
+            return [:]
+        }
     }
 }

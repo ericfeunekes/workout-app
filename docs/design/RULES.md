@@ -1,6 +1,8 @@
 # Rules — Behavior & Logic
 
-Rules extracted from `src/hifi.jsx`. If Claude needs to extend the prototype, these are the invariants.
+Rules extracted from `src/hifi.jsx`. If Claude needs to extend the prototype, these are the prototype invariants.
+
+Production behavior is governed by `docs/spec.md`, `docs/features/`, and `docs/bugs.md`. Where this file describes older prototype interactions that the app has deliberately scoped out, treat them as design reference rather than implementation requirements.
 
 ---
 
@@ -73,6 +75,8 @@ Everywhere a value is displayed, it's tappable.
 - RIR cell is **not tappable** on pending rows (no value exists yet)
 
 ### Plan sheet (Today → tap exercise)
+**Prototype-only reference as of 2026-04-24.** Production Today uses a read-only workout detail sheet plus a copyable Claude adjustment request; it does not mutate plans locally.
+
 - Edit load/reps per set in a compact grid
 - Add/remove sets (`+ set` / `− set`)
 - "Start this exercise" jumps to active screen at first-pending set
@@ -182,3 +186,33 @@ See `WORKOUT.blocks[]` in `src/hifi.jsx`:
 - **Capitalization:** Sentence case in titles, ALL CAPS + letter-spacing for monospace labels (like "LAST TIME — FRI")
 - **Units always visible** — "102.5 kg", not "102.5"
 - **RIR never abbreviated further** — it IS the abbreviation
+
+---
+
+## Icon system rules
+
+Exercise and block icons must be treated as a small visual system, not one-off generated images.
+
+- **Start from SVG masters.** Keep source icons as editable SVGs; export app-ready assets from those masters.
+- **Use the design tokens.** Default linework uses `--ink`; accent marks use existing tokens (`--accent`, `--accent-ink`, `--warn`, `--ok`) rather than new colors.
+- **Use a strict grammar.** 24×24 viewBox, rounded caps/joins, consistent stroke weight, no shadows, no perspective, no gradients inside the icon, no tiny anatomical detail.
+- **Prefer category/block icons before per-exercise icons.** Strength, conditioning, run, warm-up, rest, timer, bodyweight, dumbbell, barbell, kettlebell, row, bike, and mobility should establish the language before dozens of exercise-specific variants.
+- **Differentiate variants with the largest readable shape.** For example, flat dumbbell bench vs. incline dumbbell bench should be distinguished primarily by the bench angle and dumbbell position, not by adding a detailed human figure.
+- **Render before accepting.** Every icon batch must be rasterized and visually inspected at 48, 32, 24, and 20 pt. If it fails at 24 pt, simplify or reserve it for larger contexts. 20 pt is a lower bound, not the target.
+- **Iterate from screenshots.** The workflow is SVG source → rendered preview/contact sheet → critique → SVG edit → repeat. Do not land blind SVGs without viewing them at target sizes.
+
+Current source: `docs/design/icons/exercise-icons.svg` defines the first 24×24 symbol set and `docs/design/icons/renders/exercise-icons.png` is the contact-sheet proof. The SwiftUI implementation lives in `DSExerciseIconView`. Flat vs. incline bench now reads primarily through bench angle; the flat variant is acceptable at 24 px but should not be pushed below 20 px without simplification.
+
+## App icon rules
+
+The app icon is related to the in-app icon language, but it is not the same asset class. Treat it as a launcher-brand artifact with its own review loop.
+
+- **Start at 1024×1024.** Keep the source master at App Store size, then export the full iOS app icon set from that source.
+- **Use the same palette, more boldly.** Base should stay in the warm dark / surface family; foreground marks can use `--accent`, `--accent-ink`, `--warn`, or `--ok`, but the icon must still read as Setmark next to other apps.
+- **Avoid tiny UI-icon detail.** A launcher icon can have more depth and mass than a 24×24 glyph, but it still needs one dominant silhouette. Do not pack it with multiple tiny exercise symbols.
+- **Test real sizes.** Review at 1024, 180, 120, 87, 80, 60, 40, and 29 px, plus a simulated iOS home-screen tile. If the mark only works at 1024, it is not done.
+- **Check mask safety.** Keep the important mark away from rounded-corner crop zones; verify against iOS squircle masking.
+- **Compare variants side by side.** App icon candidates should be rendered as a contact sheet before selection. Do not choose a generated app icon from a single full-size preview.
+- **Do not land generated PNGs without critique.** As with exercise icons, the workflow is source/generation → rendered size sheet → visual critique → revision → asset catalog export.
+
+Current source: `docs/design/icons/app-icon-master.svg` is the selected launcher master, with `docs/design/icons/renders/app-icon-contact-sheet.png` as the candidate and size proof. Generated iOS app icon assets live in `app/WorkoutDB/Assets.xcassets/AppIcon.appiconset/`. The older local candidates `app/icon_1024.png` and `app/icon_1024_v2.png` remain unselected references.

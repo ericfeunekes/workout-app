@@ -36,10 +36,35 @@ ssh "$HOST" "ln -sfn $REMOTE_RELEASE $REMOTE_BASE/current"
 
 echo "==> Restarting $PLIST_LABEL"
 ssh "$HOST" "
-  if sudo launchctl list | grep -q $PLIST_LABEL; then
-    sudo launchctl bootout system/$PLIST_LABEL 2>/dev/null || true
+  set -e
+  if sudo -n true 2>/dev/null; then
+    if sudo -n launchctl print system/$PLIST_LABEL >/dev/null 2>&1; then
+      sudo -n launchctl bootout system/$PLIST_LABEL 2>/dev/null || true
+    fi
+    sudo -n launchctl bootstrap system /Library/LaunchDaemons/$PLIST_LABEL.plist
+    uid=\$(id -u)
+    agent_plist="\$HOME/Library/LaunchAgents/$PLIST_LABEL.plist"
+    launchctl bootout gui/\$uid/$PLIST_LABEL 2>/dev/null || true
+    launchctl bootout gui/\$uid "\$agent_plist" 2>/dev/null || true
+    launchctl remove $PLIST_LABEL 2>/dev/null || true
+    rm -f "\$agent_plist"
+  else
+    uid=\$(id -u)
+    agent_plist="\$HOME/Library/LaunchAgents/$PLIST_LABEL.plist"
+    system_pid=\$(launchctl print system/$PLIST_LABEL 2>/dev/null | awk '/pid =/ { print \$3; exit }' || true)
+    if [ -n "\$system_pid" ]; then
+      launchctl bootout gui/\$uid/$PLIST_LABEL 2>/dev/null || true
+      launchctl bootout gui/\$uid "\$agent_plist" 2>/dev/null || true
+      launchctl remove $PLIST_LABEL 2>/dev/null || true
+      rm -f "\$agent_plist"
+      kill "\$system_pid"
+    else
+      mkdir -p "\$HOME/Library/LaunchAgents"
+      cp $REMOTE_RELEASE/deploy/$PLIST_LABEL.agent.plist "\$agent_plist"
+      launchctl bootout gui/\$uid/$PLIST_LABEL 2>/dev/null || true
+      launchctl bootstrap gui/\$uid "\$agent_plist"
+    fi
   fi
-  sudo launchctl bootstrap system /Library/LaunchDaemons/$PLIST_LABEL.plist
 "
 
 echo "==> Verifying health"

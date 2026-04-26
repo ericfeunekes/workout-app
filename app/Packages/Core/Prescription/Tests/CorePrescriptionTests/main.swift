@@ -49,10 +49,11 @@ runCase("fixture · superset · parses item as .straightSets with nil sets") {
     try expect(autoreg != nil, "superset item should carry autoreg")
 
     let c = try unwrap(parser.parseTimingConfig(timingMode: mode, configJSON: cfg))
-    guard case .superset(let rbr) = c else {
+    guard case .superset(let rbr, let loggingMode) = c else {
         throw ExpectationFailure(message: "expected .superset config", file: #file, line: #line)
     }
     try expectEqual(rbr, 120.0)
+    try expectEqual(loggingMode, .batchAtRoundRest)
 }
 
 runCase("fixture · circuit · parses .straightSets item + .circuit config") {
@@ -65,11 +66,12 @@ runCase("fixture · circuit · parses .straightSets item + .circuit config") {
     try expectEqual(loadKg, 20.0)
 
     let c = try unwrap(parser.parseTimingConfig(timingMode: mode, configJSON: cfg))
-    guard case .circuit(let rbe, let rbr) = c else {
+    guard case .circuit(let rbe, let rbr, let loggingMode) = c else {
         throw ExpectationFailure(message: "expected .circuit config", file: #file, line: #line)
     }
     try expectEqual(rbe, 0.0)
     try expectEqual(rbr, 120.0)
+    try expectEqual(loggingMode, .stationByStation)
 }
 
 runCase("fixture · emom · parses .straightSets item + .emom config") {
@@ -158,6 +160,25 @@ runCase("fixture · continuous · parses .empty + .continuous config") {
     try expectEqual(dist, nil)  // JSON null → nil
     try expectEqual(pace, 360.0)
     try expectEqual(zone, 2)
+}
+
+runCase("fixture · accumulate · parses reps item + .accumulate config") {
+    let (pre, mode, cfg) = try FixtureLoader.wrapped("accumulate")
+    let p = try unwrap(parser.parse(prescriptionJSON: pre))
+    guard case .straightSets(let sets, let reps, let loadKg, _, _, _, _, _) = p else {
+        throw ExpectationFailure(message: "expected .straightSets, got \(p)", file: #file, line: #line)
+    }
+    try expectEqual(sets, nil)
+    try expectEqual(reps, .count(25))
+    try expectEqual(loadKg, nil)
+
+    let c = try unwrap(parser.parseTimingConfig(timingMode: mode, configJSON: cfg))
+    guard case .accumulate(let dur, let targetReps, let dist) = c else {
+        throw ExpectationFailure(message: "expected .accumulate config", file: #file, line: #line)
+    }
+    try expectEqual(dur, nil)
+    try expectEqual(targetReps, 100)
+    try expectEqual(dist, nil)
 }
 
 runCase("fixture · custom · parses .empty + .custom config with 5 segments") {
@@ -252,7 +273,7 @@ runCase("fixture · drop_set · parses as .setsDetail with drop flags on sets 1.
 runCase("fixture · cluster · parses as .cluster") {
     let json = try FixtureLoader.bare("cluster")
     let p = try unwrap(parser.parse(prescriptionJSON: json))
-    guard case .cluster(let sets, let reps, let load, _, let sub, let intra, let rir) = p else {
+    guard case .cluster(let sets, let reps, let load, _, let sub, let intra, let rir, _) = p else {
         throw ExpectationFailure(message: "expected .cluster, got \(p)", file: #file, line: #line)
     }
     try expectEqual(sets, 4)
@@ -261,6 +282,24 @@ runCase("fixture · cluster · parses as .cluster") {
     try expectEqual(sub, 4)
     try expectEqual(intra, 15.0)
     try expectEqual(rir, 1)
+}
+
+runCase("cluster · parses optional autoreg for top-level set") {
+    let json = """
+    {"sets":2,"reps":5,"load_kg":100,"weight_unit":"lb",
+     "sub_sets":2,"intra_set_rest_sec":15,"target_rir":1,
+     "autoreg":{"overshoot_at":2,"overshoot_step_kg":5,
+                 "undershoot_at":2,"undershoot_step_kg":5,
+                 "apply_to":"remaining"}}
+    """
+    let p = try unwrap(parser.parse(prescriptionJSON: json))
+    guard case .cluster(_, _, _, _, _, _, let rir, let autoreg) = p else {
+        throw ExpectationFailure(message: "expected .cluster, got \(p)", file: #file, line: #line)
+    }
+    try expectEqual(rir, 1)
+    try expectEqual(autoreg?.targetRir, 1)
+    try expectEqual(autoreg?.overshootStepKg, 5.0)
+    try expectEqual(autoreg?.undershootStepKg, 5.0)
 }
 
 runCase("fixture · amrap_token · parses as .amrapToken") {
@@ -869,7 +908,7 @@ runCase("weight_unit · repRange / cluster / setsDetail / amrapToken / warmup in
     try expectEqual(rrUnit, WeightUnit.lb)
 
     let clusterJSON = #"{"sets":4,"reps":5,"load_kg":100,"sub_sets":4,"intra_set_rest_sec":15}"#
-    guard case .cluster(_, _, _, let cUnit, _, _, _) = try unwrap(parser.parse(prescriptionJSON: clusterJSON)) else {
+    guard case .cluster(_, _, _, let cUnit, _, _, _, _) = try unwrap(parser.parse(prescriptionJSON: clusterJSON)) else {
         throw ExpectationFailure(message: "expected .cluster", file: #file, line: #line)
     }
     try expectEqual(cUnit, WeightUnit.lb)
@@ -891,6 +930,78 @@ runCase("weight_unit · repRange / cluster / setsDetail / amrapToken / warmup in
         throw ExpectationFailure(message: "expected .warmup", file: #file, line: #line)
     }
     try expectEqual(wUnit, WeightUnit.lb)
+}
+
+runCase("work_target · structured duration separates kind from display unit") {
+    guard let target = parser.parseWorkTarget(
+        prescriptionJSON: #"{"target":{"kind":"duration","value":2,"unit":"min"}}"#
+    ) else {
+        throw ExpectationFailure(message: "expected work target", file: #file, line: #line)
+    }
+    try expectEqual(target.kind, .duration)
+    try expectEqual(target.value, 2)
+    try expectEqual(target.unit, .minutes)
+    try expectEqual(target.canonicalReps, nil)
+    try expectEqual(target.canonicalDurationSec, 120)
+    try expectEqual(target.canonicalDistanceM, nil)
+}
+
+runCase("work_target · structured distance converts display unit to canonical metres") {
+    guard let target = parser.parseWorkTarget(
+        prescriptionJSON: #"{"target":{"kind":"distance","value":200,"unit":"ft"}}"#
+    ) else {
+        throw ExpectationFailure(message: "expected work target", file: #file, line: #line)
+    }
+    try expectEqual(target.kind, .distance)
+    try expectEqual(target.value, 200)
+    try expectEqual(target.unit, .feet)
+    try expectEqual(target.canonicalReps, nil)
+    try expectEqual(target.canonicalDurationSec, nil)
+    try expect(
+        abs((target.canonicalDistanceM ?? 0) - 60.96) < 0.001,
+        "200 ft should canonicalize to 60.96 m"
+    )
+}
+
+runCase("work_target · flat scalar keys still map to the same typed target") {
+    guard let duration = parser.parseWorkTarget(
+        prescriptionJSON: #"{"duration":90,"duration_unit":"sec"}"#
+    ) else {
+        throw ExpectationFailure(message: "expected duration target", file: #file, line: #line)
+    }
+    try expectEqual(duration.kind, .duration)
+    try expectEqual(duration.value, 90)
+    try expectEqual(duration.unit, .seconds)
+    try expectEqual(duration.canonicalDurationSec, 90)
+
+    guard let reps = parser.parseWorkTarget(prescriptionJSON: #"{"reps":12}"#) else {
+        throw ExpectationFailure(message: "expected reps target", file: #file, line: #line)
+    }
+    try expectEqual(reps.kind, .reps)
+    try expectEqual(reps.value, 12)
+    try expectEqual(reps.unit, .reps)
+    try expectEqual(reps.canonicalReps, 12)
+}
+
+runCase("work_target · structured units must match target kind") {
+    try expectEqual(
+        parser.parseWorkTarget(
+            prescriptionJSON: #"{"target":{"kind":"duration","value":400,"unit":"m"}}"#
+        ),
+        nil
+    )
+    try expectEqual(
+        parser.parseWorkTarget(
+            prescriptionJSON: #"{"target":{"kind":"distance","value":2,"unit":"min"}}"#
+        ),
+        nil
+    )
+    try expectEqual(
+        parser.parseWorkTarget(
+            prescriptionJSON: #"{"target":{"kind":"reps","value":12,"unit":"ft"}}"#
+        ),
+        nil
+    )
 }
 
 runCase("AlternativeOverrides · weight_unit is optional (nil means inherit)") {

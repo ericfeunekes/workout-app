@@ -99,9 +99,9 @@ extension PrescriptionParser {
     ) -> Result<Prescription, ParseError> {
         let shape = "cluster"
         let sets: Int
-        switch readRequiredInt(obj, "sets", shape: shape) {
+        switch readOptionalInt(obj, "sets") {
         case .failure(let e): return .failure(e)
-        case .success(let v): sets = v
+        case .success(let v): sets = v ?? 1
         }
         let reps: Int
         switch readRequiredInt(obj, "reps", shape: shape) {
@@ -133,6 +133,11 @@ extension PrescriptionParser {
         case .failure(let e): return .failure(e)
         case .success(let v): targetRir = v
         }
+        let autoreg: Autoreg?
+        switch parseAutoreg(obj, shape: shape, unit: unit) {
+        case .failure(let e): return .failure(e)
+        case .success(let v): autoreg = v
+        }
         return .success(.cluster(
             sets: sets,
             reps: reps,
@@ -140,7 +145,8 @@ extension PrescriptionParser {
             unit: unit,
             subSets: subSets,
             intraSetRestSec: intra,
-            targetRir: targetRir
+            targetRir: targetRir,
+            autoreg: autoreg
         ))
     }
 

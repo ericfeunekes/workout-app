@@ -41,6 +41,7 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         try await Task.sleep(nanoseconds: 50_000_000)
 
@@ -71,6 +72,7 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         try await Task.sleep(nanoseconds: 50_000_000)
 
@@ -108,6 +110,7 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         let telemetry = TelemetryRecorder()
         let vm = ExecutionViewModel(context: ctx, clock: fixed, telemetry: telemetry)
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         vm.editPastSet(itemID: itemID, setIndex: 1, loadKg: 97.5, reps: nil, rir: nil)
 
@@ -170,6 +173,7 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         )
         let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         try await Task.sleep(nanoseconds: 50_000_000)
 
@@ -205,6 +209,7 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         try await Task.sleep(nanoseconds: 50_000_000)
         vm.editPastSet(itemID: itemID, setIndex: 1, loadKg: nil, reps: 4, rir: nil)

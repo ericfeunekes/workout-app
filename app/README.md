@@ -76,7 +76,7 @@ Today  →  Active set  →  Rest  →  (repeat)  →  Complete
 
 ## Prescription execution
 
-The app reads `block.timing_mode`, `block.timing_config_json`, and each `workout_item.prescription_json` and drives the right timer UI. The full per-mode vocabulary is in `docs/prescription.md`. Summary of modes: `straight_sets`, `superset`, `circuit`, `emom`, `amrap`, `for_time`, `intervals`, `tabata`, `continuous`, `custom`, `rest`.
+The app reads `block.timing_mode`, `block.timing_config_json`, and each `workout_item.prescription_json` and drives the right timer UI. The full per-mode vocabulary is in `docs/prescription.md`. Summary of modes: `straight_sets`, `superset`, `circuit`, `emom`, `amrap`, `for_time`, `intervals`, `tabata`, `continuous`, `accumulate`, `custom`, `rest`.
 
 The app does not validate prescriptions — malformed shapes fail at execution time when a required key is missing. Claude and the app agree on shape via `docs/prescription.md`; if the app needs a new shape, the doc changes in the same commit.
 
@@ -118,7 +118,7 @@ Offline is the default assumption, not an error. A neutral `· offline` pill app
 
 ## First-run
 
-The app on first launch requires a **connection string** (server URL + bearer token) entered by paste or scanned via QR. There is no login. On success, the token lives in the keychain; the URL in `UserDefaults`. First sync runs and lands the user on Today. See `docs/sync.md` § "First-run UX" for the full flow.
+The app on first launch requires a **connection string** (server URL + bearer token) entered by paste or scanned via QR. There is no login. On success, the full connection pair lives in Keychain so it survives app restarts and same-device reinstalls; `UserDefaults` only mirrors the URL for compatibility/diagnostics. First sync runs and lands the user on Today. See `docs/sync.md` § "First-run UX" for the full flow.
 
 ## Persistence (local session)
 

@@ -74,11 +74,12 @@ public struct StraightSetsDriver: TimingDriver {
             setIndex: set.setIndex,
             totalSets: itemLog.sets.count,
             loadDisplay: loadDisplay,
-            repsDisplay: String(set.reps),
+            repsDisplay: displayText(for: set),
             loadKg: set.loadKg,
             reps: set.reps,
             adjustGlyph: set.adjust,
-            lastTime: context.lastPerformed[item.exerciseID]
+            lastTime: context.lastPerformed[item.exerciseID],
+            kind: activeKind(for: set)
         )
     }
 
@@ -207,13 +208,14 @@ public struct StraightSetsDriver: TimingDriver {
     /// parsed Prescription, for the straight-sets-adjacent shapes that
     /// may carry them.
     ///
-    /// Only shapes with a single uniform `{reps, load}` plan may propose:
-    /// `straight_sets` and `rep_range`. Per `docs/autoreg.md` S17, shapes
+    /// Only shapes with a single uniform top-level `{reps, load}` plan may propose:
+    /// `straight_sets`, `rep_range`, and top-level `cluster`. Per `docs/autoreg.md` S17, shapes
     /// that author per-set variation (`sets_detail` pyramid / warm-up /
     /// cluster drops) already encode the author's intended load trajectory
     /// — a flat autoreg adjustment against the first set's load would
-    /// silently overwrite the pyramid's authored set-2+ targets. Same
-    /// reasoning applies to `cluster` (intra-set drops), `percent_of_1rm`
+    /// silently overwrite the pyramid's authored set-2+ targets. Cluster
+    /// proposes only after the top-level composed set logs; sub-slots never
+    /// trigger autoreg. Same reasoning applies to `percent_of_1rm`
     /// (resolver-derived, not yet wired), bodyweight/warmup (loadless),
     /// amrap_token (open-entry), and `.empty` (placeholder). qa-044: the
     /// earlier `.setsDetail` branch returned `(autoreg, target)` and
@@ -227,7 +229,9 @@ public struct StraightSetsDriver: TimingDriver {
             return (autoreg, target)
         case .repRange(_, _, _, _, _, let target, let autoreg):
             return (autoreg, target)
-        case .setsDetail, .percentOf1RM, .cluster, .amrapToken, .bodyweight, .warmup, .empty:
+        case .cluster(_, _, _, _, _, _, let target, let autoreg):
+            return (autoreg, target)
+        case .setsDetail, .percentOf1RM, .amrapToken, .bodyweight, .warmup, .empty:
             return (nil, nil)
         }
     }

@@ -32,6 +32,11 @@ import WorkoutCoreFoundation
 /// server round-trip is skipped.
 public typealias HistorySetLogEditHook = @Sendable (SetLog) async -> Void
 
+/// Fire-and-forget hook invoked when the user resets an accidentally
+/// logged workout from History. Shell wires this to `SyncAPI.resetWorkout`
+/// so server state matches the local cache before the next pull.
+public typealias HistoryWorkoutResetHook = @Sendable (WorkoutID) async -> Void
+
 @Observable
 @MainActor
 public final class HistoryViewModel {
@@ -187,6 +192,7 @@ public final class HistoryViewModel {
     /// set the hook after AppBootstrap returns. See
     /// `setSetLogEditHook(_:)` below.
     var onSetLogEdited: HistorySetLogEditHook?
+    var onWorkoutReset: HistoryWorkoutResetHook?
 
     /// How many completed workouts to pull for the list view. 200 is
     /// comfortably past the single-user v1 horizon.
@@ -208,13 +214,15 @@ public final class HistoryViewModel {
         calendar: Calendar = .current,
         now: @escaping @Sendable () -> Date = { Date() },
         telemetry: TelemetryEmitter = NoopTelemetryEmitter(),
-        onSetLogEdited: HistorySetLogEditHook? = nil
+        onSetLogEdited: HistorySetLogEditHook? = nil,
+        onWorkoutReset: HistoryWorkoutResetHook? = nil
     ) {
         self.cache = cache
         self.calendar = calendar
         self.now = now
         self.telemetry = telemetry
         self.onSetLogEdited = onSetLogEdited
+        self.onWorkoutReset = onWorkoutReset
     }
 
     // MARK: - Intent
@@ -232,6 +240,10 @@ public final class HistoryViewModel {
     /// success path is the narrow plumbing needed to close bug-015.
     public func setSetLogEditHook(_ hook: HistorySetLogEditHook?) {
         self.onSetLogEdited = hook
+    }
+
+    public func setWorkoutResetHook(_ hook: HistoryWorkoutResetHook?) {
+        self.onWorkoutReset = hook
     }
 
     /// Change the split chip and re-derive groups.

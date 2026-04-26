@@ -162,8 +162,35 @@ final class CustomDriverTests: XCTestCase {
         let content = CustomDriver().activeContent(state: state, context: ctx)
         XCTAssertEqual(content?.exerciseName, "Threshold Run")
         XCTAssertEqual(content?.reps, 0)
-        XCTAssertEqual(content?.loadDisplay, "BW")
+        XCTAssertEqual(content?.repsDisplay, "1:00")
+        XCTAssertEqual(content?.loadDisplay, "WORK")
+        XCTAssertEqual(content?.kind, .cardio)
         XCTAssertGreaterThanOrEqual(content?.totalSets ?? 0, 1)
+    }
+
+    func testEmptyCustomSegmentsSeedAndRenderEachTimedSegment() {
+        let (ctx, _, state) = makeCustom(
+            timingConfigJSON: #"""
+            {"segments":[
+              {"type":"work","duration_sec":15,"label":"hard"},
+              {"type":"rest","duration_sec":10,"label":"easy"},
+              {"type":"work","duration_sec":15,"label":"hard"}
+            ]}
+            """#,
+            items: [
+                (name: "Threshold Run", prescriptionJSON: "{}"),
+            ],
+            cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 2)
+        )
+
+        XCTAssertEqual(state.items.first?.sets.count, 3)
+        let content = CustomDriver().activeContent(state: state, context: ctx)
+        XCTAssertEqual(content?.exerciseName, "Threshold Run")
+        XCTAssertEqual(content?.setIndex, 2)
+        XCTAssertEqual(content?.totalSets, 3)
+        XCTAssertEqual(content?.repsDisplay, "10 s")
+        XCTAssertEqual(content?.loadDisplay, "REST · easy")
+        XCTAssertEqual(content?.kind, .cardio)
     }
 
     func testCustomDriverZeroRowItemRendersNoActivity() {

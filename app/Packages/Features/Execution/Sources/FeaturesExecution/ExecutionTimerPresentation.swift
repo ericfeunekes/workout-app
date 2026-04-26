@@ -76,7 +76,7 @@ extension ExecutionViewModel {
 
             if let workReadyAt = state.workReadyAt {
                 return ExecutionTimerPresentation(
-                    label: "WAITING TO START",
+                    label: "READY",
                     direction: .elapsed,
                     seconds: max(0, now.timeIntervalSince(workReadyAt))
                 )
@@ -84,7 +84,7 @@ extension ExecutionViewModel {
 
             return nil
 
-        case .today, .complete:
+        case .today, .transition, .complete:
             return nil
         }
     }

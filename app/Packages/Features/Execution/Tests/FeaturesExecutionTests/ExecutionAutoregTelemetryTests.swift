@@ -28,6 +28,8 @@ final class ExecutionAutoregTelemetryTests: XCTestCase {
         let vm = ExecutionViewModel(context: ctx, telemetry: telemetry)
         vm.start()
 
+        vm.startCurrentSet()
+
         vm.logSet(reps: 5, rir: 4)
 
         let events = telemetry.events.filter {
@@ -86,6 +88,8 @@ final class ExecutionAutoregTelemetryTests: XCTestCase {
         let vm = ExecutionViewModel(context: ctx, telemetry: telemetry)
         vm.start()
 
+        vm.startCurrentSet()
+
         // Logged 6 vs prescribed 8 → undershoot-reps.
         vm.logSet(reps: 6, rir: 1)
 
@@ -106,6 +110,8 @@ final class ExecutionAutoregTelemetryTests: XCTestCase {
         let telemetry = TelemetryRecorder()
         let vm = ExecutionViewModel(context: ctx, telemetry: telemetry)
         vm.start()
+
+        vm.startCurrentSet()
 
         // RIR 2 == target, no overshoot, no undershoot → no proposal.
         vm.logSet(reps: 5, rir: 2)
@@ -130,6 +136,8 @@ final class ExecutionAutoregTelemetryTests: XCTestCase {
         let telemetry = TelemetryRecorder()
         let vm = ExecutionViewModel(context: ctx, telemetry: telemetry)
         vm.start()
+
+        vm.startCurrentSet()
 
         // Overshoot log → banner presents; user advances off rest instead
         // of tapping undo.
@@ -159,6 +167,8 @@ final class ExecutionAutoregTelemetryTests: XCTestCase {
         let vm = ExecutionViewModel(context: ctx, telemetry: telemetry)
         vm.start()
 
+        vm.startCurrentSet()
+
         // Clean log at target RIR → no proposal.
         vm.logSet(reps: 5, rir: 2)
         XCTAssertNil(vm.currentProposal, "target RIR must not propose")
@@ -184,6 +194,8 @@ final class ExecutionAutoregTelemetryTests: XCTestCase {
         let telemetry = TelemetryRecorder()
         let vm = ExecutionViewModel(context: ctx, telemetry: telemetry)
         vm.start()
+
+        vm.startCurrentSet()
 
         // Overshoot log → banner presents with a live proposal.
         vm.logSet(reps: 5, rir: 4)

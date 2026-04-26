@@ -71,11 +71,13 @@ extension ExecutionViewModel {
             now: clock.now
         )
         applyCardioLog(item: item, setIndex: c.setIndex, logMutation: logMutation)
+        completeAccumulateIfTargetReached()
         emitSessionMutation("logCardioSet")
         enqueueLoggedCardioSet(item: item, setIndex: c.setIndex, input: input)
         enterRestIfZeroItemBlock()
         enterTabataWorkWindowIfNeeded()
         enterBlockTimerIfNeeded()
+        prepareExplicitSetStartIfNeeded()
     }
 
     /// Convenience overload that accepts individual cardio fields.
@@ -96,26 +98,43 @@ extension ExecutionViewModel {
         ))
     }
 
-    /// `true` when the cursor's current block is a cardio timing mode
-    /// (`.intervals` or `.continuous`). The Active view reads this to
+    /// `true` when the cursor's current block is cardio-shaped. The
+    /// Active view reads this to
     /// pick its log affordance — cardio blocks fire `logCurrentSet()`
     /// directly (no reps/RIR sheet), strength blocks open `LogSetSheet`.
     ///
-    /// Tabata is NOT routed here: tabata blocks are predominantly strength
-    /// (20/10 push-ups, squats) and the interval shape of a cardio tabata
-    /// is already covered by the time-based `.intervals` mode. Routing
-    /// tabata to `logCardioSet` would drop the user's logged reps on the
-    /// floor.
+    /// Tabata and custom only route here when the driver renders the
+    /// current content as `.cardio`; strength-shaped Tabata rounds still
+    /// open the normal load/reps/RIR sheet.
     public var isCurrentBlockCardio: Bool {
         let bi = state.cursor.blockIndex
         guard let block = context.block(at: bi) else { return false }
         switch block.timingMode {
         case .intervals, .continuous:
             return true
-        case .straightSets, .superset, .circuit, .emom, .amrap,
-             .forTime, .tabata, .custom, .rest:
+        case .accumulate:
+            return accumulateTargetKind != .reps
+        case .straightSets, .superset, .circuit, .emom, .tabata, .custom:
+            return activeContent?.kind == .cardio
+        case .amrap, .forTime, .rest:
             return false
         }
+    }
+
+    public var continuousTargetReached: Bool {
+        guard state.route == .active,
+              let block = context.block(at: state.cursor.blockIndex),
+              block.timingMode == .continuous,
+              let workEndsAt = state.workEndsAt else {
+            return false
+        }
+        return clock.now >= workEndsAt
+    }
+
+    public func continueContinuousPastTarget() {
+        guard continuousTargetReached else { return }
+        state.workEndsAt = nil
+        persist()
     }
 
     /// Log the current set, routing to either `logSet(reps:rir:)` or
@@ -131,11 +150,9 @@ extension ExecutionViewModel {
     /// Timing data sources:
     ///   * `intervals`: `durationSec` = elapsed `clock.now - workStartedAt`
     ///     when `workStartedAt` is populated (the live gym case); else
-    ///     `work_sec` from `timing_config_json` when authored; else
-    ///     `work_distance_m / 1000 * pace_sec_per_km` when pace is
-    ///     authored. Elapsed wins because a log must describe what
-    ///     actually happened — authored work_sec / target pace are
-    ///     prescription targets, not performance.
+    ///     `work_sec` from `timing_config_json` when authored. Elapsed wins
+    ///     because a log must describe what actually happened — authored
+    ///     targets are prescription, not performance.
     ///   * `continuous`: `durationSec` = elapsed `clock.now - workStartedAt`.
     ///   * `startedAt` = `state.workStartedAt` when set (stamped by
     ///     `.start` / `.advanceFromRest`); else nil (the reducer falls
@@ -159,6 +176,14 @@ extension ExecutionViewModel {
     private func buildCardioLogInputFromState() -> CardioLogInput {
         let startedAt = state.workStartedAt
         let elapsed: TimeInterval? = startedAt.map { clock.now.timeIntervalSince($0) }
+        if let set = activeSetPlan,
+           activeKind(for: set) == .cardio {
+            return CardioLogInput(
+                durationSec: canonicalDurationForLog(set: set, elapsed: elapsed),
+                distanceM: canonicalDistanceForLog(set: set),
+                startedAt: startedAt
+            )
+        }
         let bi = state.cursor.blockIndex
         guard let block = context.block(at: bi) else {
             return CardioLogInput(durationSec: elapsed, startedAt: startedAt)
@@ -196,14 +221,12 @@ extension ExecutionViewModel {
         startedAt: Date?
     ) -> CardioLogInput {
         switch config {
-        case let .intervals(workSec, _, workDistanceM, _, _, paceSecPerKm):
+        case let .intervals(workSec, _, workDistanceM, _, _, _):
             let duration: Double?
             if let elapsed {
                 duration = elapsed
             } else if let workSec {
                 duration = workSec
-            } else if let workDistanceM, let paceSecPerKm {
-                duration = workDistanceM / 1000.0 * paceSecPerKm
             } else {
                 duration = nil
             }
@@ -212,6 +235,22 @@ extension ExecutionViewModel {
                 distanceM: workDistanceM,
                 startedAt: startedAt
             )
+        case .tabata:
+            return CardioLogInput(
+                durationSec: elapsed ?? TabataDriver.workSec,
+                startedAt: startedAt
+            )
+        case .custom(let segments):
+            let index = state.cursor.setIndex - 1
+            let segmentDuration = segments.indices.contains(index)
+                ? segments[index].durationSec
+                : nil
+            return CardioLogInput(
+                durationSec: elapsed ?? segmentDuration,
+                startedAt: startedAt
+            )
+        case .accumulate:
+            return CardioLogInput(durationSec: elapsed, startedAt: startedAt)
         default:
             // Continuous + any other cardio-adjacent mode that lands here:
             // duration is the elapsed real time since `workStartedAt`.
@@ -230,6 +269,7 @@ extension ExecutionViewModel {
         setIndex: Int,
         logMutation: SessionMutation
     ) {
+        let previousBlockIndex = state.cursor.blockIndex
         let outcome = driver.onSetLogged(
             state: state,
             context: context,
@@ -247,6 +287,7 @@ extension ExecutionViewModel {
             item: item,
             postLogState: postLogState
         ))
+        _ = enterBlockTransitionIfNeeded(from: previousBlockIndex)
         currentProposal = nil
         currentProposalItemID = nil
     }

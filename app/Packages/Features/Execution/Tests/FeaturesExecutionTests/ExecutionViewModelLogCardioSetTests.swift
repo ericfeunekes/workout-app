@@ -69,6 +69,48 @@ final class ExecutionViewModelLogCardioSetTests: XCTestCase {
         return (ctx, itemID)
     }
 
+    /// Time-owned intervals: the app owns the work/rest boundaries and can
+    /// auto-transition exactly at zero without sensor support.
+    private static func timeIntervalsContext(
+        intervalCount: Int = 2,
+        workSec: Int = 5,
+        restSec: Int = 3
+    ) -> (WorkoutContext, UUID) {
+        let userID = UUID()
+        let workoutID = UUID()
+        let blockID = UUID()
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let now = Date()
+
+        let workout = Workout(
+            id: workoutID, userID: userID, name: "Time Intervals",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil, createdAt: now, updatedAt: now,
+            completedAt: nil, tagsJSON: nil
+        )
+        let block = Block(
+            id: blockID, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: nil, timingMode: .intervals,
+            timingConfigJSON: #"""
+            {"work_sec":\#(workSec),"rest_sec":\#(restSec),"interval_count":\#(intervalCount)}
+            """#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let item = WorkoutItem(
+            id: itemID, blockID: blockID, position: 0,
+            exerciseID: exerciseID,
+            prescriptionJSON: "{}"
+        )
+        let ctx = WorkoutContext(
+            workout: workout,
+            blocks: [block],
+            itemsByBlock: [[item]],
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Bike")]
+        )
+        return (ctx, itemID)
+    }
+
     /// Build a continuous context — a 30-min Z2 run with an authored
     /// pace + HR zone. Shape matches the `continuous` fixture in
     /// `docs/prescription.md` § "continuous".
@@ -106,6 +148,57 @@ final class ExecutionViewModelLogCardioSetTests: XCTestCase {
             exercises: [exerciseID: Exercise(id: exerciseID, name: "Run")]
         )
         return (ctx, itemID)
+    }
+
+    private static func continuousThenStraightSetsContext() -> (WorkoutContext, UUID, UUID) {
+        let userID = UUID()
+        let workoutID = UUID()
+        let runBlockID = UUID()
+        let pressBlockID = UUID()
+        let runExerciseID = UUID()
+        let pressExerciseID = UUID()
+        let runItemID = UUID()
+        let pressItemID = UUID()
+        let now = Date()
+
+        let workout = Workout(
+            id: workoutID, userID: userID, name: "Run Then Press",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil, createdAt: now, updatedAt: now,
+            completedAt: nil, tagsJSON: nil
+        )
+        let runBlock = Block(
+            id: runBlockID, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: "Easy run", timingMode: .continuous,
+            timingConfigJSON: #"{"target_duration_sec":60}"#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let pressBlock = Block(
+            id: pressBlockID, workoutID: workoutID, parentBlockID: nil,
+            position: 1, name: "Press", timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":90}"#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let runItem = WorkoutItem(
+            id: runItemID, blockID: runBlockID, position: 0,
+            exerciseID: runExerciseID,
+            prescriptionJSON: "{}"
+        )
+        let pressItem = WorkoutItem(
+            id: pressItemID, blockID: pressBlockID, position: 0,
+            exerciseID: pressExerciseID,
+            prescriptionJSON: #"{"sets":1,"reps":5,"load_kg":100}"#
+        )
+        let ctx = WorkoutContext(
+            workout: workout,
+            blocks: [runBlock, pressBlock],
+            itemsByBlock: [[runItem], [pressItem]],
+            exercises: [
+                runExerciseID: Exercise(id: runExerciseID, name: "Run"),
+                pressExerciseID: Exercise(id: pressExerciseID, name: "Bench Press"),
+            ]
+        )
+        return (ctx, runItemID, pressItemID)
     }
 
     // MARK: - Cardio log shape
@@ -187,6 +280,30 @@ final class ExecutionViewModelLogCardioSetTests: XCTestCase {
         XCTAssertEqual(vm.state.route, .complete)
     }
 
+    func testCardioFinalLogRearmsSetStartOnNextExplicitStartBlock() {
+        let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_001_000))
+        let (ctx, _, pressItemID) = Self.continuousThenStraightSetsContext()
+        let vm = ExecutionViewModel(context: ctx, clock: fixed)
+        vm.start()
+
+        vm.logCardioSet(durationSec: 60, distanceM: nil, startedAt: fixed.now.addingTimeInterval(-60))
+
+        XCTAssertEqual(vm.state.route, .transition)
+        vm.beginBlockTransition()
+        XCTAssertEqual(vm.state.route, .active)
+        XCTAssertEqual(vm.state.cursor.blockIndex, 1)
+        XCTAssertEqual(vm.state.cursor.itemIndex, 0)
+        XCTAssertEqual(vm.state.cursor.setIndex, 1)
+        XCTAssertTrue(vm.requiresExplicitSetStartForCurrentWork)
+        XCTAssertFalse(vm.isCurrentWorkStarted)
+        XCTAssertNotNil(vm.state.workReadyAt)
+        XCTAssertNil(vm.state.workStartedAt)
+
+        vm.logSet(reps: 5, rir: 2)
+        let pressItem = vm.state.items.first { $0.itemID == pressItemID }
+        XCTAssertEqual(pressItem?.sets.first?.done, false, "Done cannot bypass Set Start after cardio transition")
+    }
+
     // MARK: - Trailing-rest fix
 
     func testIntervalsDriverFinalIntervalSkipsRestGoesComplete() async throws {
@@ -196,14 +313,14 @@ final class ExecutionViewModelLogCardioSetTests: XCTestCase {
         // the end of the block and routes to `.complete`. No trailing
         // rest screen.
         let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_700))
-        let (ctx, _) = Self.intervalsContext(intervalCount: 2)
+        let (ctx, _) = Self.timeIntervalsContext(intervalCount: 2)
         let vm = ExecutionViewModel(context: ctx, clock: fixed)
         vm.start()
 
         // Interval 1 — non-final. Log it; the driver surfaces the
-        // authored rest (derived from 200 m / 270 s/km = 54 s).
+        // authored rest.
         vm.logCardioSet(
-            durationSec: 96.0, distanceM: 400.0,
+            durationSec: 5.0, distanceM: nil,
             hrAvgBpm: nil, cadenceAvgSpm: nil, startedAt: nil
         )
         XCTAssertEqual(vm.state.route, .rest, "intermediate interval must rest")
@@ -213,7 +330,7 @@ final class ExecutionViewModelLogCardioSetTests: XCTestCase {
         // Interval 2 — final. Log it; the route must land on .complete
         // without transiting through .rest.
         vm.logCardioSet(
-            durationSec: 95.0, distanceM: 400.0,
+            durationSec: 5.0, distanceM: nil,
             hrAvgBpm: nil, cadenceAvgSpm: nil, startedAt: nil
         )
         XCTAssertEqual(
@@ -221,5 +338,56 @@ final class ExecutionViewModelLogCardioSetTests: XCTestCase {
             .complete,
             "final interval must route to .complete with no trailing rest"
         )
+    }
+
+    func testTimeIntervalAutoLogsWorkThenAutoAdvancesRestAtBoundary() {
+        let start = Date(timeIntervalSince1970: 1_700_000_800)
+        let clock = MutableCardioClock(now: start)
+        let (ctx, _) = Self.timeIntervalsContext(intervalCount: 2, workSec: 5, restSec: 3)
+        let vm = ExecutionViewModel(context: ctx, clock: clock)
+        vm.start()
+
+        XCTAssertEqual(vm.state.workEndsAt?.timeIntervalSince1970, start.timeIntervalSince1970 + 5)
+
+        clock.now = start.addingTimeInterval(5)
+        vm.tickBlockTimer()
+
+        XCTAssertEqual(vm.state.route, .rest)
+        XCTAssertEqual(vm.state.cursor.setIndex, 1)
+        XCTAssertEqual(vm.state.restEndsAt?.timeIntervalSince1970, start.timeIntervalSince1970 + 8)
+        XCTAssertEqual(vm.state.items.first?.sets.first?.done, true)
+        XCTAssertEqual(vm.state.items.first?.sets.first?.durationSec, 5)
+
+        clock.now = start.addingTimeInterval(8)
+        vm.tickBlockTimer()
+
+        XCTAssertEqual(vm.state.route, .active)
+        XCTAssertEqual(vm.state.cursor.setIndex, 2)
+        XCTAssertEqual(vm.state.workEndsAt?.timeIntervalSince1970, start.timeIntervalSince1970 + 13)
+    }
+
+    func testDistanceIntervalsDoNotInferAutomaticWorkBoundaryWithoutSensors() {
+        let start = Date(timeIntervalSince1970: 1_700_000_900)
+        let clock = MutableCardioClock(now: start)
+        let (ctx, _) = Self.intervalsContext(intervalCount: 2)
+        let vm = ExecutionViewModel(context: ctx, clock: clock)
+        vm.start()
+
+        XCTAssertNil(vm.state.workEndsAt)
+
+        clock.now = start.addingTimeInterval(120)
+        vm.tickBlockTimer()
+
+        XCTAssertEqual(vm.state.route, .active)
+        XCTAssertEqual(vm.state.cursor.setIndex, 1)
+        XCTAssertEqual(vm.state.items.first?.sets.first?.done, false)
+    }
+}
+
+private final class MutableCardioClock: Clock, @unchecked Sendable {
+    var now: Date
+
+    init(now: Date) {
+        self.now = now
     }
 }

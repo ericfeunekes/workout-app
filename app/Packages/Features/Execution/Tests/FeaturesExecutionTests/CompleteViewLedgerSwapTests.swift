@@ -96,6 +96,63 @@ final class CompleteViewLedgerSwapTests: XCTestCase {
         XCTAssertEqual(entries.first?.name, "Bench Press")
     }
 
+    func testBlockResultsSummarizeAccumulatedRepsAgainstTarget() {
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let context = makeContext(
+            itemID: itemID,
+            plannedExerciseID: exerciseID,
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Push-Up")],
+            timingMode: .accumulate,
+            timingConfigJSON: #"{"target_reps":100}"#,
+            blockName: "Push-up volume"
+        )
+        let itemLog = SessionState.ItemLog(
+            itemID: itemID,
+            sets: [
+                makeSet(index: 1, load: nil, unit: .lb, reps: 25, rir: nil),
+                makeSet(index: 2, load: nil, unit: .lb, reps: 25, rir: nil),
+                makeSet(index: 3, load: nil, unit: .lb, reps: 25, rir: nil),
+                makeSet(index: 4, load: nil, unit: .lb, reps: 25, rir: nil),
+            ]
+        )
+
+        let entries = CompleteView.blockResultEntries(
+            context: context,
+            items: [itemLog],
+            note: ""
+        )
+
+        XCTAssertEqual(entries.first?.title, "Push-up volume")
+        XCTAssertEqual(entries.first?.subtitle, "accumulate")
+        XCTAssertEqual(entries.first?.summary, "100 / 100 reps")
+    }
+
+    func testBlockResultsPreferAMRAPScoreNote() {
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let context = makeContext(
+            itemID: itemID,
+            plannedExerciseID: exerciseID,
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Thruster")],
+            timingMode: .amrap,
+            timingConfigJSON: #"{"time_cap_sec":600}"#,
+            blockName: "Ten minute AMRAP"
+        )
+        let itemLog = SessionState.ItemLog(
+            itemID: itemID,
+            sets: [makeSet(index: 1, load: 40, unit: .kg, reps: 10, rir: nil)]
+        )
+
+        let entries = CompleteView.blockResultEntries(
+            context: context,
+            items: [itemLog],
+            note: "AMRAP result: 3 rounds + 4 reps"
+        )
+
+        XCTAssertEqual(entries.first?.summary, "AMRAP result: 3 rounds + 4 reps")
+    }
+
     // MARK: - Fixtures
 
     private func makeSet(
@@ -119,7 +176,10 @@ final class CompleteViewLedgerSwapTests: XCTestCase {
     private func makeContext(
         itemID: UUID,
         plannedExerciseID: UUID,
-        exercises: [UUID: Exercise]
+        exercises: [UUID: Exercise],
+        timingMode: TimingMode = .straightSets,
+        timingConfigJSON: String = "{}",
+        blockName: String? = nil
     ) -> WorkoutContext {
         let now = Date()
         let userID = UUID()
@@ -133,8 +193,8 @@ final class CompleteViewLedgerSwapTests: XCTestCase {
         )
         let block = Block(
             id: blockID, workoutID: workoutID, parentBlockID: nil,
-            position: 0, name: nil, timingMode: .straightSets,
-            timingConfigJSON: "{}", rounds: nil,
+            position: 0, name: blockName, timingMode: timingMode,
+            timingConfigJSON: timingConfigJSON, rounds: nil,
             roundsRepSchemeJSON: nil, notes: nil
         )
         let item = WorkoutItem(

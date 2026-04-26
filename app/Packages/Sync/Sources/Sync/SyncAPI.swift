@@ -135,6 +135,13 @@ public final class SyncAPI: Sendable {
         )
     }
 
+    /// Enqueue a reset for a same-day workout the user accidentally logged.
+    /// The server deletes associated set_logs and returns the workout to
+    /// planned so future pulls match the local History reset.
+    public func resetWorkout(workoutID: WorkoutID) async throws {
+        try await push.enqueueWorkoutReset(workoutID: workoutID)
+    }
+
     /// Enqueue a `user_parameter` append. Returns immediately; the push
     /// happens on the next `flushPushQueue(...)` tick. Body weight, 1RM,
     /// and anything the app writes back to the append-only user-parameter

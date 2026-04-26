@@ -284,6 +284,7 @@ class BlockIn(_UuidInputBase):
         "intervals",
         "tabata",
         "continuous",
+        "accumulate",
         "custom",
         "rest",
     ]
@@ -465,11 +466,23 @@ class WorkoutStatusUpdate(_UuidInputBase):
     notes: str | None = None
 
 
+class WorkoutReset(_UuidInputBase):
+    """App tells server to erase same-day execution data for a workout.
+
+    This is the inverse of a completed-workout push: delete the set_logs
+    tied to the workout tree and put the workout back into `planned` so a
+    subsequent pull does not resurrect a locally reset History row.
+    """
+
+    workout_id: str
+
+
 class SyncResultsIn(_UuidInputBase):
     """App pushes this when a workout finishes (or on next connectivity)."""
 
     set_logs: list[SetLogIn] = Field(default_factory=list)
     status_updates: list[WorkoutStatusUpdate] = Field(default_factory=list)
+    workout_resets: list[WorkoutReset] = Field(default_factory=list)
 
 
 class ExerciseLastPerformed(_UuidReadBase):

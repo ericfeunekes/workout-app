@@ -1,6 +1,6 @@
 ---
 title: block-transition
-status: planned
+status: implemented
 last_reviewed: 2026-04-26
 purpose: Target contract and QA scenarios for the between-block setup surface.
 covers:
@@ -46,12 +46,20 @@ athlete prepare for the next block.
 
 ## Current gaps
 
-- The current execution loop can move directly from rest to the next block
-  without a setup surface.
-- Block intent display needs `block.intent` cutover before it can be fully
-  reliable.
-- Simulator proof is required before transition layout and tap-target claims are
-  marked `verified`.
+- Block intent display needs `block.intent` authoring/display cutover before the
+  transition can show intent beyond timing mode and setup lines.
+- Same-setup adjacent blocks currently still show transition when the next work
+  block has item setup. Skipping low-value same-setup transitions remains polish.
+- Route/direction integration is deferred to the later mapping feature.
+
+## Proof
+
+- Codex review thread `019dcbb2-85e7-7340-ba0c-eb4ee8a8007f` returned clean
+  after transition, skip, composite, setup-detail, and `READY` timer fixes.
+- Simulator QA: `scratch/qa-runs/phase-05-transition-screen.md`.
+- Screenshots:
+  `scratch/qa-runs/phase-05-transition-screen-final.jpg` and
+  `scratch/qa-runs/phase-05-transition-active-after-start-final.jpg`.
 
 ## QA scenarios
 

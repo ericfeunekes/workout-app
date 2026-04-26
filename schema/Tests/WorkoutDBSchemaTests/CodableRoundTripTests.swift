@@ -77,6 +77,7 @@ struct CodableRoundTripTests {
         // Exhaustive list must match the server's enum + SQL CHECK constraint.
         let all = TimingMode.allCases.map(\.rawValue).sorted()
         let expected = [
+            "accumulate",
             "amrap",
             "circuit",
             "continuous",

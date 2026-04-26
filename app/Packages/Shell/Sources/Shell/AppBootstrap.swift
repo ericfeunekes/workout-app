@@ -84,6 +84,8 @@ public enum AppBootstrap {
         sessionStateBinding: (@Sendable (SessionMutation) -> Void)? = nil,
         telemetryEmitter: TelemetryEmitter = NoopTelemetryEmitter(),
         afterLocalCompletion: (@Sendable () async -> Void)? = nil,
+        onManualRefreshTokenRejected: (@Sendable @MainActor () async -> Void)? = nil,
+        onEmptyTodayRefresh: (@Sendable @MainActor () async -> Bool)? = nil,
         historyViewModel: HistoryViewModel? = nil,
         executionHolder: ExecutionVMHolder? = nil
     ) async throws -> BootstrapResult {
@@ -118,23 +120,25 @@ public enum AppBootstrap {
             lastPerformedStore: persistence.lastPerformedStore,
             clock: { now }
         )
-        guard let todayContext = try await loader.load(
+        guard let todayPlanContext = try await loader.loadPlan(
             sessionStateBinding: sessionStateBinding
         ) else {
             return try await resolveNoPlannedWorkout(
                 persistence: persistence, syncAPI: syncAPI,
                 telemetry: telemetryEmitter,
                 sessionStateBinding: sessionStateBinding,
-                executionHolder: executionHolder
+                executionHolder: executionHolder,
+                onEmptyTodayRefresh: onEmptyTodayRefresh
             )
         }
         return try await assembleReady(AssembleInputs(
-            todayContext: todayContext,
+            todayPlanContext: todayPlanContext,
             todayLoader: loader,
             persistence: persistence,
             syncAPI: syncAPI,
             telemetry: telemetryEmitter,
             afterLocalCompletion: afterLocalCompletion,
+            onManualRefreshTokenRejected: onManualRefreshTokenRejected,
             executionHolder: executionHolder
         ))
     }
@@ -142,12 +146,13 @@ public enum AppBootstrap {
     /// Grouped args for `assembleReady`. Keeps the helper under
     /// SwiftLint's `function_parameter_count` cap.
     private struct AssembleInputs {
-        let todayContext: TodayContext
+        let todayPlanContext: TodayPlanContext
         let todayLoader: TodayLoader
         let persistence: PersistenceFactory
         let syncAPI: SyncAPI
         let telemetry: TelemetryEmitter
         let afterLocalCompletion: (@Sendable () async -> Void)?
+        let onManualRefreshTokenRejected: (@Sendable @MainActor () async -> Void)?
         let executionHolder: ExecutionVMHolder?
     }
 
@@ -159,25 +164,27 @@ public enum AppBootstrap {
         _ inputs: AssembleInputs
     ) async throws -> BootstrapResult {
         let workoutContext = try await buildWorkoutContext(
-            for: inputs.todayContext.workout,
+            for: inputs.todayPlanContext.selected.workout,
             cache: inputs.persistence.workoutCache,
             lastPerformedStore: inputs.persistence.lastPerformedStore
         )
         emitBootstrap(
             inputs.telemetry,
             name: "bootstrap.ready",
-            workoutID: inputs.todayContext.workout.id
+            workoutID: inputs.todayPlanContext.selected.workout.id
         )
         return await buildReady(ReadyInputs(
-            todayContext: inputs.todayContext,
+            todayPlanContext: inputs.todayPlanContext,
             workoutContext: workoutContext,
             todayLoader: inputs.todayLoader,
             sessionStore: inputs.persistence.sessionStore,
             workoutCache: inputs.persistence.workoutCache,
+            syncMetadataStore: inputs.persistence.syncMetadataStore,
             lastPerformedStore: inputs.persistence.lastPerformedStore,
             syncAPI: inputs.syncAPI,
             telemetry: inputs.telemetry,
             afterLocalCompletion: inputs.afterLocalCompletion,
+            onManualRefreshTokenRejected: inputs.onManualRefreshTokenRejected,
             executionHolder: inputs.executionHolder ?? ExecutionVMHolder()
         ))
     }
@@ -247,6 +254,10 @@ public enum AppBootstrap {
         historyViewModel.setSetLogEditHook({ [syncAPI] log in
             try? await syncAPI.pushLog([log])
         })
+        historyViewModel.setWorkoutResetHook({ [syncAPI] workoutID in
+            try? await syncAPI.resetWorkout(workoutID: workoutID)
+            _ = try? await syncAPI.flushPushQueue()
+        })
     }
 
     /// One-liner for bootstrap.* state events. Keeps the call sites tight.
@@ -273,7 +284,7 @@ public enum AppBootstrap {
     /// alternatives for one workout; we concatenate across all pulled
     /// workouts and hand the single batch to the cache so the `save` is
     /// one transaction.
-    private static func savePull(
+    static func savePull(
         _ result: PullResult,
         into cache: WorkoutCache
     ) async throws {

@@ -55,7 +55,7 @@ Documented in `docs/architecture/context.md` § 3. Notable:
 - `set_log` rows owned by the app (writer + editor). Server stores.
 - `user_parameters` append-only: Claude pushes most keys; app pushes `bodyweight_kg` at completion. Direction is still server-read, app-write for that one key.
 - Local session state (cursor, route, log, `adjust`, `autoregHeld`, `rest_ends_at`) owned by `Core/Session`. Features subscribe via a `SessionStore` protocol.
-- Bearer token in keychain; server URL in `UserDefaults`; both mediated by `Persistence`.
+- Connection pair (server URL + bearer token) in Keychain; URL mirrored in `UserDefaults` for compatibility/diagnostics; both mediated by `Persistence`.
 
 ### 5. Dependency directions: explicit, acyclic, enforced by compiler + linter
 

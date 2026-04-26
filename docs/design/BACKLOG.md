@@ -1,6 +1,6 @@
-# Backlog
+# Setmark Design Backlog
 
-Source of truth for what's done, in progress, and open.
+Design backlog for prototype and visual-design follow-up. It is not the active product tracker; use `docs/spec.md` for feature status and `docs/bugs.md` for open QA issues.
 
 ---
 
@@ -30,6 +30,8 @@ The core straight-sets workout loop.
 - Sheet + backdrop pattern
 - Ledger (load/reps/RIR grid) component
 - Card, button (primary/ghost), chip, keypad
+- App icon master + generated iOS app icon catalog
+- Exercise/block icon SVG grammar + SwiftUI DesignSystem primitive
 
 ---
 
@@ -41,7 +43,7 @@ These have been thought through at wireframe fidelity. Not hi-fi yet. Claude sho
 - Superset — NEXT-only, defer logging to rest
 - Circuit — single NEXT per round
 - EMOM — timed, post-round log
-- AMRAP — +1 round, partial picker on end
+- AMRAP — station-by-station `next`, partial-station picker on end
 - For Time — big NEXT on group complete
 - Intervals — work/rest cycles
 - Tabata — fixed 20/10

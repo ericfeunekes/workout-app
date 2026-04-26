@@ -1,158 +1,163 @@
 // LogSetSheet.swift
 //
-// Combined reps + RIR entry sheet — the fix for bug-023.
-//
-// Prior flow: tap "log set" → NumPadSheet (enter reps, tap "log") →
-// RirSheet (tap RIR value or "skip") → rest. Three screens, ~39+ taps
-// for a 13-set session.
-//
-// New flow: tap "log set" → LogSetSheet (reps numpad at top, RIR row at
-// bottom, single "log" button) → rest. Two screens, ~26 taps for the
-// same session. The user can commit reps without touching the RIR row
-// (RIR stays nil, preserving the "skip" semantics).
-//
-// The NumPadSheet + RirSheet primitives are kept around — the rest-screen
-// past-set edit paths use them individually and scope doesn't need both
-// fields at once there. Only the logSet flow on Active moves to this
-// combined sheet.
-//
-// State lives in `LogSetSheetModel` — an `@Observable` value-type-ish
-// controller that owns the reps buffer, the currently-picked RIR, and
-// the `commit()` entry point. Keeping state out of the SwiftUI view
-// makes unit-testing the commit contract straightforward (construct a
-// model, drive it, inspect what it emitted) without ViewInspector.
+// Row-based strength logger. The default view is compact: load, reps, and
+// RIR are shown as editable cells, with the keypad appearing only for the
+// selected numeric field. This keeps supersets/circuits from feeling like a
+// fighter-jet dashboard while still letting the user correct load at log time.
 
 import SwiftUI
 import DesignSystem
+import WorkoutCoreFoundation
 
 // MARK: - Model
 
-/// State + actions for the combined reps + RIR sheet. Owns the reps
-/// buffer (mirroring `NumPadSheet`'s editing model) and the currently-
-/// picked RIR (nil = user didn't touch it, commit with rir: nil).
-///
-/// `@Observable` so SwiftUI tracks `buffer` / `pickedRir` reads from
-/// `body` and re-renders on mutation. The `LogSetSheet` view holds
-/// this as `@State`; tests instantiate it directly and read state
-/// programmatically.
-///
-/// Not having `@Observable` here was a silent bug in the initial
-/// landing: unit tests passed (they read `model.buffer` directly),
-/// but the rendered sheet's reps readout stayed frozen at "0" because
-/// SwiftUI never re-evaluated the view on numpad taps. Found by
-/// MCP-driven validation.
 @Observable
 @MainActor
 public final class LogSetSheetModel {
 
-    // MARK: - Inputs
-
-    /// Reps pre-seeded into the numpad buffer. Mirrors `NumPadSheet`'s
-    /// priming behavior.
-    public let initialReps: Int
-
-    /// Invoked when the user taps the inline "log" button. Fires with
-    /// the current reps buffer (parsed) and the picked RIR (nil if
-    /// untouched).
-    public let onCommit: (Int, Int?) -> Void
-
-    // MARK: - State
-
-    /// The reps buffer. `"0"` when empty, primed to `String(initialReps)`
-    /// on `prime()` (mirrors the `NumPadSheet.primeBuffer` contract).
-    public private(set) var buffer: String
-
-    /// The currently-picked RIR. `nil` until the user taps a row button.
-    /// A tap on the already-selected value toggles it back to `nil` so
-    /// the user has a way to undo an accidental pick without
-    /// dismissing the sheet.
-    public private(set) var pickedRir: Int?
-
-    /// `true` once `prime()` has run (idempotent — subsequent calls are
-    /// no-ops). Matches `NumPadSheet`'s one-shot priming.
-    public private(set) var primed: Bool = false
-
-    // MARK: - Init
-
-    public init(
-        initialReps: Int,
-        onCommit: @escaping (Int, Int?) -> Void
-    ) {
-        self.initialReps = initialReps
-        self.onCommit = onCommit
-        // Buffer starts empty — `prime()` populates it on view appear so
-        // the user sees the prescribed reps pre-filled and can either
-        // commit as-is or edit. Tests can call `prime()` directly.
-        self.buffer = ""
+    public enum Field: Equatable, Sendable {
+        case load
+        case reps
     }
 
-    // MARK: - Intents
+    public let initialLoad: Double?
+    public let loadUnit: String?
+    public let initialReps: Int
+    public let onCommit: (Double?, Int, Int?) -> Void
 
-    /// Seed the buffer with `initialReps`. Idempotent.
+    public private(set) var selectedField: Field?
+    public private(set) var loadBuffer: String
+    public private(set) var repsBuffer: String
+    public private(set) var pickedRir: Int?
+    public private(set) var primed: Bool = false
+    private var replaceOnNextInput: Field?
+
+    public init(
+        initialLoad: Double?,
+        loadUnit: String?,
+        initialReps: Int,
+        onCommit: @escaping (Double?, Int, Int?) -> Void
+    ) {
+        self.initialLoad = initialLoad
+        self.loadUnit = loadUnit
+        self.initialReps = initialReps
+        self.onCommit = onCommit
+        self.selectedField = nil
+        self.loadBuffer = ""
+        self.repsBuffer = ""
+    }
+
     public func prime() {
         guard !primed else { return }
         primed = true
-        buffer = String(initialReps)
+        loadBuffer = initialLoad.map(formatLoadNumber) ?? ""
+        repsBuffer = String(initialReps)
     }
 
-    /// Append a digit to the buffer. `0` in the first slot overwrites;
-    /// subsequent digits append (mirrors `NumPadSheet.pressDigit`).
+    public func select(_ field: Field) {
+        guard field != .load || initialLoad != nil else { return }
+        if selectedField == field {
+            selectedField = nil
+            replaceOnNextInput = nil
+        } else {
+            selectedField = field
+            replaceOnNextInput = field
+        }
+    }
+
     public func pressDigit(_ digit: Int) {
-        let d = String(digit)
-        if buffer == "0" {
-            buffer = d
-        } else {
-            buffer.append(d)
+        replaceSelectedBufferIfNeeded()
+        mutateSelectedBuffer { buffer in
+            let d = String(digit)
+            if buffer == "0" {
+                buffer = d
+            } else {
+                buffer.append(d)
+            }
         }
     }
 
-    /// Backspace. Empty buffer reverts to `"0"` (mirrors NumPad).
+    public func pressDecimal() {
+        guard selectedField == .load else { return }
+        replaceSelectedBufferIfNeeded()
+        mutateSelectedBuffer { buffer in
+            if !buffer.contains(".") {
+                buffer.append(buffer.isEmpty ? "0." : ".")
+            }
+        }
+    }
+
     public func pressDelete() {
-        guard !buffer.isEmpty else { return }
-        buffer.removeLast()
-        if buffer.isEmpty { buffer = "0" }
-    }
-
-    /// Tap a RIR row. Tapping the currently-picked value clears it
-    /// (undo). Any other value replaces the selection.
-    public func pressRir(_ value: Int) {
-        if pickedRir == value {
-            pickedRir = nil
-        } else {
-            pickedRir = value
+        replaceOnNextInput = nil
+        mutateSelectedBuffer { buffer in
+            guard !buffer.isEmpty else { return }
+            buffer.removeLast()
+            if buffer.isEmpty { buffer = "0" }
         }
     }
 
-    /// Commit the entry. Parses the buffer to `Int` (defaulting to
-    /// `initialReps` on an unparseable buffer — matches NumPad's
-    /// `Double(buffer) ?? initialValue` guard) and fires `onCommit`.
-    public func commit() {
-        let reps = Int(buffer) ?? initialReps
-        onCommit(reps, pickedRir)
+    public func pressRir(_ value: Int) {
+        pickedRir = pickedRir == value ? nil : value
     }
 
-    /// Display-ready buffer text. Shows `"0"` when empty so the readout
-    /// isn't blank (NumPad parity).
-    public var displayBuffer: String {
-        buffer.isEmpty ? "0" : buffer
+    public func commit() {
+        let load = initialLoad == nil
+            ? nil
+            : Double(loadBuffer) ?? initialLoad
+        let reps = Int(repsBuffer) ?? initialReps
+        onCommit(load, reps, pickedRir)
+    }
+
+    public var loadDisplay: String {
+        guard initialLoad != nil else { return "BW" }
+        let value = loadBuffer.isEmpty ? "0" : loadBuffer
+        return [value, loadUnit].compactMap(\.self).joined(separator: " ")
+    }
+
+    public var repsDisplay: String {
+        repsBuffer.isEmpty ? "0" : repsBuffer
+    }
+
+    public var showsKeypad: Bool {
+        selectedField != nil
+    }
+
+    public var keypadAllowsDecimal: Bool {
+        selectedField == .load
+    }
+
+    private func mutateSelectedBuffer(_ body: (inout String) -> Void) {
+        switch selectedField {
+        case .load:
+            guard initialLoad != nil else { return }
+            body(&loadBuffer)
+        case .reps:
+            body(&repsBuffer)
+        case nil:
+            return
+        }
+    }
+
+    private func replaceSelectedBufferIfNeeded() {
+        guard replaceOnNextInput == selectedField else { return }
+        replaceOnNextInput = nil
+        switch selectedField {
+        case .load:
+            loadBuffer = ""
+        case .reps:
+            repsBuffer = ""
+        case nil:
+            return
+        }
     }
 }
 
 // MARK: - View
 
-/// Combined reps numpad + RIR picker sheet. Uses `DSKeypad` with the
-/// inline `onDone` row wired up — the "log" button lives under the
-/// digit grid so one thumb drives the whole flow.
-///
-/// The RIR picker lives between the readout and the keypad (instead of
-/// under it) so it stays visible while the thumb is on the digits —
-/// the user can glance at RIR options mid-typing without scrolling or
-/// losing the keypad.
 struct LogSetSheet: View {
     @State private var model: LogSetSheetModel
+    private let title: String
 
-    /// RIR option labels. Mirror `RirSheet.options` so the same
-    /// language ("failure", "grinder"…) appears in both sheets.
     private let options: [(value: Int, label: String)] = [
         (0, "failure"),
         (1, "grinder"),
@@ -162,8 +167,17 @@ struct LogSetSheet: View {
         (5, "very easy"),
     ]
 
-    init(initialReps: Int, onCommit: @escaping (Int, Int?) -> Void) {
+    init(
+        title: String = "log set",
+        initialLoad: Double?,
+        loadUnit: String?,
+        initialReps: Int,
+        onCommit: @escaping (Double?, Int, Int?) -> Void
+    ) {
+        self.title = title
         _model = State(initialValue: LogSetSheetModel(
+            initialLoad: initialLoad,
+            loadUnit: loadUnit,
             initialReps: initialReps,
             onCommit: onCommit
         ))
@@ -175,52 +189,93 @@ struct LogSetSheet: View {
 
             VStack(alignment: .leading, spacing: DSSpacing.lg) {
                 header
-                readout
+                fields
                 rirRow
-                DSKeypad(
-                    onDigit: { model.pressDigit($0) },
-                    onDelete: { model.pressDelete() },
-                    onDecimal: nil,
-                    onDone: { model.commit() },
-                    doneLabel: "log"
-                )
+                if model.showsKeypad {
+                    keypad
+                } else {
+                    DSButton(
+                        title: "log",
+                        style: .primary,
+                        action: { model.commit() }
+                    )
+                }
             }
             .padding(DSSpacing.xl)
         }
         .onAppear { model.prime() }
         .presentationDetents([.large])
-        // Single-direction sheet animation avoids the backdrop+slide
-        // interaction that caused visible frame drops on first present
-        // (bug-025). `.move(edge: .bottom)` runs one transition; the
-        // system-owned backdrop fade is unchanged, but because the
-        // sheet now has an explicit transition instead of the default
-        // composite, SwiftUI no longer re-runs geometry on the first
-        // frame.
         .transition(.move(edge: .bottom))
-        .animation(.easeInOut(duration: 0.25), value: model.buffer)
+        .animation(.easeInOut(duration: 0.25), value: model.selectedField)
     }
-
-    // MARK: - Sections
 
     private var header: some View {
         VStack(alignment: .leading, spacing: DSSpacing.xs) {
-            Text("log set")
+            Text(title)
                 .font(DSTypography.title)
                 .foregroundStyle(DSColors.foreground)
-            Text("reps + optional rir · one tap to commit")
+            Text("tap a row to edit · rir optional")
                 .font(DSTypography.caption)
                 .foregroundStyle(DSColors.foregroundDim)
         }
     }
 
-    private var readout: some View {
-        Text(model.displayBuffer)
-            .font(.system(size: 48, weight: .light, design: .monospaced))
-            .monospacedDigit()
-            .foregroundStyle(DSColors.accentInk)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, DSSpacing.md)
-            .accessibilityIdentifier("logset.reps_readout")
+    private var fields: some View {
+        HStack(spacing: DSSpacing.sm) {
+            if model.initialLoad != nil {
+                fieldCell(
+                    label: "load",
+                    value: model.loadDisplay,
+                    isSelected: model.selectedField == .load,
+                    action: { model.select(.load) }
+                )
+                .accessibilityIdentifier("logset.load_row")
+            }
+            fieldCell(
+                label: "reps",
+                value: model.repsDisplay,
+                isSelected: model.selectedField == .reps,
+                action: { model.select(.reps) }
+            )
+            .accessibilityIdentifier("logset.reps_row")
+        }
+    }
+
+    private func fieldCell(
+        label: String,
+        value: String,
+        isSelected: Bool,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                HStack(spacing: DSSpacing.xs) {
+                    Text(label.uppercased())
+                        .font(DSTypography.subLabel)
+                        .tracking(1.2)
+                    Image(systemName: "pencil")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .foregroundStyle(isSelected ? DSColors.accentInk : DSColors.foregroundDim)
+                Text(value)
+                    .font(DSTypography.monoLarge)
+                    .foregroundStyle(isSelected ? DSColors.accentInk : DSColors.foreground)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(DSSpacing.md)
+            .background(isSelected ? DSColors.accentMuted : DSColors.surfaceElevated)
+            .overlay(
+                RoundedRectangle(cornerRadius: DSRadius.control, style: .continuous)
+                    .strokeBorder(isSelected ? DSColors.accent : DSColors.border, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: DSRadius.control, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(label), \(value)")
+        .accessibilityValue(isSelected ? "editing" : "")
+        .accessibilityHint("Tap to edit \(label)")
     }
 
     private var rirRow: some View {
@@ -236,6 +291,7 @@ struct LogSetSheet: View {
                     })
                     .buttonStyle(.plain)
                     .accessibilityLabel("RIR \(opt.value) \(opt.label)")
+                    .accessibilityValue(model.pickedRir == opt.value ? "selected" : "")
                     .accessibilityIdentifier("logset.rir.\(opt.value)")
                 }
             }
@@ -260,11 +316,18 @@ struct LogSetSheet: View {
         .background(selected ? DSColors.accentMuted : DSColors.surfaceElevated)
         .overlay(
             RoundedRectangle(cornerRadius: DSRadius.control, style: .continuous)
-                .strokeBorder(
-                    selected ? DSColors.accent : DSColors.border,
-                    lineWidth: 1
-                )
+                .strokeBorder(selected ? DSColors.accent : DSColors.border, lineWidth: 1)
         )
         .clipShape(RoundedRectangle(cornerRadius: DSRadius.control, style: .continuous))
+    }
+
+    private var keypad: some View {
+        DSKeypad(
+            onDigit: { model.pressDigit($0) },
+            onDelete: { model.pressDelete() },
+            onDecimal: model.keypadAllowsDecimal ? { model.pressDecimal() } : nil,
+            onDone: { model.commit() },
+            doneLabel: "log"
+        )
     }
 }

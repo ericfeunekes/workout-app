@@ -20,9 +20,15 @@ import CoreSession
 import WorkoutCoreFoundation
 
 struct SessionStateCodable: Codable, Sendable {
+    /// Persistence-format marker for snapshots written after straight sets
+    /// gained an explicit Set Start boundary. Older snapshots can have
+    /// `workStartedAt` stamped by workout start/rest advance, so restore
+    /// normalization treats them as READY rather than already-started.
+    let explicitSetStartAware: Bool
     let state: SessionState
 
     init(state: SessionState) {
+        self.explicitSetStartAware = true
         self.state = state
     }
 
@@ -31,13 +37,16 @@ struct SessionStateCodable: Codable, Sendable {
         case route
         case cursor
         case items
+        case compositeSets
         case restEndsAt
         case blockEndsAt
         case workEndsAt
         case intervalAnchorAt
+        case workReadyAt
         case workStartedAt
         case note
         case structure
+        case explicitSetStartAware
     }
 
     init(from decoder: Decoder) throws {
@@ -46,6 +55,10 @@ struct SessionStateCodable: Codable, Sendable {
         let route = try c.decode(SessionState.Route.self, forKey: .route)
         let cursor = try c.decode(CursorCodable.self, forKey: .cursor).value
         let items = try c.decode([ItemLogCodable].self, forKey: .items).map(\.value)
+        let compositeSets = try c.decodeIfPresent(
+            [CompositeSetProgressCodable].self,
+            forKey: .compositeSets
+        )?.map { try $0.decodedValue() } ?? []
         let restEndsAt = try c.decodeIfPresent(Date.self, forKey: .restEndsAt)
         let blockEndsAt = try c.decodeIfPresent(Date.self, forKey: .blockEndsAt)
         let workEndsAt = try c.decodeIfPresent(Date.self, forKey: .workEndsAt)
@@ -53,6 +66,9 @@ struct SessionStateCodable: Codable, Sendable {
         // boundary-anchor fix decode cleanly with `intervalAnchorAt = nil`;
         // the VM's restore normalization path restamps on block entry.
         let intervalAnchorAt = try c.decodeIfPresent(Date.self, forKey: .intervalAnchorAt)
+        // Optional for back-compat — older payloads had no ready/prep
+        // anchor because work started immediately on Active entry.
+        let workReadyAt = try c.decodeIfPresent(Date.self, forKey: .workReadyAt)
         // Optional for back-compat — payloads persisted before the
         // working-time anchor fix decode cleanly with
         // `workStartedAt = nil`. A restored mid-set session with a nil
@@ -60,6 +76,10 @@ struct SessionStateCodable: Codable, Sendable {
         // downstream analysis treats that as "work window unknown"
         // rather than collapsing start + complete onto the same instant.
         let workStartedAt = try c.decodeIfPresent(Date.self, forKey: .workStartedAt)
+        let explicitSetStartAware = try c.decodeIfPresent(
+            Bool.self,
+            forKey: .explicitSetStartAware
+        ) ?? false
         let note = try c.decode(String.self, forKey: .note)
         // `StructureCodable.decodedValue()` throws on unknown or count-
         // mismatched `advancementByBlock`. Propagating the throw makes
@@ -67,15 +87,18 @@ struct SessionStateCodable: Codable, Sendable {
         // re-seed from the pulled workout rather than silently dropping
         // an unknown enum case and mis-aligning later blocks' policies.
         let structure = try c.decode(StructureCodable.self, forKey: .structure).decodedValue()
+        self.explicitSetStartAware = explicitSetStartAware
         self.state = SessionState(
             workoutID: workoutID,
             route: route,
             cursor: cursor,
             items: items,
+            compositeSets: compositeSets,
             restEndsAt: restEndsAt,
             blockEndsAt: blockEndsAt,
             workEndsAt: workEndsAt,
             intervalAnchorAt: intervalAnchorAt,
+            workReadyAt: workReadyAt,
             workStartedAt: workStartedAt,
             note: note,
             structure: structure
@@ -88,13 +111,16 @@ struct SessionStateCodable: Codable, Sendable {
         try c.encode(state.route, forKey: .route)
         try c.encode(CursorCodable(value: state.cursor), forKey: .cursor)
         try c.encode(state.items.map(ItemLogCodable.init(value:)), forKey: .items)
+        try c.encode(state.compositeSets.map(CompositeSetProgressCodable.init(value:)), forKey: .compositeSets)
         try c.encodeIfPresent(state.restEndsAt, forKey: .restEndsAt)
         try c.encodeIfPresent(state.blockEndsAt, forKey: .blockEndsAt)
         try c.encodeIfPresent(state.workEndsAt, forKey: .workEndsAt)
         try c.encodeIfPresent(state.intervalAnchorAt, forKey: .intervalAnchorAt)
+        try c.encodeIfPresent(state.workReadyAt, forKey: .workReadyAt)
         try c.encodeIfPresent(state.workStartedAt, forKey: .workStartedAt)
         try c.encode(state.note, forKey: .note)
         try c.encode(StructureCodable(value: state.structure), forKey: .structure)
+        try c.encode(explicitSetStartAware, forKey: .explicitSetStartAware)
     }
 }
 
@@ -215,6 +241,128 @@ private struct ItemLogCodable: Codable {
     }
 }
 
+private struct CompositeSetProgressCodable: Codable {
+    let itemID: UUID
+    let setIndex: Int
+    let kind: String
+    let targetRepsPerSlot: Int
+    let slotCount: Int
+    let intraRestSec: Double
+    let firstStartedAt: Date?
+    let phase: CompositeSetPhaseCodable
+    let completedSlots: Int
+
+    init(value: SessionState.CompositeSetProgress) {
+        itemID = value.itemID
+        setIndex = value.setIndex
+        kind = value.kind.rawValue
+        targetRepsPerSlot = value.targetRepsPerSlot
+        slotCount = value.slotCount
+        intraRestSec = value.intraRestSec
+        firstStartedAt = value.firstStartedAt
+        phase = CompositeSetPhaseCodable(value: value.phase)
+        completedSlots = value.completedSlots
+    }
+
+    func decodedValue() throws -> SessionState.CompositeSetProgress {
+        .init(
+            itemID: itemID,
+            setIndex: setIndex,
+            kind: SessionState.CompositeSetProgress.Kind(rawValue: kind) ?? .cluster,
+            targetRepsPerSlot: targetRepsPerSlot,
+            slotCount: slotCount,
+            intraRestSec: intraRestSec,
+            firstStartedAt: firstStartedAt,
+            phase: try phase.decodedValue(),
+            completedSlots: completedSlots
+        )
+    }
+}
+
+private struct CompositeSetPhaseCodable: Codable {
+    let name: String
+    let slotIndex: Int?
+    let afterSlotIndex: Int?
+    let startedAt: Date?
+    let endsAt: Date?
+
+    init(value: SessionState.CompositeSetProgress.Phase) {
+        switch value {
+        case .ready(let slotIndex):
+            name = "ready"
+            self.slotIndex = slotIndex
+            afterSlotIndex = nil
+            startedAt = nil
+            endsAt = nil
+        case .working(let slotIndex, let startedAt):
+            name = "working"
+            self.slotIndex = slotIndex
+            afterSlotIndex = nil
+            self.startedAt = startedAt
+            endsAt = nil
+        case .intraRest(let afterSlotIndex, let endsAt):
+            name = "intraRest"
+            slotIndex = nil
+            self.afterSlotIndex = afterSlotIndex
+            startedAt = nil
+            self.endsAt = endsAt
+        case .completePendingLog:
+            name = "completePendingLog"
+            slotIndex = nil
+            afterSlotIndex = nil
+            startedAt = nil
+            endsAt = nil
+        }
+    }
+
+    func decodedValue() throws -> SessionState.CompositeSetProgress.Phase {
+        switch name {
+        case "ready":
+            guard let slotIndex else {
+                throw Self.missingField("slotIndex", phase: name)
+            }
+            return .ready(slotIndex: slotIndex)
+        case "working":
+            guard let slotIndex else {
+                throw Self.missingField("slotIndex", phase: name)
+            }
+            guard let startedAt else {
+                throw Self.missingField("startedAt", phase: name)
+            }
+            return .working(slotIndex: slotIndex, startedAt: startedAt)
+        case "intraRest":
+            guard let afterSlotIndex else {
+                throw Self.missingField("afterSlotIndex", phase: name)
+            }
+            guard let endsAt else {
+                throw Self.missingField("endsAt", phase: name)
+            }
+            return .intraRest(
+                afterSlotIndex: afterSlotIndex,
+                endsAt: endsAt
+            )
+        case "completePendingLog":
+            return .completePendingLog
+        default:
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: [],
+                    debugDescription: "Unknown composite set phase '\(name)'"
+                )
+            )
+        }
+    }
+
+    private static func missingField(_ field: String, phase: String) -> DecodingError {
+        DecodingError.dataCorrupted(
+            DecodingError.Context(
+                codingPath: [],
+                debugDescription: "Composite set phase '\(phase)' missing required field '\(field)'"
+            )
+        )
+    }
+}
+
 private struct AlternativeOverridesCodable: Codable {
     let sets: Int?
     let reps: Int?
@@ -291,6 +439,7 @@ private struct SetPlanCodable: Codable {
     /// on encode.
     let unit: String?
     let reps: Int
+    let workTarget: WorkTargetCodable?
     let done: Bool
     let adjust: String?
     let rir: Int?
@@ -299,20 +448,24 @@ private struct SetPlanCodable: Codable {
     /// before the field existed decode cleanly as nil. Encoded
     /// losslessly via `Date`'s default Codable (timeIntervalSinceReferenceDate).
     let completedAt: Date?
-    /// Cardio-only fields. All optional for back-compat: payloads
-    /// persisted before the R2.11 cardio cutover decode cleanly with
-    /// every cardio metric nil. Strength sets never populate these.
+    /// Elapsed/cardio metric fields. All optional for back-compat:
+    /// payloads persisted before the R2.11 cardio cutover decode cleanly
+    /// with every metric nil. Composed strength rows may carry
+    /// `durationSec`; distance/HR/cadence remain cardio metrics.
     let durationSec: Double?
     let distanceM: Double?
     let hrAvgBpm: Int?
     let cadenceAvgSpm: Int?
     let startedAt: Date?
+    let skipped: Bool?
+    let side: String?
 
     init(value: SetPlan) {
         setIndex = value.setIndex
         loadKg = value.loadKg
         unit = value.unit.rawValue
         reps = value.reps
+        workTarget = value.workTarget.map(WorkTargetCodable.init(value:))
         done = value.done
         adjust = value.adjust?.rawValue
         rir = value.rir
@@ -322,6 +475,8 @@ private struct SetPlanCodable: Codable {
         hrAvgBpm = value.hrAvgBpm
         cadenceAvgSpm = value.cadenceAvgSpm
         startedAt = value.startedAt
+        skipped = value.skipped
+        side = value.side.rawValue
     }
 
     var value: SetPlan {
@@ -330,6 +485,7 @@ private struct SetPlanCodable: Codable {
             loadKg: loadKg,
             unit: unit.flatMap(WeightUnit.init(rawValue:)) ?? .lb,
             reps: reps,
+            workTarget: workTarget?.value,
             done: done,
             adjust: adjust.flatMap(SetPlan.Adjust.init(rawValue:)),
             rir: rir,
@@ -338,7 +494,29 @@ private struct SetPlanCodable: Codable {
             distanceM: distanceM,
             hrAvgBpm: hrAvgBpm,
             cadenceAvgSpm: cadenceAvgSpm,
-            startedAt: startedAt
+            startedAt: startedAt,
+            skipped: skipped ?? false,
+            side: side.flatMap(SetLogSide.init(rawValue:)) ?? .bilateral
         )
+    }
+}
+
+private struct WorkTargetCodable: Codable {
+    let kind: String
+    let amount: Double
+    let unit: String
+
+    init(value: WorkTarget) {
+        kind = value.kind.rawValue
+        amount = value.value
+        unit = value.unit.rawValue
+    }
+
+    var value: WorkTarget? {
+        guard let kind = WorkTarget.Kind(rawValue: kind),
+              let unit = WorkTarget.Unit(rawValue: unit) else {
+            return nil
+        }
+        return WorkTarget(kind: kind, value: amount, unit: unit)
     }
 }

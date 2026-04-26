@@ -54,6 +54,14 @@ extension PushQueue {
         _ = try await store.removeMatchingDedupKey(key)
     }
 
+    /// Drop every queued reset for the same workout. Reset is terminal
+    /// for the user's intent: multiple taps should collapse into one
+    /// server-side delete/replan operation.
+    func dropExistingWorkoutReset(workoutID: WorkoutID) async throws {
+        let key = "reset:\(workoutID.uuidString.lowercased())"
+        _ = try await store.removeMatchingDedupKey(key)
+    }
+
     /// Drop every queued row whose payload is a `.userParameter` with the
     /// given `id`. Trigger: user edits the bodyweight again before the
     /// first push flushes — we want the latest value to win, not a

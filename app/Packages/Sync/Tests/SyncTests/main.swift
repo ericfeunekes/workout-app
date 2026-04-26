@@ -819,6 +819,38 @@ runAsyncCase("Status update carries notes on the wire so the server persists the
     try expectEqual(payload.statusUpdates[0].notes, "leg day PR!")
 }
 
+runAsyncCase("Workout reset routes to sync results with lowercase workout id") {
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 200, body: Data())),
+    ])
+    let queue = PushQueue(store: store, transport: transport)
+
+    try await queue.enqueueWorkoutReset(
+        workoutID: uuid("DEADBEEF-1234-5678-9ABC-DEF012345678")
+    )
+    _ = try await queue.flush(bearerToken: "tok")
+
+    let calls = await transport.store.recordedCalls()
+    try expectEqual(calls.count, 1)
+    try expectEqual(calls[0].path, "/api/sync/results")
+    guard let body = calls[0].body else {
+        try expect(false, "expected body on POST")
+        return
+    }
+    let payload = try JSONDecoder.workoutDB().decode(
+        WorkoutDBSchema.SyncResultsPayload.self,
+        from: body
+    )
+    try expectEqual(payload.setLogs.count, 0)
+    try expectEqual(payload.statusUpdates.count, 0)
+    try expectEqual(payload.workoutResets.count, 1)
+    try expectEqual(
+        payload.workoutResets[0].workoutId,
+        "deadbeef-1234-5678-9abc-def012345678"
+    )
+}
+
 // MARK: - Priority ordering (telemetry ≻ results isolation)
 
 runAsyncCase("PushQueue drains results (priority 0) before telemetry (priority 1) in one flush") {

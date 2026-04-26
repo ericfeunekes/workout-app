@@ -76,7 +76,9 @@ public struct ForTimeDriver: TimingDriver {
         // from the scheme (if present for this round), else fall back to
         // the item's authored prescription.
         let round = c.setIndex
-        let (fallbackReps, loadKg, unit) = prescribedRepsAndLoad(for: item)
+        let activeSet = itemLog.sets.first(where: { $0.setIndex == c.setIndex })
+        let (fallbackReps, loadKg, unit) = activeSet.map { ($0.reps, $0.loadKg, $0.unit) }
+            ?? prescribedRepsAndLoad(for: item)
         let reps = scheme(from: block)
             .flatMap { $0[safe: round - 1] }
             ?? fallbackReps
@@ -101,16 +103,22 @@ public struct ForTimeDriver: TimingDriver {
 
         let totalRounds = block.rounds ?? 1
 
+        let repsDisplay = activeSet?.workTarget?.kind == .reps || activeSet?.workTarget == nil
+            ? String(reps)
+            : activeSet.map(displayText(for:)) ?? String(reps)
+        let kind = activeSet.map(activeKind(for:)) ?? .strength
+
         return ActiveContent(
             exerciseName: exerciseName,
             setIndex: round,
             totalSets: totalRounds,
             loadDisplay: loadDisplay,
-            repsDisplay: String(reps),
+            repsDisplay: repsDisplay,
             loadKg: heroLoadKg,
             reps: reps,
             adjustGlyph: nil,
-            lastTime: context.lastPerformed[item.exerciseID]
+            lastTime: context.lastPerformed[item.exerciseID],
+            kind: kind
         )
     }
 
@@ -197,7 +205,7 @@ public struct ForTimeDriver: TimingDriver {
             return (intReps(from: reps), loadKg, unit)
         case .bodyweight(_, let reps, _):
             return (reps, nil, .lb)
-        case .cluster(_, let reps, let loadKg, let unit, _, _, _):
+        case .cluster(_, let reps, let loadKg, let unit, _, _, _, _):
             return (reps, loadKg, unit)
         case .repRange(_, _, let repsMax, let loadKg, let unit, _, _):
             return (repsMax, loadKg, unit)

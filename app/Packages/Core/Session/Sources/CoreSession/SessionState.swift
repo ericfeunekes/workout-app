@@ -39,6 +39,7 @@ public struct SessionState: Equatable, Sendable {
     public enum Route: String, Sendable, Equatable {
         case today
         case active
+        case transition
         case rest
         case complete
     }
@@ -83,6 +84,55 @@ public struct SessionState: Equatable, Sendable {
             self.sets = sets
             self.performedExerciseID = performedExerciseID
             self.overrides = overrides
+        }
+    }
+
+    /// Runtime progress for a composed top-level set, such as a cluster
+    /// set made of several work slots separated by intra-set rest. The
+    /// authoritative log row remains the matching `SetPlan`; this sidecar
+    /// only tracks in-flight execution inside that top-level set.
+    public struct CompositeSetProgress: Equatable, Sendable {
+        public enum Kind: String, Equatable, Sendable {
+            case cluster
+        }
+
+        public enum Phase: Equatable, Sendable {
+            case ready(slotIndex: Int)
+            case working(slotIndex: Int, startedAt: Date)
+            case intraRest(afterSlotIndex: Int, endsAt: Date)
+            case completePendingLog
+        }
+
+        public let itemID: WorkoutItemID
+        public let setIndex: Int
+        public let kind: Kind
+        public let targetRepsPerSlot: Int
+        public let slotCount: Int
+        public let intraRestSec: Double
+        public var firstStartedAt: Date?
+        public var phase: Phase
+        public var completedSlots: Int
+
+        public init(
+            itemID: WorkoutItemID,
+            setIndex: Int,
+            kind: Kind,
+            targetRepsPerSlot: Int,
+            slotCount: Int,
+            intraRestSec: Double,
+            firstStartedAt: Date? = nil,
+            phase: Phase = .ready(slotIndex: 1),
+            completedSlots: Int = 0
+        ) {
+            self.itemID = itemID
+            self.setIndex = setIndex
+            self.kind = kind
+            self.targetRepsPerSlot = targetRepsPerSlot
+            self.slotCount = slotCount
+            self.intraRestSec = intraRestSec
+            self.firstStartedAt = firstStartedAt
+            self.phase = phase
+            self.completedSlots = completedSlots
         }
     }
 
@@ -177,6 +227,7 @@ public struct SessionState: Equatable, Sendable {
     public var route: Route
     public var cursor: Cursor
     public var items: [ItemLog]
+    public var compositeSets: [CompositeSetProgress]
     public var restEndsAt: Date?
     /// Absolute wall-clock deadline for the current time-capped block
     /// (AMRAP `time_cap_sec`, ForTime `time_cap_sec`, EMOM `total_minutes`,
@@ -202,6 +253,12 @@ public struct SessionState: Equatable, Sendable {
     /// Absolute-timestamp semantics so backgrounding + reload survives
     /// without drift, matching `restEndsAt` / `blockEndsAt`.
     public var intervalAnchorAt: Date?
+    /// Wall-clock instant the user reached the current Active screen while
+    /// still preparing to begin the set. This powers the visible ready/prep
+    /// count-up for explicit-start work. It is distinct from
+    /// `workStartedAt`: ready time is not working-set duration and must not
+    /// be stamped onto the eventual SetLog.
+    public var workReadyAt: Date?
     /// Wall-clock instant the user began the CURRENT working set — i.e.,
     /// when the previous rest ended (or when the session started, for the
     /// very first set). Read by the reducer's `.logSet` / `.logCardioSet`
@@ -231,10 +288,12 @@ public struct SessionState: Equatable, Sendable {
         route: Route,
         cursor: Cursor,
         items: [ItemLog],
+        compositeSets: [CompositeSetProgress] = [],
         restEndsAt: Date? = nil,
         blockEndsAt: Date? = nil,
         workEndsAt: Date? = nil,
         intervalAnchorAt: Date? = nil,
+        workReadyAt: Date? = nil,
         workStartedAt: Date? = nil,
         note: String = "",
         structure: Structure
@@ -243,10 +302,12 @@ public struct SessionState: Equatable, Sendable {
         self.route = route
         self.cursor = cursor
         self.items = items
+        self.compositeSets = compositeSets
         self.restEndsAt = restEndsAt
         self.blockEndsAt = blockEndsAt
         self.workEndsAt = workEndsAt
         self.intervalAnchorAt = intervalAnchorAt
+        self.workReadyAt = workReadyAt
         self.workStartedAt = workStartedAt
         self.note = note
         self.structure = structure

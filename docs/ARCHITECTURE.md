@@ -62,7 +62,7 @@ Swift + SwiftData. The "dumb" client. Owns:
 - Pull-to-refresh and queued push (works fully offline)
 - Percentage-based load resolution via `user_parameters`
 
-Runs the 10 timing modes + standalone `rest` blocks: `straight_sets`, `superset`, `circuit`, `emom`, `amrap`, `for_time`, `intervals`, `tabata`, `continuous`, `custom`, `rest`. Applies client-side autoregulation based on per-item `target_rir` and `autoreg` rules. See `app/README.md` for the in-app behavior contract, `docs/prescription.md` for the per-mode prescription shapes, and `docs/sync.md` for sync + first-run behavior.
+Runs the 12 timing modes: `straight_sets`, `superset`, `circuit`, `emom`, `amrap`, `for_time`, `intervals`, `tabata`, `continuous`, `accumulate`, `custom`, `rest`. Applies client-side autoregulation based on per-item `target_rir` and `autoreg` rules. See `app/README.md` for the in-app behavior contract, `docs/workout-generation.md` for the end-to-end workout authoring workflow, `docs/prescription.md` for the per-mode prescription shapes, and `docs/sync.md` for sync + first-run behavior.
 
 ### `schema/` — Shared schema
 Single source of truth for cross-stack data contracts. Committed `openapi.json` is the wire contract; hand-written Swift Codable DTOs under `Sources/WorkoutDBSchema/` mirror the server's Pydantic schemas. Cross-decoded fixtures live in `fixtures/`. See `schema/README.md`.
@@ -92,6 +92,7 @@ See `docs/sync.md` for the full rules, and the spec § "Persistence architecture
 
 - Target spec (authoritative) → `docs/specs/v2-architecture.md`
 - Structural contract (boundaries + fitness functions + hotspots + Swift package graph) → `docs/architecture/` (start at `context.md`)
+- Workout generation workflow → `docs/workout-generation.md` (how Claude/humans compose blocks, timing modes, prescriptions, autoreg, alternatives, and result expectations)
 - Prescription authoring vocabulary → `docs/prescription.md` (what Claude puts in a workout; per-mode shapes; autoreg rules)
 - Sync + connectivity + first-run → `docs/sync.md`
 - Proof contract → `docs/TESTING.md`

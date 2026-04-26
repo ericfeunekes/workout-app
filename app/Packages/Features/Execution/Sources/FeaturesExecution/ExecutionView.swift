@@ -1,7 +1,7 @@
 // ExecutionView.swift
 //
 // Top-level router for the Execution feature. Switches between the
-// Active, Rest, and Complete screens based on `SessionState.Route`.
+// Active, Rest, Transition, and Complete screens based on `SessionState.Route`.
 // `.today` is owned by `FeaturesToday` and never shown here — the shell
 // uses `ExecutionView` only once the session is in-flight.
 //
@@ -30,6 +30,8 @@ public struct ExecutionView: View {
                 Color.clear
             case .active:
                 ActiveView(viewModel: viewModel)
+            case .transition:
+                BlockTransitionView(viewModel: viewModel)
             case .rest:
                 RestView(viewModel: viewModel)
             case .complete:

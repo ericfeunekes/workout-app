@@ -50,6 +50,7 @@ extension SessionSeeder {
     /// populate `structure.itemsPerBlock`.
     struct BlockSeed {
         let itemLogs: [SessionState.ItemLog]
+        let compositeSets: [SessionState.CompositeSetProgress]
         let perBlock: [Int]
         let itemsInBlock: Int
         let advancement: SessionState.BlockAdvancement
@@ -62,6 +63,7 @@ extension SessionSeeder {
     /// concern.
     struct SeedAccumulator {
         var items: [SessionState.ItemLog] = []
+        var compositeSets: [SessionState.CompositeSetProgress] = []
         var setsPerItem: [[Int]] = []
         var itemsPerBlock: [Int] = []
         var advancementByBlock: [SessionState.BlockAdvancement] = []
@@ -69,6 +71,7 @@ extension SessionSeeder {
 
         mutating func append(_ seed: BlockSeed) {
             items.append(contentsOf: seed.itemLogs)
+            compositeSets.append(contentsOf: seed.compositeSets)
             setsPerItem.append(seed.perBlock)
             itemsPerBlock.append(seed.itemsInBlock)
             advancementByBlock.append(seed.advancement)

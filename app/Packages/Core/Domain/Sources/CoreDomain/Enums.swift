@@ -28,6 +28,7 @@ public enum TimingMode: String, Sendable, CaseIterable, Hashable {
     case intervals
     case tabata
     case continuous
+    case accumulate
     case custom
     case rest
 }

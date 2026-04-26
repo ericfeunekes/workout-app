@@ -16,8 +16,7 @@
 //      EMOM as block 3 of 12 dropped blocks 4-11 entirely.
 //
 // Post-fix: `catchUpEMOMBoundaries` walks every overdue boundary in a
-// single tick (auto-logging placeholders on `.active`, plain advance
-// on `.rest`); `routeOutOfCappedBlock` advances to the next block if
+// single tick; `routeOutOfCappedBlock` advances to the next block if
 // one exists, routing to `.complete` only when the capped block is
 // trailing.
 //
@@ -178,8 +177,8 @@ final class EMOMBackgroundCatchupTests: XCTestCase {
     /// qa-047 — multi-interval catchup in a single tick. Jump the clock
     /// 150s (past boundaries at 60 and 120) and fire the tick exactly
     /// once: the cursor must walk through BOTH boundaries, not just
-    /// one. Placeholder logs land on the items the cursor sat on at
-    /// each boundary.
+    /// one. Missed intervals advance the schedule without writing fake
+    /// 0-rep completed sets.
     func testEMOMTickCatchesUpMultipleIntervalsAfterBackground() {
         let start = Date(timeIntervalSince1970: 11_000_000)
         let clock = MutableCatchupClock(now: start)
@@ -208,20 +207,16 @@ final class EMOMBackgroundCatchupTests: XCTestCase {
             "after catching up 2 boundaries, setIndex bumps to round 2")
         XCTAssertEqual(vm.state.route, .active,
             "advance lands on .active for the next interval")
-        // Two placeholder logs landed — one per skipped interval. The
-        // user never interacted with the app for 150s; both intervals
-        // produced `(reps: 0, rir: nil)` rows so the server still sees
-        // one log per authored interval.
-        XCTAssertEqual(totalLoggedSets(vm.state), 2,
-            "each missed boundary auto-logs a 0-rep placeholder (qa-047)")
-        // Placeholders attributed to the items the cursor was sitting
-        // on at each boundary. Interval 1 → item A; interval 2 → item B.
+        // No logs are fabricated for skipped intervals. Interval 1 →
+        // item A and interval 2 → item B both remain pending.
+        XCTAssertEqual(totalLoggedSets(vm.state), 0,
+            "missed EMOM boundaries advance without fake completed sets")
         let logA = vm.state.items.first { $0.itemID == itemA }
         let logB = vm.state.items.first { $0.itemID == itemB }
-        XCTAssertEqual(logA?.sets.filter { $0.done }.count, 1,
-            "interval 1 placeholder attributed to item A")
-        XCTAssertEqual(logB?.sets.filter { $0.done }.count, 1,
-            "interval 2 placeholder attributed to item B")
+        XCTAssertEqual(logA?.sets.filter { $0.done }.count, 0,
+            "interval 1 remains pending")
+        XCTAssertEqual(logB?.sets.filter { $0.done }.count, 0,
+            "interval 2 remains pending")
     }
 
     /// qa-047 — round-robin correctness across catchup. Each advance
@@ -249,8 +244,8 @@ final class EMOMBackgroundCatchupTests: XCTestCase {
             "catchup walked 4 boundaries; cursor lands on interval 5 (round 3)")
         XCTAssertEqual(vm.state.cursor.itemIndex, 0,
             "round 3 starts at item 0 — round-robin correctness across catchup")
-        XCTAssertEqual(totalLoggedSets(vm.state), 4,
-            "4 skipped intervals = 4 auto-logged placeholders")
+        XCTAssertEqual(totalLoggedSets(vm.state), 0,
+            "4 skipped intervals advance without fake completed sets")
     }
 
     /// qa-047 — an EMOM block cap expiring with remaining blocks must
@@ -281,15 +276,17 @@ final class EMOMBackgroundCatchupTests: XCTestCase {
 
         // Cursor must land on the first position of block 1, NOT on
         // `.complete`. The workout has a straight_sets block waiting
-        // and the user should see its first set.
-        XCTAssertEqual(vm.state.route, .active,
-            "cap-out must land on .active for the next block, not .complete")
+        // behind the setup transition.
+        XCTAssertEqual(vm.state.route, .transition,
+            "cap-out must land on transition for the next block, not .complete")
         XCTAssertEqual(vm.state.cursor.blockIndex, 1,
             "cursor advances from block 0 (EMOM) into block 1 (straight_sets)")
         XCTAssertEqual(vm.state.cursor.itemIndex, 0,
             "cursor enters the new block at item 0")
         XCTAssertEqual(vm.state.cursor.setIndex, 1,
             "cursor enters the new block at set 1")
+        vm.beginBlockTransition()
+        XCTAssertEqual(vm.state.route, .active)
 
         // Timer anchors for the capped block are cleared; straight_sets
         // is not time-capped so `blockEndsAt` stays nil.

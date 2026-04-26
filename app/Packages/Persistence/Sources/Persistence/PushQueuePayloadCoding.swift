@@ -24,6 +24,7 @@ enum PushQueuePayloadCoding {
     enum EnvelopeKind: String, Codable {
         case setLogs
         case statusUpdate
+        case workoutReset
         case events
         case userParameter
     }
@@ -44,6 +45,7 @@ enum PushQueuePayloadCoding {
         /// this field landed still decode cleanly (they default to nil,
         /// which is the pre-bug behavior).
         var statusNotes: String?
+        var resetWorkoutID: UUID?
         var events: [CodableEvent]?
         var userParameter: CodableUserParameter?
 
@@ -55,6 +57,7 @@ enum PushQueuePayloadCoding {
                 statusRaw: nil,
                 statusCompletedAt: nil,
                 statusNotes: nil,
+                resetWorkoutID: nil,
                 events: nil,
                 userParameter: nil
             )
@@ -181,6 +184,9 @@ enum PushQueuePayloadCoding {
             envelope.statusRaw = status.rawValue
             envelope.statusCompletedAt = completedAt
             envelope.statusNotes = notes
+        case .workoutReset(let workoutID):
+            envelope = .empty(kind: .workoutReset)
+            envelope.resetWorkoutID = workoutID
         case .events(let events):
             envelope = .empty(kind: .events)
             envelope.events = events.map(CodableEvent.init)
@@ -213,6 +219,11 @@ enum PushQueuePayloadCoding {
                 completedAt: envelope.statusCompletedAt,
                 notes: envelope.statusNotes
             )
+        case .workoutReset:
+            guard let workoutID = envelope.resetWorkoutID else {
+                throw PersistenceError.decode("invalid workoutReset envelope")
+            }
+            return .workoutReset(workoutID: workoutID)
         case .events:
             let events = (envelope.events ?? []).map { $0.toDomain() }
             return .events(events)

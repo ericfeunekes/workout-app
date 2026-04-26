@@ -120,6 +120,42 @@ extension HistoryViewModel {
         await load()
     }
 
+    public func canResetToday(workoutID: WorkoutID) -> Bool {
+        guard let session = rawSessions.first(where: { $0.workout.id == workoutID }),
+              let date = session.sortDate else {
+            return false
+        }
+        return calendar.isDate(date, inSameDayAs: now())
+    }
+
+    @discardableResult
+    public func resetWorkout(workoutID: WorkoutID) async -> Bool {
+        guard canResetToday(workoutID: workoutID) else { return false }
+
+        do {
+            try await cache.resetWorkout(workoutID: workoutID)
+        } catch {
+            return false
+        }
+
+        telemetry.emit(Event(
+            sessionID: TelemetrySession.id,
+            kind: "state",
+            name: "history.workout_reset",
+            workoutID: workoutID
+        ))
+
+        if let onWorkoutReset {
+            // swiftlint:disable:next no_direct_task_unstructured
+            Task { [onWorkoutReset, workoutID] in
+                await onWorkoutReset(workoutID)
+            }
+        }
+
+        await load()
+        return true
+    }
+
     /// Emit a single `history.past_set_edited` telemetry event tagged
     /// with the workout and the SetLog it mutated. Payload carries
     /// `{itemID, setIndex, setLogID}` — the same shape as

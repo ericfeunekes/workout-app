@@ -11,7 +11,7 @@
 // as the explicit "no bound" semantic. `ActiveView` gates its
 // progress-dot row and the "OF M" denominator suffix on
 // `totalSets > 0`; when unbounded, the meta line collapses to
-// "ROUND N · REST …" (see `ActiveViewMetaLineTests`).
+// "ROUND N" (see `ActiveViewMetaLineTests`).
 //
 // This file pins the DRIVER end of that contract. The VIEW end lives
 // in `ActiveViewMetaLineTests`. Separate file mainly because the

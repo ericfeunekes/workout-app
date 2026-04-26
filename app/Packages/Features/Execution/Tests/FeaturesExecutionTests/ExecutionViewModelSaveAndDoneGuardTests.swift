@@ -38,6 +38,7 @@ final class ExecutionViewModelSaveAndDoneGuardTests: XCTestCase {
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
+        vm.startCurrentSet()
         vm.complete()
 
         XCTAssertFalse(vm.saveAndDoneInFlight, "guard starts clear")
@@ -75,6 +76,7 @@ final class ExecutionViewModelSaveAndDoneGuardTests: XCTestCase {
         let (ctx, _) = GuardTestFixtures.context(sets: 1, reps: 5, loadKg: 100)
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: .none)
         vm.start()
+        vm.startCurrentSet()
         vm.complete()
 
         XCTAssertFalse(vm.saveAndDoneInFlight)

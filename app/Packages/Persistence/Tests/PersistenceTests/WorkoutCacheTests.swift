@@ -98,6 +98,39 @@ final class WorkoutCacheTests: XCTestCase {
         XCTAssertEqual(completedRows[0].id, completed.id)
     }
 
+    func testResetWorkoutDeletesLogsAndReturnsWorkoutToPlanned() async throws {
+        let factory = try makeFactory()
+        let cache = factory.workoutCache
+
+        var workout = Fixtures.sampleWorkout(status: .completed)
+        workout.completedAt = Fixtures.baseDate.addingTimeInterval(3_600)
+        let block = Fixtures.sampleBlock(workoutID: workout.id)
+        let item = Fixtures.sampleItem(blockID: block.id)
+        let exercise = Fixtures.sampleExercise(id: item.exerciseID)
+        let log = Fixtures.sampleSetLog(workoutItemID: item.id)
+
+        try await cache.save(PulledDataset(
+            workouts: [workout],
+            blocks: [block],
+            items: [item],
+            exercises: [exercise]
+        ))
+        try await cache.saveSetLogs([log], workoutID: workout.id)
+
+        let logsBeforeReset = try await cache.loadSetLogs(workoutID: workout.id)
+        XCTAssertEqual(logsBeforeReset.count, 1)
+
+        try await cache.resetWorkout(workoutID: workout.id)
+
+        let logsAfterReset = try await cache.loadSetLogs(workoutID: workout.id)
+        XCTAssertTrue(logsAfterReset.isEmpty)
+        let completedAfterReset = try await cache.loadCompletedWorkouts(limit: 10, offset: 0)
+        XCTAssertTrue(completedAfterReset.isEmpty)
+        let planned = try await cache.loadWorkouts(status: .planned, since: nil)
+        XCTAssertEqual(planned.map(\.id), [workout.id])
+        XCTAssertNil(planned[0].completedAt)
+    }
+
     func testLatestUserParameterPerKey() async throws {
         let factory = try makeFactory()
         let cache = factory.workoutCache

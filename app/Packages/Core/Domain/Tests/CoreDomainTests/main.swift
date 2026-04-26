@@ -6,8 +6,8 @@ import CoreDomain
 
 // ---- Enums ---------------------------------------------------------------
 
-runCase("TimingMode has 11 cases") {
-    try expectEqual(TimingMode.allCases.count, 11)
+runCase("TimingMode has 12 cases") {
+    try expectEqual(TimingMode.allCases.count, 12)
 }
 
 runCase("TimingMode snake_case raw values round-trip") {
@@ -19,11 +19,12 @@ runCase("TimingMode snake_case raw values round-trip") {
 }
 
 runCase("TimingMode full case coverage matches spec") {
-    // Belt + braces on the 11-count test. If someone adds a case, this
+    // Belt + braces on the 12-count test. If someone adds a case, this
     // assertion breaks loudly instead of silently drifting.
     let expected: Set<String> = [
         "straight_sets", "superset", "circuit", "emom", "amrap",
-        "for_time", "intervals", "tabata", "continuous", "custom", "rest",
+        "for_time", "intervals", "tabata", "continuous", "accumulate",
+        "custom", "rest",
     ]
     let actual = Set(TimingMode.allCases.map(\.rawValue))
     try expectEqual(actual, expected)

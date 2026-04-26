@@ -29,6 +29,7 @@
 
 import Foundation
 import CoreDomain
+import CorePrescription
 
 public struct SetPlan: Equatable, Sendable, Hashable {
 
@@ -72,6 +73,13 @@ public struct SetPlan: Equatable, Sendable, Hashable {
     /// holds the observed reps.
     public let reps: Int
 
+    /// Unit-aware target the athlete is trying to complete for this row.
+    /// Strength rows are `.reps`; timed holds/carries/runs can be
+    /// `.duration` or `.distance`. Canonical log fields remain `reps`,
+    /// `durationSec`, and `distanceM`; this target preserves the authored
+    /// unit for display and mode routing.
+    public let workTarget: WorkTarget?
+
     /// Whether the set has been logged yet. `apply(...)` never touches
     /// done sets — once a set is logged it is immutable history from
     /// autoreg's point of view. (Manual edits to past sets happen through
@@ -98,10 +106,10 @@ public struct SetPlan: Equatable, Sendable, Hashable {
     /// once logged, the timestamp is immutable history. See file header.
     public let completedAt: Date?
 
-    /// Cardio-only: how long the interval / effort ran (seconds). `nil`
-    /// for strength sets. Stamped by the reducer's `.logCardioSet`
-    /// handler when a cardio driver logs a set; plumbed through to the
-    /// server's `set_log.duration_sec` column via the push path.
+    /// Elapsed work time in seconds. Cardio rows use this for intervals
+    /// and continuous efforts; composed strength rows (cluster/rest-pause)
+    /// may also carry it while preserving reps/load/RIR. Plumbed through
+    /// to the server's `set_log.duration_sec` column via the push path.
     public let durationSec: Double?
 
     /// Cardio-only: distance covered during the interval / effort
@@ -118,18 +126,26 @@ public struct SetPlan: Equatable, Sendable, Hashable {
     /// the interval / effort. Same nullability story as `hrAvgBpm`.
     public let cadenceAvgSpm: Int?
 
-    /// Cardio-only: wall-clock stamp for when the interval / effort
-    /// started. The strength path derives `startedAt` at completion time
-    /// (previous set's `completedAt`) via `buildCompletionSetLogs`;
-    /// cardio modes know the start instant at log time and can stamp it
-    /// directly.
+    /// Wall-clock stamp for when the interval, effort, or composed set
+    /// started. Normal strength rows stamp this from the live work anchor;
+    /// cardio and composed-set paths can also stamp it directly.
     public let startedAt: Date?
+
+    /// Whether this row was deliberately skipped by the athlete. Skipped
+    /// rows are still done rows for cursor/progress purposes, but push and
+    /// history treat them as "no performance was logged".
+    public let skipped: Bool
+
+    /// Side represented by this row. Defaults to bilateral for normal
+    /// strength/cardio work; per-side prescriptions can stamp left/right.
+    public let side: SetLogSide
 
     public init(
         setIndex: Int,
         loadKg: Double?,
         unit: WeightUnit = .lb,
         reps: Int,
+        workTarget: WorkTarget? = nil,
         done: Bool,
         adjust: Adjust?,
         rir: Int? = nil,
@@ -138,12 +154,15 @@ public struct SetPlan: Equatable, Sendable, Hashable {
         distanceM: Double? = nil,
         hrAvgBpm: Int? = nil,
         cadenceAvgSpm: Int? = nil,
-        startedAt: Date? = nil
+        startedAt: Date? = nil,
+        skipped: Bool = false,
+        side: SetLogSide = .bilateral
     ) {
         self.setIndex = setIndex
         self.loadKg = loadKg
         self.unit = unit
         self.reps = reps
+        self.workTarget = workTarget
         self.done = done
         self.adjust = adjust
         self.rir = rir
@@ -153,6 +172,8 @@ public struct SetPlan: Equatable, Sendable, Hashable {
         self.hrAvgBpm = hrAvgBpm
         self.cadenceAvgSpm = cadenceAvgSpm
         self.startedAt = startedAt
+        self.skipped = skipped
+        self.side = side
     }
 
     /// Convenience for the apply path — returns a copy with an updated
@@ -165,6 +186,7 @@ public struct SetPlan: Equatable, Sendable, Hashable {
             loadKg: newLoadKg,
             unit: unit,
             reps: reps,
+            workTarget: workTarget,
             done: done,
             adjust: newAdjust,
             rir: rir,
@@ -173,7 +195,9 @@ public struct SetPlan: Equatable, Sendable, Hashable {
             distanceM: distanceM,
             hrAvgBpm: hrAvgBpm,
             cadenceAvgSpm: cadenceAvgSpm,
-            startedAt: startedAt
+            startedAt: startedAt,
+            skipped: skipped,
+            side: side
         )
     }
 }

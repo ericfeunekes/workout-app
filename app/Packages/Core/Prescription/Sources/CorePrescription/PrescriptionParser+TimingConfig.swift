@@ -36,6 +36,7 @@ extension PrescriptionParser {
         case "intervals":     return parseIntervalsConfig(obj)
         case "tabata":        return .success(.tabata)
         case "continuous":    return parseContinuousConfig(obj)
+        case "accumulate":    return parseAccumulateConfig(obj)
         case "custom":        return parseCustomConfig(obj)
         case "rest":          return parseRestConfig(obj)
         default:              return .failure(.unknownTimingMode(timingMode))
@@ -83,7 +84,17 @@ extension PrescriptionParser {
         case .failure(let e): return .failure(e)
         case .success(let d): v = d
         }
-        return .success(.superset(restBetweenRoundsSec: v))
+        switch readRoundRobinLoggingMode(
+            obj,
+            defaultMode: .batchAtRoundRest
+        ) {
+        case .failure(let e): return .failure(e)
+        case .success(let mode):
+            return .success(.superset(
+                restBetweenRoundsSec: v,
+                loggingMode: mode
+            ))
+        }
     }
 
     func parseCircuitConfig(
@@ -100,10 +111,18 @@ extension PrescriptionParser {
         case .failure(let e): return .failure(e)
         case .success(let v): rbr = v
         }
-        return .success(.circuit(
-            restBetweenExercisesSec: rbe,
-            restBetweenRoundsSec: rbr
-        ))
+        switch readRoundRobinLoggingMode(
+            obj,
+            defaultMode: .stationByStation
+        ) {
+        case .failure(let e): return .failure(e)
+        case .success(let mode):
+            return .success(.circuit(
+                restBetweenExercisesSec: rbe,
+                restBetweenRoundsSec: rbr,
+                loggingMode: mode
+            ))
+        }
     }
 
     func parseEmomConfig(
@@ -156,5 +175,50 @@ extension PrescriptionParser {
         case .success(let v): d = v
         }
         return .success(.rest(durationSec: d))
+    }
+
+    func parseAccumulateConfig(
+        _ obj: [String: Any]
+    ) -> Result<TimingConfig, ParseError> {
+        let dur: Double?
+        switch readOptionalDouble(obj, "target_duration_sec") {
+        case .failure(let e): return .failure(e)
+        case .success(let v): dur = v
+        }
+        let reps: Int?
+        switch readOptionalInt(obj, "target_reps") {
+        case .failure(let e): return .failure(e)
+        case .success(let v): reps = v
+        }
+        let dist: Double?
+        switch readOptionalDouble(obj, "target_distance_m") {
+        case .failure(let e): return .failure(e)
+        case .success(let v): dist = v
+        }
+        return .success(.accumulate(
+            targetDurationSec: dur,
+            targetReps: reps,
+            targetDistanceM: dist
+        ))
+    }
+
+    func readRoundRobinLoggingMode(
+        _ obj: [String: Any],
+        defaultMode: RoundRobinLoggingMode
+    ) -> Result<RoundRobinLoggingMode, ParseError> {
+        switch readOptionalString(obj, "logging_mode") {
+        case .failure(let e):
+            return .failure(e)
+        case .success(.none):
+            return .success(defaultMode)
+        case .success(.some(let raw)):
+            guard let mode = RoundRobinLoggingMode(rawValue: raw) else {
+                return .failure(.wrongType(
+                    key: "logging_mode",
+                    expected: "\"station_by_station\" or \"batch_at_round_rest\""
+                ))
+            }
+            return .success(mode)
+        }
     }
 }

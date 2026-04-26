@@ -121,6 +121,8 @@ The flow (`deploy/deploy.sh`):
 5. `launchctl bootout` + `launchctl bootstrap` to restart the service.
 6. Health check with retries — the lifespan hook runs migrations on startup.
 
+The deploy script uses system launchd when passwordless `sudo` is available. If SSH can connect but cannot run `sudo -n`, it first checks for an already-running system service and restarts it by killing the user-owned `uvicorn` process so launchd respawns it from `/opt/workoutdb/current`. On a host without a system service, it falls back to a user LaunchAgent.
+
 If the health check fails, the previous release is still intact for rollback:
 
 ```bash

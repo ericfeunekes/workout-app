@@ -158,6 +158,12 @@ public protocol WorkoutCache: Sendable {
     /// place (matches the cache's upsert-on-UUID contract).
     func saveSetLogs(_ setLogs: [SetLog], workoutID: WorkoutID) async throws
 
+    /// Delete all local set_logs for a workout and return it to planned.
+    /// Used by History's same-day reset affordance so an accidental log
+    /// disappears immediately while a matching sync reset is queued for
+    /// the server.
+    func resetWorkout(workoutID: WorkoutID) async throws
+
     /// Upsert a single workout row. Used by Execution on `save & done`
     /// so the just-completed workout (with `status == .completed` and
     /// `completedAt` populated) lands in the local cache immediately —

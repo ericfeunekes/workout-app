@@ -33,18 +33,37 @@ public struct WorkoutStatusUpdate: Codable, Sendable, Equatable {
     }
 }
 
+public struct WorkoutReset: Codable, Sendable, Equatable {
+    public let workoutId: String
+
+    enum CodingKeys: String, CodingKey {
+        case workoutId = "workout_id"
+    }
+
+    public init(workoutId: String) {
+        self.workoutId = workoutId
+    }
+}
+
 public struct SyncResultsPayload: Codable, Sendable, Equatable {
     public let setLogs: [SetLog]
     public let statusUpdates: [WorkoutStatusUpdate]
+    public let workoutResets: [WorkoutReset]
 
     enum CodingKeys: String, CodingKey {
         case setLogs = "set_logs"
         case statusUpdates = "status_updates"
+        case workoutResets = "workout_resets"
     }
 
-    public init(setLogs: [SetLog] = [], statusUpdates: [WorkoutStatusUpdate] = []) {
+    public init(
+        setLogs: [SetLog] = [],
+        statusUpdates: [WorkoutStatusUpdate] = [],
+        workoutResets: [WorkoutReset] = []
+    ) {
         self.setLogs = setLogs
         self.statusUpdates = statusUpdates
+        self.workoutResets = workoutResets
     }
 }
 

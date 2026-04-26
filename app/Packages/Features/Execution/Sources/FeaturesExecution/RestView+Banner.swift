@@ -66,7 +66,9 @@ extension RestView {
                 })
                 .buttonStyle(.plain)
             }
-            .padding(DSSpacing.lg)
+            .padding(.top, DSSpacing.lg)
+            .padding(.horizontal, DSSpacing.lg)
+            .padding(.bottom, DSSpacing.xl)
             .background(DSColors.accentMuted)
             .overlay(
                 RoundedRectangle(cornerRadius: 14, style: .continuous)

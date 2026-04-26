@@ -49,7 +49,7 @@ public func formatPrescriptionLine(_ prescription: Prescription) -> String {
         // "3 × 10 BW"
         return "\(sets) × \(reps) BW"
 
-    case .cluster(let sets, let reps, let loadKg, let unit, let subSets, _, _):
+    case .cluster(let sets, let reps, let loadKg, let unit, let subSets, _, _, _):
         // "4 × (3 × 5) @ 100 kg" — condensed cluster summary
         return "\(sets) × (\(subSets) × \(reps)) @ \(loadText(loadKg, unit: unit))"
 

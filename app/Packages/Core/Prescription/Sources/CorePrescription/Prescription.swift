@@ -85,7 +85,7 @@ public enum Prescription: Equatable, Sendable, Hashable {
         autoreg: Autoreg?
     )
 
-    /// `{ "sets": n, "reps": r, "load_kg": kg, "sub_sets": k, "intra_set_rest_sec": s, "target_rir": rir? }`
+    /// `{ "sets": n, "reps": r, "load_kg": kg, "sub_sets": k, "intra_set_rest_sec": s, "target_rir": rir?, "autoreg": ...? }`
     case cluster(
         sets: Int,
         reps: Int,
@@ -93,7 +93,8 @@ public enum Prescription: Equatable, Sendable, Hashable {
         unit: WeightUnit,
         subSets: Int,
         intraSetRestSec: Double,
-        targetRir: Int?
+        targetRir: Int?,
+        autoreg: Autoreg?
     )
 
     /// `{ "reps": "amrap", "load_kg": kg?, "target_rir": rir? }`

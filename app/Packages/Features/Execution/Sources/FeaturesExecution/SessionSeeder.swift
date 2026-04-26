@@ -110,6 +110,7 @@ public enum SessionSeeder {
             route: .today,
             cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1),
             items: accum.items,
+            compositeSets: accum.compositeSets,
             restEndsAt: nil,
             note: "",
             structure: SessionState.Structure(
@@ -145,9 +146,10 @@ public enum SessionSeeder {
             blockIndex: blockIndex,
             block: block
         )
-        let (itemLogs, perBlock) = seedItems(blockItems, block: block, parser: parser)
+        let (itemLogs, compositeSets, perBlock) = seedItems(blockItems, block: block, parser: parser)
         return BlockSeed(
             itemLogs: itemLogs,
+            compositeSets: compositeSets,
             perBlock: perBlock,
             itemsInBlock: blockItems.count,
             advancement: advancement(for: block, itemCount: blockItems.count),
@@ -180,20 +182,27 @@ public enum SessionSeeder {
         _ blockItems: [WorkoutItem],
         block: Block?,
         parser: PrescriptionParser
-    ) -> (items: [SessionState.ItemLog], perBlock: [Int]) {
+    ) -> (
+        items: [SessionState.ItemLog],
+        compositeSets: [SessionState.CompositeSetProgress],
+        perBlock: [Int]
+    ) {
         var items: [SessionState.ItemLog] = []
+        var compositeSets: [SessionState.CompositeSetProgress] = []
         var perBlock: [Int] = []
         for item in blockItems {
-            let sets = setRowsForBlock(block: block, item: item, parser: parser)
+            let seed = setSeedForBlock(block: block, item: item, parser: parser)
+            let sets = seed.sets
             items.append(SessionState.ItemLog(
                 itemID: item.id,
                 autoregHeld: false,
                 sets: sets,
                 performedExerciseID: nil
             ))
+            compositeSets.append(contentsOf: seed.compositeSets)
             perBlock.append(sets.count)
         }
-        return (items, perBlock)
+        return (items, compositeSets, perBlock)
     }
 
     /// Build per-item SetPlan rows from a prescription. All rows start
@@ -218,7 +227,9 @@ public enum SessionSeeder {
         // placeholder — there's nothing to recover from.
         switch parser.parseTolerantOfAutoreg(prescriptionJSON: item.prescriptionJSON) {
         case .success(let p):
-            return setsFor(prescription: p)
+            let sets = setSeed(for: item, prescription: p).sets
+            let workTarget = parser.parseWorkTarget(prescriptionJSON: item.prescriptionJSON)
+            return overlaySetMajorWorkTarget(workTarget, on: sets, prescription: p)
         case .failure:
             // Graceful fallback — one placeholder set so the UI doesn't
             // hand the user an empty item. The parse error already ate
@@ -257,8 +268,8 @@ public enum SessionSeeder {
             // the set counter. Unit defaults to .lb until the resolver
             // lands with its own unit plumb.
             return seedUniform(sets: sets, loadKg: nil, unit: .lb, reps: reps)
-        case .cluster(let sets, let reps, let loadKg, let unit, _, _, _):
-            return seedUniform(sets: sets, loadKg: loadKg, unit: unit, reps: reps)
+        case .cluster(let sets, let reps, let loadKg, let unit, let subSets, _, _, _):
+            return seedUniform(sets: sets, loadKg: loadKg, unit: unit, reps: reps * subSets)
         case .warmup(let sets, let reps, let loadKg, let unit):
             // Authored-nil load stays nil (warm-up bodyweight shapes).
             return seedUniform(sets: sets, loadKg: loadKg, unit: unit, reps: reps)
@@ -288,6 +299,124 @@ public enum SessionSeeder {
             // manual placeholder so the driver can render "set 1 of 1"
             // and the user can log-or-skip to move the cursor forward.
             return [manualPlaceholder]
+        }
+    }
+
+    struct SetSeed {
+        let sets: [SetPlan]
+        let compositeSets: [SessionState.CompositeSetProgress]
+    }
+
+    static func setSeedForBlock(
+        block: Block?,
+        item: WorkoutItem,
+        parser: PrescriptionParser
+    ) -> SetSeed {
+        let sets = setRowsForBlock(block: block, item: item, parser: parser)
+        switch parser.parseTolerantOfAutoreg(prescriptionJSON: item.prescriptionJSON) {
+        case .success(let prescription):
+            if case .cluster(_, let reps, let loadKg, let unit, let subSets, let intraRestSec, _, _) = prescription {
+                return clusterSetSeed(
+                    item: item,
+                    sets: sets,
+                    repsPerSlot: reps,
+                    loadKg: loadKg,
+                    unit: unit,
+                    subSets: subSets,
+                    intraRestSec: intraRestSec
+                )
+            }
+            return SetSeed(sets: sets, compositeSets: [])
+        case .failure:
+            return SetSeed(sets: sets, compositeSets: [])
+        }
+    }
+
+    private static func setSeed(for item: WorkoutItem, prescription: Prescription) -> SetSeed {
+        let sets = setsFor(prescription: prescription)
+        guard case .cluster(_, let reps, _, _, let subSets, let intraRestSec, _, _) = prescription else {
+            return SetSeed(sets: sets, compositeSets: [])
+        }
+        let progress = sets.map { set in
+            SessionState.CompositeSetProgress(
+                itemID: item.id,
+                setIndex: set.setIndex,
+                kind: .cluster,
+                targetRepsPerSlot: reps,
+                slotCount: subSets,
+                intraRestSec: intraRestSec
+            )
+        }
+        return SetSeed(sets: sets, compositeSets: progress)
+    }
+
+    private static func clusterSetSeed(
+        item: WorkoutItem,
+        sets: [SetPlan],
+        repsPerSlot: Int,
+        loadKg: Double?,
+        unit: WeightUnit,
+        subSets: Int,
+        intraRestSec: TimeInterval
+    ) -> SetSeed {
+        let topLevelReps = repsPerSlot * subSets
+        let correctedSets = sets.map { set in
+            SetPlan(
+                setIndex: set.setIndex,
+                loadKg: set.loadKg ?? loadKg,
+                unit: set.unit == .lb && unit != .lb ? unit : set.unit,
+                reps: topLevelReps,
+                workTarget: .reps(topLevelReps),
+                done: set.done,
+                adjust: set.adjust,
+                rir: set.rir,
+                completedAt: set.completedAt,
+                durationSec: set.durationSec,
+                distanceM: set.distanceM,
+                hrAvgBpm: set.hrAvgBpm,
+                cadenceAvgSpm: set.cadenceAvgSpm,
+                startedAt: set.startedAt
+            )
+        }
+        let progress = correctedSets.map { set in
+            SessionState.CompositeSetProgress(
+                itemID: item.id,
+                setIndex: set.setIndex,
+                kind: .cluster,
+                targetRepsPerSlot: repsPerSlot,
+                slotCount: subSets,
+                intraRestSec: intraRestSec
+            )
+        }
+        return SetSeed(sets: correctedSets, compositeSets: progress)
+    }
+
+    private static func overlaySetMajorWorkTarget(
+        _ target: WorkTarget?,
+        on sets: [SetPlan],
+        prescription: Prescription
+    ) -> [SetPlan] {
+        guard let target else { return sets }
+        if case .cluster = prescription, target.kind == .reps {
+            return sets
+        }
+        return sets.map { set in
+            SetPlan(
+                setIndex: set.setIndex,
+                loadKg: set.loadKg,
+                unit: set.unit,
+                reps: target.canonicalReps ?? set.reps,
+                workTarget: target,
+                done: set.done,
+                adjust: set.adjust,
+                rir: set.rir,
+                completedAt: set.completedAt,
+                durationSec: target.canonicalDurationSec ?? set.durationSec,
+                distanceM: target.canonicalDistanceM ?? set.distanceM,
+                hrAvgBpm: set.hrAvgBpm,
+                cadenceAvgSpm: set.cadenceAvgSpm,
+                startedAt: set.startedAt
+            )
         }
     }
 
@@ -322,7 +451,15 @@ public enum SessionSeeder {
         // load_kg is a bodyweight / loadless variant (circuit station,
         // pull-up block) and must render as "BW", not "0 lb".
         return (1...max(n, 1)).map {
-            SetPlan(setIndex: $0, loadKg: loadKg, unit: unit, reps: repCount, done: false, adjust: nil)
+            SetPlan(
+                setIndex: $0,
+                loadKg: loadKg,
+                unit: unit,
+                reps: repCount,
+                workTarget: .reps(repCount),
+                done: false,
+                adjust: nil
+            )
         }
     }
 
@@ -330,10 +467,24 @@ public enum SessionSeeder {
         sets: Int,
         loadKg: Double?,
         unit: WeightUnit,
-        reps: Int
+        reps: Int,
+        workTarget: WorkTarget? = nil,
+        durationSec: Double? = nil,
+        distanceM: Double? = nil
     ) -> [SetPlan] {
-        (1...max(sets, 1)).map {
-            SetPlan(setIndex: $0, loadKg: loadKg, unit: unit, reps: reps, done: false, adjust: nil)
+        let resolvedTarget = workTarget ?? (reps > 0 ? .reps(reps) : nil)
+        return (1...max(sets, 1)).map {
+            SetPlan(
+                setIndex: $0,
+                loadKg: loadKg,
+                unit: unit,
+                reps: reps,
+                workTarget: resolvedTarget,
+                done: false,
+                adjust: nil,
+                durationSec: durationSec,
+                distanceM: distanceM
+            )
         }
     }
 
@@ -349,6 +500,7 @@ public enum SessionSeeder {
                 loadKg: d.loadKg,
                 unit: unit,
                 reps: reps,
+                workTarget: .reps(reps),
                 done: false,
                 adjust: nil
             )

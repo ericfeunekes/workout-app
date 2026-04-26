@@ -77,6 +77,7 @@ extension SessionSeeder {
                     loadKg: resolved,
                     unit: .kg,
                     reps: set.reps,
+                    workTarget: set.workTarget,
                     done: set.done,
                     adjust: set.adjust,
                     rir: set.rir,

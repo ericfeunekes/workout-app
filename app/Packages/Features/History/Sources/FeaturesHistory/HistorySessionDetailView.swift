@@ -21,8 +21,10 @@ struct HistorySessionDetailView: View {
     let viewModel: SessionDetailViewModel
     let historyViewModel: HistoryViewModel
 
+    @Environment(\.dismiss) private var dismiss
     @State private var highlightedSetID: UUID?
     @State private var editingSetLogID: UUID?
+    @State private var showsResetConfirmation = false
 
     var body: some View {
         ScrollView {
@@ -30,6 +32,9 @@ struct HistorySessionDetailView: View {
                 header
                 ForEach(viewModel.cards) { card in
                     exerciseCard(card)
+                }
+                if historyViewModel.canResetToday(workoutID: viewModel.workoutID) {
+                    resetBlock
                 }
                 if let note = viewModel.workoutNote {
                     noteBlock(note)
@@ -60,6 +65,14 @@ struct HistorySessionDetailView: View {
                     )
                 }
             )
+        }
+        .alert("Reset workout?", isPresented: $showsResetConfirmation) {
+            Button("Cancel", role: .cancel) {}
+            Button("Reset", role: .destructive) {
+                resetWorkout()
+            }
+        } message: {
+            Text("Delete today's logged sets and make this workout planned again.")
         }
     }
 
@@ -128,6 +141,43 @@ struct HistorySessionDetailView: View {
         })
         .buttonStyle(.plain)
         .accessibilityIdentifier("history.session.setrow.\(row.id.uuidString)")
+    }
+
+    private var resetBlock: some View {
+        DSCard {
+            VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                Text("START OVER")
+                    .font(DSTypography.caption)
+                    .tracking(1.5)
+                    .foregroundStyle(DSColors.warn)
+                Text("Reset this same-day workout if it was logged by mistake.")
+                    .font(DSTypography.caption)
+                    .foregroundStyle(DSColors.foregroundMuted)
+                Button(role: .destructive) {
+                    showsResetConfirmation = true
+                } label: {
+                    Text("reset workout")
+                        .font(DSTypography.body)
+                        .foregroundStyle(DSColors.warn)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, DSSpacing.xs)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("history.session.reset-workout")
+            }
+        }
+    }
+
+    private func resetWorkout() {
+        let workoutID = viewModel.workoutID
+        let historyVM = historyViewModel
+        // swiftlint:disable:next no_direct_task_unstructured
+        Task { @MainActor in
+            let didReset = await historyVM.resetWorkout(workoutID: workoutID)
+            if didReset {
+                dismiss()
+            }
+        }
     }
 
     /// Tap handler: flash the accent highlight (so the user sees the row

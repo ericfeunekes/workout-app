@@ -21,7 +21,7 @@ extension PushQueue {
     /// endpoint and are append-only.
     func pushPath(for payload: PushItem.Payload) -> String {
         switch payload {
-        case .setLogs, .statusUpdate:
+        case .setLogs, .statusUpdate, .workoutReset:
             return "/api/sync/results"
         case .events:
             return "/api/telemetry/events"
@@ -45,6 +45,8 @@ extension PushQueue {
                 completedAt: completedAt,
                 notes: notes
             )
+        case .workoutReset(let workoutID):
+            return try encodeWorkoutReset(workoutID: workoutID)
         case .events(let events):
             return try encodeEvents(events)
         case .userParameter(let param):
@@ -59,7 +61,8 @@ extension PushQueue {
     private func encodeSetLogs(_ logs: [CoreDomain.SetLog]) throws -> Data {
         let payload = WorkoutDBSchema.SyncResultsPayload(
             setLogs: logs.map(DTOMapping.toDTO),
-            statusUpdates: []
+            statusUpdates: [],
+            workoutResets: []
         )
         return try encoder.encode(payload)
     }
@@ -85,7 +88,18 @@ extension PushQueue {
         )
         let payload = WorkoutDBSchema.SyncResultsPayload(
             setLogs: [],
-            statusUpdates: [dto]
+            statusUpdates: [dto],
+            workoutResets: []
+        )
+        return try encoder.encode(payload)
+    }
+
+    private func encodeWorkoutReset(workoutID: WorkoutID) throws -> Data {
+        let dto = WorkoutDBSchema.WorkoutReset(workoutId: workoutID.wireID)
+        let payload = WorkoutDBSchema.SyncResultsPayload(
+            setLogs: [],
+            statusUpdates: [],
+            workoutResets: [dto]
         )
         return try encoder.encode(payload)
     }

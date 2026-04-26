@@ -144,6 +144,32 @@ extension WorkoutCacheImpl {
         }
     }
 
+    public func resetWorkout(workoutID: WorkoutID) async throws {
+        do {
+            let workoutDescriptor = FetchDescriptor<WorkoutModel>(
+                predicate: #Predicate<WorkoutModel> { $0.id == workoutID }
+            )
+            guard let workout = try modelContext.fetch(workoutDescriptor).first else {
+                return
+            }
+
+            let logsDescriptor = FetchDescriptor<SetLogModel>(
+                predicate: #Predicate<SetLogModel> { $0.workoutID == workoutID }
+            )
+            for log in try modelContext.fetch(logsDescriptor) {
+                modelContext.delete(log)
+            }
+
+            workout.statusRaw = WorkoutStatus.planned.rawValue
+            workout.completedAt = nil
+            workout.updatedAt = Date()
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
     public func saveWorkout(_ workout: Workout) async throws {
         // Same explicit-rollback pattern as `saveSetLogs` — see comment there
         // for why we can't use `modelContext.transaction { ... }` on iOS 17.x.

@@ -43,7 +43,7 @@ This doc answers the 9-question sequence that the architecture skill requires. T
 
 **Three deployable units:**
 
-1. **`workoutdb-server`** — single Python process, FastAPI + SQLite + `uvicorn`, systemd unit on Eric's home server, reachable over Tailscale.
+1. **`workoutdb-server`** — single Python process, FastAPI + SQLite + `uvicorn`, launchd LaunchDaemon on Eric's home server, reachable over Tailscale.
 2. **`WorkoutDB.app`** — the iOS app binary, installed on Eric's phone via Xcode/TestFlight.
 3. **`WorkoutDBWatch.app`** — the watchOS companion, installed to the paired watch via the iOS app.
 

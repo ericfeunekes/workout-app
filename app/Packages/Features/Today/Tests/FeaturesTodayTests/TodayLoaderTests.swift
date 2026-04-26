@@ -78,6 +78,42 @@ final class TodayLoaderTests: XCTestCase {
         XCTAssertNil(ctx)
     }
 
+    func testLoadPlanReturnsMissedTodayAndUpcomingQueueWithTodaySelected() async throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let userID = UUID()
+        let missed = makeWorkout(
+            userID: userID,
+            name: "Missed Lower",
+            scheduledDate: now.addingTimeInterval(-86_400)
+        )
+        let today = makeWorkout(
+            userID: userID,
+            name: "Today Push",
+            scheduledDate: now
+        )
+        let tomorrow = makeWorkout(
+            userID: userID,
+            name: "Tomorrow Conditioning",
+            scheduledDate: now.addingTimeInterval(86_400)
+        )
+
+        let fake = FakeCache(
+            workouts: [tomorrow, missed, today],
+            blocks: [:],
+            items: [:],
+            exercises: []
+        )
+        let loader = TodayLoader(cache: fake, clock: { now })
+
+        let plan = try await loader.loadPlan()
+        let unwrapped = try XCTUnwrap(plan)
+        XCTAssertEqual(unwrapped.selected.workout.id, today.id)
+        XCTAssertEqual(
+            unwrapped.workouts.map(\.workout.name),
+            ["Today Push", "Missed Lower", "Tomorrow Conditioning"]
+        )
+    }
+
     func testPickClosest_prefersPastOrTodayOverFuture() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let past = makeWorkout(name: "past", scheduledDate: now.addingTimeInterval(-3 * 86400))
@@ -97,8 +133,12 @@ final class TodayLoaderTests: XCTestCase {
     // MARK: - Helpers
 
     private func makeWorkout(name: String, scheduledDate: Date?) -> Workout {
+        makeWorkout(userID: UUID(), name: name, scheduledDate: scheduledDate)
+    }
+
+    private func makeWorkout(userID: UUID, name: String, scheduledDate: Date?) -> Workout {
         Workout(
-            id: UUID(), userID: UUID(), name: name,
+            id: UUID(), userID: userID, name: name,
             scheduledDate: scheduledDate, status: .planned, source: .claude,
             notes: nil, createdAt: Date(), updatedAt: Date(),
             completedAt: nil, tagsJSON: nil
@@ -190,6 +230,8 @@ private final class FakeCache: WorkoutCache, @unchecked Sendable {
     func loadOrphanedSetLogs() async throws -> [SetLog] { [] }
 
     func saveSetLogs(_ setLogs: [SetLog], workoutID: WorkoutID) async throws {}
+
+    func resetWorkout(workoutID: WorkoutID) async throws {}
 
     func saveWorkout(_ workout: Workout) async throws {}
 

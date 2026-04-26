@@ -93,10 +93,10 @@ final class ExecutionViewModelTickBlockTimerTests: XCTestCase {
 
         clock.now = start.addingTimeInterval(7)
         let readyTimer = vm.timerPresentation(now: clock.now)
-        XCTAssertEqual(readyTimer?.label, "WAITING TO START")
+        XCTAssertEqual(readyTimer?.label, "READY")
         XCTAssertEqual(readyTimer?.direction, .elapsed)
         XCTAssertEqual(readyTimer?.seconds, 7)
-        XCTAssertEqual(readyTimer?.inlineText, "WAITING TO START 0:07")
+        XCTAssertEqual(readyTimer?.inlineText, "READY 0:07")
 
         vm.startCurrentSet()
 
@@ -315,6 +315,8 @@ final class ExecutionViewModelTickBlockTimerTests: XCTestCase {
         clock.now = start.addingTimeInterval(12)
         vm.tickBlockTimer()
 
+        XCTAssertEqual(vm.state.route, .transition)
+        vm.beginBlockTransition()
         XCTAssertEqual(vm.state.route, .active)
         XCTAssertEqual(vm.state.cursor.blockIndex, 1)
         XCTAssertEqual(vm.state.cursor.itemIndex, 0)

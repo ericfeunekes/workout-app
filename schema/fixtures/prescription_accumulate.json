@@ -1,0 +1,9 @@
+{
+  "timing_mode": "accumulate",
+  "timing_config_json": {
+    "target_reps": 100
+  },
+  "prescription_json": {
+    "reps": 25
+  }
+}

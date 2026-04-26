@@ -90,11 +90,35 @@ public struct TabataDriver: TimingDriver {
             return nil
         }
 
-        let (reps, loadKg, unit) = prescribedRepsAndLoad(for: item)
+        let activeSet = itemLog.sets.first(where: { $0.setIndex == round })
+        let (reps, loadKg, unit) = activeSet.map { ($0.reps, $0.loadKg, $0.unit) }
+            ?? prescribedRepsAndLoad(for: item)
         let exerciseName = context.exerciseName(
             for: item,
             performedExerciseID: itemLog.performedExerciseID
         )
+
+        if activeSet.map(activeKind(for:)) == .cardio || (reps == 0 && loadKg == nil) {
+            let isTimerOnlyPlaceholder = activeSet?.workTarget == nil
+                && reps == 0
+                && loadKg == nil
+            return ActiveContent(
+                exerciseName: exerciseName,
+                setIndex: round,
+                totalSets: TabataDriver.rounds,
+                loadDisplay: isTimerOnlyPlaceholder
+                    ? "20 s work · 10 s rest"
+                    : activeSet.map(loadDisplayForTarget(set:)) ?? "20 s work · 10 s rest",
+                repsDisplay: isTimerOnlyPlaceholder
+                    ? "20 s"
+                    : activeSet.map(displayText(for:)) ?? "20 s",
+                loadKg: nil,
+                reps: 0,
+                adjustGlyph: nil,
+                lastTime: context.lastPerformed[item.exerciseID],
+                kind: .cardio
+            )
+        }
 
         let loadDisplay: String
         let heroLoadKg: Double?
@@ -106,12 +130,13 @@ public struct TabataDriver: TimingDriver {
             heroLoadKg = nil
         }
 
+        let repsDisplay = activeSet.map(displayText(for:)) ?? String(reps)
         return ActiveContent(
             exerciseName: exerciseName,
             setIndex: round,
             totalSets: TabataDriver.rounds,
             loadDisplay: loadDisplay,
-            repsDisplay: String(reps),
+            repsDisplay: repsDisplay,
             loadKg: heroLoadKg,
             reps: reps,
             adjustGlyph: nil,
@@ -170,7 +195,7 @@ public struct TabataDriver: TimingDriver {
             return (intReps(from: reps), loadKg, unit)
         case .bodyweight(_, let reps, _):
             return (reps, nil, .lb)
-        case .cluster(_, let reps, let loadKg, let unit, _, _, _):
+        case .cluster(_, let reps, let loadKg, let unit, _, _, _, _):
             return (reps, loadKg, unit)
         case .repRange(_, _, let repsMax, let loadKg, let unit, _, _):
             return (repsMax, loadKg, unit)

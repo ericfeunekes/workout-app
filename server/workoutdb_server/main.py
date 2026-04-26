@@ -121,7 +121,7 @@ async def lifespan(_app: FastAPI):
             pass
 
 
-app = FastAPI(title="WorkoutDB Home Server", version=__version__, lifespan=lifespan)
+app = FastAPI(title="Setmark Home Server", version=__version__, lifespan=lifespan)
 app.add_middleware(RequestIdMiddleware)
 
 

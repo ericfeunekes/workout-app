@@ -87,16 +87,11 @@ extension CompleteView {
         let done = log.sets.filter(\.done)
         guard !done.isEmpty else { return "no sets logged" }
 
-        // qa-043: cardio branch. Cardio logs (continuous / intervals)
-        // carry `durationSec` or `distanceM` on the done row and no
-        // meaningful reps/load pair — pre-fix the strength template
-        // rendered "1×0 @ BW" for a 45-min Z2 run. Detecting via
-        // "any done row carries a cardio field" keeps the branch
-        // narrow (strength logs never populate these), so we don't
-        // need to thread the block's timing mode through this static.
-        let hasCardio = done.contains {
-            ($0.durationSec ?? 0) > 0 || ($0.distanceM ?? 0) > 0
-        }
+        // qa-043: cardio branch. Duration alone is no longer sufficient:
+        // composed strength sets (cluster/rest-pause) also carry elapsed
+        // time while preserving reps/load/RIR. Treat rows as cardio only
+        // when they have cardio metrics or the duration-only no-load shape.
+        let hasCardio = done.contains(where: isCardioLike)
         if hasCardio {
             return cardioLedgerSummary(done: done)
         }
@@ -159,6 +154,13 @@ extension CompleteView {
             return "\(done.count) intervals · \(formatDuration(seconds: total))"
         }
         return "\(done.count) intervals"
+    }
+
+    static func isCardioLike(_ row: SetPlan) -> Bool {
+        row.distanceM != nil
+            || row.hrAvgBpm != nil
+            || row.cadenceAvgSpm != nil
+            || (row.durationSec != nil && row.reps == 0 && row.loadKg == nil && row.rir == nil)
     }
 
     /// Render a summary line. When the summary ends in a weight unit

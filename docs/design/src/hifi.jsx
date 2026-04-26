@@ -1,4 +1,4 @@
-// WorkoutDB — hi-fi straight_sets flow
+// Setmark — hi-fi straight_sets flow
 // Phase: today → active → rest (edit-last, longpress swap) → complete → ledger
 
 const { useState, useEffect, useRef, useMemo } = React;
@@ -187,7 +187,7 @@ function App() {
   return (
     <>
       <div className="header">
-        <h1>WorkoutDB — straight_sets hi-fi</h1>
+        <h1>Setmark — straight_sets hi-fi</h1>
         <p>Start → Active → Rest → Complete · Interactive</p>
       </div>
 

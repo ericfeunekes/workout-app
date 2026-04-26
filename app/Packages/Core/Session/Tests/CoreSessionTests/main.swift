@@ -101,6 +101,26 @@ runCase("logSet · rir nil is preserved (user skipped picker)") {
     try expectEqual(setsA[0].rir, nil)
 }
 
+runCase("skipSet · marks row done/skipped without performance metrics") {
+    var s0 = SessionReducer.reduce(makeBaselineState(), .start)
+    s0.workStartedAt = Date(timeIntervalSince1970: 1_699_999_990)
+    let s1 = SessionReducer.reduce(
+        s0,
+        .skipSet(itemID: itemA, setIndex: 1, now: logSetStamp)
+    )
+
+    let set = s1.items.first(where: { $0.itemID == itemA })!.sets[0]
+    try expectEqual(set.done, true)
+    try expectEqual(set.skipped, true)
+    try expectEqual(set.rir, nil)
+    try expectEqual(set.durationSec, nil)
+    try expectEqual(set.distanceM, nil)
+    try expectEqual(set.completedAt, logSetStamp)
+    try expectEqual(set.startedAt, Date(timeIntervalSince1970: 1_699_999_990))
+    try expectEqual(set.side, .bilateral)
+    try expectEqual(s1.workStartedAt, nil)
+}
+
 // ---------------------------------------------------------------------------
 // 3. editPastSet · preserves done=true, updates fields, sets adjust=.manual.
 // ---------------------------------------------------------------------------
@@ -160,16 +180,112 @@ runCase("editPastSet · adjust stays .manual when already .manual") {
 // ---------------------------------------------------------------------------
 runCase("editPendingSet · non-done set updated, adjust=.manual") {
     var s = makeBaselineState()
+    let started = Date(timeIntervalSince1970: 1_700_000_010)
     s = SessionReducer.reduce(s, .start)
     s = SessionReducer.reduce(
         s,
-        .editPendingSet(itemID: itemA, setIndex: 2, loadKg: 102.5, reps: 6)
+        .editPendingSet(
+            itemID: itemA,
+            setIndex: 2,
+            loadKg: 102.5,
+            reps: 6,
+            rir: 2,
+            startedAt: started
+        )
     )
     let set = s.items[0].sets[1]
     try expectEqual(set.done, false)
     try expectEqual(set.loadKg, 102.5)
     try expectEqual(set.reps, 6)
+    try expectEqual(set.rir, 2)
+    try expectEqual(set.startedAt, started)
     try expectEqual(set.adjust, .manual)
+}
+
+runCase("markPendingSetStarted · stamps startedAt without manual adjust") {
+    var s = makeBaselineState()
+    let started = Date(timeIntervalSince1970: 1_700_000_020)
+    s = SessionReducer.reduce(s, .start)
+    s = SessionReducer.reduce(
+        s,
+        .markPendingSetStarted(itemID: itemA, setIndex: 2, startedAt: started)
+    )
+    let set = s.items[0].sets[1]
+    try expectEqual(set.done, false)
+    try expectEqual(set.startedAt, started)
+    try expectEqual(set.adjust, nil)
+}
+
+runCase("composite set · non-final slot enters intra-set rest without logging") {
+    let start = Date(timeIntervalSince1970: 1_700_000_100)
+    let done = start.addingTimeInterval(8)
+    var s = makeBaselineState()
+    s.compositeSets = [
+        SessionState.CompositeSetProgress(
+            itemID: itemA,
+            setIndex: 1,
+            kind: .cluster,
+            targetRepsPerSlot: 5,
+            slotCount: 2,
+            intraRestSec: 15
+        ),
+    ]
+
+    s = SessionReducer.reduce(
+        s,
+        .startCompositeSlot(itemID: itemA, setIndex: 1, slotIndex: 1, startedAt: start)
+    )
+    s = SessionReducer.reduce(
+        s,
+        .completeCompositeSlot(itemID: itemA, setIndex: 1, now: done)
+    )
+
+    try expectEqual(s.items[0].sets[0].done, false)
+    try expectEqual(s.workStartedAt, nil)
+    guard case .intraRest(let afterSlot, let endsAt) = s.compositeSets[0].phase else {
+        throw ExpectationFailure(message: "expected intraRest", file: #file, line: #line)
+    }
+    try expectEqual(afterSlot, 1)
+    try expectEqual(endsAt, done.addingTimeInterval(15))
+}
+
+runCase("composite set · finalization logs one top-level set with duration") {
+    let start = Date(timeIntervalSince1970: 1_700_000_200)
+    let done = start.addingTimeInterval(33)
+    var s = makeBaselineState()
+    s.compositeSets = [
+        SessionState.CompositeSetProgress(
+            itemID: itemA,
+            setIndex: 1,
+            kind: .cluster,
+            targetRepsPerSlot: 5,
+            slotCount: 2,
+            intraRestSec: 15,
+            firstStartedAt: start,
+            phase: .working(slotIndex: 2, startedAt: done.addingTimeInterval(-8)),
+            completedSlots: 1
+        ),
+    ]
+
+    s = SessionReducer.reduce(
+        s,
+        .finalizeCompositeSet(
+            itemID: itemA,
+            setIndex: 1,
+            loggedReps: 10,
+            loggedRir: 1,
+            now: done
+        )
+    )
+
+    let set = s.items[0].sets[0]
+    try expectEqual(set.done, true)
+    try expectEqual(set.reps, 10)
+    try expectEqual(set.rir, 1)
+    try expectEqual(set.startedAt, start)
+    try expectEqual(set.completedAt, done)
+    try expectEqual(set.durationSec ?? -1, 33)
+    try expectEqual(s.compositeSets.isEmpty, true)
 }
 
 // ---------------------------------------------------------------------------
@@ -308,12 +424,24 @@ runCase("swap+overrides · remaining sets updated; logged set preserved; target_
 runCase("swap+empty overrides · overrides field stays nil") {
     var s = SessionReducer.reduce(makeBaselineState(), .start)
     let empty = AlternativeOverrides()
+    s.compositeSets = [
+        SessionState.CompositeSetProgress(
+            itemID: itemA,
+            setIndex: 1,
+            kind: .cluster,
+            targetRepsPerSlot: 5,
+            slotCount: 2,
+            intraRestSec: 15
+        ),
+    ]
     s = SessionReducer.reduce(
         s,
         .swap(itemID: itemA, toExerciseID: exerciseAlt, overrides: empty)
     )
     try expectEqual(s.items[0].performedExerciseID, exerciseAlt)
     try expectEqual(s.items[0].overrides, nil)
+    try expectEqual(s.compositeSets.count, 1, "pure swap preserves cluster slot progress")
+    try expectEqual(s.compositeSets[0].setIndex, 1)
     // Sets unchanged.
     try expectEqual(s.items[0].sets[0].loadKg, 100.0)
     try expectEqual(s.items[0].sets[0].reps, 5)
@@ -325,7 +453,7 @@ runCase("swap+overrides · manual set preserved, other remaining sets overridden
     // User manually edited set 2.
     s = SessionReducer.reduce(
         s,
-        .editPendingSet(itemID: itemA, setIndex: 2, loadKg: 90.0, reps: nil)
+        .editPendingSet(itemID: itemA, setIndex: 2, loadKg: 90.0, reps: nil, rir: nil, startedAt: nil)
     )
     try expectEqual(s.items[0].sets[1].loadKg, 90.0)
     try expectEqual(s.items[0].sets[1].adjust, .manual)
@@ -343,15 +471,86 @@ runCase("swap+overrides · manual set preserved, other remaining sets overridden
     try expectEqual(s1.items[0].sets[2].loadKg, 70.0)
 }
 
+runCase("swap+overrides · manual cluster row preserves slot target") {
+    var s = SessionReducer.reduce(makeBaselineState(), .start)
+    s.compositeSets = [
+        SessionState.CompositeSetProgress(
+            itemID: itemA,
+            setIndex: 1,
+            kind: .cluster,
+            targetRepsPerSlot: 5,
+            slotCount: 2,
+            intraRestSec: 15
+        ),
+        SessionState.CompositeSetProgress(
+            itemID: itemA,
+            setIndex: 2,
+            kind: .cluster,
+            targetRepsPerSlot: 5,
+            slotCount: 2,
+            intraRestSec: 15
+        ),
+        SessionState.CompositeSetProgress(
+            itemID: itemA,
+            setIndex: 3,
+            kind: .cluster,
+            targetRepsPerSlot: 5,
+            slotCount: 2,
+            intraRestSec: 15
+        ),
+    ]
+    s = SessionReducer.reduce(
+        s,
+        .editPendingSet(itemID: itemA, setIndex: 2, loadKg: 90.0, reps: nil, rir: nil, startedAt: nil)
+    )
+
+    let overrides = AlternativeOverrides(reps: 8, loadKg: 70)
+    let s1 = SessionReducer.reduce(
+        s,
+        .swap(itemID: itemA, toExerciseID: exerciseAlt, overrides: overrides)
+    )
+
+    try expectEqual(s1.items[0].sets.map(\.reps), [16, 5, 16])
+    try expectEqual(s1.items[0].sets.map(\.loadKg), [70, 90, 70])
+    try expectEqual(s1.compositeSets.map(\.targetRepsPerSlot), [8, 5, 8])
+}
+
 // 8e. swap+overrides · sets override on a STRAIGHT-SETS block IS applied.
 //     Sanity: the existing `sets` resize path still works for set-major
 //     blocks — we didn't regress straight-sets by narrowing the contract
 //     for round-robin. This is the baseline the rejection cases contrast
 //     against.
-runCase("swap+overrides · sets override applied on straight-sets (set-major) block") {
+runCase("swap+overrides · sets override applied on straight-sets cluster block") {
     // Baseline structure defaults to .setMajor via `itemsPerBlock.map`.
     var s = SessionReducer.reduce(makeBaselineState(), .start)
-    // Override bumps the target to 5; non-done tail extends by two rows.
+    s.compositeSets = [
+        SessionState.CompositeSetProgress(
+            itemID: itemA,
+            setIndex: 1,
+            kind: .cluster,
+            targetRepsPerSlot: 5,
+            slotCount: 2,
+            intraRestSec: 15
+        ),
+        SessionState.CompositeSetProgress(
+            itemID: itemA,
+            setIndex: 2,
+            kind: .cluster,
+            targetRepsPerSlot: 5,
+            slotCount: 2,
+            intraRestSec: 15
+        ),
+        SessionState.CompositeSetProgress(
+            itemID: itemA,
+            setIndex: 3,
+            kind: .cluster,
+            targetRepsPerSlot: 5,
+            slotCount: 2,
+            intraRestSec: 15
+        ),
+    ]
+    // Override bumps the top-level set count to 5 and the per-slot
+    // cluster reps to 8; each top-level SetPlan stores total reps.
     let overrides = AlternativeOverrides(sets: 5, reps: 8, loadKg: 70)
     s = SessionReducer.reduce(
         s,
@@ -359,9 +558,13 @@ runCase("swap+overrides · sets override applied on straight-sets (set-major) bl
     )
     try expectEqual(s.items[0].sets.count, 5, "set-major block honors sets override")
     try expectEqual(s.items[0].overrides?.sets, 5)
+    try expectEqual(s.items[0].overrides?.reps, 8)
     try expectEqual(s.structure.setsPerItem[0][0], 5, "structure tracks new count")
-    // Every pending set carries the override load/reps.
-    try expect(s.items[0].sets.allSatisfy { $0.loadKg == 70 && $0.reps == 8 })
+    try expectEqual(s.compositeSets.filter { $0.itemID == itemA }.map(\.setIndex), [1, 2, 3, 4, 5])
+    try expectEqual(s.compositeSets.map(\.targetRepsPerSlot), [8, 8, 8, 8, 8])
+    try expectEqual(s.compositeSets.last?.slotCount, 2)
+    // Every pending set carries the override load and total cluster reps.
+    try expect(s.items[0].sets.allSatisfy { $0.loadKg == 70 && $0.reps == 16 })
 }
 
 // 8f. swap+overrides · sets override on a ROUND-ROBIN block (superset) is
@@ -405,6 +608,62 @@ runCase("swap+overrides · sets override REJECTED on superset (round-robin); oth
     // get row-count enforcement behind them.
     try expectEqual(s1.items[0].overrides?.sets, 6)
     try expectEqual(s1.items[0].performedExerciseID, exerciseAlt)
+}
+
+runCase("swap+overrides · round-robin cluster updates slot reps while rejecting set count") {
+    let s0 = SessionState(
+        workoutID: workoutID,
+        route: .active,
+        cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1),
+        items: [
+            SessionState.ItemLog(itemID: itemA, sets: pristineSets(count: 3)),
+            SessionState.ItemLog(itemID: itemB, sets: pristineSets(count: 3)),
+        ],
+        compositeSets: [
+            SessionState.CompositeSetProgress(
+                itemID: itemA,
+                setIndex: 1,
+                kind: .cluster,
+                targetRepsPerSlot: 5,
+                slotCount: 2,
+                intraRestSec: 15
+            ),
+            SessionState.CompositeSetProgress(
+                itemID: itemA,
+                setIndex: 2,
+                kind: .cluster,
+                targetRepsPerSlot: 5,
+                slotCount: 2,
+                intraRestSec: 15
+            ),
+            SessionState.CompositeSetProgress(
+                itemID: itemA,
+                setIndex: 3,
+                kind: .cluster,
+                targetRepsPerSlot: 5,
+                slotCount: 2,
+                intraRestSec: 15
+            ),
+        ],
+        restEndsAt: nil,
+        note: "",
+        structure: SessionState.Structure(
+            itemsPerBlock: [2],
+            setsPerItem: [[3, 3]],
+            advancementByBlock: [.roundRobin]
+        )
+    )
+    let overrides = AlternativeOverrides(sets: 6, reps: 10, loadKg: 60)
+    let s1 = SessionReducer.reduce(
+        s0,
+        .swap(itemID: itemA, toExerciseID: exerciseAlt, overrides: overrides)
+    )
+
+    try expectEqual(s1.items[0].sets.count, 3, "round-robin sets count preserved")
+    try expectEqual(s1.structure.setsPerItem[0][0], 3, "structure row count preserved")
+    try expectEqual(s1.items[0].sets.map(\.reps), [20, 20, 20])
+    try expectEqual(s1.items[0].sets.map(\.loadKg), [60, 60, 60])
+    try expectEqual(s1.compositeSets.map(\.targetRepsPerSlot), [10, 10, 10])
 }
 
 // 8g. swap+overrides · sets override on a CIRCUIT block is REJECTED.
@@ -482,6 +741,31 @@ runCase("enterRest · sets restEndsAt = now + 180") {
     s = SessionReducer.reduce(s, .enterRest(durationSec: 180, now: now))
     try expectEqual(s.route, .rest)
     try expectEqual(s.restEndsAt, now.addingTimeInterval(180))
+}
+
+runCase("extendRest · adds recovery time to an active rest window") {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    var s = SessionReducer.reduce(makeBaselineState(), .start)
+    s = SessionReducer.reduce(s, .enterRest(durationSec: 180, now: now))
+    s = SessionReducer.reduce(s, .extendRest(durationSec: 30))
+    try expectEqual(s.route, .rest)
+    try expectEqual(s.restEndsAt, now.addingTimeInterval(210))
+}
+
+runCase("extendRest · no-ops outside rest") {
+    let s0 = SessionReducer.reduce(makeBaselineState(), .start)
+    let s1 = SessionReducer.reduce(s0, .extendRest(durationSec: 30))
+    try expectEqual(s1, s0)
+}
+
+runCase("extendRest · ignores non-positive durations") {
+    let now = Date(timeIntervalSince1970: 1_700_000_000)
+    var s = SessionReducer.reduce(makeBaselineState(), .start)
+    s = SessionReducer.reduce(s, .enterRest(durationSec: 180, now: now))
+    let zero = SessionReducer.reduce(s, .extendRest(durationSec: 0))
+    let negative = SessionReducer.reduce(s, .extendRest(durationSec: -30))
+    try expectEqual(zero, s)
+    try expectEqual(negative, s)
 }
 
 // ---------------------------------------------------------------------------
@@ -630,7 +914,7 @@ runCase("no-op · holdAutoreg / swap / editPendingSet with unknown itemID unchan
     try expectEqual(s0, s2)
     let s3 = SessionReducer.reduce(
         s0,
-        .editPendingSet(itemID: unknown, setIndex: 1, loadKg: 50, reps: 5)
+        .editPendingSet(itemID: unknown, setIndex: 1, loadKg: 50, reps: 5, rir: nil, startedAt: nil)
     )
     try expectEqual(s0, s3)
 }
@@ -656,7 +940,7 @@ runCase("no-op · editPendingSet on done set unchanged") {
     )
     let s1 = SessionReducer.reduce(
         s,
-        .editPendingSet(itemID: itemA, setIndex: 1, loadKg: 999, reps: 99)
+        .editPendingSet(itemID: itemA, setIndex: 1, loadKg: 999, reps: 99, rir: nil, startedAt: nil)
     )
     try expectEqual(s, s1)
 }

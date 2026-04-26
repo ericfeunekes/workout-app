@@ -28,11 +28,11 @@
 // Cursor semantics (v1):
 //   AMRAP items typically parse as `.straightSets(sets: nil, reps: ...,
 //   loadKg: ...)` because the authoring shape is `{"reps": N}` with no
-//   `sets` key. The seeder produces one SetPlan row per item (setIndex=1).
-//   The driver reads reps/load directly from the parsed prescription —
-//   never from `itemLog.sets` — so the display stays correct across rounds
-//   even when only one SetPlan row is seeded. The cursor's setIndex is
-//   surfaced as the round counter (round 1, 2, 3, ...).
+//   `sets` key. The seeder produces a high sentinel row count per item,
+//   while the wall clock terminates the block. The driver reads reps/load
+//   directly from the parsed prescription so the display stays correct
+//   across rounds. Each `next` logs the current station; the finish sheet
+//   captures only the partial station reached when the cap ends.
 
 import Foundation
 import CoreAutoreg
@@ -79,7 +79,9 @@ public struct AMRAPDriver: TimingDriver {
         // Reps and load come from the authored prescription — AMRAP items
         // typically seed as a single SetPlan row (setIndex=1) regardless
         // of how many rounds the user ends up completing.
-        let (reps, loadKg, unit) = prescribedRepsAndLoad(for: item)
+        let activeSet = itemLog.sets.first(where: { $0.setIndex == c.setIndex })
+        let (reps, loadKg, unit) = activeSet.map { ($0.reps, $0.loadKg, $0.unit) }
+            ?? prescribedRepsAndLoad(for: item)
 
         let exerciseName = context.exerciseName(
             for: item,
@@ -99,16 +101,20 @@ public struct AMRAPDriver: TimingDriver {
             heroLoadKg = nil
         }
 
+        let repsDisplay = activeSet.map(displayText(for:)) ?? String(reps)
+        let kind = activeSet.map(activeKind(for:)) ?? .strength
+
         return ActiveContent(
             exerciseName: exerciseName,
             setIndex: c.setIndex,
             totalSets: AMRAPDriver.unboundedRoundsCount,
             loadDisplay: loadDisplay,
-            repsDisplay: String(reps),
+            repsDisplay: repsDisplay,
             loadKg: heroLoadKg,
             reps: reps,
             adjustGlyph: nil,
-            lastTime: context.lastPerformed[item.exerciseID]
+            lastTime: context.lastPerformed[item.exerciseID],
+            kind: kind
         )
     }
 
@@ -164,7 +170,7 @@ public struct AMRAPDriver: TimingDriver {
             return (intReps(from: reps), loadKg, unit)
         case .bodyweight(_, let reps, _):
             return (reps, nil, .lb)
-        case .cluster(_, let reps, let loadKg, let unit, _, _, _):
+        case .cluster(_, let reps, let loadKg, let unit, _, _, _, _):
             return (reps, loadKg, unit)
         case .repRange(_, _, let repsMax, let loadKg, let unit, _, _):
             return (repsMax, loadKg, unit)

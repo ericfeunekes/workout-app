@@ -77,6 +77,67 @@ final class AppBootstrapTests: XCTestCase {
         }
     }
 
+    func testTodayRefreshRunsPullAndKeepsReadyState() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let fixture = Fixtures.sampleWorkoutPayload()
+        let transport = ScriptedTransport(
+            getOutcomes: [.ok(fixture.json), .ok(fixture.json)]
+        )
+
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in transport }
+        )
+
+        guard case let .ready(todayVM, executionHolder, _) = result else {
+            return XCTFail("expected .ready, got \(result)")
+        }
+        XCTAssertTrue(todayVM.canRefresh)
+
+        await todayVM.refresh()
+
+        XCTAssertEqual(todayVM.refreshState, .idle)
+        XCTAssertNotNil(executionHolder.vm)
+        let paths = await transport.store.snapshotGetPaths()
+        XCTAssertEqual(paths, ["/api/sync/pull", "/api/sync/pull"])
+    }
+
+    func testTodayRefreshRoutesTokenRejected() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let fixture = Fixtures.sampleWorkoutPayload()
+        let transport = ScriptedTransport(
+            getOutcomes: [.ok(fixture.json), .error(.tokenRejected)]
+        )
+        var routedToFirstRun = false
+
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in transport },
+            onManualRefreshTokenRejected: {
+                routedToFirstRun = true
+            }
+        )
+
+        guard case let .ready(todayVM, _, _) = result else {
+            return XCTFail("expected .ready, got \(result)")
+        }
+
+        await todayVM.refresh()
+
+        XCTAssertTrue(routedToFirstRun)
+        XCTAssertEqual(todayVM.refreshState, .failed)
+        let paths = await transport.store.snapshotGetPaths()
+        XCTAssertEqual(paths, ["/api/sync/pull", "/api/sync/pull"])
+    }
+
     // MARK: - 401 → shell must send user back to FirstRun
 
     func testBootstrapRaisesTokenRejected() async throws {
@@ -319,11 +380,16 @@ final class AppBootstrapTests: XCTestCase {
         let transport = ScriptedTransport(
             getOutcomes: [.error(.network("dns"))]
         )
+        var didRequestBootstrapRerun = false
         let result = try await AppBootstrap.bootstrap(
             connection: (url: URL(string: "https://example.test")!, token: "tok"),
             persistence: factory,
             now: completedAt,
-            transportBuilder: { _ in transport }
+            transportBuilder: { _ in transport },
+            onEmptyTodayRefresh: {
+                didRequestBootstrapRerun = true
+                return true
+            }
         )
 
         guard case let .ready(todayVM, executionHolder, _) = result else {
@@ -342,6 +408,12 @@ final class AppBootstrapTests: XCTestCase {
         )
         XCTAssertNil(todayVM.workoutID)
         XCTAssertTrue(todayVM.exercises.isEmpty)
+        XCTAssertTrue(todayVM.canRefresh)
+
+        await todayVM.refresh()
+
+        XCTAssertTrue(didRequestBootstrapRerun)
+        XCTAssertEqual(todayVM.refreshState, .idle)
 
         // `RootTabView` reads `holder.vm` — nil routes to `TodayView`
         // which renders the empty glance. No ExecutionViewModel is built
@@ -388,6 +460,7 @@ final class AppBootstrapTests: XCTestCase {
 
         let executionVM = try XCTUnwrap(executionHolder.vm)
         executionVM.start()
+        executionVM.startCurrentSet()
         executionVM.logSet(reps: 5, rir: 2)
 
         // Push enqueue is fire-and-forget from the UI mutation path.
@@ -440,11 +513,14 @@ final class AppBootstrapTests: XCTestCase {
         // (4 sets, then 3 sets). The fixture's timing_config_json is
         // empty so `restDuration` is 0 and the view model auto-advances
         // after each `logSet` — no explicit `.advance()` calls needed.
+        // Each set still needs the user-visible Set Start boundary first.
         executionVM.start()
         for _ in 0..<4 {
+            executionVM.startCurrentSet()
             executionVM.logSet(reps: 5, rir: 2)
         }
         for _ in 0..<3 {
+            executionVM.startCurrentSet()
             executionVM.logSet(reps: 8, rir: 2)
         }
         XCTAssertEqual(executionVM.state.route, .complete)
@@ -523,6 +599,7 @@ final class AppBootstrapTests: XCTestCase {
         // Drive A to completion via the same path the UI takes.
         vmA.start()
         // Workout A has 1 block × 1 item × 1 set — single logSet completes.
+        vmA.startCurrentSet()
         vmA.logSet(reps: 5, rir: 2)
         XCTAssertEqual(vmA.state.route, .complete, "A should be on Complete")
 
@@ -552,6 +629,44 @@ final class AppBootstrapTests: XCTestCase {
             vmB.activeContent,
             "new VM must produce non-nil activeContent — nil is the qa-002 symptom"
         )
+    }
+
+    func testTodayCanStartNonSelectedPlannedWorkout() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let (workoutA, workoutB) = Fixtures.twoPlannedWorkouts()
+        try await factory.workoutCache.save(
+            PulledDataset(
+                workouts: [workoutA.workout, workoutB.workout],
+                blocks: workoutA.blocks + workoutB.blocks,
+                items: workoutA.items + workoutB.items,
+                alternatives: [],
+                exercises: workoutA.exercises + workoutB.exercises,
+                userParameters: []
+            )
+        )
+
+        let transport = ScriptedTransport(getOutcomes: [.error(.network("dns"))])
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: workoutA.workout.scheduledDate!,
+            transportBuilder: { _ in transport }
+        )
+        guard case let .ready(todayVM, holder, _) = result else {
+            return XCTFail("expected .ready, got \(result)")
+        }
+        let vmA = try XCTUnwrap(holder.vm)
+        XCTAssertEqual(vmA.context.workout.id, workoutA.workout.id)
+
+        await todayVM.start(workoutID: workoutB.workout.id)
+
+        let vmB = try XCTUnwrap(holder.vm)
+        XCTAssertFalse(vmB === vmA)
+        XCTAssertEqual(vmB.context.workout.id, workoutB.workout.id)
+        XCTAssertEqual(vmB.state.route, .active)
+        XCTAssertNotNil(vmB.activeContent)
     }
 
     /// qa-030 root-cause regression: after the post-save VM rebuild, the
@@ -599,6 +714,7 @@ final class AppBootstrapTests: XCTestCase {
         // coverage in `testSaveAndDoneEnqueuesBodyweightUserParameter`.
         let vmA = try XCTUnwrap(holder.vm)
         vmA.start()
+        vmA.startCurrentSet()
         vmA.logSet(reps: 5, rir: 2)
         vmA.saveAndDone()
         try await Task.sleep(nanoseconds: 400_000_000)
@@ -630,6 +746,7 @@ final class AppBootstrapTests: XCTestCase {
         // before enqueuing the push — the cache is the ground truth for
         // "the hook fired".
         vmB.start()
+        vmB.startCurrentSet()
         vmB.logSet(reps: 5, rir: 2)
         vmB.saveAndDone(bodyweightKg: 82.5)
         try await Task.sleep(nanoseconds: 400_000_000)
@@ -670,8 +787,14 @@ final class AppBootstrapTests: XCTestCase {
         let vm = try XCTUnwrap(holder.vm)
         vm.start()
         // Fixture: 4 sets + 3 sets = 7 logs to finish.
-        for _ in 0..<4 { vm.logSet(reps: 5, rir: 2) }
-        for _ in 0..<3 { vm.logSet(reps: 8, rir: 2) }
+        for _ in 0..<4 {
+            vm.startCurrentSet()
+            vm.logSet(reps: 5, rir: 2)
+        }
+        for _ in 0..<3 {
+            vm.startCurrentSet()
+            vm.logSet(reps: 8, rir: 2)
+        }
         XCTAssertEqual(vm.state.route, .complete)
 
         vm.saveAndDone()

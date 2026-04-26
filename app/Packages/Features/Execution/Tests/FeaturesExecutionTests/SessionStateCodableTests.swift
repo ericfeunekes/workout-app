@@ -16,6 +16,7 @@
 
 import XCTest
 import CoreAutoreg
+import CoreDomain
 import CoreSession
 import WorkoutCoreFoundation
 @testable import FeaturesExecution
@@ -154,5 +155,142 @@ final class SessionStateCodableTests: XCTestCase {
 
         let decoded = try JSONDecoder().decode(SessionStateCodable.self, from: stripped)
         XCTAssertEqual(decoded.state.structure.advancementByBlock, [.setMajor])
+    }
+
+    func testSetPlanSkipAndSideRoundTrip() throws {
+        let itemID = UUID()
+        let stamp = Date(timeIntervalSince1970: 1_700_030_000)
+        let state = SessionState(
+            workoutID: UUID(),
+            route: .rest,
+            cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1),
+            items: [
+                SessionState.ItemLog(
+                    itemID: itemID,
+                    sets: [
+                        SetPlan(
+                            setIndex: 1,
+                            loadKg: 100,
+                            reps: 5,
+                            done: true,
+                            adjust: nil,
+                            completedAt: stamp,
+                            skipped: true,
+                            side: .left
+                        ),
+                    ]
+                ),
+            ],
+            note: "",
+            structure: SessionState.Structure(itemsPerBlock: [1], setsPerItem: [[1]])
+        )
+
+        let encoded = try JSONEncoder().encode(SessionStateCodable(state: state))
+        let decoded = try JSONDecoder().decode(SessionStateCodable.self, from: encoded).state
+        let set = try XCTUnwrap(decoded.items.first?.sets.first)
+        XCTAssertTrue(set.skipped)
+        XCTAssertEqual(set.side, .left)
+    }
+
+    func testCompositeSetPhaseRoundTripsWorkingAndIntraRest() throws {
+        let itemID = UUID()
+        let startedAt = Date(timeIntervalSince1970: 1_700_020_000)
+        let endsAt = startedAt.addingTimeInterval(15)
+        let state = makeCompositeState(
+            itemID: itemID,
+            compositeSets: [
+                SessionState.CompositeSetProgress(
+                    itemID: itemID,
+                    setIndex: 1,
+                    kind: .cluster,
+                    targetRepsPerSlot: 5,
+                    slotCount: 2,
+                    intraRestSec: 15,
+                    firstStartedAt: startedAt,
+                    phase: .working(slotIndex: 1, startedAt: startedAt),
+                    completedSlots: 0
+                ),
+                SessionState.CompositeSetProgress(
+                    itemID: itemID,
+                    setIndex: 2,
+                    kind: .cluster,
+                    targetRepsPerSlot: 5,
+                    slotCount: 2,
+                    intraRestSec: 15,
+                    phase: .intraRest(afterSlotIndex: 1, endsAt: endsAt),
+                    completedSlots: 1
+                ),
+            ]
+        )
+
+        let encoded = try JSONEncoder().encode(SessionStateCodable(state: state))
+        let decoded = try JSONDecoder().decode(SessionStateCodable.self, from: encoded).state
+
+        XCTAssertEqual(decoded.compositeSets.count, 2)
+        XCTAssertEqual(decoded.compositeSets[0].phase, .working(slotIndex: 1, startedAt: startedAt))
+        XCTAssertEqual(decoded.compositeSets[1].phase, .intraRest(afterSlotIndex: 1, endsAt: endsAt))
+    }
+
+    func testCompositeSetPhaseRejectsMissingRequiredFields() throws {
+        let itemID = UUID()
+        let state = makeCompositeState(
+            itemID: itemID,
+            compositeSets: [
+                SessionState.CompositeSetProgress(
+                    itemID: itemID,
+                    setIndex: 1,
+                    kind: .cluster,
+                    targetRepsPerSlot: 5,
+                    slotCount: 2,
+                    intraRestSec: 15,
+                    phase: .working(slotIndex: 1, startedAt: Date(timeIntervalSince1970: 1_700_020_000))
+                ),
+            ]
+        )
+        let encoded = try JSONEncoder().encode(SessionStateCodable(state: state))
+        guard var dict = try JSONSerialization.jsonObject(with: encoded) as? [String: Any],
+              var compositeSets = dict["compositeSets"] as? [[String: Any]],
+              var first = compositeSets.first,
+              var phase = first["phase"] as? [String: Any] else {
+            XCTFail("expected compositeSets payload")
+            return
+        }
+        phase.removeValue(forKey: "startedAt")
+        first["phase"] = phase
+        compositeSets[0] = first
+        dict["compositeSets"] = compositeSets
+        let tampered = try JSONSerialization.data(withJSONObject: dict)
+
+        XCTAssertThrowsError(
+            try JSONDecoder().decode(SessionStateCodable.self, from: tampered),
+            "working phase without startedAt must fail decode, not restore from Unix epoch"
+        )
+    }
+
+    private func makeCompositeState(
+        itemID: UUID,
+        compositeSets: [SessionState.CompositeSetProgress]
+    ) -> SessionState {
+        SessionState(
+            workoutID: UUID(),
+            route: .active,
+            cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1),
+            items: [
+                SessionState.ItemLog(
+                    itemID: itemID,
+                    sets: [
+                        SetPlan(setIndex: 1, loadKg: 100, reps: 10, done: false, adjust: nil),
+                        SetPlan(setIndex: 2, loadKg: 100, reps: 10, done: false, adjust: nil),
+                    ]
+                ),
+            ],
+            compositeSets: compositeSets,
+            note: "",
+            structure: SessionState.Structure(
+                itemsPerBlock: [1],
+                setsPerItem: [[2]],
+                advancementByBlock: [.setMajor]
+            )
+        )
     }
 }

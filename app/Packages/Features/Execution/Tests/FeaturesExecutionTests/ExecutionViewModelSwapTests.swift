@@ -38,6 +38,8 @@ final class ExecutionViewModelSwapTests: XCTestCase {
         let vm = ExecutionViewModel(context: fixture.context)
         vm.start()
 
+        vm.startCurrentSet()
+
         vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
 
         let itemLog = vm.state.items.first(where: { $0.itemID == fixture.itemID })
@@ -53,6 +55,8 @@ final class ExecutionViewModelSwapTests: XCTestCase {
         let fixture = makeContext(overridesJSON: #"{"load_kg":72.5}"#)
         let vm = ExecutionViewModel(context: fixture.context)
         vm.start()
+
+        vm.startCurrentSet()
 
         vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
 
@@ -74,6 +78,8 @@ final class ExecutionViewModelSwapTests: XCTestCase {
         let vm = ExecutionViewModel(context: fixture.context)
         vm.start()
 
+        vm.startCurrentSet()
+
         vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
 
         let itemLog = vm.state.items.first(where: { $0.itemID == fixture.itemID })
@@ -91,6 +97,7 @@ final class ExecutionViewModelSwapTests: XCTestCase {
         let fixture = makeContext(overridesJSON: #"{"load_kg":70,"reps":8}"#)
         let vm = ExecutionViewModel(context: fixture.context)
         vm.start()
+        vm.startCurrentSet()
         // Log set 1 at the original prescription values.
         vm.logSet(reps: 5, rir: 2)
 
@@ -126,6 +133,8 @@ final class ExecutionViewModelSwapTests: XCTestCase {
         let vm = ExecutionViewModel(context: fixture.context)
         vm.start()
 
+        vm.startCurrentSet()
+
         vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
 
         // Log set 1 at RIR 4 — shouldn't trigger overshoot under the
@@ -143,6 +152,7 @@ final class ExecutionViewModelSwapTests: XCTestCase {
         let fixture = makeContext(targetRir: 2)
         let vm = ExecutionViewModel(context: fixture.context)
         vm.start()
+        vm.startCurrentSet()
         vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
         vm.logSet(reps: 5, rir: 4)
         XCTAssertNotNil(vm.currentProposal)
@@ -181,6 +191,8 @@ final class ExecutionViewModelSwapTests: XCTestCase {
         let recorder = SwapTelemetryRecorder()
         let vm = ExecutionViewModel(context: fixture.context, telemetry: recorder)
         vm.start()
+
+        vm.startCurrentSet()
 
         vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
 
@@ -230,6 +242,7 @@ final class ExecutionViewModelSwapTests: XCTestCase {
         let recorder = SwapTelemetryRecorder()
         let vm = ExecutionViewModel(context: fixture.context, telemetry: recorder)
         vm.start()
+        vm.startCurrentSet()
         vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
         let swapEvent = recorder.events.first(where: { $0.name == "execution.exercise_swap" })
         XCTAssertEqual(swapEvent?.dataJSON?.contains("\"had_overrides\":false"), true)
@@ -247,10 +260,13 @@ final class ExecutionViewModelSwapTests: XCTestCase {
         let vm = ExecutionViewModel(context: fixture.context)
         vm.start()
 
+        vm.startCurrentSet()
+
         vm.logSet(reps: 5, rir: 2)
         // Pre-swap: set 2 still at 100 kg in the driver's active content
         // (we're on rest now; advance to see set 2 active view).
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(vm.activeContent?.loadKg, 100, "pre-swap set 2 load")
 
         vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
@@ -278,6 +294,8 @@ final class ExecutionViewModelSwapTests: XCTestCase {
         let vm = ExecutionViewModel(context: fixture.context)
         vm.start()
 
+        vm.startCurrentSet()
+
         vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
 
         let itemLog = vm.state.items.first { $0.itemID == fixture.itemID }
@@ -296,6 +314,8 @@ final class ExecutionViewModelSwapTests: XCTestCase {
         let vm = ExecutionViewModel(context: fixture.context)
         vm.start()
 
+        vm.startCurrentSet()
+
         vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
 
         let itemLog = vm.state.items.first { $0.itemID == fixture.itemID }
@@ -313,6 +333,7 @@ final class ExecutionViewModelSwapTests: XCTestCase {
         let fixture = makeContext(overridesJSON: overridesJSON)
         let vm = ExecutionViewModel(context: fixture.context)
         vm.start()
+        vm.startCurrentSet()
         vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
 
         let itemLog = vm.state.items.first { $0.itemID == fixture.itemID }
@@ -329,6 +350,8 @@ final class ExecutionViewModelSwapTests: XCTestCase {
         let fixture = makeContext(overridesJSON: #"{"reps":"many","load_kg":80}"#)
         let vm = ExecutionViewModel(context: fixture.context)
         vm.start()
+
+        vm.startCurrentSet()
 
         vm.swap(itemID: fixture.itemID, alternativeID: fixture.altID)
 

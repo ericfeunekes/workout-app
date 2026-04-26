@@ -5,7 +5,7 @@
 // the pairing is working and nothing else.
 //
 // Layout (per v1 scope in app/README.md § "Watch (v1 scope)"):
-//   - center: "workoutdb · paired" in mono caption
+//   - center: "setmark · paired" in mono caption
 //   - footer: HR placeholder ("—") until HealthKit on-watch lands in v1.1+
 //
 // The full design grammar (`docs/design/src/watch-hifi-v2.jsx`) is deferred.
@@ -18,7 +18,7 @@ struct IdleFace: View {
         VStack(spacing: DSSpacing.md) {
             Spacer()
 
-            Text("workoutdb · paired")
+            Text("setmark · paired")
                 .font(DSTypography.caption)
                 .tracking(0.5)
                 .foregroundStyle(DSColors.foregroundMuted)

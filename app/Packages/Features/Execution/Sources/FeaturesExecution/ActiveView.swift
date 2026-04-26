@@ -59,6 +59,9 @@ struct ActiveView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: DSSpacing.xl) {
                             header(content: content)
+                            if let progress = activeBlockProgress {
+                                blockProgressStrip(progress)
+                            }
                             if let timer = viewModel.timerPresentation(now: timerNow) {
                                 timerHero(timer)
                             }
@@ -335,6 +338,31 @@ struct ActiveView: View {
         return max(0, Date().timeIntervalSince(startedAt))
     }
 
+    private var activeBlockProgress: BlockProgressPresentation? {
+        let progress = viewModel.executionProjection(now: timerNow).blockProgress
+        guard ActiveView.shouldRenderBlockProgress(progress) else { return nil }
+        return progress
+    }
+
+    private func blockProgressStrip(_ progress: BlockProgressPresentation) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text("BLOCK \(progress.blockIndex + 1) / \(progress.blockCount)")
+                .font(DSTypography.subLabel)
+                .tracking(1.2)
+                .foregroundStyle(DSColors.foregroundDim)
+            Spacer()
+            Text(ActiveView.blockProgressSummary(progress))
+                .font(DSTypography.caption)
+                .foregroundStyle(DSColors.foregroundDim)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "Block \(progress.blockIndex + 1) of \(progress.blockCount), "
+            + "\(progress.completedSets) of \(progress.totalSets) done"
+        )
+    }
+
     private func timerHero(_ timer: ExecutionTimerPresentation) -> some View {
         VStack(spacing: DSSpacing.xs) {
             Text(timer.label)
@@ -359,6 +387,15 @@ struct ActiveView: View {
     /// without SwiftUI snapshotting.
     static func shouldRenderProgressPips(content: ActiveContent) -> Bool {
         content.totalSets > 0
+    }
+
+    static func shouldRenderBlockProgress(_ progress: BlockProgressPresentation?) -> Bool {
+        guard let progress else { return false }
+        return progress.totalSets > 0
+    }
+
+    static func blockProgressSummary(_ progress: BlockProgressPresentation) -> String {
+        "\(max(0, progress.completedSets)) / \(max(0, progress.totalSets)) DONE"
     }
 
     private func progressPips(content: ActiveContent) -> some View {

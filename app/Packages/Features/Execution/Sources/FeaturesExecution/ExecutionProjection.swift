@@ -12,6 +12,7 @@ public struct CurrentTaskPresentation: Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
         case today
         case active
+        case transition
         case rest
         case complete
     }
@@ -215,6 +216,21 @@ extension ExecutionViewModel {
                 exerciseName: content?.exerciseName,
                 title: "Rest",
                 detail: content?.exerciseName,
+                primaryMetric: nil,
+                secondaryMetric: nil,
+                side: .bilateral,
+                skipped: false
+            )
+        case .transition:
+            return CurrentTaskPresentation(
+                kind: .transition,
+                blockIndex: validBlockIndex(),
+                blockCount: context.blocks.count,
+                blockName: block?.name,
+                blockIntent: block?.intent,
+                exerciseName: content?.exerciseName,
+                title: "Transition",
+                detail: block?.name,
                 primaryMetric: nil,
                 secondaryMetric: nil,
                 side: .bilateral,
@@ -449,7 +465,7 @@ extension ExecutionViewModel {
             canEditPendingSet: activeSetPlan.map { !$0.done } ?? false,
             canEditLoggedSet: lastLoggedSet != nil,
             canSwapExercise: canSwapCurrentExercise(),
-            canCompleteWorkout: state.route == .active || state.route == .rest
+            canCompleteWorkout: state.route == .active || state.route == .rest || state.route == .transition
         )
     }
 

@@ -56,6 +56,7 @@ public struct SupersetDriver: TimingDriver {
         // rows, so reading the SetPlan reflects post-swap state. Re-parsing
         // `prescriptionJSON` would return the pre-swap authored values and
         // strand the Active screen on stale load/reps after a swap.
+        let activeSet = itemLog.sets.first(where: { $0.setIndex == c.setIndex })
         let (reps, loadKg, unit) = resolveRepsAndLoad(for: item, itemLog: itemLog, cursor: c)
         let exerciseName = context.exerciseName(
             for: item,
@@ -74,16 +75,20 @@ public struct SupersetDriver: TimingDriver {
 
         let totalRounds = block.rounds ?? 1
 
+        let repsDisplay = activeSet.map(displayText(for:)) ?? String(reps)
+        let kind = activeSet.map(activeKind(for:)) ?? .strength
+
         return ActiveContent(
             exerciseName: exerciseName,
             setIndex: c.setIndex,
             totalSets: totalRounds,
             loadDisplay: loadDisplay,
-            repsDisplay: String(reps),
+            repsDisplay: repsDisplay,
             loadKg: heroLoadKg,
             reps: reps,
             adjustGlyph: nil,
-            lastTime: context.lastPerformed[item.exerciseID]
+            lastTime: context.lastPerformed[item.exerciseID],
+            kind: kind
         )
     }
 
@@ -103,7 +108,7 @@ public struct SupersetDriver: TimingDriver {
             configJSON: block.timingConfigJSON
         ) {
         case .success(let config):
-            guard case .superset(let rbr) = config else { return 0 }
+            guard case .superset(let rbr, _) = config else { return 0 }
             let itemsInBlock = itemsInCurrentBlock(state: state)
             let isLastItem = c.itemIndex + 1 == itemsInBlock
             let totalRounds = block.rounds ?? 1
@@ -186,7 +191,7 @@ public struct SupersetDriver: TimingDriver {
             return (intReps(from: reps), loadKg, unit)
         case .bodyweight(_, let reps, _):
             return (reps, nil, .lb)
-        case .cluster(_, let reps, let loadKg, let unit, _, _, _):
+        case .cluster(_, let reps, let loadKg, let unit, _, _, _, _):
             return (reps, loadKg, unit)
         case .repRange(_, _, let repsMax, let loadKg, let unit, _, _):
             return (repsMax, loadKg, unit)

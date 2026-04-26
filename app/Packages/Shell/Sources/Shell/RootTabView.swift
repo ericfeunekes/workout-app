@@ -62,20 +62,40 @@ public struct RootTabView: View {
     }
 
     public var body: some View {
-        // Note: `.accessibilityIdentifier` on tab content does NOT propagate
-        // to the tab-bar button in SwiftUI's `TabView`. See
-        // `docs/open-questions.md` § "Tab bar accessibility IDs missing" —
-        // real fix requires a custom tab bar or UIKit wrapper. For now
-        // MCP-driven UI tests fall back to coordinate taps on the tab bar.
-        TabView(selection: $tab) {
+        ZStack(alignment: .bottom) {
+            activeContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+            if shouldShowTabBar {
+                HStack(spacing: DSSpacing.sm) {
+                    tabButton(.today, title: "today", systemImage: "figure.strengthtraining.traditional")
+                    tabButton(.history, title: "history", systemImage: "clock")
+                    if settingsVM != nil {
+                        tabButton(.settings, title: "settings", systemImage: "gearshape")
+                    }
+                }
+                .padding(DSSpacing.sm)
+                .background(.ultraThinMaterial)
+                .overlay(
+                    Capsule(style: .continuous)
+                        .strokeBorder(DSColors.border.opacity(0.7), lineWidth: 1)
+                )
+                .clipShape(Capsule(style: .continuous))
+                .padding(.horizontal, DSSpacing.xl)
+                .padding(.bottom, DSSpacing.lg)
+            }
+        }
+        .tint(DSColors.accent)
+    }
+
+    @ViewBuilder
+    private var activeContent: some View {
+        switch tab {
+        case .today:
             todayTab
-                .tag(RootTab.today)
-                .tabItem { Label("today", systemImage: "figure.strengthtraining.traditional") }
-
+        case .history:
             HistoryView(viewModel: historyVM)
-                .tag(RootTab.history)
-                .tabItem { Label("history", systemImage: "clock") }
-
+        case .settings:
             if let settingsVM {
                 NavigationStack {
                     SettingsView(viewModel: settingsVM)
@@ -84,11 +104,48 @@ public struct RootTabView: View {
                         .navigationBarTitleDisplayMode(.large)
                         #endif
                 }
-                .tag(RootTab.settings)
-                .tabItem { Label("settings", systemImage: "gearshape") }
+            } else {
+                todayTab
             }
         }
-        .tint(DSColors.accent)
+    }
+
+    private var shouldShowTabBar: Bool {
+        guard let executionVM = executionHolder.vm else { return true }
+        switch executionVM.state.route {
+        case .today:
+            return true
+        case .active, .transition, .rest, .complete:
+            return false
+        }
+    }
+
+    private func tabButton(
+        _ destination: RootTab,
+        title: String,
+        systemImage: String
+    ) -> some View {
+        let isSelected = tab == destination
+        return Button {
+            tab = destination
+        } label: {
+            VStack(spacing: DSSpacing.xs) {
+                Image(systemName: systemImage)
+                    .font(.system(size: 20, weight: .semibold))
+                Text(title)
+                    .font(DSTypography.caption)
+                    .tracking(0.4)
+            }
+            .foregroundStyle(isSelected ? DSColors.accentInk : DSColors.foregroundMuted)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, DSSpacing.md)
+            .background(isSelected ? DSColors.accentMuted : Color.clear)
+            .clipShape(Capsule(style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("root.tab.\(title)")
+        .accessibilityLabel(Text(title))
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
     }
 
     /// Route the "today" tab's content based on session route — same
@@ -105,7 +162,7 @@ public struct RootTabView: View {
             switch executionVM.state.route {
             case .today:
                 TodayView(viewModel: todayVM)
-            case .active, .rest, .complete:
+            case .active, .transition, .rest, .complete:
                 ExecutionView(viewModel: executionVM)
             }
         } else {

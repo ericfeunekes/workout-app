@@ -51,7 +51,9 @@ extension ExecutionViewModel {
                     itemID: itemID,
                     setIndex: set.setIndex,
                     loadKg: original.loadKg,
-                    reps: nil
+                    reps: nil,
+                    rir: nil,
+                    startedAt: nil
                 ))
             }
         }

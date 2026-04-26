@@ -89,12 +89,13 @@ struct CompleteView: View {
                 ScrollView {
                     VStack(alignment: .leading, spacing: DSSpacing.xl) {
                         header
+                        blockResults
                         ledger
                         captureCard
                     }
                     .padding(.horizontal, DSSpacing.xl)
                     .padding(.top, DSSpacing.xxl)
-                    .padding(.bottom, DSSpacing.xl)
+                    .padding(.bottom, DSSpacing.xxl)
                 }
 
                 DSButton(
@@ -112,7 +113,7 @@ struct CompleteView: View {
                 .disabled(viewModel.saveAndDoneInFlight)
                 .padding(.horizontal, DSSpacing.xl)
                 .padding(.top, DSSpacing.lg)
-                .padding(.bottom, DSSpacing.xl)
+                .padding(.bottom, DSSpacing.xxl)
             }
         }
     }
@@ -144,13 +145,13 @@ struct CompleteView: View {
 
     private var captureCard: some View {
         DSCard {
-            VStack(alignment: .leading, spacing: DSSpacing.md) {
+            VStack(alignment: .leading, spacing: DSSpacing.xl) {
                 Text("capture")
                     .font(DSTypography.caption)
                     .tracking(0.5)
                     .foregroundStyle(DSColors.foregroundDim)
 
-                VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                VStack(alignment: .leading, spacing: DSSpacing.md) {
                     Text("body weight (kg)")
                         .font(DSTypography.caption)
                         .foregroundStyle(DSColors.foregroundMuted)
@@ -173,13 +174,14 @@ struct CompleteView: View {
                         .monospacedDigit()
                         .foregroundStyle(DSColors.foreground)
                         .textFieldStyle(.plain)
+                        .padding(.top, DSSpacing.md)
                         #if os(iOS)
                         .keyboardType(.decimalPad)
                         #endif
                         .accessibilityIdentifier("complete.bodyweight_kg")
                 }
 
-                VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                VStack(alignment: .leading, spacing: DSSpacing.md) {
                     Text("note")
                         .font(DSTypography.caption)
                         .foregroundStyle(DSColors.foregroundMuted)
@@ -203,6 +205,7 @@ struct CompleteView: View {
                     .foregroundStyle(DSColors.foreground)
                     .lineLimit(1...8)
                     .textFieldStyle(.plain)
+                    .padding(.top, DSSpacing.md)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("complete.note")
                 }
@@ -247,6 +250,18 @@ struct CompleteView: View {
                     .padding(.horizontal, DSSpacing.xl)
                     .padding(.vertical, DSSpacing.lg)
                 }
+            }
+        }
+    }
+
+    private var blockResults: some View {
+        VStack(alignment: .leading, spacing: DSSpacing.md) {
+            Text("block results")
+                .font(DSTypography.caption)
+                .tracking(0.5)
+                .foregroundStyle(DSColors.foregroundDim)
+            ForEach(Array(allBlockResultEntries().enumerated()), id: \.offset) { _, entry in
+                blockResultSummaryView(entry: entry)
             }
         }
     }

@@ -1,4 +1,4 @@
-// WorkoutDB — Watch hi-fi
+// Setmark — Watch hi-fi
 // Left: interactive watch cycling through a workout.
 // Right: gallery of every face statically, for visual reference.
 

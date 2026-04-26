@@ -28,6 +28,7 @@ extension SessionReducer {
             route: .today,
             cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1),
             items: freshItems,
+            compositeSets: [],
             restEndsAt: nil,
             blockEndsAt: nil,
             workEndsAt: nil,
@@ -76,6 +77,7 @@ extension SessionReducer {
                 loadKg: old.loadKg,
                 unit: old.unit,
                 reps: input.loggedReps,
+                workTarget: old.workTarget,
                 done: true,
                 adjust: old.adjust,
                 rir: input.loggedRir,
@@ -84,7 +86,9 @@ extension SessionReducer {
                 distanceM: old.distanceM,
                 hrAvgBpm: old.hrAvgBpm,
                 cadenceAvgSpm: old.cadenceAvgSpm,
-                startedAt: resolvedStart ?? old.startedAt
+                startedAt: resolvedStart ?? old.startedAt,
+                skipped: false,
+                side: old.side
             )
         }
         // Consume the anchor: the set has been logged, so the next set's
@@ -93,6 +97,142 @@ extension SessionReducer {
         // anchor" visible instead of silently reusing a stale one across
         // sets.
         next.workStartedAt = nil
+        return next
+    }
+
+    static func applySkipSet(
+        state: SessionState,
+        itemID: WorkoutItemID,
+        setIndex: Int,
+        now: Date
+    ) -> SessionState {
+        var next = updateSet(in: state, itemID: itemID, setIndex: setIndex) { old in
+            SetPlan(
+                setIndex: old.setIndex,
+                loadKg: old.loadKg,
+                unit: old.unit,
+                reps: old.reps,
+                workTarget: old.workTarget,
+                done: true,
+                adjust: old.adjust,
+                rir: nil,
+                completedAt: now,
+                durationSec: nil,
+                distanceM: nil,
+                hrAvgBpm: nil,
+                cadenceAvgSpm: nil,
+                startedAt: state.workStartedAt ?? old.startedAt,
+                skipped: true,
+                side: old.side
+            )
+        }
+        next.compositeSets.removeAll {
+            $0.itemID == itemID && $0.setIndex == setIndex
+        }
+        next.workStartedAt = nil
+        next.workReadyAt = nil
+        return next
+    }
+
+    static func applyStartCompositeSlot(
+        state: SessionState,
+        itemID: WorkoutItemID,
+        setIndex: Int,
+        slotIndex: Int,
+        startedAt: Date
+    ) -> SessionState {
+        guard let idx = state.compositeSets.firstIndex(where: {
+            $0.itemID == itemID && $0.setIndex == setIndex
+        }) else {
+            return state
+        }
+        var next = state
+        var progress = next.compositeSets[idx]
+        let safeSlot = min(max(slotIndex, 1), progress.slotCount)
+        progress.phase = .working(slotIndex: safeSlot, startedAt: startedAt)
+        if progress.firstStartedAt == nil {
+            progress.firstStartedAt = startedAt
+        }
+        next.compositeSets[idx] = progress
+        next.workStartedAt = startedAt
+        next.workReadyAt = nil
+        return next
+    }
+
+    static func applyCompleteCompositeSlot(
+        state: SessionState,
+        itemID: WorkoutItemID,
+        setIndex: Int,
+        now: Date
+    ) -> SessionState {
+        guard let idx = state.compositeSets.firstIndex(where: {
+            $0.itemID == itemID && $0.setIndex == setIndex
+        }) else {
+            return state
+        }
+        var next = state
+        var progress = next.compositeSets[idx]
+        let currentSlot: Int
+        switch progress.phase {
+        case .working(let slotIndex, _):
+            currentSlot = slotIndex
+        case .ready(let slotIndex):
+            currentSlot = slotIndex
+        case .intraRest, .completePendingLog:
+            return state
+        }
+        progress.completedSlots = max(progress.completedSlots, currentSlot)
+        if currentSlot >= progress.slotCount {
+            progress.phase = .completePendingLog
+        } else {
+            progress.phase = .intraRest(
+                afterSlotIndex: currentSlot,
+                endsAt: now.addingTimeInterval(progress.intraRestSec)
+            )
+        }
+        next.compositeSets[idx] = progress
+        next.workStartedAt = nil
+        next.workReadyAt = currentSlot >= progress.slotCount ? nil : now
+        return next
+    }
+
+    static func applyFinalizeCompositeSet(
+        state: SessionState,
+        input: LogSetInput
+    ) -> SessionState {
+        guard let progressIdx = state.compositeSets.firstIndex(where: {
+            $0.itemID == input.itemID && $0.setIndex == input.setIndex
+        }) else {
+            return applyLogSet(state: state, input: input)
+        }
+        let progress = state.compositeSets[progressIdx]
+        let startedAt = progress.firstStartedAt ?? state.workStartedAt
+        let durationSec = startedAt.map { max(0, input.now.timeIntervalSince($0)) }
+        var next = updateSet(in: state, itemID: input.itemID, setIndex: input.setIndex) { old in
+            SetPlan(
+                setIndex: old.setIndex,
+                loadKg: old.loadKg,
+                unit: old.unit,
+                reps: input.loggedReps,
+                workTarget: old.workTarget,
+                done: true,
+                adjust: old.adjust,
+                rir: input.loggedRir,
+                completedAt: input.now,
+                durationSec: durationSec,
+                distanceM: old.distanceM,
+                hrAvgBpm: old.hrAvgBpm,
+                cadenceAvgSpm: old.cadenceAvgSpm,
+                startedAt: startedAt ?? old.startedAt,
+                skipped: false,
+                side: old.side
+            )
+        }
+        next.compositeSets.removeAll {
+            $0.itemID == input.itemID && $0.setIndex == input.setIndex
+        }
+        next.workStartedAt = nil
+        next.workReadyAt = nil
         return next
     }
 
@@ -119,6 +259,7 @@ extension SessionReducer {
                 loadKg: old.loadKg,
                 unit: old.unit,
                 reps: 0,
+                workTarget: old.workTarget,
                 done: true,
                 adjust: old.adjust,
                 rir: nil,
@@ -127,7 +268,9 @@ extension SessionReducer {
                 distanceM: input.distanceM,
                 hrAvgBpm: input.hrAvgBpm,
                 cadenceAvgSpm: input.cadenceAvgSpm,
-                startedAt: input.startedAt ?? state.workStartedAt
+                startedAt: input.startedAt ?? state.workStartedAt,
+                skipped: false,
+                side: old.side
             )
         }
         // Consume the anchor — same rationale as applyLogSet.
@@ -140,7 +283,9 @@ extension SessionReducer {
         itemID: WorkoutItemID,
         setIndex: Int,
         loadKg: Double?,
-        reps: Int?
+        reps: Int?,
+        rir: Int?,
+        startedAt: Date?
     ) -> SessionState {
         updateSet(in: state, itemID: itemID, setIndex: setIndex) { old in
             // Only applies to non-done sets. If the set has been logged
@@ -152,14 +297,45 @@ extension SessionReducer {
                 loadKg: loadKg ?? old.loadKg,
                 unit: old.unit,
                 reps: reps ?? old.reps,
+                workTarget: old.workTarget,
                 done: old.done,
                 adjust: .manual,
+                rir: rir ?? old.rir,
+                durationSec: old.durationSec,
+                distanceM: old.distanceM,
+                hrAvgBpm: old.hrAvgBpm,
+                cadenceAvgSpm: old.cadenceAvgSpm,
+                startedAt: startedAt ?? old.startedAt,
+                skipped: old.skipped,
+                side: old.side
+            )
+        }
+    }
+
+    static func applyMarkPendingSetStarted(
+        state: SessionState,
+        itemID: WorkoutItemID,
+        setIndex: Int,
+        startedAt: Date
+    ) -> SessionState {
+        updateSet(in: state, itemID: itemID, setIndex: setIndex) { old in
+            guard !old.done else { return old }
+            return SetPlan(
+                setIndex: old.setIndex,
+                loadKg: old.loadKg,
+                unit: old.unit,
+                reps: old.reps,
+                workTarget: old.workTarget,
+                done: old.done,
+                adjust: old.adjust,
                 rir: old.rir,
                 durationSec: old.durationSec,
                 distanceM: old.distanceM,
                 hrAvgBpm: old.hrAvgBpm,
                 cadenceAvgSpm: old.cadenceAvgSpm,
-                startedAt: old.startedAt
+                startedAt: startedAt,
+                skipped: old.skipped,
+                side: old.side
             )
         }
     }
@@ -185,6 +361,7 @@ extension SessionReducer {
                 loadKg: edit.loadKg ?? old.loadKg,
                 unit: old.unit,
                 reps: edit.reps ?? old.reps,
+                workTarget: old.workTarget,
                 done: old.done,
                 adjust: .manual,
                 rir: edit.rir ?? old.rir,
@@ -193,7 +370,9 @@ extension SessionReducer {
                 distanceM: old.distanceM,
                 hrAvgBpm: old.hrAvgBpm,
                 cadenceAvgSpm: old.cadenceAvgSpm,
-                startedAt: old.startedAt
+                startedAt: old.startedAt,
+                skipped: old.skipped,
+                side: old.side
             )
         }
     }
@@ -234,8 +413,9 @@ extension SessionReducer {
         // new end of the item.
         //
         // `sets`-override scope: ONLY set-major blocks honor the override.
-        // Round-robin blocks (superset / circuit / AMRAP / EMOM / Tabata /
-        // forTime) replicate a single `rounds` count across every item;
+        // Round-robin/unbounded-target blocks (superset / circuit / AMRAP /
+        // EMOM / Tabata / forTime / accumulate) replicate a single `rounds`
+        // count across every item or use target completion rather than row count;
         // rewriting one item's row count would either skew the cursor walk
         // (rows past the block's rounds never run) or implicitly collapse
         // every item to the new count (silently corrupting the other
@@ -244,6 +424,23 @@ extension SessionReducer {
         // in `docs/prescription.md` § "Alternative prescription (overrides)"
         // and `docs/features/exercise-swap.md` § "Known issues / gaps".
         if let overrides, !overrides.isEmpty {
+            let compositeRows = next.compositeSets.filter { $0.itemID == itemID }
+            let compositeSlotCount = compositeRows.first?.slotCount
+            let compositeRepsPerSlot = compositeSlotCount == nil ? nil : overrides.reps
+            let runtimeOverrides: AlternativeOverrides
+            if let reps = overrides.reps, let slotCount = compositeSlotCount {
+                runtimeOverrides = AlternativeOverrides(
+                    sets: overrides.sets,
+                    reps: reps * slotCount,
+                    loadKg: overrides.loadKg,
+                    unit: overrides.unit,
+                    targetRir: overrides.targetRir,
+                    perSide: overrides.perSide,
+                    autoreg: overrides.autoreg
+                )
+            } else {
+                runtimeOverrides = overrides
+            }
             let position = findBlockItemPosition(flatIndex: idx, in: state.structure)
             let blockAdvancement = position.flatMap { pos -> SessionState.BlockAdvancement? in
                 guard pos.blockIndex < state.structure.advancementByBlock.count else { return nil }
@@ -253,9 +450,17 @@ extension SessionReducer {
             next.items[idx].overrides = overrides
             next.items[idx].sets = applyOverridesToSetPlans(
                 next.items[idx].sets,
-                overrides: overrides,
+                overrides: runtimeOverrides,
                 allowSetsResize: allowSetsResize
             )
+            if allowSetsResize || compositeRepsPerSlot != nil {
+                next.compositeSets = syncCompositeProgress(
+                    next.compositeSets,
+                    itemID: itemID,
+                    setPlans: next.items[idx].sets,
+                    targetRepsPerSlot: compositeRepsPerSlot
+                )
+            }
             if allowSetsResize,
                let newSetsCount = overrides.sets,
                let (blockIndex, itemInBlock) = position {
@@ -271,6 +476,58 @@ extension SessionReducer {
         }
         // Do NOT reset autoregHeld: the hold is session-scoped by design.
         // docs/prescription.md § "Hold scope".
+        return next
+    }
+
+    private static func syncCompositeProgress(
+        _ progress: [SessionState.CompositeSetProgress],
+        itemID: WorkoutItemID,
+        setPlans: [SetPlan],
+        targetRepsPerSlot: Int?
+    ) -> [SessionState.CompositeSetProgress] {
+        let validSetIndices = Set(setPlans.map(\.setIndex))
+        let existingForItem = progress.filter { $0.itemID == itemID }
+        var next = progress.compactMap { row -> SessionState.CompositeSetProgress? in
+            guard row.itemID == itemID else { return row }
+            guard validSetIndices.contains(row.setIndex) else { return nil }
+            guard let targetRepsPerSlot else { return row }
+            let matchingSet = setPlans.first { $0.setIndex == row.setIndex }
+            if matchingSet?.done == true || matchingSet?.adjust == .manual {
+                return row
+            }
+            return SessionState.CompositeSetProgress(
+                itemID: row.itemID,
+                setIndex: row.setIndex,
+                kind: row.kind,
+                targetRepsPerSlot: targetRepsPerSlot,
+                slotCount: row.slotCount,
+                intraRestSec: row.intraRestSec,
+                firstStartedAt: row.firstStartedAt,
+                phase: row.phase,
+                completedSlots: row.completedSlots
+            )
+        }
+        guard let template = existingForItem.sorted(by: { $0.setIndex < $1.setIndex }).last else {
+            return next
+        }
+        let templateRepsPerSlot = targetRepsPerSlot ?? template.targetRepsPerSlot
+        var existingSetIndices = Set(next.filter { $0.itemID == itemID }.map { $0.setIndex })
+        let missingPendingSets = setPlans
+            .filter { !$0.done && !existingSetIndices.contains($0.setIndex) }
+            .sorted { $0.setIndex < $1.setIndex }
+        for set in missingPendingSets {
+            next.append(
+                SessionState.CompositeSetProgress(
+                    itemID: itemID,
+                    setIndex: set.setIndex,
+                    kind: template.kind,
+                    targetRepsPerSlot: templateRepsPerSlot,
+                    slotCount: template.slotCount,
+                    intraRestSec: template.intraRestSec
+                )
+            )
+            existingSetIndices.insert(set.setIndex)
+        }
         return next
     }
 

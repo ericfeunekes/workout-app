@@ -179,6 +179,23 @@ final class TabataDriverTests: XCTestCase {
         XCTAssertEqual(content?.loadDisplay, "20 lb")
     }
 
+    func testLoadlessTabataRendersAsCardioTimedWork() {
+        let (ctx, _) = makeTabataContext(
+            items: [
+                (name: "Bike", prescriptionJSON: "{}"),
+            ]
+        )
+        var state = SessionSeeder.seed(context: ctx)
+        state.route = .active
+
+        let content = TabataDriver().activeContent(state: state, context: ctx)
+        XCTAssertEqual(content?.exerciseName, "Bike")
+        XCTAssertEqual(content?.kind, .cardio)
+        XCTAssertEqual(content?.repsDisplay, "20 s")
+        XCTAssertEqual(content?.loadDisplay, "20 s work · 10 s rest")
+        XCTAssertNil(content?.loadKg)
+    }
+
     func testActiveContentSurfacesRoundCounterViaSetIndex() {
         // Round 5 — the cursor's setIndex flows through unchanged so
         // the Active screen can render "round 5 of 8".

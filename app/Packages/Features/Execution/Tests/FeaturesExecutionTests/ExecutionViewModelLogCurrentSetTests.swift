@@ -140,6 +140,81 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         return (ctx, itemID)
     }
 
+    /// Circuit station with a unit-aware duration/distance target. This
+    /// pins the "work kind + unit" cutover: targets are not fake reps,
+    /// but loaded carries/holds still preserve their authored load.
+    private static func targetedCircuitContext(
+        prescriptionJSON: String,
+        exerciseName: String
+    ) -> (WorkoutContext, UUID) {
+        let userID = UUID()
+        let workoutID = UUID()
+        let blockID = UUID()
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let now = Date()
+        let workout = Workout(
+            id: workoutID, userID: userID, name: "Targeted circuit",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil, createdAt: now, updatedAt: now,
+            completedAt: nil, tagsJSON: nil
+        )
+        let block = Block(
+            id: blockID, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: nil, timingMode: .circuit,
+            timingConfigJSON: #"{"rest_between_exercises_sec":0,"rest_between_rounds_sec":60}"#,
+            rounds: 1, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let item = WorkoutItem(
+            id: itemID, blockID: blockID, position: 0,
+            exerciseID: exerciseID,
+            prescriptionJSON: prescriptionJSON
+        )
+        let ctx = WorkoutContext(
+            workout: workout,
+            blocks: [block],
+            itemsByBlock: [[item]],
+            exercises: [exerciseID: Exercise(id: exerciseID, name: exerciseName)]
+        )
+        return (ctx, itemID)
+    }
+
+    private static func targetedStraightSetsContext(
+        prescriptionJSON: String,
+        exerciseName: String
+    ) -> (WorkoutContext, UUID) {
+        let userID = UUID()
+        let workoutID = UUID()
+        let blockID = UUID()
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let now = Date()
+        let workout = Workout(
+            id: workoutID, userID: userID, name: "Targeted straight sets",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil, createdAt: now, updatedAt: now,
+            completedAt: nil, tagsJSON: nil
+        )
+        let block = Block(
+            id: blockID, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: nil, timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":60,"rest_between_exercises_sec":60}"#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let item = WorkoutItem(
+            id: itemID, blockID: blockID, position: 0,
+            exerciseID: exerciseID,
+            prescriptionJSON: prescriptionJSON
+        )
+        let ctx = WorkoutContext(
+            workout: workout,
+            blocks: [block],
+            itemsByBlock: [[item]],
+            exercises: [exerciseID: Exercise(id: exerciseID, name: exerciseName)]
+        )
+        return (ctx, itemID)
+    }
+
     // MARK: - Routing
 
     func testLogCurrentSetRoutesToLogSetForStrength() async throws {
@@ -160,6 +235,7 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
             vm.isCurrentBlockCardio,
             "straight-sets must be classified as strength"
         )
+        vm.startCurrentSet()
         vm.logCurrentSet(reps: 5, rir: 2)
         try await Task.sleep(nanoseconds: 50_000_000)
 
@@ -268,13 +344,122 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         XCTAssertEqual(vm.state.route, .complete)
     }
 
+    func testUnitAwareDistanceTargetRendersAndLogsLoadedCarry() async throws {
+        let t0 = Date(timeIntervalSince1970: 1_700_003_000)
+        let clock = AdvanceableClock(now: t0)
+        let (ctx, itemID) = Self.targetedCircuitContext(
+            prescriptionJSON: #"""
+            {"target":{"kind":"distance","value":200,"unit":"ft"},"load_kg":53,"weight_unit":"lb"}
+            """#,
+            exerciseName: "Farmer Carry"
+        )
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
+        vm.start()
+
+        let content = try XCTUnwrap(vm.activeContent)
+        XCTAssertEqual(content.kind, .cardio)
+        XCTAssertEqual(content.repsDisplay, "200 ft")
+        XCTAssertEqual(content.loadDisplay, "53 lb")
+        XCTAssertTrue(vm.isCurrentBlockCardio)
+
+        vm.startCurrentSet()
+        vm.logCurrentSet()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let logs = await recorder.setLogs
+        let log = try XCTUnwrap(logs.first)
+        XCTAssertEqual(log.workoutItemID, itemID)
+        XCTAssertNil(log.reps)
+        XCTAssertEqual(log.weight, 53)
+        XCTAssertEqual(log.weightUnit, .lb)
+        XCTAssertEqual(try XCTUnwrap(log.distanceM), 60.96, accuracy: 0.001)
+        XCTAssertNil(log.durationSec)
+    }
+
+    func testUnitAwareDurationTargetDisplaysAuthoredUnitButLogsElapsedSeconds() async throws {
+        let t0 = Date(timeIntervalSince1970: 1_700_004_000)
+        let clock = AdvanceableClock(now: t0)
+        let (ctx, _) = Self.targetedCircuitContext(
+            prescriptionJSON: #"""
+            {"target":{"kind":"duration","value":2,"unit":"min"},"load_kg":40,"weight_unit":"lb"}
+            """#,
+            exerciseName: "Weighted Hang"
+        )
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
+        vm.start()
+
+        let content = try XCTUnwrap(vm.activeContent)
+        XCTAssertEqual(content.kind, .cardio)
+        XCTAssertEqual(content.repsDisplay, "2 min")
+        XCTAssertEqual(content.loadDisplay, "40 lb")
+
+        vm.startCurrentSet()
+        clock.advance(by: 133)
+        vm.logCurrentSet()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let logs = await recorder.setLogs
+        let log = try XCTUnwrap(logs.first)
+        XCTAssertNil(log.reps)
+        XCTAssertEqual(log.weight, 40)
+        XCTAssertEqual(log.weightUnit, .lb)
+        XCTAssertEqual(try XCTUnwrap(log.durationSec), 133, accuracy: 0.001)
+        XCTAssertNil(log.distanceM)
+    }
+
+    func testSetMajorDurationTargetDoesNotCollapseToZeroReps() async throws {
+        let t0 = Date(timeIntervalSince1970: 1_700_005_000)
+        let clock = AdvanceableClock(now: t0)
+        let (ctx, itemID) = Self.targetedStraightSetsContext(
+            prescriptionJSON: #"""
+            {"sets":2,"target":{"kind":"duration","value":30,"unit":"sec"},"load_kg":20,"weight_unit":"lb"}
+            """#,
+            exerciseName: "Weighted Plank"
+        )
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
+        vm.start()
+
+        let content = try XCTUnwrap(vm.activeContent)
+        XCTAssertEqual(content.kind, .cardio)
+        XCTAssertEqual(content.totalSets, 2)
+        XCTAssertEqual(content.repsDisplay, "30 sec")
+        XCTAssertEqual(content.loadDisplay, "20 lb")
+        XCTAssertTrue(vm.isCurrentBlockCardio)
+
+        vm.startCurrentSet()
+        clock.advance(by: 37)
+        vm.logCurrentSet()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let logs = await recorder.setLogs
+        let log = try XCTUnwrap(logs.first)
+        XCTAssertEqual(log.workoutItemID, itemID)
+        XCTAssertNil(log.reps)
+        XCTAssertEqual(log.weight, 20)
+        XCTAssertEqual(log.weightUnit, .lb)
+        XCTAssertEqual(try XCTUnwrap(log.durationSec), 37, accuracy: 0.001)
+        XCTAssertNil(log.distanceM)
+    }
+
     // MARK: - Source inspection
 
     func testActiveViewCardioBlockDispatchesLogCurrentSet() throws {
         // Contract: ActiveView's primary log-button action MUST NOT call
-        // `logSet(reps:rir:)` directly — that's the cardio-dispatch bug.
-        // The only `logSet(reps:rir:)` call left in the Active screen's
-        // UI surface is inside `LogSetSheet`'s commit closure in
+        // a strength-only log path directly — that's the cardio-dispatch
+        // bug. The only `logSet(loadKg:reps:rir:)` call left in the Active
+        // screen's UI surface is inside `LogSetSheet`'s commit closure in
         // `ActiveView.swift`, which the cardio branch never presents.
         //
         // This test reads the two source files that constitute the
@@ -282,10 +467,11 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         // `ActiveView+LogButton.swift` — and asserts:
         //   * `ActiveView+LogButton.swift` dispatches `logCurrentSet`
         //     (the cardio-safe routing entry point).
-        //   * `ActiveView+LogButton.swift` does NOT contain
-        //     `logSet(reps:` — the button must not bypass routing.
-        //   * `ActiveView.swift` still has exactly one `logSet(reps:`
-        //     call (the strength-only `LogSetSheet` commit).
+        //   * `ActiveView+LogButton.swift` does NOT contain a strength-only
+        //     `viewModel.logSet(` call — the button must not bypass routing.
+        //   * `ActiveView.swift` still has exactly one
+        //     `logSet(loadKg:reps:rir:)` call (the strength-only
+        //     `LogSetSheet` commit).
         let activeView = try loadSource(
             relativePath: "ActiveView.swift"
         )
@@ -293,12 +479,13 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
             relativePath: "ActiveView+LogButton.swift"
         )
 
-        // Count actual call sites (`viewModel.logSet(reps:`) — ignore doc
-        // comments and the declaration itself. The only permitted call is
-        // inside `ActiveView.swift`'s LogSetSheet commit closure (strength
-        // only). `ActiveView+LogButton.swift` must have zero.
+        // Count actual call sites (`viewModel.logSet(`) — ignore doc
+        // comments and declarations by limiting the search to these view
+        // files. The only permitted call is inside `ActiveView.swift`'s
+        // LogSetSheet commit closure (strength only). `ActiveView+LogButton.swift`
+        // must have zero.
         func callSiteCount(_ source: String) -> Int {
-            source.components(separatedBy: "viewModel.logSet(reps:").count - 1
+            source.components(separatedBy: "viewModel.logSet(").count - 1
         }
         func callCurrentSetCount(_ source: String) -> Int {
             source.components(separatedBy: "viewModel.logCurrentSet(").count - 1
@@ -312,12 +499,39 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         XCTAssertEqual(
             callSiteCount(activeViewLogButton),
             0,
-            "the log button must not bypass routing by calling viewModel.logSet(reps:rir:)"
+            "the log button must not bypass routing by calling viewModel.logSet"
         )
         XCTAssertEqual(
             callSiteCount(activeView),
             1,
-            "only the LogSetSheet's strength-specific commit may call viewModel.logSet(reps:)"
+            "only the LogSetSheet's strength-specific commit may call viewModel.logSet"
+        )
+        XCTAssertTrue(
+            activeViewLogButton.contains("case .custom:"),
+            "cardio-shaped custom segments still need mode-native CTA copy"
+        )
+        XCTAssertTrue(
+            activeViewLogButton.contains("log segment"),
+            "custom segment logging must not fall back to generic set copy"
+        )
+        XCTAssertTrue(
+            activeViewLogButton.contains("viewModel.canSkipCurrentSet"),
+            "the active log affordance must expose the deliberate-skip gate"
+        )
+        XCTAssertTrue(
+            activeViewLogButton.contains("viewModel.skipCurrentSet()"),
+            "the active log affordance must route deliberate skips through the view model"
+        )
+        let batchModeRange = try XCTUnwrap(
+            activeViewLogButton.range(of: "viewModel.isCurrentRoundRobinBatchMode")
+        )
+        let compositeModeRange = try XCTUnwrap(
+            activeViewLogButton.range(of: "viewModel.isCurrentCompositeSet")
+        )
+        XCTAssertLessThan(
+            batchModeRange.lowerBound,
+            compositeModeRange.lowerBound,
+            "batch-at-round-rest supersets must take precedence over composite logging so they do not open a mid-superset log sheet"
         )
     }
 

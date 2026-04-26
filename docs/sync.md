@@ -78,10 +78,12 @@ Returns (schema owned by `server/workoutdb_server/api/sync.py` and mirrored in `
 ```
 POST /api/sync/results
   Authorization: Bearer <token>
-  Body: { "set_logs": [...], "status_updates": [...] }
+  Body: { "set_logs": [...], "status_updates": [...], "workout_resets": [...] }
 ```
 
 Each `set_log` row carries the UUID the app assigned. Re-pushing the same UUID updates in place (idempotent). `status_updates` flip `workout.status` (planned → active → completed / skipped) and bump `workout.updated_at` so a subsequent pull sees the change.
+
+`workout_resets` is the same-day History escape hatch: the app deletes local logs immediately, queues `{workout_id}`, and the server deletes all set_logs tied to that workout's items, clears `completed_at`, and returns the workout to `planned`. Without this server-side reset, the next pull would resurrect the completed workout the user just reset locally.
 
 **Batching.** The app sends pending results in whatever size is convenient — per set after each log write is fine; batches at workout completion are also fine. There is no server-side minimum or maximum.
 
@@ -121,7 +123,7 @@ There is no login form. There is no account creation. There are no usernames or 
 ### First-launch flow
 
 1. **Welcome.** "Point at your server to begin." Text input for URL + "Scan QR" button.
-2. **Connecting.** On submit, the app calls `GET /api/version` with the provided token. On 200, the token and URL are persisted to the keychain (token) and `UserDefaults` (URL). On 401/failure, show "Couldn't reach the server — check the address and try again."
+2. **Connecting.** On submit, the app calls `GET /api/version` with the provided token. On 200, the full connection pair (URL + token) is persisted to Keychain so same-device reinstalls do not require re-entry. `UserDefaults` keeps a URL mirror only for compatibility/diagnostics. On 401/failure, show "Couldn't reach the server — check the address and try again."
 3. **First sync.** Call `GET /api/sync/pull` (no `since`). Show a progress indicator with metadata as it arrives — "4 weeks · 14 sessions · 42 exercises."
 4. **Ready.** Land on Today.
 
@@ -181,5 +183,5 @@ The watch face grammar (widget-based faces for set / rest / superset / EMOM / AM
 ## Open items
 
 - **Sync triggers on the watch.** Currently the phone is the only sync actor. If the watch ever writes set_logs independently (not in v1), we'll need a watch → phone → server reconciliation step.
-- **Deletion semantics.** The v1 app does not delete set_logs. If that becomes a user request later, we'll need to decide between soft-delete (a `deleted_at` column) and hard-delete (push a tombstone). Revisit when the request appears.
+- **Set-log deletion scope.** v1 only deletes set_logs through `workout_resets` for same-day accidental workout logs. Arbitrary historical set deletion/edit provenance remains out of scope unless the user asks for audit-grade history later.
 - **Multiple active workouts.** The spec allows a user to mark multiple workouts `active`, but the app UX assumes one active workout at a time. Behavior if a second workout is started before the first is completed is undefined; we'd need to decide whether "start workout" auto-completes the prior one or refuses.

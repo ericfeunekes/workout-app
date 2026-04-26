@@ -45,6 +45,7 @@ extension PushQueue {
         switch payload {
         case .setLogs: return "set_logs"
         case .statusUpdate: return "status_update"
+        case .workoutReset: return "workout_reset"
         case .events: return "events"
         case .userParameter: return "user_parameter"
         }
@@ -69,6 +70,8 @@ extension PushQueue {
             guard let first = logs.first else { return nil }
             return #""set_log_id":"\#(first.id.wireID)""#
         case .statusUpdate(let workoutID, _, _, _):
+            return #""workout_id":"\#(workoutID.wireID)""#
+        case .workoutReset(let workoutID):
             return #""workout_id":"\#(workoutID.wireID)""#
         case .userParameter(let param):
             return #""user_parameter_id":"\#(param.id.wireID)""#

@@ -66,6 +66,15 @@ public struct CustomDriver: TimingDriver {
             return nil
         }
 
+        if let segmentContent = timedSegmentContent(
+            state: state,
+            context: context,
+            item: item,
+            itemLog: itemLog
+        ) {
+            return segmentContent
+        }
+
         let resolved = resolveActive(item: item, itemLog: itemLog, cursor: c)
         return ActiveContent(
             exerciseName: context.exerciseName(
@@ -75,11 +84,42 @@ public struct CustomDriver: TimingDriver {
             setIndex: c.setIndex,
             totalSets: resolved.totalSets,
             loadDisplay: resolved.loadDisplay,
-            repsDisplay: String(resolved.reps),
+            repsDisplay: resolved.repsDisplay,
             loadKg: resolved.heroLoadKg,
             reps: resolved.reps,
             adjustGlyph: nil,
-            lastTime: context.lastPerformed[item.exerciseID]
+            lastTime: context.lastPerformed[item.exerciseID],
+            kind: resolved.kind
+        )
+    }
+
+    private func timedSegmentContent(
+        state: SessionState,
+        context: WorkoutContext,
+        item: WorkoutItem,
+        itemLog: SessionState.ItemLog
+    ) -> ActiveContent? {
+        let cursor = state.cursor
+        guard let segment = customSegment(state: state, context: context),
+              isEmptyPrescription(item),
+              isLoadlessPlaceholder(itemLog: itemLog, setIndex: cursor.setIndex) else {
+            return nil
+        }
+        let exerciseName = context.exerciseName(
+            for: item,
+            performedExerciseID: itemLog.performedExerciseID
+        )
+        return ActiveContent(
+            exerciseName: exerciseName,
+            setIndex: cursor.setIndex,
+            totalSets: customSegmentCount(state: state, context: context),
+            loadDisplay: segmentSecondary(segment),
+            repsDisplay: formatSegmentDuration(segment.durationSec),
+            loadKg: nil,
+            reps: 0,
+            adjustGlyph: nil,
+            lastTime: context.lastPerformed[item.exerciseID],
+            kind: .cardio
         )
     }
 
@@ -90,7 +130,9 @@ public struct CustomDriver: TimingDriver {
         let totalSets: Int
         let loadDisplay: String
         let heroLoadKg: Double?
+        let repsDisplay: String
         let reps: Int
+        let kind: ActiveContent.Kind
     }
 
     /// Resolve the renderable numeric state at the cursor. Prefer the live
@@ -106,6 +148,7 @@ public struct CustomDriver: TimingDriver {
     ) -> ResolvedActive {
         let parsed = parser.parse(prescriptionJSON: item.prescriptionJSON)
         let totalSets = totalSets(parsed: parsed, itemLog: itemLog)
+        let activeSet = itemLog.sets.first(where: { $0.setIndex == cursor.setIndex })
         let (reps, loadKg, unit) = resolveRepsAndLoad(
             for: item,
             parsed: parsed,
@@ -125,7 +168,9 @@ public struct CustomDriver: TimingDriver {
             totalSets: totalSets,
             loadDisplay: loadDisplay,
             heroLoadKg: heroLoadKg,
-            reps: reps
+            repsDisplay: activeSet.map(displayText(for:)) ?? String(reps),
+            reps: reps,
+            kind: activeSet.map(activeKind(for:)) ?? .strength
         )
     }
 
@@ -191,7 +236,7 @@ public struct CustomDriver: TimingDriver {
             return (reps, nil, .lb)
         case .repRange(_, _, let repsMax, let loadKg, let unit, _, _):
             return (repsMax, loadKg, unit)
-        case .cluster(_, let reps, let loadKg, let unit, _, _, _):
+        case .cluster(_, let reps, let loadKg, let unit, _, _, _, _):
             return (reps, loadKg, unit)
         case .warmup(_, let reps, let loadKg, let unit):
             return (reps, loadKg, unit)
@@ -225,7 +270,7 @@ public struct CustomDriver: TimingDriver {
                 return sets
             case .repRange(let sets, _, _, _, _, _, _):
                 return sets
-            case .cluster(let sets, _, _, _, _, _, _):
+            case .cluster(let sets, _, _, _, _, _, _, _):
                 return sets
             case .warmup(let sets, _, _, _):
                 return sets
@@ -245,5 +290,80 @@ public struct CustomDriver: TimingDriver {
         guard let rc else { return 0 }
         if case .count(let n) = rc { return n }
         return 0
+    }
+
+    private func customSegment(
+        state: SessionState,
+        context: WorkoutContext
+    ) -> CustomSegment? {
+        let cursor = state.cursor
+        guard let block = context.block(at: cursor.blockIndex) else { return nil }
+        switch parser.parseTimingConfig(
+            timingMode: block.timingMode.rawValue,
+            configJSON: block.timingConfigJSON
+        ) {
+        case .success(.custom(let segments)):
+            let index = cursor.setIndex - 1
+            guard index >= 0, index < segments.count else { return nil }
+            return segments[index]
+        case .success, .failure:
+            return nil
+        }
+    }
+
+    private func customSegmentCount(
+        state: SessionState,
+        context: WorkoutContext
+    ) -> Int {
+        guard let block = context.block(at: state.cursor.blockIndex) else {
+            return 1
+        }
+        switch parser.parseTimingConfig(
+            timingMode: block.timingMode.rawValue,
+            configJSON: block.timingConfigJSON
+        ) {
+        case .success(.custom(let segments)):
+            return max(segments.count, 1)
+        case .success, .failure:
+            return 1
+        }
+    }
+
+    private func isLoadlessPlaceholder(
+        itemLog: SessionState.ItemLog,
+        setIndex: Int
+    ) -> Bool {
+        guard let set = itemLog.sets.first(where: { $0.setIndex == setIndex }) else {
+            return false
+        }
+        return set.reps == 0 && set.loadKg == nil
+    }
+
+    private func isEmptyPrescription(_ item: WorkoutItem) -> Bool {
+        switch parser.parse(prescriptionJSON: item.prescriptionJSON) {
+        case .success(.empty):
+            return true
+        case .success, .failure:
+            return false
+        }
+    }
+
+    private func segmentSecondary(_ segment: CustomSegment) -> String {
+        let type = segment.type == .rest ? "REST" : "WORK"
+        if let label = segment.label, !label.isEmpty {
+            return "\(type) · \(label)"
+        }
+        if let zone = segment.targetHrZone {
+            return "\(type) · Z\(zone)"
+        }
+        return type
+    }
+
+    private func formatSegmentDuration(_ seconds: Double) -> String {
+        if seconds < 60 {
+            return "\(Int(seconds.rounded())) s"
+        }
+        let total = Int(seconds.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }

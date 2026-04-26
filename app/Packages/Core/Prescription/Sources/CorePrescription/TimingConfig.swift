@@ -21,15 +21,18 @@ public enum TimingConfig: Equatable, Sendable, Hashable {
         restBetweenExercisesSec: Double
     )
 
-    /// `{ "rest_between_rounds_sec": n }`
+    /// `{ "rest_between_rounds_sec": n, "logging_mode": "..."? }`
     case superset(
-        restBetweenRoundsSec: Double
+        restBetweenRoundsSec: Double,
+        loggingMode: RoundRobinLoggingMode
     )
 
-    /// `{ "rest_between_exercises_sec": n, "rest_between_rounds_sec": n }`
+    /// `{ "rest_between_exercises_sec": n, "rest_between_rounds_sec": n,
+    ///    "logging_mode": "..."? }`
     case circuit(
         restBetweenExercisesSec: Double,
-        restBetweenRoundsSec: Double
+        restBetweenRoundsSec: Double,
+        loggingMode: RoundRobinLoggingMode
     )
 
     /// `{ "interval_sec": n, "total_minutes": n }`
@@ -71,6 +74,14 @@ public enum TimingConfig: Equatable, Sendable, Hashable {
         targetHrZone: Int?
     )
 
+    /// `{ "target_duration_sec": n?, "target_reps": n?,
+    ///    "target_distance_m": n? }`
+    case accumulate(
+        targetDurationSec: Double?,
+        targetReps: Int?,
+        targetDistanceM: Double?
+    )
+
     /// `{ "segments": [ { type, duration_sec, label, target_hr_zone? }, ... ] }`
     case custom(
         segments: [CustomSegment]
@@ -80,6 +91,11 @@ public enum TimingConfig: Equatable, Sendable, Hashable {
     case rest(
         durationSec: Double
     )
+}
+
+public enum RoundRobinLoggingMode: String, Equatable, Sendable, Hashable {
+    case stationByStation = "station_by_station"
+    case batchAtRoundRest = "batch_at_round_rest"
 }
 
 public struct CustomSegment: Equatable, Sendable, Hashable {

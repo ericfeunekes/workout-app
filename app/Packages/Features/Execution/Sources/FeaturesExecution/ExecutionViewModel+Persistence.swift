@@ -60,7 +60,7 @@ extension ExecutionViewModel {
             }
             guard restored.state.workoutID == context.workout.id else { return }
             self.state = restored.state
-            normalizeRestoredState()
+            normalizeRestoredState(explicitSetStartAware: restored.explicitSetStartAware)
         } catch {
             // Silent — a failed load means "no saved state", not "crash".
         }
@@ -76,16 +76,36 @@ extension ExecutionViewModel {
     ///
     /// Each helper calls `persist()` on mutation, so the normalized state
     /// lands on disk before the UI renders it.
-    private func normalizeRestoredState() {
+    private func normalizeRestoredState(explicitSetStartAware: Bool) {
         switch state.route {
-        case .today, .complete:
+        case .today, .transition, .complete:
             return
         case .active, .rest:
             backfillEMOMIntervalAnchorIfNeeded()
             enterRestIfZeroItemBlock()
             enterBlockTimerIfNeeded()
             enterTabataWorkWindowIfNeeded()
+            normalizeLegacyStraightSetStartIfNeeded(explicitSetStartAware: explicitSetStartAware)
         }
+    }
+
+    /// Payloads written before explicit Set Start can have `workStartedAt`
+    /// stamped on active straight-set entry. That timestamp means "ready
+    /// since", not "user started the set", so restore converts it into the
+    /// new ready/prep anchor. Payloads written after the cutover preserve a
+    /// non-nil `workStartedAt` because that means the user actually tapped
+    /// Set Start before the app was killed.
+    private func normalizeLegacyStraightSetStartIfNeeded(explicitSetStartAware: Bool) {
+        guard !explicitSetStartAware,
+              state.route == .active,
+              context.block(at: state.cursor.blockIndex)?.timingMode == .straightSets,
+              state.workReadyAt == nil,
+              let legacyReadyAt = state.workStartedAt else {
+            return
+        }
+        state.workStartedAt = nil
+        state.workReadyAt = legacyReadyAt
+        persist()
     }
 
     /// Back-compat for EMOM payloads persisted before the R2.1 cutover —
@@ -169,12 +189,15 @@ extension ExecutionViewModel {
             // `advance()`, so the stamp MUST be here.
             if case .advanceFromRest = m {
                 restWindowStartedAt = nil
+                next.workEndsAt = nil
+                next.workReadyAt = nil
                 next.workStartedAt = clock.now
             }
             // `.start` is the first-set anchor — matches `.advanceFromRest`
             // semantics ("work has begun"). The very first SetPlan.startedAt
             // thus reflects session-start rather than the nil fallback.
             if case .start = m {
+                next.workReadyAt = nil
                 next.workStartedAt = clock.now
             }
         }
@@ -264,6 +287,7 @@ extension ExecutionViewModel {
     /// round's work window (the active phase). The 10s rest window is
     /// handled via the existing `.enterRest` path in `buildLogMutations`.
     func enterBlockTimerIfNeeded() {
+        guard state.route == .active || state.route == .rest else { return }
         let b = state.cursor.blockIndex
         guard b < state.structure.itemsPerBlock.count else { return }
         guard let block = context.block(at: b) else { return }
@@ -287,6 +311,20 @@ extension ExecutionViewModel {
                     * (TabataDriver.workSec + TabataDriver.restSec)
                 state.blockEndsAt = now.addingTimeInterval(total)
             }
+            persist()
+            return
+        }
+
+        // Intervals/custom/continuous-duration: per-segment or target
+        // work windows. These are not always whole-block caps, but they
+        // still need a concrete deadline so the athlete always sees the
+        // current work boundary. Continuous distance targets stay manual
+        // until sensor-derived distance exists.
+        if state.route == .active,
+           state.workEndsAt == nil,
+           let workDuration = workWindowSeconds(for: block),
+           workDuration > 0 {
+            state.workEndsAt = now.addingTimeInterval(workDuration)
             persist()
             return
         }
@@ -353,7 +391,7 @@ extension ExecutionViewModel {
     ///      `Timer.publish` while backgrounded, so on foreground the
     ///      publisher fires a single tick regardless of elapsed time.
     ///   3. **Block cap.** If `blockEndsAt` elapsed, route out of the
-    ///      capped block via `routeOutOfCappedBlock` — advance to the
+    ///      capped block via `routeOutOfCurrentBlock` — advance to the
     ///      next block when one exists, else `.complete`.
     ///
     /// Ordering (regression: "Tabata placeholder log dropped after long
@@ -383,11 +421,14 @@ extension ExecutionViewModel {
     public func tickBlockTimer() {
         tickCallCount &+= 1
         let now = clock.now
-        // Tabata work window expired → log placeholder + enter rest.
+        advanceAutoRestIfNeeded(now: now)
+        // Work window expired → close the current timed piece. Tabata
+        // keeps its strength/cardio round rest, while intervals/custom
+        // reuse the mode-routed current-log path.
         // Run BEFORE the EMOM catchup / block-cap paths so a suspend-past-cap
         // scenario still writes the final round's placeholder.
         if let workEnds = state.workEndsAt, now >= workEnds, state.route == .active {
-            autoLogAndRestForTabata()
+            closeExpiredWorkWindow()
             // Fall through to the block-cap check — if the cap is also
             // overdue (long suspend case) we still need to flip to
             // `.complete`, and the auto-log path just flipped us to
@@ -395,47 +436,107 @@ extension ExecutionViewModel {
         }
         // EMOM boundary catchup. iOS suspends `Timer.publish` while the app
         // is backgrounded; on foreground return the publisher fires ONCE,
-        // regardless of how many minute boundaries have elapsed. Without a
-        // catchup loop, a 90-second background on a 2-item EMOM advances
-        // the cursor exactly once — leaving the user staring at interval 2
-        // when the wall clock is already deep inside interval 2's next
-        // boundary (qa-047). The loop walks every overdue boundary in one
-        // tick: `.rest` → `advance()` (user's log is already committed);
-        // `.active` → `autoLogPlaceholderForEMOM()` + `advance()` (skipped
-        // interval still produces a server-visible row, matching the
-        // "capture the most user data" contract in timing-modes.md). Runs
-        // BEFORE the block-cap path so the final interval's placeholder
-        // lands while the cursor is still inside the authored window; the
-        // cap path then routes out of the block.
+        // regardless of how many minute boundaries have elapsed. The loop
+        // walks every overdue boundary in one tick. Logged intervals are
+        // already on `.rest`; missed intervals advance from `.active`
+        // without writing fake 0-rep completion rows.
         catchUpEMOMBoundaries(now: now)
-        // Block cap expired → advance out of the time-capped block. Before
-        // routing, capture the final EMOM interval's log if the user is
-        // still on `.active` inside the authored window (qa-005). Running
-        // the autolog here as well as inside the catchup loop is necessary
-        // because a cap that lands exactly at the FINAL boundary is
-        // consumed by the catchup loop (ordinal = N, boundary passed), but
-        // a cap with no pending boundary (e.g. late-log inline-advance that
-        // walked the cursor to the next sentinel row) still needs to
-        // terminate the block.
+        // Block cap expired → advance out of the time-capped block. Leave
+        // unlogged EMOM intervals pending; a missed interval is not a
+        // completed zero-rep set.
         if let ends = state.blockEndsAt, now >= ends,
            state.route != .complete, state.route != .today {
-            if state.route == .active,
-               let block = context.block(at: state.cursor.blockIndex),
-               block.timingMode == .emom,
-               emomCursorIsWithinAuthoredIntervals() {
-                autoLogPlaceholderForEMOM()
+            if currentBlockNeedsManualMetconResultAtCap() {
+                return
             }
-            routeOutOfCappedBlock()
+            routeOutOfCurrentBlock()
         }
+    }
+
+    /// Auto-transition rests only when the rest itself is clock-owned by
+    /// the timing mode. Strength recovery remains manual and can go over
+    /// rest; interval/Tabata/EMOM/rest-block transitions move immediately
+    /// at zero because the prescribed clock owns that boundary.
+    public var currentRestShouldAutoAdvance: Bool {
+        guard state.route == .rest,
+              state.restEndsAt != nil,
+              let block = context.block(at: state.cursor.blockIndex) else {
+            return false
+        }
+        switch block.timingMode {
+        case .intervals, .tabata, .emom, .rest:
+            return true
+        case .straightSets, .superset, .circuit, .amrap, .forTime,
+             .continuous, .accumulate, .custom:
+            return false
+        }
+    }
+
+    private func advanceAutoRestIfNeeded(now: Date) {
+        guard currentRestShouldAutoAdvance,
+              let restEndsAt = state.restEndsAt,
+              now >= restEndsAt else {
+            return
+        }
+        advance()
+    }
+
+    /// AMRAP and For Time caps require athlete-facing result capture.
+    /// Routing out from the low-level timer tick would lose the score or
+    /// create an unscored completion. AMRAP is prompted by `ActiveView`;
+    /// For Time cap-partial capture is intentionally deferred, so the cap
+    /// behaves as a warning until the athlete taps `finish`.
+    private func currentBlockNeedsManualMetconResultAtCap() -> Bool {
+        guard let block = context.block(at: state.cursor.blockIndex) else {
+            return false
+        }
+        switch block.timingMode {
+        case .amrap, .forTime:
+            return true
+        case .straightSets, .superset, .circuit, .emom, .intervals, .tabata,
+             .continuous, .accumulate, .custom, .rest:
+            return false
+        }
+    }
+
+    private func closeExpiredWorkWindow() {
+        guard let block = context.block(at: state.cursor.blockIndex) else {
+            return
+        }
+        switch block.timingMode {
+        case .tabata:
+            autoLogAndRestForTabata()
+        case .continuous:
+            autoTransitionContinuousTargetIfComposed()
+        case .intervals, .custom:
+            logCurrentSet()
+        case .straightSets, .superset, .circuit, .emom, .amrap, .forTime,
+             .accumulate, .rest:
+            break
+        }
+    }
+
+    /// Continuous duration targets are detectable from the clock. In a
+    /// composed workout, reaching that target should move directly to the
+    /// next authored block. In a standalone run/ride, expiry is a prompt:
+    /// the athlete can complete or continue, so this helper intentionally
+    /// leaves the active route alone when there is no next block.
+    private func autoTransitionContinuousTargetIfComposed() {
+        let currentBlock = state.cursor.blockIndex
+        guard currentBlock + 1 < state.structure.itemsPerBlock.count else {
+            return
+        }
+        logCurrentSet()
     }
 
     /// Walk the cursor through every EMOM minute boundary that has elapsed
     /// since the last tick. The loop terminates when the cursor either
     /// catches up to `now` (next boundary still in the future) OR walks
     /// past the block's authored intervals (sentinel seed row). Each
-    /// iteration either advances on a live `.rest` or auto-logs +
-    /// advances on `.active`; no other route reaches this helper (the
-    /// guard excludes `.today` / `.complete`).
+    /// iteration advances the cursor. If the user already logged the
+    /// interval, route is `.rest` and the log is committed. If the user
+    /// never logged, route is `.active`; that is a missed interval, not a
+    /// completed 0-rep set.
     ///
     /// qa-047: pre-fix, `tickBlockTimer` handled a single boundary per
     /// call. `Timer.publish` is suspended while the app is backgrounded,
@@ -457,17 +558,14 @@ extension ExecutionViewModel {
         while emomBoundaryReached(now: now),
               emomCursorIsWithinAuthoredIntervals(),
               state.route == .active || state.route == .rest {
-            if state.route == .active {
-                autoLogPlaceholderForEMOM()
-            }
             advance()
             guardCount += 1
             if guardCount > maxIterations { break }
         }
     }
 
-    /// Called when a time-capped block's `blockEndsAt` has elapsed. If
-    /// there is a subsequent block, jump the cursor to its first
+    /// Called when the current block has been completed by an engine-owned
+    /// timer/result. If there is a subsequent block, jump the cursor to its first
     /// position, clear the capped-block's timer anchors, and re-enter
     /// via the normal block-entry helpers (`enterRestIfZeroItemBlock`,
     /// `enterTabataWorkWindowIfNeeded`, `enterBlockTimerIfNeeded`). If
@@ -490,7 +588,7 @@ extension ExecutionViewModel {
     /// carries "when this block started" as its `startedAt` anchor —
     /// matching the semantics of `.advanceFromRest` / `.start` via
     /// `apply(_:)`.
-    private func routeOutOfCappedBlock() {
+    func routeOutOfCurrentBlock() {
         let currentBlock = state.cursor.blockIndex
         let nextBlock = currentBlock + 1
         guard nextBlock < state.structure.itemsPerBlock.count else {
@@ -501,31 +599,36 @@ extension ExecutionViewModel {
         state.blockEndsAt = nil
         state.workEndsAt = nil
         state.intervalAnchorAt = nil
+        state.workReadyAt = nil
         state.cursor = SessionState.Cursor(
             blockIndex: nextBlock,
             itemIndex: 0,
             setIndex: 1
         )
-        state.route = .active
-        state.workStartedAt = clock.now
+        let shouldTransition = state.structure.itemsPerBlock[nextBlock] > 0
+        state.route = shouldTransition ? .transition : .active
+        state.workStartedAt = shouldTransition ? nil : clock.now
         persist()
+        guard !shouldTransition else { return }
         enterRestIfZeroItemBlock()
         enterTabataWorkWindowIfNeeded()
         enterBlockTimerIfNeeded()
+        prepareExplicitSetStartIfNeeded()
+    }
+
+    func finishCurrentTimedBlockFromResult() {
+        routeOutOfCurrentBlock()
     }
 
     /// Helper invoked from `tickBlockTimer` when the Tabata work window
-    /// elapses. v1 logs a placeholder `(reps: 0, rir: nil)` — a later
-    /// slice can prompt the user for a real per-round count.
+    /// elapses. Cardio-shaped Tabata can be auto-logged because duration
+    /// is observable from the clock. Strength-shaped Tabata must not
+    /// fabricate a completed 0-rep row; until missed/partial rows exist,
+    /// the app enters the scheduled rest and leaves that round unlogged.
     ///
-    /// Fires the push-side hook via `enqueueLoggedSet` and the
-    /// `execution.session_mutation(logSet)` telemetry event after the
-    /// state mutation lands — without these the auto-log updates
-    /// SessionState only and the resulting SetLog never reaches the
-    /// server or the event log (qa-050). `tickBlockTimer`'s
-    /// `state.route == .active` guard prevents double-fire on the next
-    /// tick: the `.enterRest` mutation dispatched here flips the route
-    /// to `.rest`, so a second tick within the same work window won't
+    /// `tickBlockTimer`'s `state.route == .active` guard prevents
+    /// double-fire on the next tick: `.enterRest` flips the route to
+    /// `.rest`, so a second tick within the same work window won't
     /// re-enter this helper.
     private func autoLogAndRestForTabata() {
         let c = state.cursor
@@ -533,38 +636,31 @@ extension ExecutionViewModel {
             return
         }
         let now = clock.now
-        apply([
-            .logSet(itemID: item.id, setIndex: c.setIndex, loggedReps: 0, loggedRir: nil, now: now),
-            .enterRest(durationSec: TabataDriver.restSec, now: now),
-        ])
-        emitSessionMutation("logSet")
-        enqueueLoggedSet(item: item, setIndex: c.setIndex, reps: 0, rir: nil)
-    }
-
-    /// Helper invoked from `tickBlockTimer` when the EMOM block cap elapses
-    /// while the user is still on `.active` for the final interval. Logs a
-    /// placeholder `(reps: 0, rir: nil)` so the interval is captured before
-    /// the route flips to `.complete`. Unlike Tabata, no `.enterRest`
-    /// follows — the block is terminating on this tick, not entering
-    /// another round. Matches the "capture the most user data" contract
-    /// (timing-modes.md) for time-capped modes.
-    ///
-    /// Fires the push-side hook via `enqueueLoggedSet` and the
-    /// `execution.session_mutation(logSet)` telemetry event so the
-    /// placeholder lands on the server + in analytics (same fix as
-    /// tabata's qa-050; the EMOM auto-log path was missing the same
-    /// side-effects plumbing).
-    private func autoLogPlaceholderForEMOM() {
-        let c = state.cursor
-        guard let item = context.item(at: c.blockIndex, itemIndex: c.itemIndex) else {
+        if activeContent?.kind == .cardio {
+            let input = CardioLogInput(
+                durationSec: TabataDriver.workSec,
+                startedAt: state.workStartedAt
+            )
+            apply([
+                .logCardioSet(
+                    itemID: item.id,
+                    setIndex: c.setIndex,
+                    durationSec: input.durationSec,
+                    distanceM: input.distanceM,
+                    hrAvgBpm: input.hrAvgBpm,
+                    cadenceAvgSpm: input.cadenceAvgSpm,
+                    startedAt: input.startedAt,
+                    now: now
+                ),
+                .enterRest(durationSec: TabataDriver.restSec, now: now),
+            ])
+            emitSessionMutation("logCardioSet")
+            enqueueLoggedCardioSet(item: item, setIndex: c.setIndex, input: input)
             return
         }
-        let now = clock.now
         apply([
-            .logSet(itemID: item.id, setIndex: c.setIndex, loggedReps: 0, loggedRir: nil, now: now),
+            .enterRest(durationSec: TabataDriver.restSec, now: now),
         ])
-        emitSessionMutation("logSet")
-        enqueueLoggedSet(item: item, setIndex: c.setIndex, reps: 0, rir: nil)
     }
 
     /// True when the current EMOM cursor points to one of the block's
@@ -614,6 +710,31 @@ extension ExecutionViewModel {
             case .emom(let intervalSec, let totalMinutes):
                 _ = intervalSec  // not used here — cap is total, not interval
                 return Double(totalMinutes) * 60
+            default:
+                return nil
+            }
+        case .failure:
+            return nil
+        }
+    }
+
+    private func workWindowSeconds(for block: Block) -> TimeInterval? {
+        let parser = PrescriptionParser()
+        switch parser.parseTimingConfig(
+            timingMode: block.timingMode.rawValue,
+            configJSON: block.timingConfigJSON
+        ) {
+        case .success(let config):
+            switch config {
+            case let .intervals(workSec, _, _, _, _, _):
+                if let workSec { return workSec }
+                return nil
+            case let .continuous(targetDurationSec, _, _, _):
+                return targetDurationSec
+            case .custom(let segments):
+                let index = state.cursor.setIndex - 1
+                guard segments.indices.contains(index) else { return nil }
+                return segments[index].durationSec
             default:
                 return nil
             }

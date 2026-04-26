@@ -169,22 +169,25 @@ extension ExecutionViewModel {
         // this push and any future past-set edit push carry the same
         // timestamp (the server's upsert overwrites on each push).
         let completedAt = loggedSet?.completedAt ?? clock.now
+        let skipped = loggedSet?.skipped ?? false
         let setLog = SetLog(
             id: Self.setLogID(itemID: item.id, setIndex: setIndex),
             workoutItemID: item.id,
             performedExerciseID: performedExerciseID,
             setIndex: setIndex,
-            reps: reps,
-            weight: loggedLoad,
-            weightUnit: loggedLoad == nil ? nil : loggedUnit,
-            durationSec: loggedSet?.durationSec,
-            distanceM: loggedSet?.distanceM,
-            rir: rir,
+            reps: skipped ? nil : reps,
+            weight: skipped ? nil : loggedLoad,
+            weightUnit: skipped || loggedLoad == nil ? nil : loggedUnit,
+            durationSec: skipped ? nil : loggedSet?.durationSec,
+            distanceM: skipped ? nil : loggedSet?.distanceM,
+            rir: skipped ? nil : rir,
             isWarmup: false,
+            skipped: skipped,
+            side: loggedSet?.side ?? .bilateral,
             startedAt: loggedSet?.startedAt,
             completedAt: completedAt,
-            hrAvgBpm: loggedSet?.hrAvgBpm,
-            cadenceAvgSpm: loggedSet?.cadenceAvgSpm
+            hrAvgBpm: skipped ? nil : loggedSet?.hrAvgBpm,
+            cadenceAvgSpm: skipped ? nil : loggedSet?.cadenceAvgSpm
         )
         // swiftlint:disable:next no_direct_task_unstructured
         Task { @MainActor in
@@ -193,11 +196,11 @@ extension ExecutionViewModel {
     }
 
     /// Cardio sibling of `enqueueLoggedSet`. Builds a cardio `SetLog`
-    /// (no `reps` / `weight` / `rir`, populated `durationSec` /
-    /// `distanceM` / `hrAvgBpm` / `cadenceAvgSpm` / `startedAt`) and
-    /// pushes it through `onSetLogged` if the hook is wired. Same
-    /// deterministic UUID scheme as the strength path so retries upsert
-    /// in place.
+    /// (no `reps` / `rir`, populated `durationSec` / `distanceM` /
+    /// `hrAvgBpm` / `cadenceAvgSpm` / `startedAt`, and authored load
+    /// when the target is loaded) and pushes it through `onSetLogged`
+    /// if the hook is wired. Same deterministic UUID scheme as the
+    /// strength path so retries upsert in place.
     func enqueueLoggedCardioSet(
         item: WorkoutItem,
         setIndex: Int,
@@ -208,22 +211,26 @@ extension ExecutionViewModel {
         let loggedSet = itemLog?.sets.first(where: { $0.setIndex == setIndex })
         let performedExerciseID = itemLog?.performedExerciseID
         let completedAt = loggedSet?.completedAt ?? clock.now
+        let weight = loggedSet?.loadKg
+        let skipped = loggedSet?.skipped ?? false
         let setLog = SetLog(
             id: Self.setLogID(itemID: item.id, setIndex: setIndex),
             workoutItemID: item.id,
             performedExerciseID: performedExerciseID,
             setIndex: setIndex,
             reps: nil,
-            weight: nil,
-            weightUnit: nil,
-            durationSec: input.durationSec,
-            distanceM: input.distanceM,
+            weight: skipped ? nil : weight,
+            weightUnit: skipped || weight == nil ? nil : loggedSet?.unit,
+            durationSec: skipped ? nil : input.durationSec,
+            distanceM: skipped ? nil : input.distanceM,
             rir: nil,
             isWarmup: false,
-            startedAt: input.startedAt,
+            skipped: skipped,
+            side: loggedSet?.side ?? .bilateral,
+            startedAt: loggedSet?.startedAt ?? input.startedAt,
             completedAt: completedAt,
-            hrAvgBpm: input.hrAvgBpm,
-            cadenceAvgSpm: input.cadenceAvgSpm
+            hrAvgBpm: skipped ? nil : input.hrAvgBpm,
+            cadenceAvgSpm: skipped ? nil : input.cadenceAvgSpm
         )
         // swiftlint:disable:next no_direct_task_unstructured
         Task { @MainActor in
@@ -270,22 +277,25 @@ extension ExecutionViewModel {
         // `weightUnit` only makes sense paired with a non-nil weight.
         // A loadless row (`loadKg == nil`) writes both as nil so History
         // renders "BW" and analytics don't see a phantom unit on a BW set.
+        let skipped = set.skipped
         let setLog = SetLog(
             id: Self.setLogID(itemID: item.id, setIndex: setIndex),
             workoutItemID: item.id,
             performedExerciseID: itemLog.performedExerciseID,
             setIndex: setIndex,
-            reps: set.reps,
-            weight: set.loadKg,
-            weightUnit: set.loadKg == nil ? nil : set.unit,
-            durationSec: set.durationSec,
-            distanceM: set.distanceM,
-            rir: set.rir,
+            reps: skipped ? nil : set.reps,
+            weight: skipped ? nil : set.loadKg,
+            weightUnit: skipped || set.loadKg == nil ? nil : set.unit,
+            durationSec: skipped ? nil : set.durationSec,
+            distanceM: skipped ? nil : set.distanceM,
+            rir: skipped ? nil : set.rir,
             isWarmup: false,
+            skipped: skipped,
+            side: set.side,
             startedAt: set.startedAt,
             completedAt: completedAt,
-            hrAvgBpm: set.hrAvgBpm,
-            cadenceAvgSpm: set.cadenceAvgSpm
+            hrAvgBpm: skipped ? nil : set.hrAvgBpm,
+            cadenceAvgSpm: skipped ? nil : set.cadenceAvgSpm
         )
         // swiftlint:disable:next no_direct_task_unstructured
         Task { @MainActor in
@@ -417,37 +427,43 @@ extension ExecutionViewModel {
             for set in itemLog.sets.sorted(by: { $0.setIndex < $1.setIndex })
             where set.done {
                 let setCompletedAt = set.completedAt ?? fallbackCompletedAt
-                // Cardio rows carry durationSec/distanceM/hrAvg/cadence
-                // on SetPlan; strength rows carry reps/weight. Detect
-                // cardio by the presence of `durationSec` OR `distanceM`
-                // — either signal means this row was logged through
-                // `.logCardioSet`, so reps/weight are 0/default and
-                // should not be emitted to the wire.
-                let isCardio = set.durationSec != nil || set.distanceM != nil
+                // Cardio rows carry duration/distance/HR/cadence and may
+                // still carry load (farmer carries, weighted hangs). Cluster
+                // strength rows also carry duration, so a duration field by
+                // itself is not enough; an explicit unit-aware target wins.
+                let isCardio = set.workTarget?.kind == .duration
+                    || set.workTarget?.kind == .distance
+                    || set.distanceM != nil
+                    || set.hrAvgBpm != nil
+                    || set.cadenceAvgSpm != nil
+                    || (set.durationSec != nil && set.reps == 0 && set.rir == nil)
                 let reps: Int? = isCardio ? nil : set.reps
-                let weight: Double? = isCardio ? nil : set.loadKg
+                let repsForLog: Int? = set.skipped ? nil : reps
+                let weight: Double? = set.skipped ? nil : set.loadKg
                 // `weightUnit` only makes sense paired with a non-nil
                 // weight. A loadless strength row (BW, loadless AMRAP
                 // token, `.empty` placeholder) writes weight=nil and
                 // unit=nil so History renders "BW" and analytics don't
                 // see a phantom unit on a BW set.
-                let weightUnit: WeightUnit? = (isCardio || weight == nil) ? nil : set.unit
+                let weightUnit: WeightUnit? = weight == nil ? nil : set.unit
                 setLogs.append(SetLog(
                     id: Self.setLogID(itemID: itemLog.itemID, setIndex: set.setIndex),
                     workoutItemID: itemLog.itemID,
                     performedExerciseID: itemLog.performedExerciseID,
                     setIndex: set.setIndex,
-                    reps: reps,
+                    reps: repsForLog,
                     weight: weight,
                     weightUnit: weightUnit,
-                    durationSec: set.durationSec,
-                    distanceM: set.distanceM,
-                    rir: set.rir,
+                    durationSec: set.skipped ? nil : set.durationSec,
+                    distanceM: set.skipped ? nil : set.distanceM,
+                    rir: set.skipped ? nil : set.rir,
                     isWarmup: false,
+                    skipped: set.skipped,
+                    side: set.side,
                     startedAt: set.startedAt,
                     completedAt: setCompletedAt,
-                    hrAvgBpm: set.hrAvgBpm,
-                    cadenceAvgSpm: set.cadenceAvgSpm
+                    hrAvgBpm: set.skipped ? nil : set.hrAvgBpm,
+                    cadenceAvgSpm: set.skipped ? nil : set.cadenceAvgSpm
                 ))
             }
         }

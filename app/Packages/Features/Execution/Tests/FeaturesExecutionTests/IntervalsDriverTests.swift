@@ -2,9 +2,8 @@
 //
 // Unit coverage for `IntervalsDriver`:
 //   - restDuration reads `rest_sec` directly for time-based configs.
-//   - restDuration derives rest from `rest_distance_m / 1000 * pace` for
-//     distance-based configs that author a pace.
-//   - restDuration falls back to 0 when distance-based and pace is missing.
+//   - restDuration does not infer distance-based rest from target pace
+//     until sensor support can prove the boundary.
 //   - restDuration falls back to 0 on malformed JSON and wrong timing mode.
 //   - activeContent surfaces the distance/time target in `repsDisplay`,
 //     the pace in `loadDisplay`, and `totalSets` = `interval_count`.
@@ -142,17 +141,16 @@ final class IntervalsDriverTests: XCTestCase {
         XCTAssertEqual(driver.restDuration(state: f.state, context: f.context), 30)
     }
 
-    func testRestDurationDerivesFromDistanceAndPace() {
-        // 200 m rest at 270 s / km → 200 / 1000 * 270 = 54 s.
+    func testRestDurationDoesNotInferDistanceRestFromPace() {
+        // No distance sensor support exists in v1, so a 200 m rest at
+        // target pace must not become an automatic 54 s rest.
         let f = canonicalFixture()
         let driver = IntervalsDriver()
-        XCTAssertEqual(driver.restDuration(state: f.state, context: f.context), 54)
+        XCTAssertEqual(driver.restDuration(state: f.state, context: f.context), 0)
     }
 
     func testRestDurationIsZeroWhenDistanceBasedAndPaceMissing() {
-        // No pace authored — without a pace we cannot infer a rest time.
-        // Return 0 so the VM's auto-advance collapses the rest; the user
-        // taps "next lap" to start the rest-to-work transition in v1.
+        // No pace authored — and no sensor support exists in v1.
         let f = makeFixture(
             configJSON: #"""
             {"work_distance_m":400,"rest_distance_m":200,"interval_count":10}

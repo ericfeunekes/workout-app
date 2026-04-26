@@ -60,6 +60,7 @@ def test_timing_mode_parity(swift_source: str) -> None:
         "intervals",
         "tabata",
         "continuous",
+        "accumulate",
         "custom",
         "rest",
     }

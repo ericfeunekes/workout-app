@@ -16,25 +16,31 @@ import Shell
 
 extension RootView {
 
-    /// Build the `.debugSeed` phase's view models backed by
-    /// `ExecutionPreviewSeed.pushA()` + matching Today seed. Wraps the
+    /// Build the `.debugSeed` phase's view models backed by a DEBUG
+    /// execution fixture + matching Today seed. Wraps the
     /// seeded ExecutionViewModel in an `ExecutionVMHolder` so
     /// RootTabView's observation path matches production.
-    func buildDebugSeedViewModels() -> (TodayViewModel, ExecutionVMHolder) {
+    func buildDebugSeedViewModels(args: [String] = []) -> (TodayViewModel, ExecutionVMHolder) {
+        if args.contains("--debug-today-plan") {
+            return buildDebugTodayPlanViewModels()
+        }
+
         let cache = persistence.workoutCache
         let telemetry = persistence.telemetryEmitter()
-        let context = ExecutionPreviewSeed.pushA()
+        let context = debugWorkoutContext(from: args)
         let dataset = PulledDataset(
             workouts: [context.workout],
             blocks: context.blocks,
             items: context.itemsByBlock.flatMap { $0 },
             exercises: Array(context.exercises.values)
         )
-        Task { [cache, dataset] in try? await cache.save(dataset) }
+        Task { [cache, dataset] in
+            try? await cache.clear()
+            try? await cache.save(dataset)
+        }
         // Capture historyVM so save & done on the debug path also
         // refreshes the History tab, matching the production flow.
         let historyVM = self.historyVM
-        let todaySeed = TodayPreviewSeed.pushA(withLastSession: true)
         // Build todayVM FIRST so the executionVM's localCompletionWriter
         // can capture it + a TodayLoader and call `reload` post-save,
         // matching the production bug-036 wiring. The Today → Execution
@@ -42,13 +48,13 @@ extension RootView {
         // `ExecutionVMHolder` (shared with RootTabView's observation).
         let executionHolder = ExecutionVMHolder()
         let todayContext = TodayContext(
-            workout: todaySeed.workout,
-            blocks: todaySeed.blocks,
-            items: todaySeed.items,
-            exercises: todaySeed.exercises,
-            lastPerformed: todaySeed.lastPerformed,
-            lastSessionSummary: todaySeed.lastSessionSummary,
-            programTags: todaySeed.programTags,
+            workout: context.workout,
+            blocks: context.blocks,
+            items: context.itemsByBlock.flatMap { $0 },
+            exercises: context.exercises,
+            lastPerformed: context.lastPerformed,
+            lastSessionSummary: "last time: 45 lb × 8",
+            programTags: debugProgramTags(from: args),
             sessionStateBinding: { [executionHolder] mutation in
                 guard case .start = mutation else { return }
                 Task { @MainActor in executionHolder.vm?.start() }
@@ -70,23 +76,238 @@ extension RootView {
         return (todayVM, executionHolder)
     }
 
-    /// Honor `--start-active` / `--jump-rest` / `--jump-complete` launch
-    /// args by driving the Execution view model straight to the target
+    /// DEBUG-only plan-surface fixture. Unlike `--start-active`, this
+    /// bypasses FirstRun without starting execution, so simulator QA can
+    /// validate missed / today / upcoming cards, detail sheets, and the
+    /// start-any-visible-card handoff.
+    private func buildDebugTodayPlanViewModels() -> (TodayViewModel, ExecutionVMHolder) {
+        let cache = persistence.workoutCache
+        let telemetry = persistence.telemetryEmitter()
+        let historyVM = self.historyVM
+        let executionHolder = ExecutionVMHolder()
+        let now = Date()
+        let contexts = debugTodayPlanContexts(now: now)
+        let selected = contexts.first ?? ExecutionPreviewSeed.pushA()
+        let contextsByWorkoutID = Dictionary(uniqueKeysWithValues: contexts.map {
+            ($0.workout.id, $0)
+        })
+
+        let binding: @Sendable (SessionMutation) -> Void = { [executionHolder] mutation in
+            guard case .start = mutation else { return }
+            Task { @MainActor in executionHolder.vm?.start() }
+        }
+        let todayContexts = contexts.map { todayContext(from: $0, binding: binding) }
+        let selectedTodayContext = todayContext(from: selected, binding: binding)
+        let planContext = TodayPlanContext(
+            selected: selectedTodayContext,
+            workouts: todayContexts
+        )
+        let todayVM = TodayViewModel(planContext: planContext, telemetry: telemetry)
+        let todayLoader = TodayLoader(cache: cache)
+        let makeCompletionWriter: @MainActor () -> LocalCompletionWriter = {
+            { [cache, historyVM, todayVM, todayLoader] workout, setLogs in
+                try? await cache.saveWorkout(workout)
+                try? await cache.saveSetLogs(setLogs, workoutID: workout.id)
+                await todayVM.reload(using: todayLoader)
+                await historyVM.load()
+            }
+        }
+
+        todayVM.setStartWorkoutAction { [executionHolder, contextsByWorkoutID, telemetry] workoutID in
+            guard let context = contextsByWorkoutID[workoutID] else { return false }
+            let vm = ExecutionViewModel(
+                context: context,
+                localCompletionWriter: makeCompletionWriter(),
+                telemetry: telemetry
+            )
+            executionHolder.vm = vm
+            vm.start()
+            return true
+        }
+
+        let executionVM = ExecutionViewModel(
+            context: selected,
+            localCompletionWriter: makeCompletionWriter(),
+            telemetry: telemetry
+        )
+        executionHolder.vm = executionVM
+
+        let dataset = PulledDataset(
+            workouts: contexts.map(\.workout),
+            blocks: contexts.flatMap(\.blocks),
+            items: contexts.flatMap { $0.itemsByBlock.flatMap { $0 } },
+            exercises: Array(contexts.flatMap { $0.exercises.values })
+        )
+        Task { [cache, dataset] in
+            try? await cache.clear()
+            try? await cache.save(dataset)
+        }
+
+        return (todayVM, executionHolder)
+    }
+
+    /// Honor `--start-active` / `--jump-rest` / `--jump-transition` /
+    /// `--jump-complete` launch args by driving the Execution view model straight to the target
     /// state.
     func applyDebugLaunchJumps(args: [String], executionVM: ExecutionViewModel) {
-        if args.contains("--start-active") {
+        if args.contains("--jump-transition") {
+            executionVM.start()
+            executionVM.startCurrentSet()
+            executionVM.logSet(reps: 5, rir: 2)
+            executionVM.advance()
+        } else if args.contains("--start-active") {
             executionVM.start()
         } else if args.contains("--jump-rest") {
             executionVM.start()
+            executionVM.startCurrentSet()
             executionVM.logSet(reps: 5, rir: 2)
         } else if args.contains("--jump-complete") {
             executionVM.start()
             let totalSets = executionVM.state.items.reduce(0) { $0 + $1.sets.count }
             for _ in 0..<totalSets {
+                executionVM.startCurrentSet()
                 executionVM.logSet(reps: 5, rir: 2)
                 executionVM.advance()
             }
         }
+    }
+
+    private func debugWorkoutContext(from args: [String]) -> WorkoutContext {
+        if let scenario = debugScenario(from: args),
+           let context = ExecutionPreviewSeed.qaScenario(scenario) {
+            return context
+        }
+        return ExecutionPreviewSeed.timingMode(debugTimingMode(from: args) ?? .straightSets)
+    }
+
+    private func debugTodayPlanContexts(now: Date) -> [WorkoutContext] {
+        let calendar = Calendar(identifier: .gregorian)
+        let today = ExecutionPreviewSeed.qaScenario("timer_gauntlet_strength")
+            ?? ExecutionPreviewSeed.pushA()
+        let missed = ExecutionPreviewSeed.qaScenario("timer_gauntlet_endurance")
+            ?? ExecutionPreviewSeed.timingMode(.intervals)
+        let upcoming = ExecutionPreviewSeed.qaScenario("timer_gauntlet_clocked")
+            ?? ExecutionPreviewSeed.timingMode(.emom)
+
+        return [
+            retitle(
+                today,
+                name: "Upper Hypertrophy Calibration",
+                scheduledDate: now,
+                tagsJSON: #"["upper","hypertrophy","bench_station"]"#,
+                notes: "Heavy press work first, then controlled shoulder and arm volume. Stay near one bench station if the gym is busy."
+            ),
+            retitle(
+                missed,
+                name: "Missed Engine + Core",
+                scheduledDate: calendar.date(byAdding: .day, value: -1, to: now) ?? now,
+                tagsJSON: #"["endurance","core","reschedule"]"#,
+                notes: "A missed conditioning day that can be reviewed, moved, or skipped without losing the rest of the week."
+            ),
+            retitle(
+                upcoming,
+                name: "Tomorrow Intervals",
+                scheduledDate: calendar.date(byAdding: .day, value: 1, to: now) ?? now,
+                tagsJSON: #"["intervals","conditioning","tomorrow"]"#,
+                notes: "Clock-led conditioning with clear work and rest boundaries."
+            ),
+        ]
+    }
+
+    private func retitle(
+        _ context: WorkoutContext,
+        name: String,
+        scheduledDate: Date,
+        tagsJSON: String,
+        notes: String
+    ) -> WorkoutContext {
+        let workout = Workout(
+            id: context.workout.id,
+            userID: context.workout.userID,
+            name: name,
+            scheduledDate: scheduledDate,
+            status: context.workout.status,
+            source: context.workout.source,
+            notes: notes,
+            createdAt: context.workout.createdAt,
+            updatedAt: context.workout.updatedAt,
+            completedAt: context.workout.completedAt,
+            tagsJSON: tagsJSON
+        )
+        return WorkoutContext(
+            workout: workout,
+            blocks: context.blocks,
+            itemsByBlock: context.itemsByBlock,
+            exercises: context.exercises,
+            lastPerformed: context.lastPerformed,
+            alternativesByItem: context.alternativesByItem,
+            userParameters: context.userParameters
+        )
+    }
+
+    private func todayContext(
+        from context: WorkoutContext,
+        binding: (@Sendable (SessionMutation) -> Void)?
+    ) -> TodayContext {
+        TodayContext(
+            workout: context.workout,
+            blocks: context.blocks,
+            items: context.itemsByBlock.flatMap { $0 },
+            exercises: context.exercises,
+            lastPerformed: context.lastPerformed,
+            lastSessionSummary: "last time: 45 lb × 8",
+            programTags: debugProgramTags(from: context),
+            sessionStateBinding: binding
+        )
+    }
+
+    private func debugProgramTags(from context: WorkoutContext) -> [String] {
+        guard let tagsJSON = context.workout.tagsJSON,
+              let data = tagsJSON.data(using: .utf8),
+              let tags = try? JSONDecoder().decode([String].self, from: data)
+        else {
+            return ["qa"]
+        }
+        return tags.map { $0.replacingOccurrences(of: "_", with: " ") }
+    }
+
+    private func debugProgramTags(from args: [String]) -> [String] {
+        if let scenario = debugScenario(from: args) {
+            return ["qa", scenario.replacingOccurrences(of: "_", with: " ")]
+        }
+        if let mode = debugTimingMode(from: args) {
+            return ["qa", mode.rawValue.replacingOccurrences(of: "_", with: " ")]
+        }
+        return ["qa", "straight sets"]
+    }
+
+    /// Accept either `--debug-mode emom` or `--debug-mode=emom` so
+    /// simulator QA can jump directly into each timer mode.
+    private func debugTimingMode(from args: [String]) -> TimingMode? {
+        if let modeArg = args.first(where: { $0.hasPrefix("--debug-mode=") }) {
+            return TimingMode(rawValue: String(modeArg.dropFirst("--debug-mode=".count)))
+        }
+        guard let idx = args.firstIndex(of: "--debug-mode"),
+              args.indices.contains(args.index(after: idx))
+        else {
+            return nil
+        }
+        return TimingMode(rawValue: args[args.index(after: idx)])
+    }
+
+    /// Accept either `--debug-scenario timer_gauntlet_strength` or
+    /// `--debug-scenario=timer_gauntlet_strength`. Scenario wins over
+    /// `--debug-mode` because it seeds a full multi-block workout.
+    private func debugScenario(from args: [String]) -> String? {
+        if let scenarioArg = args.first(where: { $0.hasPrefix("--debug-scenario=") }) {
+            return String(scenarioArg.dropFirst("--debug-scenario=".count))
+        }
+        guard let idx = args.firstIndex(of: "--debug-scenario"),
+              args.indices.contains(args.index(after: idx))
+        else {
+            return nil
+        }
+        return args[args.index(after: idx)]
     }
 }
 

@@ -24,12 +24,8 @@
 //     the authored `interval_count`.
 //   - `restDuration` returns the rest between intervals. Time-based configs
 //     use `rest_sec` directly. Distance-based configs have no native rest
-//     time, so we approximate from the authored pace:
-//       rest_time_sec = rest_distance_m / 1000 * target_pace_sec_per_km.
-//     When the distance-based config omits pace we fall back to 0 — the
-//     VM's auto-advance path collapses the zero rest and drops straight
-//     back to `.active` for the next interval. GPS-driven distance
-//     advancement is a v1.1+ concern.
+//     time until sensor support exists, so v1 does not infer a rest
+//     boundary from target pace.
 //   - `onSetLogged` returns an empty outcome. Intervals has no autoreg
 //     (per `docs/prescription.md` § "Autoregulation").
 //
@@ -97,10 +93,9 @@ public struct IntervalsDriver: TimingDriver {
     // MARK: - Rest duration
 
     /// Rest between intervals. Time-based configs expose `rest_sec`
-    /// directly. Distance-based configs derive a time estimate from the
-    /// authored pace; without a pace we return 0 (user taps "next lap"
-    /// to advance — GPS-driven advance is not v1). Malformed / wrong-mode
-    /// configs also return 0.
+    /// directly. Distance-based configs return 0 until sensor support can
+    /// prove the boundary; v1 must not infer completion from target pace.
+    /// Malformed / wrong-mode configs also return 0.
     ///
     /// Final-interval short-circuit: when the cursor is on the last
     /// interval (cursor.setIndex == interval_count), rest is 0 so the
@@ -124,9 +119,9 @@ public struct IntervalsDriver: TimingDriver {
                 _,
                 restSec,
                 _,
-                restDistanceM,
+                _,
                 intervalCount,
-                paceSecPerKm
+                _
             ) = config else {
                 return 0
             }
@@ -136,9 +131,6 @@ public struct IntervalsDriver: TimingDriver {
             }
             if let restSec {
                 return restSec
-            }
-            if let restDistanceM, let paceSecPerKm {
-                return restDistanceM / 1000.0 * paceSecPerKm
             }
             return 0
         case .failure:

@@ -130,11 +130,40 @@ final class EMOMBoundaryTests: XCTestCase {
         }
     }
 
+    private func logStartedSet(_ vm: ExecutionViewModel, reps: Int = 10) {
+        vm.startCurrentSet()
+        vm.logSet(reps: reps, rir: nil)
+    }
+
     // MARK: - Tests
 
     /// A log at 0:15 inside interval 1 must rest until 1:00, not 1:15.
     /// Advancing the clock to 1:00 and calling `tickBlockTimer()` must
     /// auto-advance the cursor to interval 2 on the minute mark.
+    func testEMOMRequiresSetStartBeforeManualLog() {
+        let start = Date(timeIntervalSince1970: 900_000)
+        let clock = MutableBoundaryClock(now: start)
+        let (ctx, _) = makeEMOMContext(totalMinutes: 3)
+        let vm = ExecutionViewModel(context: ctx, clock: clock)
+        vm.start()
+
+        XCTAssertTrue(vm.requiresExplicitSetStartForCurrentWork)
+        XCTAssertFalse(vm.isCurrentWorkStarted)
+
+        clock.now = start.addingTimeInterval(10)
+        vm.logSet(reps: 10, rir: nil)
+
+        XCTAssertEqual(vm.state.route, .active)
+        XCTAssertEqual(totalLoggedSets(vm.state), 0)
+
+        vm.startCurrentSet()
+        XCTAssertTrue(vm.isCurrentWorkStarted)
+        vm.logSet(reps: 10, rir: nil)
+
+        XCTAssertEqual(vm.state.route, .rest)
+        XCTAssertEqual(totalLoggedSets(vm.state), 1)
+    }
+
     func testEMOMBoundaryAdvanceOnMinuteMark() {
         let start = Date(timeIntervalSince1970: 1_000_000)
         let clock = MutableBoundaryClock(now: start)
@@ -149,10 +178,12 @@ final class EMOMBoundaryTests: XCTestCase {
             "EMOM block entry must stamp intervalAnchorAt = now"
         )
         XCTAssertEqual(vm.state.cursor.setIndex, 1)
+        XCTAssertTrue(vm.requiresExplicitSetStartForCurrentWork)
+        XCTAssertFalse(vm.isCurrentWorkStarted)
 
         // User logs at 0:15 inside interval 1.
         clock.now = start.addingTimeInterval(15)
-        vm.logSet(reps: 10, rir: nil)
+        logStartedSet(vm)
         XCTAssertEqual(vm.state.route, .rest)
 
         // Rest must end at boundary (1:00), NOT at log + interval (1:15).
@@ -183,7 +214,7 @@ final class EMOMBoundaryTests: XCTestCase {
 
         // Log interval 1 at 0:15.
         clock.now = start.addingTimeInterval(15)
-        vm.logSet(reps: 10, rir: nil)
+        logStartedSet(vm)
         XCTAssertEqual(
             vm.state.restEndsAt?.timeIntervalSince1970,
             start.timeIntervalSince1970 + 60,
@@ -197,7 +228,7 @@ final class EMOMBoundaryTests: XCTestCase {
 
         // User starts interval 2 immediately and logs late — at 1:30.
         clock.now = start.addingTimeInterval(90)
-        vm.logSet(reps: 10, rir: nil)
+        logStartedSet(vm)
         // Rest until 2:00 (boundary = anchor + 2*60 = start + 120), NOT
         // log + interval (would be 2:30).
         XCTAssertEqual(
@@ -306,7 +337,7 @@ final class EMOMBoundaryTests: XCTestCase {
 
         // Log at 0:15 — 45s of real rest remaining until the 1:00 boundary.
         clock.now = start.addingTimeInterval(15)
-        vm.logSet(reps: 10, rir: nil)
+        logStartedSet(vm)
         XCTAssertEqual(vm.state.route, .rest)
 
         // Ring total = real window (45s), NOT interval_sec (60s).
@@ -344,7 +375,7 @@ final class EMOMBoundaryTests: XCTestCase {
         let vm1 = ExecutionViewModel(context: ctx, clock: clock, sessionStore: store)
         vm1.start()
         clock.now = start.addingTimeInterval(20)
-        vm1.logSet(reps: 10, rir: nil)
+        logStartedSet(vm1)
         XCTAssertEqual(vm1.state.route, .rest)
 
         // Give the persistence pipeline a moment to drain.
@@ -371,17 +402,12 @@ final class EMOMBoundaryTests: XCTestCase {
             "restoration on a clock past blockEndsAt must route to complete")
     }
 
-    /// Regression for qa-005: an 8-minute EMOM with 2 items rotating must
-    /// capture all 8 intervals, not 7. Pre-fix: the user taps log 7 times
-    /// across minutes 1..7, reaches the 8th interval at t=420 on `.active`,
-    /// and fails to tap log before the block cap fires at t=480 — the
-    /// block-cap complete check commits `.complete` with the 8th interval
-    /// silently dropped. Server shows 7 set_logs (4 of one item + 3 of the
-    /// other). Post-fix: `tickBlockTimer` auto-logs a placeholder `(reps: 0,
-    /// rir: nil)` for the in-progress EMOM interval before flipping to
-    /// `.complete`, mirroring Tabata's work-window auto-log pattern
-    /// ("capture the most user data" per timing-modes.md).
-    func testEMOM8MinuteWorkoutLogs8Intervals() {
+    /// An 8-minute EMOM with 2 items rotating must not fabricate a final
+    /// 0-rep set when the athlete misses the last interval. The timer
+    /// still completes the block at the cap, but only user-logged work
+    /// becomes completed set data until a first-class missed/partial row
+    /// exists.
+    func testEMOM8MinuteWorkoutDoesNotFakeMissedFinalInterval() {
         let start = Date(timeIntervalSince1970: 7_000_000)
         let clock = MutableBoundaryClock(now: start)
         let (ctx, _, _) = makeTwoItemEMOMContext(totalMinutes: 8)
@@ -402,7 +428,7 @@ final class EMOMBoundaryTests: XCTestCase {
         for interval in 1...7 {
             let intervalStart = Double(interval - 1) * 60
             clock.now = start.addingTimeInterval(intervalStart + 10)
-            vm.logSet(reps: 10, rir: nil)
+            logStartedSet(vm)
             // Advance clock to this interval's boundary + tick. Only fires
             // boundary advance when we're on `.rest`; an inline advance on
             // log (late log) means no rest to tick out of.
@@ -415,13 +441,13 @@ final class EMOMBoundaryTests: XCTestCase {
             "7 user-driven logs before the final tick")
 
         // Clock rolls to the block cap without the user logging interval 8.
-        // Pre-fix: `.complete` fires here with 7 rows, dropping interval 8.
-        // Post-fix: the auto-log placeholder commits interval 8 first.
+        // The block completes, but interval 8 remains unlogged rather than
+        // being misrepresented as completed 0-rep work.
         clock.now = start.addingTimeInterval(480)
         vm.tickBlockTimer()
 
-        XCTAssertEqual(totalLoggedSets(vm.state), 8,
-            "an 8-minute 2-item EMOM must log 8 intervals, not 7 (qa-005)")
+        XCTAssertEqual(totalLoggedSets(vm.state), 7,
+            "missed EMOM intervals must not become fake 0-rep logs")
         XCTAssertEqual(vm.state.route, .complete,
             "EMOM must complete when total_minutes elapses")
     }
@@ -452,7 +478,7 @@ final class EMOMBoundaryTests: XCTestCase {
 
         // Log interval 1 at 0:15.
         clock.now = start.addingTimeInterval(15)
-        vm.logSet(reps: 10, rir: nil)
+        logStartedSet(vm)
         XCTAssertEqual(vm.state.route, .rest,
             "early log inside interval 1 must enter .rest until the minute boundary")
         XCTAssertEqual(
@@ -494,11 +520,8 @@ final class EMOMBoundaryTests: XCTestCase {
     /// user forced to manually recover via tapping "next" or editing
     /// past-sets, which produced 12 spurious set_logs in the QA run.
     ///
-    /// Post-fix: `tickBlockTimer` auto-logs a `(reps: 0, rir: nil)`
-    /// placeholder for the current interval and advances the cursor when
-    /// the boundary passes on `.active`. Mirrors Tabata's work-window
-    /// auto-log pattern (`autoLogAndRestForTabata`) — "capture the most
-    /// user data" per `docs/features/timing-modes.md`.
+    /// Post-fix: `tickBlockTimer` advances the cursor when the boundary
+    /// passes on `.active`, but does not write a fake completed 0-rep set.
     func testEMOMBoundaryTickAdvancesEvenWhenUserNeverLogsOnActive() {
         let start = Date(timeIntervalSince1970: 10_000_000)
         let clock = MutableBoundaryClock(now: start)
@@ -510,8 +533,8 @@ final class EMOMBoundaryTests: XCTestCase {
         XCTAssertEqual(vm.state.route, .active)
 
         // User watches Push Press for the full minute without tapping log.
-        // Clock rolls to the minute boundary. Tick must auto-log a 0-rep
-        // placeholder and advance the cursor to item 1 (Jump Rope).
+        // Clock rolls to the minute boundary. Tick advances the cursor to
+        // item 1 (Jump Rope), but no completed set is created.
         clock.now = start.addingTimeInterval(60)
         vm.tickBlockTimer()
 
@@ -522,13 +545,11 @@ final class EMOMBoundaryTests: XCTestCase {
         XCTAssertEqual(vm.state.route, .active,
             "advance lands on .active for the next interval")
 
-        // Auto-log placeholder landed on item A (the skipped interval).
+        // The skipped interval stays pending. This avoids false summaries
+        // like "1×0"; first-class missed rows are a separate model.
         let logA = vm.state.items.first { $0.itemID == itemA }
-        XCTAssertEqual(logA?.sets.filter { $0.done }.count, 1,
-            "skipped interval 1 must have a 0-rep placeholder log so the "
-                + "server reflects an intent row per EMOM interval")
-        XCTAssertEqual(logA?.sets.first(where: { $0.done })?.reps, 0,
-            "placeholder log reports 0 reps — the user did not report a value")
+        XCTAssertEqual(logA?.sets.filter { $0.done }.count, 0,
+            "skipped interval 1 must not be represented as a completed 0-rep set")
 
         // Item B has nothing yet — interval 2 is just beginning.
         let logB = vm.state.items.first { $0.itemID == itemB }
@@ -550,7 +571,7 @@ final class EMOMBoundaryTests: XCTestCase {
 
         // Interval 1: log at 0:15, tick at 1:00 → advance to item 1.
         clock.now = start.addingTimeInterval(15)
-        vm.logSet(reps: 10, rir: nil)
+        logStartedSet(vm)
         clock.now = start.addingTimeInterval(60)
         vm.tickBlockTimer()
         XCTAssertEqual(vm.state.cursor.itemIndex, 1)
@@ -559,7 +580,7 @@ final class EMOMBoundaryTests: XCTestCase {
         // Interval 2: log at 1:15, rest anchors to 2:00, tick at 2:00 →
         // advance to round 2 item 0.
         clock.now = start.addingTimeInterval(75)
-        vm.logSet(reps: 10, rir: nil)
+        logStartedSet(vm)
         XCTAssertEqual(vm.state.route, .rest,
             "early log inside interval 2 must enter .rest, not late-log inline-advance")
         XCTAssertEqual(
@@ -593,7 +614,7 @@ final class EMOMBoundaryTests: XCTestCase {
         for interval in 1...7 {
             let intervalStart = Double(interval - 1) * 60
             clock.now = start.addingTimeInterval(intervalStart + 10)
-            vm.logSet(reps: 10, rir: nil)
+            logStartedSet(vm)
             clock.now = start.addingTimeInterval(intervalStart + 60)
             vm.tickBlockTimer()
         }
@@ -606,7 +627,7 @@ final class EMOMBoundaryTests: XCTestCase {
         // correct pre-fix, but we pin it so a future cap/log-order refactor
         // can't resurrect the drop.
         clock.now = start.addingTimeInterval(479.5)
-        vm.logSet(reps: 10, rir: nil)
+        logStartedSet(vm)
 
         XCTAssertEqual(totalLoggedSets(vm.state), 8,
             "a log at T=479.5s (inside the 8th interval) must commit; nothing dropped")

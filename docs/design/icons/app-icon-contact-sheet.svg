@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="760" viewBox="0 0 1280 760" role="img" aria-labelledby="title desc">
+  <title id="title">Setmark app icon review sheet</title>
+  <desc id="desc">Side-by-side app icon candidates and real-size checks for the selected master.</desc>
+  <defs>
+    <style>
+      text { font-family: ui-monospace, "SFMono-Regular", Menlo, monospace; fill: #c2bcae; font-size: 14px; }
+      .title { fill: #f5f1e8; font-size: 22px; }
+      .label { fill: #f5f1e8; font-size: 13px; }
+      .card { fill: #1a1815; stroke: #36322b; }
+      .mask-line { fill: none; stroke: #d28766; stroke-width: 2; stroke-dasharray: 8 8; opacity: 0.75; }
+    </style>
+    <clipPath id="iosMask" clipPathUnits="objectBoundingBox">
+      <path d="M .5 0 C .78 0 1 .22 1 .5 C 1 .78 .78 1 .5 1 C .22 1 0 .78 0 .5 C 0 .22 .22 0 .5 0 Z"/>
+    </clipPath>
+  </defs>
+
+  <rect width="1280" height="760" fill="#0f0e0c"/>
+  <text x="32" y="44" class="title">Setmark app icon review sheet</text>
+  <text x="32" y="72">Selected master uses the same warm dark, terracotta, and accent-ink palette as the app tokens.</text>
+
+  <g transform="translate(32 112)">
+    <text x="0" y="0" class="label">candidate comparison</text>
+
+    <g transform="translate(0 28)">
+      <rect class="card" width="260" height="312" rx="28"/>
+      <image href="renders/app-icon-candidate-1-180.png" x="40" y="28" width="180" height="180" preserveAspectRatio="xMidYMid slice" clip-path="url(#iosMask)"/>
+      <text x="46" y="246">candidate 1</text>
+      <text x="46" y="272">existing generated PNG</text>
+    </g>
+
+    <g transform="translate(296 28)">
+      <rect class="card" width="260" height="312" rx="28"/>
+      <image href="renders/app-icon-candidate-2-180.png" x="40" y="28" width="180" height="180" preserveAspectRatio="xMidYMid slice" clip-path="url(#iosMask)"/>
+      <text x="46" y="246">candidate 2</text>
+      <text x="46" y="272">existing generated PNG</text>
+    </g>
+
+    <g transform="translate(592 28)">
+      <rect class="card" width="260" height="312" rx="28"/>
+      <image href="app-icon-master.svg" x="40" y="28" width="180" height="180" preserveAspectRatio="xMidYMid slice" clip-path="url(#iosMask)"/>
+      <text x="46" y="246">selected master</text>
+      <text x="46" y="272">barbell + timer mark</text>
+    </g>
+  </g>
+
+  <g transform="translate(32 500)">
+    <text x="0" y="0" class="label">selected master size proof</text>
+    <g transform="translate(0 28)">
+      <image href="app-icon-master.svg" x="0" y="0" width="180" height="180" clip-path="url(#iosMask)"/>
+      <image href="app-icon-master.svg" x="220" y="30" width="120" height="120" clip-path="url(#iosMask)"/>
+      <image href="app-icon-master.svg" x="380" y="46.5" width="87" height="87" clip-path="url(#iosMask)"/>
+      <image href="app-icon-master.svg" x="510" y="50" width="80" height="80" clip-path="url(#iosMask)"/>
+      <image href="app-icon-master.svg" x="630" y="60" width="60" height="60" clip-path="url(#iosMask)"/>
+      <image href="app-icon-master.svg" x="730" y="70" width="40" height="40" clip-path="url(#iosMask)"/>
+      <image href="app-icon-master.svg" x="810" y="75.5" width="29" height="29" clip-path="url(#iosMask)"/>
+      <text x="0" y="202">180</text>
+      <text x="220" y="202">120</text>
+      <text x="380" y="202">87</text>
+      <text x="510" y="202">80</text>
+      <text x="630" y="202">60</text>
+      <text x="730" y="202">40</text>
+      <text x="810" y="202">29</text>
+    </g>
+  </g>
+</svg>

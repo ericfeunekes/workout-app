@@ -26,6 +26,93 @@ import WorkoutCoreFoundation
 @MainActor
 final class BlockTransitionAdvancementTests: XCTestCase {
 
+    func testWorkBlockBoundaryRoutesThroughTransitionBeforeNextActiveBlock() {
+        let ctx = makeWorkToCarryContext()
+        let vm = ExecutionViewModel(
+            context: ctx,
+            clock: FixedClock(now: Date(timeIntervalSince1970: 10_000))
+        )
+
+        vm.start()
+        vm.startCurrentSet()
+        vm.logSet(reps: 5, rir: 2)
+        XCTAssertEqual(vm.state.route, .rest)
+
+        vm.advance()
+
+        XCTAssertEqual(vm.state.route, .transition)
+        XCTAssertEqual(vm.state.cursor.blockIndex, 1)
+        XCTAssertNil(vm.timerPresentation(now: Date(timeIntervalSince1970: 10_000)))
+        let presentation = vm.blockTransitionPresentation
+        XCTAssertEqual(presentation?.finishedTitle, "Press primer")
+        XCTAssertEqual(presentation?.nextTitle, "Carry test")
+        XCTAssertEqual(presentation?.timingMode, "straight sets")
+        XCTAssertEqual(presentation?.firstTask, "Farmer Carry · 100 ft · 53 lb")
+        XCTAssertEqual(presentation?.setup, "Farmer Carry · 100 ft · 53 lb")
+
+        vm.beginBlockTransition()
+
+        XCTAssertEqual(vm.state.route, .active)
+        XCTAssertEqual(vm.state.cursor.blockIndex, 1)
+        XCTAssertTrue(vm.requiresExplicitSetStartForCurrentWork)
+        XCTAssertFalse(vm.isCurrentWorkStarted)
+    }
+
+    func testSkippedZeroRestFinalSetRoutesThroughTransition() {
+        let ctx = makeWorkToCarryContext(restSec: 0)
+        let vm = ExecutionViewModel(context: ctx)
+
+        vm.start()
+        vm.startCurrentSet()
+        vm.skipCurrentSet()
+
+        XCTAssertEqual(vm.state.route, .transition)
+        XCTAssertEqual(vm.state.cursor.blockIndex, 1)
+        XCTAssertEqual(vm.blockTransitionPresentation?.nextTitle, "Carry test")
+    }
+
+    func testCompositeZeroRestFinalSetRoutesThroughTransition() {
+        let ctx = makeClusterToCarryContext(restSec: 0)
+        let vm = ExecutionViewModel(context: ctx)
+
+        vm.start()
+        vm.startCurrentSet()
+        vm.completeCurrentCompositeSlot()
+        vm.startCurrentSet()
+        vm.logSet(reps: 10, rir: 1)
+
+        XCTAssertEqual(vm.state.route, .transition)
+        XCTAssertEqual(vm.state.cursor.blockIndex, 1)
+        XCTAssertEqual(vm.blockTransitionPresentation?.finishedTitle, "Cluster primer")
+        XCTAssertEqual(vm.blockTransitionPresentation?.nextTitle, "Carry test")
+    }
+
+    func testStandaloneRestBlockDoesNotChainIntoDuplicateTransition() {
+        let fixed = FixedClock(now: Date(timeIntervalSince1970: 20_000))
+        let (ctx, _, _) = makeWorkRestWorkContext(restSec: 10, restBlockDurationSec: 5)
+        let vm = ExecutionViewModel(context: ctx, clock: fixed)
+
+        vm.start()
+        vm.startCurrentSet()
+        vm.logSet(reps: 5, rir: 2)
+        vm.advance()
+        vm.startCurrentSet()
+        vm.logSet(reps: 5, rir: 2)
+        vm.advance()
+
+        XCTAssertEqual(vm.state.route, .rest)
+        XCTAssertEqual(vm.state.cursor.blockIndex, 1)
+        XCTAssertEqual(
+            vm.state.restEndsAt?.timeIntervalSince1970,
+            fixed.now.timeIntervalSince1970 + 5
+        )
+
+        vm.advance()
+
+        XCTAssertEqual(vm.state.route, .active)
+        XCTAssertEqual(vm.state.cursor.blockIndex, 2)
+    }
+
     func testBlockTransitionResetsAdvancementMode() {
         let workoutID = UUID()
         let userID = UUID()
@@ -145,5 +232,166 @@ final class BlockTransitionAdvancementTests: XCTestCase {
             state.cursor, SessionState.Cursor(blockIndex: 1, itemIndex: 0, setIndex: 2),
             "round-robin must alternate back to item 0 at the round boundary — qa-041 regression"
         )
+    }
+
+    private func makeWorkToCarryContext(restSec: Int = 10) -> WorkoutContext {
+        let userID = UUID()
+        let workoutID = UUID()
+        let now = Date()
+        let pressBlockID = UUID()
+        let carryBlockID = UUID()
+        let pressExerciseID = UUID()
+        let carryExerciseID = UUID()
+
+        let workout = Workout(
+            id: workoutID, userID: userID, name: "transition setup",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil, createdAt: now, updatedAt: now,
+            completedAt: nil, tagsJSON: nil
+        )
+        let pressBlock = Block(
+            id: pressBlockID, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: "Press primer", timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":\#(restSec),"rest_between_exercises_sec":\#(restSec)}"#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let carryBlock = Block(
+            id: carryBlockID, workoutID: workoutID, parentBlockID: nil,
+            position: 1, name: "Carry test", timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":\#(restSec),"rest_between_exercises_sec":\#(restSec)}"#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let pressItem = WorkoutItem(
+            id: UUID(), blockID: pressBlockID, position: 0,
+            exerciseID: pressExerciseID,
+            prescriptionJSON: #"{"sets":1,"reps":5,"load_kg":80,"weight_unit":"kg"}"#
+        )
+        let carryItem = WorkoutItem(
+            id: UUID(), blockID: carryBlockID, position: 0,
+            exerciseID: carryExerciseID,
+            prescriptionJSON: #"{"sets":1,"target":{"kind":"distance","value":100,"unit":"ft"},"load_kg":53,"weight_unit":"lb"}"#
+        )
+        return WorkoutContext(
+            workout: workout,
+            blocks: [pressBlock, carryBlock],
+            itemsByBlock: [[pressItem], [carryItem]],
+            exercises: [
+                pressExerciseID: Exercise(id: pressExerciseID, name: "Bench Press"),
+                carryExerciseID: Exercise(id: carryExerciseID, name: "Farmer Carry"),
+            ],
+            lastPerformed: [:]
+        )
+    }
+
+    private func makeClusterToCarryContext(restSec: Int) -> WorkoutContext {
+        let userID = UUID()
+        let workoutID = UUID()
+        let now = Date()
+        let clusterBlockID = UUID()
+        let carryBlockID = UUID()
+        let clusterExerciseID = UUID()
+        let carryExerciseID = UUID()
+
+        let workout = Workout(
+            id: workoutID, userID: userID, name: "cluster transition",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil, createdAt: now, updatedAt: now,
+            completedAt: nil, tagsJSON: nil
+        )
+        let clusterBlock = Block(
+            id: clusterBlockID, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: "Cluster primer", timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":\#(restSec),"rest_between_exercises_sec":\#(restSec)}"#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let carryBlock = Block(
+            id: carryBlockID, workoutID: workoutID, parentBlockID: nil,
+            position: 1, name: "Carry test", timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":\#(restSec),"rest_between_exercises_sec":\#(restSec)}"#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let clusterItem = WorkoutItem(
+            id: UUID(), blockID: clusterBlockID, position: 0,
+            exerciseID: clusterExerciseID,
+            prescriptionJSON: #"{"sets":1,"reps":5,"load_kg":80,"weight_unit":"kg","sub_sets":2,"intra_set_rest_sec":1}"#
+        )
+        let carryItem = WorkoutItem(
+            id: UUID(), blockID: carryBlockID, position: 0,
+            exerciseID: carryExerciseID,
+            prescriptionJSON: #"{"sets":1,"target":{"kind":"distance","value":100,"unit":"ft"},"load_kg":53,"weight_unit":"lb"}"#
+        )
+        return WorkoutContext(
+            workout: workout,
+            blocks: [clusterBlock, carryBlock],
+            itemsByBlock: [[clusterItem], [carryItem]],
+            exercises: [
+                clusterExerciseID: Exercise(id: clusterExerciseID, name: "Cluster Press"),
+                carryExerciseID: Exercise(id: carryExerciseID, name: "Farmer Carry"),
+            ],
+            lastPerformed: [:]
+        )
+    }
+
+    private func makeWorkRestWorkContext(
+        restSec: Int,
+        restBlockDurationSec: Int
+    ) -> (WorkoutContext, UUID, UUID) {
+        let userID = UUID()
+        let workoutID = UUID()
+        let now = Date()
+        let blockA = UUID()
+        let blockRest = UUID()
+        let blockB = UUID()
+        let exerciseA = UUID()
+        let exerciseB = UUID()
+        let itemA = UUID()
+        let itemB = UUID()
+
+        let workout = Workout(
+            id: workoutID, userID: userID, name: "work rest work",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil, createdAt: now, updatedAt: now,
+            completedAt: nil, tagsJSON: nil
+        )
+        let workA = Block(
+            id: blockA, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: "A", timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":\#(restSec),"rest_between_exercises_sec":\#(restSec)}"#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let rest = Block(
+            id: blockRest, workoutID: workoutID, parentBlockID: nil,
+            position: 1, name: "Rest", timingMode: .rest,
+            timingConfigJSON: #"{"duration_sec":\#(restBlockDurationSec)}"#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let workB = Block(
+            id: blockB, workoutID: workoutID, parentBlockID: nil,
+            position: 2, name: "B", timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":\#(restSec),"rest_between_exercises_sec":\#(restSec)}"#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        return (WorkoutContext(
+            workout: workout,
+            blocks: [workA, rest, workB],
+            itemsByBlock: [
+                [WorkoutItem(
+                    id: itemA, blockID: blockA, position: 0,
+                    exerciseID: exerciseA,
+                    prescriptionJSON: #"{"sets":2,"reps":5,"load_kg":50}"#
+                )],
+                [],
+                [WorkoutItem(
+                    id: itemB, blockID: blockB, position: 0,
+                    exerciseID: exerciseB,
+                    prescriptionJSON: #"{"sets":1,"reps":6,"load_kg":40}"#
+                )],
+            ],
+            exercises: [
+                exerciseA: Exercise(id: exerciseA, name: "A"),
+                exerciseB: Exercise(id: exerciseB, name: "B"),
+            ],
+            lastPerformed: [:]
+        ), itemA, itemB)
     }
 }

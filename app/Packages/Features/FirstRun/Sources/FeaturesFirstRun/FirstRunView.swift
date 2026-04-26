@@ -70,9 +70,9 @@ struct WelcomeCard: View {
         VStack(spacing: DSSpacing.xl) {
             Spacer(minLength: 0)
 
-            // Title block — "workoutdb" + subtitle, centered.
+            // Title block — "setmark" + subtitle, centered.
             VStack(spacing: DSSpacing.md) {
-                Text("workoutdb")
+                Text("setmark")
                     .font(DSTypography.display)
                     .foregroundStyle(DSColors.foreground)
                 Text("point at your server to begin.")

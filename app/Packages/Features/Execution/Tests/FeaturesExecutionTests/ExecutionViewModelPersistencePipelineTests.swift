@@ -156,6 +156,7 @@ final class ExecutionViewModelPersistencePipelineTests: XCTestCase {
         let stateA = vm.state
 
         // State B: log a set → .rest.
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         let stateB = vm.state
 
@@ -207,6 +208,7 @@ final class ExecutionViewModelPersistencePipelineTests: XCTestCase {
 
         // Drive persist() → a save is in-flight inside the slow store.
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
 
         // Immediately enqueue the clear — no deliberate sleep in between.
@@ -272,6 +274,64 @@ final class ExecutionViewModelPersistencePipelineTests: XCTestCase {
             decoded.state.restEndsAt?.timeIntervalSince1970,
             fixed.now.timeIntervalSince1970 + 45
         )
+    }
+
+    func testRestoreNormalizesLegacyActiveStraightSetToReady() async throws {
+        let legacyReadyAt = Date(timeIntervalSince1970: 5_000_000)
+        let fixed = FixedClock(now: legacyReadyAt.addingTimeInterval(12))
+        let ctx = makeStraightSetsContext(sets: 2)
+        let store = RecordingSessionStore()
+
+        var rawState = SessionSeeder.seed(context: ctx)
+        rawState.route = .active
+        rawState.workStartedAt = legacyReadyAt
+        rawState.workReadyAt = nil
+
+        let encoded = try JSONEncoder().encode(SessionStateCodable(state: rawState))
+        try await store.save(
+            try dataByRemovingTopLevelKey("explicitSetStartAware", from: encoded)
+        )
+
+        let vm = ExecutionViewModel(context: ctx, clock: fixed, sessionStore: store)
+        defer { vm.resetPersistencePipelineForTesting() }
+        await vm.restoreIfPossible()
+
+        XCTAssertEqual(vm.state.route, .active)
+        XCTAssertNil(vm.state.workStartedAt)
+        XCTAssertEqual(vm.state.workReadyAt, legacyReadyAt)
+        XCTAssertEqual(vm.timerPresentation(now: fixed.now)?.label, "READY")
+
+        vm.logSet(reps: 5, rir: 2)
+        XCTAssertEqual(
+            vm.state.items.first?.sets.filter(\.done).count,
+            0,
+            "legacy restore should not allow straight-set logging before Set Start"
+        )
+    }
+
+    func testRestorePreservesCurrentActiveStraightSetAfterSetStart() async throws {
+        let setStartedAt = Date(timeIntervalSince1970: 5_100_000)
+        let fixed = FixedClock(now: setStartedAt.addingTimeInterval(9))
+        let ctx = makeStraightSetsContext(sets: 2)
+        let store = RecordingSessionStore()
+
+        var rawState = SessionSeeder.seed(context: ctx)
+        rawState.route = .active
+        rawState.workStartedAt = setStartedAt
+        rawState.workReadyAt = nil
+        try await store.save(JSONEncoder().encode(SessionStateCodable(state: rawState)))
+
+        let vm = ExecutionViewModel(context: ctx, clock: fixed, sessionStore: store)
+        defer { vm.resetPersistencePipelineForTesting() }
+        await vm.restoreIfPossible()
+
+        XCTAssertEqual(vm.state.route, .active)
+        XCTAssertEqual(vm.state.workStartedAt, setStartedAt)
+        XCTAssertNil(vm.state.workReadyAt)
+        XCTAssertEqual(vm.timerPresentation(now: fixed.now)?.label, "SET ELAPSED")
+
+        vm.logSet(reps: 5, rir: 2)
+        XCTAssertEqual(vm.state.items.first?.sets.filter(\.done).count, 1)
     }
 
     /// A restored snapshot on a zero-item block that ALREADY has
@@ -435,6 +495,7 @@ final class ExecutionViewModelPersistencePipelineTests: XCTestCase {
         // the single item's set list without entering `.rest`, so every
         // apply goes through `persist()`.
         for _ in 0..<10 {
+            vm.startCurrentSet()
             vm.logSet(reps: 5, rir: 2)
         }
         let finalState = vm.state
@@ -490,6 +551,7 @@ final class ExecutionViewModelPersistencePipelineTests: XCTestCase {
         // SessionStates with distinct routes.
         vm.start()
         let stateA = vm.state  // .active, no sets done
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         let stateB = vm.state  // .rest (or advanced), first set done
         XCTAssertNotEqual(stateA.route, stateB.route)
@@ -519,6 +581,14 @@ final class ExecutionViewModelPersistencePipelineTests: XCTestCase {
             stateB.items.first?.sets.filter(\.done).count
         )
     }
+}
+
+private func dataByRemovingTopLevelKey(_ key: String, from data: Data) throws -> Data {
+    guard var object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+        return data
+    }
+    object.removeValue(forKey: key)
+    return try JSONSerialization.data(withJSONObject: object)
 }
 
 // MARK: - Test stores

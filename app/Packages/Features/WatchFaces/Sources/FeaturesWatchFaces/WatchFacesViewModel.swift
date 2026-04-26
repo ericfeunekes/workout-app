@@ -252,7 +252,7 @@ public enum WatchFaceRoute {
     /// shell debugging.
     public static func face(for route: SessionState.Route) -> WatchFacesViewModel.Face {
         switch route {
-        case .today, .complete:
+        case .today, .transition, .complete:
             return .idle
         case .active, .rest:
             // The watch needs a payload to show active/rest, which it

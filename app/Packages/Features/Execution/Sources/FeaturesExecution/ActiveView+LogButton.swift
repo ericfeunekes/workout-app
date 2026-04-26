@@ -5,7 +5,7 @@
 // `type_body_length` cap.
 //
 // The button branches on the current block's timing mode:
-//   * Strength modes open `LogSetSheet` (reps + RIR numpad) on tap. The
+//   * Strength modes open `LogSetSheet` (load + reps + RIR) on tap. The
 //     sheet's commit fires the strength `logSet` entry point directly
 //     — no mode branching needed there because cardio never presents it.
 //   * Cardio modes (`.intervals` / `.continuous`) have no reps / RIR to
@@ -28,17 +28,106 @@ extension ActiveView {
     /// header for the cardio / strength branch rationale.
     @ViewBuilder
     func logButton(content: ActiveContent) -> some View {
-        if viewModel.isCurrentBlockCardio {
+        VStack(spacing: DSSpacing.md) {
+            primaryLogButton(content: content)
+            if viewModel.canSkipCurrentSet {
+                DSButton(
+                    title: "skip",
+                    style: .ghost,
+                    action: { viewModel.skipCurrentSet() }
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func primaryLogButton(content: ActiveContent) -> some View {
+        let mode = viewModel.context.block(at: viewModel.state.cursor.blockIndex)?.timingMode
+        if viewModel.requiresExplicitSetStartForCurrentWork,
+           !viewModel.isCurrentWorkStarted {
+            DSButton(
+                title: viewModel.currentCompositeButtonTitle,
+                style: .primary,
+                action: { viewModel.startCurrentSet() }
+            )
+        } else if mode == .forTime {
+            DSButton(
+                title: "finish",
+                style: .primary,
+                action: { viewModel.logForTimeResult() }
+            )
+        } else if mode == .amrap {
+            DSButton(
+                title: "next",
+                style: .primary,
+                action: {
+                    if !viewModel.logAMRAPStation(reps: content.reps) {
+                        showMetconResultSheet = true
+                    }
+                }
+            )
+        } else if viewModel.isCurrentRoundRobinBatchMode {
+            roundRobinBatchButton()
+        } else if viewModel.isCurrentBlockCardio {
+            cardioLogButtons(content: content)
+        } else if viewModel.isCurrentCompositeSet && !viewModel.isCurrentCompositeSlotFinal {
+            DSButton(
+                title: viewModel.currentCompositeButtonTitle,
+                style: .primary,
+                action: { viewModel.completeCurrentCompositeSlot() }
+            )
+        } else if viewModel.isCurrentCompositeSet {
+            DSButton(
+                title: strengthLogTitle(content: content),
+                style: .primary,
+                action: { showLogSheet = true }
+            )
+        } else {
+            DSButton(
+                title: strengthLogTitle(content: content),
+                style: .primary,
+                action: { showLogSheet = true }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func roundRobinBatchButton() -> some View {
+        if viewModel.isCurrentCompositeSet && !viewModel.isCurrentCompositeSlotFinal {
+            DSButton(
+                title: viewModel.currentCompositeButtonTitle,
+                style: .primary,
+                action: { viewModel.completeCurrentCompositeSlot() }
+            )
+        } else {
+            DSButton(
+                title: roundRobinBatchTitle(),
+                style: .primary,
+                action: { viewModel.advanceRoundRobinBatchStation() }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func cardioLogButtons(content: ActiveContent) -> some View {
+        if viewModel.continuousTargetReached {
+            VStack(spacing: DSSpacing.md) {
+                DSButton(
+                    title: cardioLogTitle(content: content),
+                    style: .primary,
+                    action: { viewModel.logCurrentSet() }
+                )
+                DSButton(
+                    title: "continue",
+                    style: .ghost,
+                    action: { viewModel.continueContinuousPastTarget() }
+                )
+            }
+        } else {
             DSButton(
                 title: cardioLogTitle(content: content),
                 style: .primary,
                 action: { viewModel.logCurrentSet() }
-            )
-        } else {
-            DSButton(
-                title: "log set \(content.setIndex)",
-                style: .primary,
-                action: { showLogSheet = true }
             )
         }
     }
@@ -52,11 +141,48 @@ extension ActiveView {
         let bi = viewModel.state.cursor.blockIndex
         switch viewModel.context.block(at: bi)?.timingMode {
         case .continuous:
-            return "end"
+            return viewModel.continuousTargetReached ? "complete" : "end"
         case .intervals:
             return "log interval \(content.setIndex)"
+        case .custom:
+            return "log segment \(content.setIndex)"
+        case .accumulate:
+            return "break"
+        case .tabata:
+            return "log round \(content.setIndex)"
         default:
             return "log set \(content.setIndex)"
         }
+    }
+
+    /// Button title for strength-shaped logging. The data path is still
+    /// `LogSetSheet`, but the user's mental model changes by timing mode.
+    func strengthLogTitle(content: ActiveContent) -> String {
+        let bi = viewModel.state.cursor.blockIndex
+        switch viewModel.context.block(at: bi)?.timingMode {
+        case .emom:
+            return "log interval \(content.setIndex)"
+        case .forTime, .tabata:
+            return "log round \(content.setIndex)"
+        case .custom:
+            return "log segment \(content.setIndex)"
+        case .accumulate:
+            return "log chunk"
+        case .superset, .circuit, .amrap:
+            return "log station"
+        case .straightSets:
+            return "done"
+        case .rest, .intervals, .continuous, nil:
+            return "log set \(content.setIndex)"
+        }
+    }
+
+    func roundRobinBatchTitle() -> String {
+        let cursor = viewModel.state.cursor
+        let itemsInBlock = cursor.blockIndex < viewModel.state.structure.itemsPerBlock.count
+            ? viewModel.state.structure.itemsPerBlock[cursor.blockIndex]
+            : 0
+        let isLastStation = cursor.itemIndex + 1 >= itemsInBlock
+        return isLastStation ? "finish round" : "next station"
     }
 }

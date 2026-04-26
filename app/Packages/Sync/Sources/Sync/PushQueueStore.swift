@@ -35,6 +35,7 @@ public struct PushItem: Sendable, Equatable {
             completedAt: Date?,
             notes: String?
         )
+        case workoutReset(workoutID: WorkoutID)
         case events([CoreTelemetry.Event])
         case userParameter(CoreDomain.UserParameter)
 
@@ -47,7 +48,7 @@ public struct PushItem: Sendable, Equatable {
         /// two tables.
         public var priority: Int {
             switch self {
-            case .setLogs, .statusUpdate, .userParameter:
+            case .setLogs, .statusUpdate, .workoutReset, .userParameter:
                 return 0
             case .events:
                 return 1
@@ -74,6 +75,8 @@ public struct PushItem: Sendable, Equatable {
                 return "setLog:\(logs[0].id.uuidString.lowercased())"
             case .statusUpdate(let workoutID, let status, _, _):
                 return "status:\(workoutID.uuidString.lowercased()):\(status.rawValue)"
+            case .workoutReset(let workoutID):
+                return "reset:\(workoutID.uuidString.lowercased())"
             case .userParameter(let param):
                 return "userParam:\(param.id.uuidString.lowercased())"
             case .events:

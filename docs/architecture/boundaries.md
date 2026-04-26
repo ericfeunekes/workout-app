@@ -103,7 +103,7 @@ Notes:
 | `tests/` | Cross-stack tests (server, contract, architecture) | Contains no production code |
 | `docs/` | Durable documentation | No generated files; reference data only |
 | `scratch/` | Ephemeral, gitignored | Not part of the boundary system |
-| `deploy/` | Deployment assets (systemd, config) | No application code |
+| `deploy/` | Deployment assets (launchd, config) | No application code |
 | `planner/` | (reserved) upstream Claude CLI | Does not exist yet; reserved top-level slot |
 
 **Monorepo rule:** ≤ 8 top-level directories. A 9th directory requires an ADR. Enforced by a structural test (`tests/architecture/test_monorepo_shape.py`).

@@ -19,7 +19,7 @@ This is the list of things that must happen outside the codebase before the syst
 - Server builds, 183 tests pass, migrations idempotent (through `006_exercise_defaults`), push + pull + telemetry + user-parameters protocols fully specified and tested.
 - Architecture enforcement live: ruff, import-linter, SwiftLint strict, fitness-function structural tests.
 - Deployment runbook drafted; `make deploy` stubbed with the intended flow; `make db-backup` + `make server-status` + `make server-logs` functional today.
-- **Ready-to-QA assessment (post-R1+R2+P2 cutover):** all 18 bug waves landed, >800 Swift cases + 183 server cases green. Active bug tracker has zero open P0/P1/P2 rows. Closed this session: session-persistence pipeline (bug-043), deterministic-wire-UUID sweep (bug-044 / bug-045), SwiftData V2+V3 migration with reconcile (bug-046 / bug-047), cardio logging contract (bug-049), EMOM minute-boundary (bug-050), push queue backoff + dead-letter + priority + dedup (bug-055 / bug-056 / bug-060), pound-default trunk refactor (bug-059). Ship bar met for Eric's first gym session — remaining work is credentials + device install.
+- **Ready-to-QA assessment:** all R1/R2 execution and sync fix waves landed, >800 Swift cases + 183 server cases green at the 2026-04-18 cutover. As of the 2026-04-24 simulator UX pass, Today’s refresh, plan visibility, workout detail, Claude adjustment handoff, execution timer hierarchy, and next-up visibility gaps are closed. Use `docs/bugs.md` for the current issue list.
 
 ## Remaining gates between now and first real workout
 
@@ -39,14 +39,14 @@ Follow `docs/infrastructure/home-server.md` § "First-time server bootstrap":
 2. Install `uv`.
 3. `mkdir -p /opt/workoutdb/shared/db /opt/workoutdb/releases`.
 4. Generate a bearer token (`openssl rand -hex 32`) and write to `/opt/workoutdb/shared/.env` as `WORKOUTDB_BEARER_TOKEN=...`.
-5. Drop the systemd unit per the decision from step 1, `systemctl enable --now workoutdb-server`.
+5. Install the launchd LaunchDaemon plist from `deploy/com.ericfeunekes.workoutdb.plist`.
 6. Confirm `curl http://localhost:<port>/api/version` returns `{"version":"..."}` from the server.
 
 Once these steps pass, the server is ready to accept pushes from the app.
 
 ### 3. `make deploy` flesh-out (Claude-action) — DONE
 
-Closed 2026-04-20. `deploy/deploy.sh` rsyncs server code to a release dir, installs deps, flips symlink, restarts systemd unit, verifies health. `deploy/rollback.sh` flips back to the previous release. `make deploy HOST=...` and `make deploy-rollback HOST=...` are the entry points.
+Closed 2026-04-20. `deploy/deploy.sh` rsyncs server code to a release dir, installs deps, flips symlink, restarts the launchd service, and verifies health. `deploy/rollback.sh` flips back to the previous release. `make deploy HOST=...` and `make deploy-rollback HOST=...` are the entry points.
 
 ### 4. Apple Developer Team ID paste (Eric-action, 30 seconds)
 
@@ -108,7 +108,7 @@ Each of these has its own entry in `docs/open-questions.md` with a disposition.
 
 Eric, before the first real workout:
 
-- [x] Decide systemd scope (step 1 — system-scope, decided 2026-04-20).
+- [x] Decide service scope (step 1 — launchd system-scope, decided 2026-04-20).
 - [ ] Bootstrap the server machine (step 2).
 - [ ] Paste Apple Developer Team ID into `app/project.yml` (step 4).
 - [ ] Install the app on the physical phone (step 5).

@@ -17,7 +17,7 @@ Every user action in WorkoutDB should leave a trail at four layers:
 
 This doc is the matrix. A "✓" means that layer records this action; "—" means it doesn't (and shouldn't). If a cell is blank, the behavior is TBD / unclear — that's a QA gap.
 
-**Tick source.** Time-cap enforcement for AMRAP / ForTime / EMOM / Tabata runs off a 1s `Timer.publish(every: 1, on: .main, in: .common).autoconnect()` wired into both `ActiveView` and `RestView` via `.onReceive(tickTimer)`. Each tick calls `ExecutionViewModel.tickBlockTimer()`; the VM's `tickCallCount` increments every call and the `.complete` dispatch fires once `clock.now >= state.blockEndsAt`. The view-side gate `state.blockEndsAt != nil` is an optimization so non-time-capped blocks don't wake the VM each second — correctness doesn't depend on it (`tickBlockTimer` is a cheap no-op when both timers are nil). See bug-042 in `docs/bugs.md` for the wiring history.
+**Tick source.** Time-cap enforcement for AMRAP / ForTime / EMOM / Tabata runs off a 1s `Timer.publish(every: 1, on: .main, in: .common).autoconnect()` wired into both `ActiveView` and `RestView` via `.onReceive(tickTimer)`. ForTime / EMOM / Tabata ticks call `ExecutionViewModel.tickBlockTimer()`; the VM's `tickCallCount` increments every call and the `.complete` dispatch fires once `clock.now >= state.blockEndsAt`. AMRAP is view-gated: when the cap elapses, `ActiveView` opens the partial-result sheet first, then the sheet commit logs the current partial station and routes out of the capped block. The view-side gate `state.blockEndsAt != nil` is an optimization so non-time-capped blocks don't wake the VM each second — correctness doesn't depend on it (`tickBlockTimer` is a cheap no-op when both timers are nil). See bug-042 in `docs/bugs.md` for the wiring history.
 
 ## Actions × layers
 
@@ -46,14 +46,15 @@ This doc is the matrix. A "✓" means that layer records this action; "—" mean
 | Action | SessionState | Local cache | Push queue | Server | event_log |
 |---|---|---|---|---|---|
 | Tap "start workout" | route: today → active; cursor (0,0,1); items seeded; `workStartedAt` anchor stamped | — | — | — | `today.start_tap`, `execution.session_mutation (start)` ✓ |
-| Log a strength set (reps + RIR) | SetPlan[idx].done=true, rir populated, `startedAt = workStartedAt anchor`, `completedAt = clock.now` | — | `.setLogs(SetLog)` enqueued with **deterministic UUID** from (itemID, setIndex) | on flush: upsert `set_log` by id | `execution.session_mutation (logSet)` ✓ |
+| Log a strength set (load + reps + RIR) | optional pending SetPlan load correction, then SetPlan[idx].done=true, rir populated, `startedAt = workStartedAt anchor`, `completedAt = clock.now` | — | `.setLogs(SetLog)` enqueued with **deterministic UUID** from (itemID, setIndex) | on flush: upsert `set_log` by id | `execution.session_mutation (editPendingSet?)` + `execution.session_mutation (logSet)` ✓ |
 | Log a cardio set (duration / distance / HR / cadence) | SetPlan[idx].done=true, cardio fields populated via `.logCardioSet`; elapsed wins over authored target | — | `.setLogs(SetLog)` enqueued with deterministic UUID | on flush: upsert `set_log` with cardio columns | `execution.session_mutation (logSet, kind=cardio)` ✓ |
 | Log with RIR that triggers autoreg | proposal on currentProposal; remaining SetPlans' loadKg updated; clamp at 0 | — | (set_log already pushed) | — | `execution.autoreg_proposed` (typed payload: `step_kg`, reason token) ✓ |
 | Accept autoreg (default) | remaining SetPlans keep adjusted loadKg | — | — | — | `execution.autoreg_accepted` ✓ |
 | Undo autoreg | `itemLog.autoregHeld = true`, remaining SetPlans revert | — | — | — | `execution.autoreg_undo` ✓ |
 | Enter rest | route: active → rest; `restEndsAt = now + driver.restDuration` | — | — | — | — (no event; could add for debugging) |
 | EMOM interval tick | `intervalAnchorAt` drives `.advanceFromRest` when `now >= anchor + interval_sec` | — | — | — | `execution.session_mutation (advance)` ✓ |
-| Time-cap tick (AMRAP / ForTime / EMOM / Tabata) | `tickCallCount` bumps; once `clock.now >= blockEndsAt`, route flips to `.complete` (Tabata also auto-logs a placeholder 0-rep set when `workEndsAt` elapses) | — | — | — | `execution.session_mutation (complete)` when the cap flips the route ✓ |
+| Time-cap tick (ForTime / EMOM / Tabata) | `tickCallCount` bumps; once `clock.now >= blockEndsAt`, route flips to `.complete` (Tabata also auto-logs a placeholder 0-rep set when `workEndsAt` elapses) | — | — | — | `execution.session_mutation (complete)` when the cap flips the route ✓ |
+| AMRAP cap result | view opens the partial-result sheet; save logs the current station's partial reps if >0, appends an AMRAP partial note, then routes to next block / complete | — | `.setLogs(SetLog)` enqueued only when partial reps >0; prior `next` taps already enqueued completed stations | on flush: upsert station-level `set_log` rows | `execution.session_mutation (logSet)` when partial reps >0 ✓ |
 | Advance from rest (auto or tap next) | route: rest → active (or complete if last); cursor advances; `workStartedAt` re-stamped | — | — | — | `execution.session_mutation (advance)` ✓ |
 | Tap past-set pill in Rest, edit reps/rir | SetPlan[idx] mutated; original `completedAt` preserved | — | re-enqueued with **same deterministic UUID** → server upsert | server updates same SetLog row | `execution.past_set_edited` ✓ |
 | Long-press exercise → swap alternative | `.swap` mutation: item's `overrides` set; reps/loadKg applied to non-done sets | — | — | (next log_set push carries `performed_exercise_id`) | `execution.exercise_swap` ✓ |
@@ -97,10 +98,11 @@ This doc is the matrix. A "✓" means that layer records this action; "—" mean
 |---|---|---|
 | Tap "start workout" on Today | `sessionStateBinding(.start)` → `ExecutionVM.start()` | session + event |
 | Tap "log set N" on Active | Open `LogSetSheet` | (no side effects until commit) |
-| Tap digit on LogSetSheet numpad | Append to reps buffer | (sheet state only) |
+| Tap load or reps row on LogSetSheet | Select field and reveal keypad | (sheet state only) |
+| Tap digit on LogSetSheet keypad | Append to selected load/reps buffer | (sheet state only) |
 | Tap "delete" on numpad | Trim rightmost digit | (sheet state only) |
 | Tap a RIR button on LogSetSheet | Select that RIR (toggle off if already selected) | (sheet state only) |
-| Tap "log" on LogSetSheet | `ExecutionVM.logSet(reps:, rir:)` | full log path (see above) |
+| Tap "log" on LogSetSheet | `ExecutionVM.logSet(loadKg:reps:rir:)` | full log path (see above) |
 | Tap past-set pill on RestView | Open `PastSetSheet` pre-filled | (sheet state only) |
 | Commit past-set edit | `ExecutionVM.editPastSet(...)` | full edit path |
 | Long-press Active card | Open `SwapSheet` with item's alternatives | (sheet state only) |
@@ -133,4 +135,4 @@ Each feature doc's scenarios should exercise the rows above. Current gaps flagge
 
 ## `event_log` retention
 
-The server-side `event_log` table is bounded by a startup sweep (`workoutdb_server.sync.event_log_retention.prune_event_log`) wired into `main._sweep_event_log`. Default retention is 90 days (`WORKOUTDB_EVENT_LOG_RETENTION_DAYS`). Rows with `ts` older than the threshold are deleted on every server boot; the table is therefore bounded by `~90 days × daily emit rate` in steady state. A systemd restart or manual deploy triggers the sweep — the home server restarts often enough in practice that a cron / admin endpoint isn't needed. Set the env var to `0` to purge every boot (useful after schema rollouts), or to a larger value when running a long debugging investigation.
+The server-side `event_log` table is bounded by a startup sweep (`workoutdb_server.sync.event_log_retention.prune_event_log`) wired into `main._sweep_event_log`. Default retention is 90 days (`WORKOUTDB_EVENT_LOG_RETENTION_DAYS`). Rows with `ts` older than the threshold are deleted on every server boot; the table is therefore bounded by `~90 days × daily emit rate` in steady state. A launchd service restart or manual deploy triggers the sweep — the home server restarts often enough in practice that a cron / admin endpoint isn't needed. Set the env var to `0` to purge every boot (useful after schema rollouts), or to a larger value when running a long debugging investigation.

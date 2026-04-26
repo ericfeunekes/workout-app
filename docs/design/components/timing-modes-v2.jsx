@@ -99,7 +99,7 @@ function Emom() {
   );
 }
 
-// AMRAP — +1 round only
+// AMRAP — station advance + partial station at end
 function Amrap() {
   return (
     <ModePhone mode="AMRAP · 15 min">
@@ -109,16 +109,16 @@ function Amrap() {
       </div>
       <div className="divider dashed"/>
       <div style={{textAlign: "center"}}>
-        <div className="tiny">rounds</div>
-        <div className="megareps" style={{fontSize: 88, color: "var(--accent)"}}>4</div>
+        <div className="tiny">round 4 · current</div>
+        <div className="megareps" style={{fontSize: 56, color: "var(--accent)"}}>Push-Up</div>
       </div>
       <div style={{padding: "10px 16px"}}>
         <div className="small hand" style={{color: "var(--ink)"}}>1 round =</div>
         <div className="small">10 Pull-Ups · 15 Push-Ups · 20 Air Squats</div>
       </div>
       <div style={{marginTop: "auto", padding: "0 16px 10px"}}>
-        <div className="btn accent" style={{fontSize: 24, padding: "22px 20px"}}>+ 1 round</div>
-        <div className="small" style={{textAlign:"center", marginTop: 6}}>partial reps asked at the end</div>
+        <div className="btn accent" style={{fontSize: 24, padding: "22px 20px"}}>next</div>
+        <div className="small" style={{textAlign:"center", marginTop: 6}}>logs this station, advances to the next</div>
       </div>
     </ModePhone>
   );
@@ -336,7 +336,7 @@ function ModesSection() {
     <Section
       title="2. Timing modes · progression-first"
       kicker="one big NEXT · log on rest"
-      intro="Under fatigue, only one decision: advance. Supersets/circuits/for-time all collapse to a single giant NEXT button. Logging (RIR, reps, load) is deferred until rest or completion. AMRAP gets the most radical simplification: +1 round only; a partial-rep picker fires exactly once when the clock hits zero."
+      intro="Under fatigue, only one decision: advance. Supersets/circuits/for-time all collapse to a single giant NEXT button. Logging (RIR, reps, load) is deferred until rest or completion. AMRAP advances station-by-station; the finish picker captures only the partial station reached when the clock hits zero."
     >
       <div className="row">
         {items.map(it => (

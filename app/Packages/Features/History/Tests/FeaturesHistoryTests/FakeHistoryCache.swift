@@ -181,6 +181,18 @@ final class FakeHistoryCache: WorkoutCache, @unchecked Sendable {
         setLogsByWorkout[workoutID] = bucket
     }
 
+    func resetWorkout(workoutID: WorkoutID) async throws {
+        setLogsByWorkout[workoutID] = []
+        workouts = workouts.map { workout in
+            guard workout.id == workoutID else { return workout }
+            var reset = workout
+            reset.status = .planned
+            reset.completedAt = nil
+            reset.updatedAt = Date()
+            return reset
+        }
+    }
+
     func saveWorkout(_ workout: Workout) async throws {
         // Not used by the FeaturesHistory tests but required by the
         // protocol. No-op keeps behavior predictable.

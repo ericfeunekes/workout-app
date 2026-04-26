@@ -35,12 +35,12 @@ carry/distance/duration logging, current-block "what's next," superset logging
 at rest, and between-block setup through `block-transition.md`.
 
 ## Current implementation
-Once `SessionState.route` flips out of `.today`, `ExecutionView` renders the active/rest/complete router. `ExecutionViewModel` wraps the pure `SessionReducer`, owns a `SessionState` (seeded by `SessionSeeder` from each item's prescription), and mutates via a single `apply(_:)` funnel that persists to `SessionStore` as fire-and-forget JSON. Active screen: exercise name, mode-native metadata (`SET`, `ROUND`, `INTERVAL`, `SEGMENT`, or `CONTINUOUS`), one primary timer hero, progress pips when bounded, hero load + reps display, last-time chip, smaller next-up card, and a mode-aware primary action. Straight sets have an explicit boundary: Active first shows a `READY` count-up and `set start`; only after `set start` does `workStartedAt` stamp, the timer switch to `SET ELAPSED`, and the primary action become `done`. `done` opens the row-based `LogSetSheet` for actuals (load + reps as side-by-side cells, RIR as a quick row; keypad appears only for the selected numeric cell; inline "log" commit) → `viewModel.logSet(loadKg:reps:rir:)`. AMRAP is mode-specific: the primary button says `next`, logs the completed station, and advances round-robin with zero rest; when the cap ends, the result sheet captures only extra reps on the current partial station while completed prior stations show as checkmarked and unreached stations stay locked; saving appends an `AMRAP result: N rounds + M reps` note before routing out. For Time's current M2 contract is finish-only: tapping `finish` immediately logs one total-duration result, while an expired cap does not auto-complete because cap-partial capture is deferred. `logSet` asks the current driver (resolved from `block.timingMode`) for an autoreg outcome against the *pre-log* state, applies `[.logSet, .applyAutoregProposal?, .enterRest | .advanceFromRest, outcome.mutations...]` in order, enqueues the SetLog for push, and stores the proposal for the banner (accept-by-default — Undo reverts). Rest screen: `TimelineView(.periodic(by: 0.25))` drives a `DSRing` countdown against the absolute `state.restEndsAt`; strength rests show tap-editable "just did" pills (load / reps / RIR), while cardio rests suppress those strength-only correction controls; smaller next-up card; autoreg banner with Undo; "next" → `advance()` → `.advanceFromRest` → next set / next item / next block / `.complete`. Complete screen: per-item ledger ("NxR @ kg · RIR n" or "N sets" when non-uniform); "save & done" → `saveAndDone()` emits terminal `status_update`, writes the completion into the local cache, dispatches `.save` with empty items (shell flips route back to Today), and fires `sessionStore.clear()`.
+Once `SessionState.route` flips out of `.today`, `ExecutionView` renders the active/rest/transition/complete router. `ExecutionViewModel` wraps the pure `SessionReducer`, owns a `SessionState` (seeded by `SessionSeeder` from each item's prescription), and mutates via a single `apply(_:)` funnel that persists to `SessionStore` as fire-and-forget JSON. Active screen: exercise name, mode-native metadata (`SET`, `ROUND`, `INTERVAL`, `SEGMENT`, or `CONTINUOUS`), bounded whole-block progress (`BLOCK n / m`, `N / M DONE`), one primary timer hero, progress pips when bounded, hero load + reps display, last-time chip, smaller next-up card, and a mode-aware primary action. Straight sets have an explicit boundary: Active first shows a `READY` count-up and `set start`; only after `set start` does `workStartedAt` stamp, the timer switch to `SET ELAPSED`, and the primary action become `done`. `done` opens the row-based `LogSetSheet` for actuals (load + reps as side-by-side cells, RIR as a quick row; keypad appears only for the selected numeric cell; inline "log" commit) → `viewModel.logSet(loadKg:reps:rir:)`. Eligible active row-based routes also expose a secondary `skip` action; skip completes the current row for cursor/rest progress but persists `skipped=true` with no performance metrics. AMRAP, For Time, standalone Rest, Accumulate, and round-robin batch logging do not expose this deliberate skip affordance because their completion semantics are block/score/target owned. AMRAP is mode-specific: the primary button says `next`, logs the completed station, and advances round-robin with zero rest; when the cap ends, the result sheet captures only extra reps on the current partial station while completed prior stations show as checkmarked and unreached stations stay locked; saving appends an `AMRAP result: N rounds + M reps` note before routing out. For Time's current M2 contract is finish-only: tapping `finish` immediately logs one total-duration result, while an expired cap does not auto-complete because cap-partial capture is deferred. `logSet` asks the current driver (resolved from `block.timingMode`) for an autoreg outcome against the *pre-log* state, applies `[.logSet, .applyAutoregProposal?, .enterRest | .advanceFromRest, outcome.mutations...]` in order, enqueues the SetLog for push, and stores the proposal for the banner (accept-by-default — Undo reverts). Rest screen: `TimelineView(.periodic(by: 0.25))` drives a `DSRing` countdown against the absolute `state.restEndsAt`; bounded work rests show a block progress grid under the timer with performed/skipped/pending dots and `N / M DONE`; strength rests show tap-editable "just did" pills (load / reps / RIR), skipped rows show `SKIPPED SET` with no editable metrics, and cardio rests suppress strength-only correction controls; smaller next-up card; autoreg banner with Undo; "next" → `advance()` → `.advanceFromRest` → next set / next item / next block / transition / `.complete`. Transition screen appears between real work blocks when the next block has setup value, shows the finished block, next block, timing mode, first task, timing setup, and all station setup lines, then `start block` enters the next active route without starting explicit-set work early. Complete screen: per-item ledger ("NxR @ kg · RIR n" or "N sets" when non-uniform); "save & done" → `saveAndDone()` emits terminal `status_update`, writes the completion into the local cache, dispatches `.save` with empty items (shell flips route back to Today), and fires `sessionStore.clear()`.
 
 ## State surface
 - **Inputs:** `WorkoutContext` (workout + blocks + itemsByBlock + exercise catalog + lastPerformed); `SessionStore`; `DriverRegistry`; `ExecutionPushHooks` (`onSetLogged`, `onStatusChanged`, `onPushKick`); `LocalCompletionWriter`; `TelemetryEmitter`; `Clock`.
 - **Outputs / side effects:** (1) reducer-driven `SessionState`; (2) `sessionStore.save(data)` JSON bytes on every mutation; (3) enqueue one `SetLog` per `logSet`; (4) enqueue one terminal `status_update(completed, completedAt)` on `saveAndDone` (`complete()` only flips route; the terminal enqueue is owned exclusively by `saveAndDone`); (5) kick push flush after completion; (6) local-cache `Workout` + `[SetLog]` write on `saveAndDone`; (7) telemetry events per intent.
-- **State transitions (`SessionState.Route`):** `.today → .active` (start); `.active → .rest` (logSet with rest > 0); `.active → .active next set` (logSet with rest == 0 — `advanceFromRest` fires directly — see `ExecutionViewModel.swift:262-268`); `.rest → .active` (advance); `.rest → .complete` (advance past last set); `.active → .complete` (explicit End button); `.complete → .today` (saveAndDone clears state).
+- **State transitions (`SessionState.Route`):** `.today → .active` (start); `.active → .rest` (logSet with rest > 0); `.active → .active next set` (logSet with rest == 0 and no block boundary); `.active/.rest → .transition` (next real work block needs setup); `.transition → .active` (`start block`); `.rest → .active` (advance within current setup); `.rest → .complete` (advance past last set); `.active → .complete` (explicit End button); `.complete → .today` (saveAndDone clears state).
 - **Timer anchors:** `restEndsAt` (rest countdown), `blockEndsAt` (AMRAP / ForTime / EMOM / Tabata total cap), `workEndsAt` (Tabata / intervals / custom work window), `intervalAnchorAt` (EMOM boundary), `workReadyAt` (straight-set ready/prep count-up), and `workStartedAt` (active-set elapsed anchor). These anchors are state, not presentation; views should not independently infer timer labels from driver metadata.
 - **Next-up read model:** Active and Rest derive next-up context from the current cursor and the loaded workout structure. It can label the next set, next exercise, next block, rest block, or workout completion. The compact card is tappable for a read-only preview sheet. This is display context only; it must not perform workout reorganization or programming logic.
 - **Execution projection:** `ExecutionProjection` is the shared read-model seam for execution surfaces. Preview, Active/Rest, History correction, and Watch mapping should ask it for current task, remaining work, upcoming work, block progress, editability, and timer state rather than re-deriving cursor, driver, and timer rules from SwiftUI. This layer is view-neutral and watch-neutral: it may consume `WorkoutContext` and `SessionState`, but `FeaturesExecution` must not import Watch packages or sync/protocol DTOs. Unbounded modes such as AMRAP must not leak internal sentinel set counts into remaining/progress displays.
@@ -71,8 +71,32 @@ Do not regress to the old pattern where Active renders `REST 0:00` while a block
 
 ## Edge cases handled in code
 - **Progress-dot / meta-line contract (bug-037).** `ActiveView` gates progress dots on `content.totalSets > 0` and uses timing-mode language for the header line: straight strength = `SET`, round-based modes = `ROUND`, EMOM / intervals = `INTERVAL`, custom = `SEGMENT`, continuous = `CONTINUOUS`. Drivers for unbounded time-capped modes (AMRAP → `AMRAPDriver.unboundedRoundsCount == 0`) pass `totalSets = 0` to declare "no bound"; the view collapses the dot row and the meta line reads `ROUND N`. Bounded modes pass their real count and render the dots. If a future mode goes unbounded, seed `totalSets = 0` — do NOT reach for a large-integer sentinel (a prior AMRAP sentinel of 999 rendered 999 dots off-screen at x = -5797). Pinned by `AMRAPDriverBug037Tests` + `ActiveViewMetaLineTests`.
+- **Active block-position strip.** `ActiveView` renders whole-block
+  progress from `ExecutionProjection.blockProgress` when the block has a
+  bounded positive `totalSets`. This is separate from exercise-local progress
+  pips: the strip answers where the athlete is in the block, while pips answer
+  the current item/set sequence. Pinned by
+  `ActiveViewMetaLineTests.testBlockProgressStripRendersOnlyWhenBounded` and
+  `testBlockProgressSummaryUsesCompletedOverTotal`.
 - **Projection count contract.** `ExecutionProjection` treats AMRAP set counts as unbounded even if `SessionState` carries an internal cap for cursor advancement. Remaining/progress models should show no fake denominator for those blocks. Pinned by `ExecutionProjectionTests.testAMRAPProjectionKeepsUnboundedRoundsReadable`.
 - Straight-set logging is guarded behind `startCurrentSet()`: workout start and rest advance land on Active with `workReadyAt` and nil `workStartedAt`; `Set Start` stamps `workStartedAt`; `logSet` / `logSet(loadKg:reps:rir:)` no-op until that stamp exists. This prevents fake/default actuals from entering push/autoreg while still keeping a visible prep timer.
+- Deliberate skip uses `.skipSet`: the row becomes `done=true` and
+  `skipped=true`, cursor/rest advancement treats it as complete, and push/local
+  completion emit a `SetLog` with performance metrics empty. Rest displays it
+  as `SKIPPED SET`, not as editable performed work. Pinned by
+  `CoreSessionTests`, `ExecutionViewModelPushTests`,
+  `ExecutionViewModelTests.testSaveAndDoneLocalCachePreservesSkippedWithoutPerformanceMetrics`,
+  and `PostLogUnitDisplayTests.testSkippedSetDoesNotRenderPerformedMetricAffordances`.
+- Rest block progress renders only for bounded work blocks with real rows.
+  Standalone rest blocks, unbounded/sentinel modes (`amrap`, `emom`,
+  `accumulate`), and round-robin batch-rest pre-commit states hide the grid so
+  the UI does not invent progress. Set-major blocks order dots by item/set;
+  round-robin blocks order dots by execution order. Skipped rows count as
+  complete but render distinctly from performed rows. Pinned by
+  `PostLogUnitDisplayTests.testRestProgressOrderFollowsSetMajorExecutionOrder`,
+  `testRestProgressOrderFollowsRoundRobinExecutionOrder`,
+  `testRestProgressGridSuppressesUnboundedTimingModes`, and
+  `testRestProgressGridSuppressesRoundRobinBatchRoundRest`.
 - Unknown itemID / setIndex is a silent no-op (`SessionReducer.swift:6-8`, `SessionReducer+Handlers.swift:164-178`).
 - `rest_sec == 0` collapses rest entirely and advances directly (`ExecutionViewModel.swift:262-268`).
 - Rest timer survives backgrounding: `restEndsAt` is an absolute `Date`, the `TimelineView` re-reads current time each tick (`RestView.swift:113-134`). Resolved per `docs/open-questions.md` § "In-flight rest timer persistence".
@@ -87,15 +111,18 @@ Do not regress to the old pattern where Active renders `REST 0:00` while a block
 
 ## Current gaps
 
-- Rest still needs simulator proof that no mid-workout state shows dead
-  "waiting to start" copy.
+- Rest no longer has dead "waiting to start" copy; explicit-start active work
+  uses `READY` as the prep timer label.
 - Primary CTA enabled/disabled contrast and tap targets need simulator proof.
 - Bodyweight editability must be proven through the shared edit surface.
-- Skip action and skip persistence require the schema cutover.
-- Active view still needs the target scrolling column, focal hierarchy, and
-  current-position proof.
-- Rest progress grid and between-block setup transition are not yet built.
-- Superset logging must be proven at rest, not mid-superset.
+- Skip action/persistence is built for eligible active row-based routes; broader
+  Phase 5 UI work still needs proof that skip placement remains purposeful after
+  the active/rest redesign.
+- Active view now shows bounded whole-block position; remaining Active work is
+  focal hierarchy/scrolling polish across non-straight-set modes.
+- Between-block setup transition is built for work-block handoffs and proven in
+  simulator with `transition_setup`.
+- Superset logging is proven at round rest, not mid-superset.
 - Rest timer continuity requires simulator or pinned UI proof.
 - Per-side logging and carry/distance/duration logging need active/log/history
   parity.

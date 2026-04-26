@@ -34,6 +34,7 @@ final class ExecutionViewModelPushTests: XCTestCase {
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         try await Task.sleep(nanoseconds: 50_000_000)
 
@@ -58,6 +59,7 @@ final class ExecutionViewModelPushTests: XCTestCase {
             push: hooks
         )
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
 
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -75,6 +77,40 @@ final class ExecutionViewModelPushTests: XCTestCase {
         XCTAssertFalse(log.isWarmup)
         XCTAssertEqual(log.completedAt, fixed.now)
         XCTAssertNil(log.performedExerciseID)
+    }
+
+    func testSkipCurrentSetEnqueuesSkippedSetLogWithoutPerformanceMetrics() async throws {
+        let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_100))
+        let (ctx, itemID) = PushTestFixtures.context(sets: 2, reps: 5, loadKg: 100)
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
+        vm.start()
+        vm.startCurrentSet()
+        XCTAssertTrue(vm.canSkipCurrentSet)
+
+        vm.skipCurrentSet()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let set = try XCTUnwrap(vm.state.items.first?.sets.first)
+        XCTAssertTrue(set.done)
+        XCTAssertTrue(set.skipped)
+        XCTAssertEqual(vm.state.route, .rest)
+        let logs = await recorder.setLogs
+        let log = try XCTUnwrap(logs.first)
+        XCTAssertEqual(log.workoutItemID, itemID)
+        XCTAssertEqual(log.setIndex, 1)
+        XCTAssertTrue(log.skipped)
+        XCTAssertNil(log.reps)
+        XCTAssertNil(log.weight)
+        XCTAssertNil(log.weightUnit)
+        XCTAssertNil(log.rir)
+        XCTAssertNil(log.durationSec)
+        XCTAssertNil(log.distanceM)
+        XCTAssertEqual(log.side, .bilateral)
+        XCTAssertEqual(log.completedAt, fixed.now)
     }
 
     func testCompleteAloneDoesNotEnqueueStatus() async throws {
@@ -107,6 +143,7 @@ final class ExecutionViewModelPushTests: XCTestCase {
             push: hooks
         )
         vm.start()
+        vm.startCurrentSet()
         vm.complete()
 
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -135,6 +172,7 @@ final class ExecutionViewModelPushTests: XCTestCase {
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
+        vm.startCurrentSet()
         vm.complete()
         vm.saveAndDone(note: "  leg day PR!  ", bodyweightKg: nil)
 
@@ -165,6 +203,7 @@ final class ExecutionViewModelPushTests: XCTestCase {
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
+        vm.startCurrentSet()
         vm.complete()
         vm.saveAndDone(note: "   ", bodyweightKg: nil)
 
@@ -195,6 +234,7 @@ final class ExecutionViewModelPushTests: XCTestCase {
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
+        vm.startCurrentSet()
         vm.complete()
         vm.saveAndDone()
 
@@ -216,6 +256,7 @@ final class ExecutionViewModelPushTests: XCTestCase {
         let (ctx, _) = PushTestFixtures.context(sets: 2, reps: 5, loadKg: 100)
         let vm = ExecutionViewModel(context: ctx)
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         XCTAssertEqual(vm.state.route, .rest)
 
@@ -240,6 +281,7 @@ final class ExecutionViewModelPushTests: XCTestCase {
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 8, rir: nil)
         try await Task.sleep(nanoseconds: 50_000_000)
 

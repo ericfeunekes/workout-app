@@ -11,8 +11,8 @@
 //   - onSetLogged returns an empty outcome (no autoreg on EMOM)
 //
 // Built against a single-item and a multi-item EMOM block. The round-
-// robin cursor ticking across intervals is VM work — here we only
-// verify the driver resolves the item at whatever cursor it's handed.
+// robin cursor ticking across intervals is VM work; the driver still
+// derives the athlete-facing global interval ordinal from that cursor.
 
 import XCTest
 import CoreAutoreg
@@ -172,8 +172,26 @@ final class EMOMDriverTests: XCTestCase {
 
     func testActiveContentResolvesCursorPointedItemInMultiItemBlock() {
         // Two items — driver resolves whichever the cursor points at.
-        // Round-robin-per-interval is VM work; here we just advance the
-        // itemIndex to emulate the second interval.
+        // Cursor setIndex is the round; itemIndex is the station within
+        // that round. Athlete-facing "interval N" is derived globally.
+        let f = makeEmomFixture(
+            configJSON: #"{"interval_sec":60,"total_minutes":10}"#,
+            items: [
+                ("Burpee", #"{"reps":5}"#),
+                ("Power Clean", #"{"reps":3,"load_kg":60}"#)
+            ],
+            cursor: SessionState.Cursor(blockIndex: 0, itemIndex: 1, setIndex: 1)
+        )
+        let driver = EMOMDriver()
+        let content = driver.activeContent(state: f.state, context: f.context)
+        XCTAssertEqual(content?.exerciseName, "Power Clean")
+        XCTAssertEqual(content?.reps, 3)
+        XCTAssertEqual(content?.loadKg, 60)
+        XCTAssertEqual(content?.setIndex, 2)
+        XCTAssertEqual(content?.totalSets, 10)
+    }
+
+    func testActiveContentGlobalOrdinalUsesRoundAndItemInMultiItemBlock() {
         let f = makeEmomFixture(
             configJSON: #"{"interval_sec":60,"total_minutes":10}"#,
             items: [
@@ -185,9 +203,8 @@ final class EMOMDriverTests: XCTestCase {
         let driver = EMOMDriver()
         let content = driver.activeContent(state: f.state, context: f.context)
         XCTAssertEqual(content?.exerciseName, "Power Clean")
-        XCTAssertEqual(content?.reps, 3)
-        XCTAssertEqual(content?.loadKg, 60)
-        XCTAssertEqual(content?.setIndex, 2)
+        XCTAssertEqual(content?.setIndex, 4,
+            "round 2 station 2 is global interval 4, not round number 2")
         XCTAssertEqual(content?.totalSets, 10)
     }
 

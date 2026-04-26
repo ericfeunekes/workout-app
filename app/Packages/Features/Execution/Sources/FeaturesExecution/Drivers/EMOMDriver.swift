@@ -50,10 +50,10 @@ public struct EMOMDriver: TimingDriver {
     // MARK: - Active content
 
     /// Resolve the current item via the cursor and pre-format the
-    /// active-screen content. `setIndex` carries the 1-based interval
-    /// number (from the cursor's `setIndex`, which the VM ticks each
-    /// interval). `totalSets` is the total interval count —
-    /// `total_minutes * 60 / interval_sec`.
+    /// active-screen content. `setIndex` carries the global 1-based
+    /// interval ordinal. The session cursor remains round-based for
+    /// multi-item EMOMs (`setIndex` = round, `itemIndex` = station), so
+    /// the display ordinal is derived from both fields.
     public func activeContent(
         state: SessionState,
         context: WorkoutContext
@@ -71,23 +71,36 @@ public struct EMOMDriver: TimingDriver {
             performedExerciseID: itemLog.performedExerciseID
         )
 
-        let (reps, loadKg, unit) = prescribed(for: item)
+        let activeSet = itemLog.sets.first(where: { $0.setIndex == c.setIndex })
+        let (reps, loadKg, unit) = activeSet.map { (Optional($0.reps), $0.loadKg, $0.unit) }
+            ?? prescribed(for: item)
         let intervalCount = resolveIntervalCount(state: state, context: context)
 
         let loadDisplay = formatLoad(weight: loadKg, unit: LoadUnit(setPlanUnit: unit))
-        let repsDisplay = reps.map { String($0) } ?? "—"
+        let repsDisplay = activeSet.map(displayText(for:)) ?? reps.map { String($0) } ?? "—"
+        let kind = activeSet.map(activeKind(for:)) ?? .strength
 
         return ActiveContent(
             exerciseName: exerciseName,
-            setIndex: c.setIndex,
+            setIndex: intervalOrdinal(state: state, context: context),
             totalSets: intervalCount,
             loadDisplay: loadDisplay,
             repsDisplay: repsDisplay,
             loadKg: loadKg,
             reps: reps ?? 0,
             adjustGlyph: nil,
-            lastTime: context.lastPerformed[item.exerciseID]
+            lastTime: context.lastPerformed[item.exerciseID],
+            kind: kind
         )
+    }
+
+    private func intervalOrdinal(state: SessionState, context: WorkoutContext) -> Int {
+        let c = state.cursor
+        guard c.blockIndex >= 0, c.blockIndex < context.itemsByBlock.count else {
+            return c.setIndex
+        }
+        let itemCount = max(context.itemsByBlock[c.blockIndex].count, 1)
+        return ((c.setIndex - 1) * itemCount) + c.itemIndex + 1
     }
 
     // MARK: - Rest duration

@@ -25,8 +25,9 @@ extension ExecutionViewModel {
     /// design — see `docs/features/exercise-swap.md`. Telemetry:
     /// `execution.exercise_swap` carries
     /// `{itemID, fromExerciseID, toExerciseID, hadOverrides}`. When a
-    /// `sets` override is authored against a round-robin block (superset /
-    /// circuit / AMRAP / EMOM / Tabata / forTime) the reducer drops the
+    /// `sets` override is authored against a round-robin or target-owned
+    /// block (superset / circuit / AMRAP / EMOM / Tabata / forTime /
+    /// accumulate) the reducer drops the
     /// `sets` portion — see `docs/prescription.md` § "Alternative
     /// prescription (overrides)" — and we emit
     /// `execution.swap_sets_override_rejected` so the rejection is visible

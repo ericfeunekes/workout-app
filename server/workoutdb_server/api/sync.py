@@ -21,6 +21,7 @@ from workoutdb_server.api.schemas import (
     SyncPullOut,
     SyncResultsIn,
     UserParameterRead,
+    WorkoutReset,
 )
 from workoutdb_server.api.workouts import workout_tree_loader
 from workoutdb_server.models import (
@@ -237,11 +238,43 @@ def sync_results(payload: SyncResultsIn, db: DbSession, user_id: CurrentUserId) 
         if update.notes is not None:
             workout.notes = update.notes
 
+    for reset in payload.workout_resets:
+        _reset_workout(db, reset, user_id)
+
     db.commit()
     return {
         "set_logs_received": len(payload.set_logs),
         "status_updates_received": len(payload.status_updates),
+        "workout_resets_received": len(payload.workout_resets),
     }
+
+
+def _reset_workout(db: DbSession, payload: WorkoutReset, user_id: str) -> None:
+    workout = db.get(Workout, payload.workout_id)
+    if workout is None or workout.user_id != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Workout {payload.workout_id} not found",
+        )
+
+    item_ids = db.execute(
+        select(WorkoutItem.id)
+        .join(Block, Block.id == WorkoutItem.block_id)
+        .where(Block.workout_id == workout.id)
+    ).scalars().all()
+    if item_ids:
+        logs = db.execute(
+            select(SetLog).where(SetLog.workout_item_id.in_(item_ids))
+        ).scalars().all()
+        for log in logs:
+            db.delete(log)
+
+    workout.status = "planned"
+    workout.completed_at = None
+    # Explicit bump keeps incremental pulls honest even if no scalar
+    # value other than status/completed_at changed under SQLAlchemy's
+    # onupdate machinery.
+    workout.updated_at = datetime.now(UTC)
 
 
 def _upsert_set_log(db: DbSession, payload: SetLogIn) -> SetLog:

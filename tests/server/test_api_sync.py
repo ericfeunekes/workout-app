@@ -168,11 +168,89 @@ def test_push_set_logs_and_status(client, test_engine, test_user_id) -> None:
     )
     assert response.status_code == 200
     body = response.json()
-    assert body == {"set_logs_received": 1, "status_updates_received": 1}
+    assert body == {
+        "set_logs_received": 1,
+        "status_updates_received": 1,
+        "workout_resets_received": 0,
+    }
 
     # Verify
     detail = client.get(f"/api/workouts/{future_id}").json()
     assert detail["status"] == "completed"
+
+    with Session(test_engine) as session:
+        row = session.get(SetLog, "88888888-8888-8888-8888-888888888888")
+        assert row is not None
+        assert row.skipped is True
+        assert row.side == "left"
+
+    pulled = client.get("/api/sync/pull").json()
+    last = next(lp for lp in pulled["last_performed"] if lp["exercise_id"] == exercise_id)
+    pushed_log = next(
+        log
+        for log in last["last_set_logs"]
+        if log["id"] == "88888888-8888-8888-8888-888888888888"
+    )
+    assert pushed_log["skipped"] is True
+    assert pushed_log["side"] == "left"
+
+
+def test_workout_reset_deletes_logs_and_replans_workout(
+    client, test_engine, test_user_id
+) -> None:
+    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
+    future_id = _create_future_workout(client, exercise_id)
+    item_id = client.get(f"/api/workouts/{future_id}").json()["blocks"][0]["workout_items"][0]["id"]
+
+    logged = client.post(
+        "/api/sync/results",
+        json={
+            "set_logs": [
+                {
+                    "id": "88888888-8888-8888-8888-888888888888",
+                    "workout_item_id": item_id,
+                    "set_index": 1,
+                    "reps": 5,
+                    "weight": 105.0,
+                    "weight_unit": "kg",
+                    "rir": 2,
+                    "completed_at": "2026-04-20T07:30:00Z",
+                }
+            ],
+            "status_updates": [
+                {
+                    "workout_id": future_id,
+                    "status": "completed",
+                    "completed_at": "2026-04-20T08:00:00Z",
+                    "notes": "accidental log",
+                }
+            ],
+        },
+    )
+    assert logged.status_code == 200
+
+    reset = client.post(
+        "/api/sync/results",
+        json={
+            "set_logs": [],
+            "status_updates": [],
+            "workout_resets": [{"workout_id": future_id}],
+        },
+    )
+    assert reset.status_code == 200
+    assert reset.json() == {
+        "set_logs_received": 0,
+        "status_updates_received": 0,
+        "workout_resets_received": 1,
+    }
+
+    detail = client.get(f"/api/workouts/{future_id}").json()
+    assert detail["status"] == "planned"
+    assert detail["completed_at"] is None
+    assert detail["blocks"][0]["workout_items"][0].get("set_logs") is None
+
+    with Session(test_engine) as session:
+        assert session.get(SetLog, "88888888-8888-8888-8888-888888888888") is None
 
 
 def test_workout_status_update_persists_notes(client, test_engine, test_user_id) -> None:

@@ -83,6 +83,7 @@ _WRAPPED_SHAPES: frozenset[str] = frozenset(
         "intervals",
         "tabata",
         "continuous",
+        "accumulate",
         "custom",
         "rest_block",
     }
@@ -168,6 +169,11 @@ _WRAPPED_REQUIRED_KEYS: dict[str, dict[str, set[str]]] = {
         "top": {"timing_mode", "timing_config_json", "prescription_json"},
         # prescription is typically `{}`; all the work is in timing_config.
         "prescription": set(),
+    },
+    "accumulate": {
+        "top": {"timing_mode", "timing_config_json", "prescription_json"},
+        # Accumulate can use prescription defaults for per-bout entry.
+        "prescription": {"reps"},
     },
     "custom": {
         "top": {"timing_mode", "timing_config_json", "prescription_json"},

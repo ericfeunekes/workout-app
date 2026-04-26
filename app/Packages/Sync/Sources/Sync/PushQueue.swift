@@ -136,6 +136,19 @@ public actor PushQueue {
         try await store.enqueue(item)
     }
 
+    /// Enqueue a workout reset. This is used when the user deletes an
+    /// accidentally logged same-day workout from History: the server must
+    /// delete the associated set_logs and return the workout to `planned`
+    /// or the next pull would rehydrate the completed row locally.
+    public func enqueueWorkoutReset(workoutID: WorkoutID) async throws {
+        try await dropExistingWorkoutReset(workoutID: workoutID)
+        let item = PushItem(
+            payload: .workoutReset(workoutID: workoutID),
+            enqueuedAt: clock.now
+        )
+        try await store.enqueue(item)
+    }
+
     /// Enqueue a batch of telemetry events. Routed to `/api/telemetry/events`
     /// at push time — a separate endpoint from set_logs/status_updates so
     /// telemetry failures never block user data and vice versa.

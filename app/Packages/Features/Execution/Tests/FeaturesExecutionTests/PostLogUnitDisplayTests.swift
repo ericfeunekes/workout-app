@@ -42,7 +42,9 @@ final class PostLogUnitDisplayTests: XCTestCase {
         unit: WeightUnit,
         reps: Int = 5,
         done: Bool = true,
-        rir: Int? = 2
+        rir: Int? = 2,
+        durationSec: Double? = nil,
+        skipped: Bool = false
     ) -> SetPlan {
         SetPlan(
             setIndex: index,
@@ -51,12 +53,24 @@ final class PostLogUnitDisplayTests: XCTestCase {
             reps: reps,
             done: done,
             adjust: nil,
-            rir: rir
+            rir: rir,
+            durationSec: durationSec,
+            skipped: skipped
         )
     }
 
     private func makeLog(sets: [SetPlan]) -> SessionState.ItemLog {
         SessionState.ItemLog(itemID: UUID(), sets: sets)
+    }
+
+    private func makeItem(id: UUID = UUID(), position: Int) -> WorkoutItem {
+        WorkoutItem(
+            id: id,
+            blockID: UUID(),
+            position: position,
+            exerciseID: UUID(),
+            prescriptionJSON: "{}"
+        )
     }
 
     // MARK: - 1) RestView "just logged" pill caption
@@ -81,6 +95,17 @@ final class PostLogUnitDisplayTests: XCTestCase {
         // empty). Pinning the fallback so a future refactor doesn't
         // silently change the dash-state caption.
         XCTAssertEqual(RestView.loadPillCaption(for: nil), "KG")
+    }
+
+    func testRestViewRestTimerSeparatesRemainingFromOverdue() {
+        let now = Date(timeIntervalSince1970: 1_000)
+        let future = now.addingTimeInterval(45)
+        let past = now.addingTimeInterval(-12)
+
+        XCTAssertEqual(RestView.restRemainingSeconds(endsAt: future, now: now), 45)
+        XCTAssertEqual(RestView.restOverdueSeconds(endsAt: future, now: now), 0)
+        XCTAssertEqual(RestView.restRemainingSeconds(endsAt: past, now: now), 0)
+        XCTAssertEqual(RestView.restOverdueSeconds(endsAt: past, now: now), 12)
     }
 
     func testLoadlessSetRendersJustBWNoUnit() {
@@ -140,6 +165,122 @@ final class PostLogUnitDisplayTests: XCTestCase {
 
         let lbSet = makeSet(load: 0, unit: .lb, reps: 5, rir: 2)
         XCTAssertEqual(RestView.loadPillCaption(for: lbSet), "LB")
+    }
+
+    func testSkippedSetDoesNotRenderPerformedMetricAffordances() {
+        // Phase 5 deliberate skip contract: a skipped set advances the
+        // cursor, but no performance was recorded. The rest screen must not
+        // show editable prescription metrics as if they were logged work.
+        let skipped = makeSet(load: 102.5, unit: .lb, reps: 5, skipped: true)
+
+        XCTAssertEqual(RestView.justLoggedHeader(for: skipped), "SKIPPED SET")
+        XCTAssertFalse(RestView.shouldOfferJustLoggedCorrection(for: skipped))
+        XCTAssertFalse(RestView.shouldRenderLoadPill(for: skipped))
+        XCTAssertNil(RestView.loadPillCaption(for: skipped))
+    }
+
+    func testPerformedSetStillOffersJustLoggedCorrection() {
+        let logged = makeSet(load: 102.5, unit: .lb, reps: 5)
+
+        XCTAssertEqual(RestView.justLoggedHeader(for: logged), "JUST LOGGED")
+        XCTAssertTrue(RestView.shouldOfferJustLoggedCorrection(for: logged))
+        XCTAssertTrue(RestView.shouldRenderLoadPill(for: logged))
+        XCTAssertEqual(RestView.loadPillCaption(for: logged), "LB")
+    }
+
+    func testRestProgressSummaryUsesCompletedOverTotal() {
+        XCTAssertEqual(RestView.progressSummary(completed: 1, total: 4), "1 / 4 DONE")
+        XCTAssertEqual(RestView.progressSummary(completed: -1, total: -4), "0 / 0 DONE")
+    }
+
+    func testRestProgressOrderFollowsRoundRobinExecutionOrder() {
+        let itemA = makeItem(position: 0)
+        let itemB = makeItem(position: 1)
+        let logA = SessionState.ItemLog(
+            itemID: itemA.id,
+            sets: [
+                makeSet(index: 1, load: 100, unit: .lb),
+                makeSet(index: 2, load: 100, unit: .lb),
+                makeSet(index: 3, load: 100, unit: .lb)
+            ]
+        )
+        let logB = SessionState.ItemLog(
+            itemID: itemB.id,
+            sets: [
+                makeSet(index: 1, load: 50, unit: .lb),
+                makeSet(index: 2, load: 50, unit: .lb),
+                makeSet(index: 3, load: 50, unit: .lb)
+            ]
+        )
+
+        let order = RestView.progressOrder(
+            advancement: .roundRobin,
+            items: [itemA, itemB],
+            itemLogs: [logA, logB]
+        )
+
+        XCTAssertEqual(order, [
+            RestView.RestProgressOrderEntry(itemID: itemA.id, setIndex: 1),
+            RestView.RestProgressOrderEntry(itemID: itemB.id, setIndex: 1),
+            RestView.RestProgressOrderEntry(itemID: itemA.id, setIndex: 2),
+            RestView.RestProgressOrderEntry(itemID: itemB.id, setIndex: 2),
+            RestView.RestProgressOrderEntry(itemID: itemA.id, setIndex: 3),
+            RestView.RestProgressOrderEntry(itemID: itemB.id, setIndex: 3)
+        ])
+    }
+
+    func testRestProgressOrderFollowsSetMajorExecutionOrder() {
+        let itemA = makeItem(position: 0)
+        let itemB = makeItem(position: 1)
+        let logA = SessionState.ItemLog(
+            itemID: itemA.id,
+            sets: [
+                makeSet(index: 1, load: 100, unit: .lb),
+                makeSet(index: 2, load: 100, unit: .lb)
+            ]
+        )
+        let logB = SessionState.ItemLog(
+            itemID: itemB.id,
+            sets: [
+                makeSet(index: 1, load: 50, unit: .lb),
+                makeSet(index: 2, load: 50, unit: .lb)
+            ]
+        )
+
+        let order = RestView.progressOrder(
+            advancement: .setMajor,
+            items: [itemA, itemB],
+            itemLogs: [logA, logB]
+        )
+
+        XCTAssertEqual(order, [
+            RestView.RestProgressOrderEntry(itemID: itemA.id, setIndex: 1),
+            RestView.RestProgressOrderEntry(itemID: itemA.id, setIndex: 2),
+            RestView.RestProgressOrderEntry(itemID: itemB.id, setIndex: 1),
+            RestView.RestProgressOrderEntry(itemID: itemB.id, setIndex: 2)
+        ])
+    }
+
+    func testRestProgressGridSuppressesUnboundedTimingModes() {
+        XCTAssertFalse(RestView.shouldRenderProgressGrid(for: .amrap))
+        XCTAssertFalse(RestView.shouldRenderProgressGrid(for: .emom))
+        XCTAssertFalse(RestView.shouldRenderProgressGrid(for: .accumulate))
+        XCTAssertTrue(RestView.shouldRenderProgressGrid(for: .superset))
+    }
+
+    func testRestProgressGridSuppressesRoundRobinBatchRoundRest() {
+        XCTAssertFalse(
+            RestView.shouldRenderProgressGrid(
+                for: .superset,
+                isRoundRobinBatchRoundRest: true
+            )
+        )
+        XCTAssertTrue(
+            RestView.shouldRenderProgressGrid(
+                for: .superset,
+                isRoundRobinBatchRoundRest: false
+            )
+        )
     }
 
     // MARK: - 2) Autoreg banner unit inheritance
@@ -231,6 +372,18 @@ final class PostLogUnitDisplayTests: XCTestCase {
         XCTAssertEqual(
             CompleteView.ledgerSummary(for: lbLog),
             "2×5 @ 0 lb · RIR 2"
+        )
+    }
+
+    func testCompleteLedgerKeepsTimedStrengthRowsInStrengthSummary() {
+        // Cluster/rest-pause rows record elapsed work time, but they are
+        // still strength rows because reps/load/RIR are meaningful.
+        let log = makeLog(sets: [
+            makeSet(index: 1, load: 100, unit: .lb, reps: 10, rir: 1, durationSec: 33)
+        ])
+        XCTAssertEqual(
+            CompleteView.ledgerSummary(for: log),
+            "1×10 @ 100 lb · RIR 1"
         )
     }
 

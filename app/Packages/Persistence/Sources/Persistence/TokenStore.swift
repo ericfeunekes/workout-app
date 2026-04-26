@@ -1,9 +1,10 @@
 // TokenStore.swift
 //
-// Keychain-backed bearer token + UserDefaults-backed server URL. The pair
-// lives together because the app either has a usable connection (URL +
-// token) or doesn't (first-run state). Splitting them would leak the
-// intermediate "URL but no token" state into every call site.
+// Keychain-backed server connection. The URL and bearer token live as one
+// payload because the app either has a usable connection or doesn't
+// (first-run state). Keeping the whole pair in Keychain means it survives
+// app reinstalls on the same device; `UserDefaults` is only a compatibility
+// mirror for older installs and diagnostics.
 //
 // Keychain item shape:
 //   • `kSecClass`              = `kSecClassGenericPassword`
@@ -11,12 +12,11 @@
 //                                 `com.ericfeunekes.WorkoutDB.token`). Tests
 //                                 override this to avoid bleed between runs.
 //   • `kSecAttrAccount`        = `bearer`
-//   • `kSecValueData`          = the bearer token as UTF-8 bytes.
+//   • `kSecValueData`          = JSON `{version, url, token}` as UTF-8 bytes.
 //
-// UserDefaults key: `workoutdb.server.url` (absolute string form). Kept in
-// UserDefaults rather than Keychain because the URL is not a secret — only
-// the paired token is sensitive, and Tailscale already gates network-layer
-// access to the server.
+// Legacy shape: earlier builds stored only the raw bearer token in Keychain
+// and `workoutdb.server.url` in UserDefaults. `loadConnection()` still reads
+// that pair and rewrites it into the durable Keychain payload.
 
 import Foundation
 import Security
@@ -28,6 +28,12 @@ public protocol TokenStore: Sendable {
 }
 
 public struct TokenStoreImpl: TokenStore {
+    private struct StoredConnection: Codable {
+        var version: Int
+        var url: String
+        var token: String
+    }
+
     private let serviceName: String
     private let account: String
     private let urlDefaultsKey: String
@@ -52,18 +58,37 @@ public struct TokenStoreImpl: TokenStore {
 
     public func saveConnection(url: URL, token: String) throws {
         defaults.set(url.absoluteString, forKey: urlDefaultsKey)
-        try writeKeychain(token: token)
+        try writeKeychain(connection: StoredConnection(
+            version: 1,
+            url: url.absoluteString,
+            token: token
+        ))
     }
 
     public func loadConnection() throws -> (url: URL, token: String)? {
-        guard let urlString = defaults.string(forKey: urlDefaultsKey),
+        guard let data = try readKeychainData() else {
+            return nil
+        }
+
+        if let stored = try? JSONDecoder().decode(StoredConnection.self, from: data),
+           let url = URL(string: stored.url) {
+            defaults.set(stored.url, forKey: urlDefaultsKey)
+            return (url, stored.token)
+        }
+
+        guard let legacyToken = String(data: data, encoding: .utf8),
+              let urlString = defaults.string(forKey: urlDefaultsKey),
               let url = URL(string: urlString) else {
             return nil
         }
-        guard let token = try readKeychain() else {
-            return nil
-        }
-        return (url, token)
+
+        try writeKeychain(connection: StoredConnection(
+            version: 1,
+            url: url.absoluteString,
+            token: legacyToken
+        ))
+
+        return (url, legacyToken)
     }
 
     public func clear() throws {
@@ -73,15 +98,15 @@ public struct TokenStoreImpl: TokenStore {
 
     // MARK: - Keychain ops
 
-    private func writeKeychain(token: String) throws {
-        let data = Data(token.utf8)
+    private func writeKeychain(connection: StoredConnection) throws {
+        let data = try JSONEncoder().encode(connection)
+        try writeKeychain(data: data)
+    }
+
+    private func writeKeychain(data: Data) throws {
         // Prefer update; fall back to add. Avoids leaving multiple items in
         // the login keychain with the same service/account pair.
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: serviceName,
-            kSecAttrAccount as String: account,
-        ]
+        let query = keychainQuery()
         let updateStatus = SecItemUpdate(
             query as CFDictionary,
             [kSecValueData as String: data] as CFDictionary
@@ -92,39 +117,35 @@ public struct TokenStoreImpl: TokenStore {
         }
         var addQuery = query
         addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
         let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
         if addStatus != errSecSuccess {
             throw PersistenceError.keychain(addStatus)
         }
     }
 
-    private func readKeychain() throws -> String? {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: serviceName,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-        ]
+    private func readKeychainData() throws -> Data? {
+        var query = keychainQuery()
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         if status == errSecItemNotFound { return nil }
         if status != errSecSuccess { throw PersistenceError.keychain(status) }
-        guard let data = result as? Data,
-              let token = String(data: data, encoding: .utf8) else {
-            return nil
-        }
-        return token
+        return result as? Data
     }
 
     private func deleteKeychain() throws {
-        let query: [String: Any] = [
+        let status = SecItemDelete(keychainQuery() as CFDictionary)
+        if status == errSecSuccess || status == errSecItemNotFound { return }
+        throw PersistenceError.keychain(status)
+    }
+
+    private func keychainQuery() -> [String: Any] {
+        [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: serviceName,
             kSecAttrAccount as String: account,
         ]
-        let status = SecItemDelete(query as CFDictionary)
-        if status == errSecSuccess || status == errSecItemNotFound { return }
-        throw PersistenceError.keychain(status)
     }
 }

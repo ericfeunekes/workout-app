@@ -339,6 +339,8 @@ final class SeedCache: WorkoutCache, @unchecked Sendable {
 
     func saveSetLogs(_ setLogs: [SetLog], workoutID: WorkoutID) async throws {}
 
+    func resetWorkout(workoutID: WorkoutID) async throws {}
+
     func saveWorkout(_ workout: Workout) async throws {}
 
     func saveUserParameter(_ param: UserParameter) async throws {}

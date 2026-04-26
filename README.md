@@ -1,6 +1,6 @@
-# WorkoutDB
+# Setmark
 
-A workout system built on the **"dumb app, smart conversation"** philosophy:
+Setmark is a workout system built on the **"dumb app, smart conversation"** philosophy:
 
 - **Claude is the brain.** Programming, periodization, progression, alternatives, and readiness all happen in conversation.
 - **The app is dumb.** It shows the workout, times it, logs what happened. Nothing more.
@@ -13,6 +13,10 @@ A workout system built on the **"dumb app, smart conversation"** philosophy:
 - `schema/` — shared schema definitions between server and app
 - `docs/` — architecture, testing contract, and the v2 spec
 - `tests/` — server tests (iOS tests live in `app/`)
+
+Internal repo, package, and server identifiers still use the original
+`WorkoutDB` / `workoutdb` names unless changing them would affect the product
+surface.
 
 ## Status
 

@@ -1,27 +1,9 @@
 // TabataAutoLogPushTests.swift
 //
-// qa-050 regression coverage. The Tabata 20s work-window expiry path
-// (`autoLogAndRestForTabata` in `ExecutionViewModel+Persistence.swift`)
-// used to dispatch `.logSet` directly through `apply(_:)` — mutating
-// SessionState but bypassing the post-log side-effects the user-tap
-// `logSet()` runs through `handleLogSetSideEffects`. That meant:
-//
-//   - the push hook (`onSetLogged`) never fired → the `set_log` row
-//     never reached the server (the bug the user reported: "JUST LOGGED
-//     | 0 REPS" renders from SessionState but no SetLog lands)
-//   - the `execution.session_mutation(logSet)` telemetry never fired
-//     → analytics saw zero logSet events for tabata auto-logs
-//   - `writeCompletionToLocalCache` on save-and-done reads from
-//     `state.items`, so the cache DID eventually pick up the rows on
-//     save — but any user who force-quit between auto-log and save-
-//     and-done would still have the row on disk (persisted session
-//     state) but no server copy, and no history cache either
-//
-// Post-fix: `autoLogAndRestForTabata` calls `enqueueLoggedSet` and
-// `emitSessionMutation("logSet")` after the `apply(_:)` — mirroring
-// the user-tap path's `handleLogSetSideEffects`. The same treatment
-// applies to the companion EMOM cap auto-log
-// (`autoLogPlaceholderForEMOM`) which had the same gap.
+// Tabata work-window expiry coverage. Cardio-shaped Tabata can auto-log
+// duration because the clock owns the measurement; strength-shaped
+// Tabata must not fabricate a completed 0-rep row when the athlete
+// misses the window.
 
 import XCTest
 import CoreDomain
@@ -38,7 +20,7 @@ final class TabataAutoLogPushTests: XCTestCase {
     /// `ExecutionViewModelTickBlockTimerTests.makeTabataContext` so the
     /// auto-log path (which drives `enterBlockTimerIfNeeded` on `.start`)
     /// stamps `workEndsAt` + `blockEndsAt` as expected.
-    private func makeTabataContext() -> (WorkoutContext, UUID) {
+    private func makeTabataContext(prescriptionJSON: String = #"{"reps":20}"#) -> (WorkoutContext, UUID) {
         let userID = UUID()
         let workoutID = UUID()
         let blockID = UUID()
@@ -60,7 +42,7 @@ final class TabataAutoLogPushTests: XCTestCase {
         let item = WorkoutItem(
             id: itemID, blockID: blockID, position: 0,
             exerciseID: exerciseID,
-            prescriptionJSON: #"{"reps":20}"#
+            prescriptionJSON: prescriptionJSON
         )
         let ctx = WorkoutContext(
             workout: workout, blocks: [block],
@@ -72,12 +54,14 @@ final class TabataAutoLogPushTests: XCTestCase {
 
     // MARK: - Tests
 
-    /// qa-050 — the core regression. A single 20s work-window expiry
-    /// tick fires `onSetLogged` exactly once with a placeholder SetLog
-    /// (`reps = 0`, `rir = nil`). Before the fix the state mutation
-    /// happened but the hook never ran, so the server never received
-    /// the row and the user's "JUST LOGGED" UI was a lie.
-    func testTabataAutoLogEnqueuesSetLog() async throws {
+    private func makeCardioTabataContext() -> (WorkoutContext, UUID) {
+        makeTabataContext(prescriptionJSON: #"{}"#)
+    }
+
+    /// A strength-shaped Tabata round is manually judged work. When the
+    /// 20s window expires, the app should enter the 10s rest but leave
+    /// the row unlogged instead of fabricating a completed 0-rep set.
+    func testStrengthTabataWindowExpiryDoesNotEnqueueFakeSetLog() async throws {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let clock = TabataAutoLogClock(now: start)
         let (ctx, itemID) = makeTabataContext()
@@ -101,23 +85,45 @@ final class TabataAutoLogPushTests: XCTestCase {
         try await Task.sleep(nanoseconds: 50_000_000)
 
         let logs = await recorder.setLogs
-        XCTAssertEqual(logs.count, 1, "one work-window expiry = one pushed SetLog")
+        XCTAssertTrue(logs.isEmpty, "missed strength Tabata work must not push a fake SetLog")
+        let item = try XCTUnwrap(vm.state.items.first { $0.itemID == itemID })
+        XCTAssertEqual(item.sets.first?.done, false)
+        XCTAssertEqual(vm.state.route, .rest)
+    }
+
+    /// Cardio-shaped Tabata does auto-log duration at the work boundary
+    /// because duration is clock-owned and measurable.
+    func testCardioTabataAutoLogEnqueuesDurationSetLog() async throws {
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+        let clock = TabataAutoLogClock(now: start)
+        let (ctx, itemID) = makeCardioTabataContext()
+        let recorder = AutoLogEnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onSetLogged: { [recorder] log in await recorder.append(log) }
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
+        vm.start()
+
+        clock.now = start.addingTimeInterval(TabataDriver.workSec)
+        vm.tickBlockTimer()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let logs = await recorder.setLogs
+        XCTAssertEqual(logs.count, 1, "one cardio work-window expiry = one pushed SetLog")
         let log = try XCTUnwrap(logs.first)
         XCTAssertEqual(log.workoutItemID, itemID)
         XCTAssertEqual(log.setIndex, 1, "first round = setIndex 1")
-        XCTAssertEqual(log.reps, 0, "Tabata auto-log is a 0-rep placeholder")
-        XCTAssertNil(log.rir, "Tabata auto-log carries nil RIR")
+        XCTAssertEqual(log.durationSec, TabataDriver.workSec)
+        XCTAssertNil(log.reps)
+        XCTAssertNil(log.rir)
         XCTAssertFalse(log.isWarmup)
-        // completedAt stamped on the log mutation = clock.now at tick time.
         XCTAssertEqual(log.completedAt, clock.now)
     }
 
-    /// qa-050 companion — the `.enterRest` flip that ships alongside the
-    /// placeholder log must gate the next tick from re-entering the
-    /// helper, so a second tick inside the same work window does not
-    /// double-enqueue. Mirrors the "no double-enqueue if the auto-log
-    /// fires twice" requirement in the fix brief.
-    func testTabataAutoLogDoesNotDoubleEnqueueOnRepeatedTicks() async throws {
+    /// The `.enterRest` flip gates the next tick from re-entering the
+    /// helper, so repeated ticks inside the same window do not enqueue
+    /// anything for strength-shaped Tabata.
+    func testStrengthTabataWindowExpiryDoesNotDoubleEnqueueOnRepeatedTicks() async throws {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let clock = TabataAutoLogClock(now: start)
         let (ctx, _) = makeTabataContext()
@@ -134,7 +140,7 @@ final class TabataAutoLogPushTests: XCTestCase {
         vm.tickBlockTimer()
         try await Task.sleep(nanoseconds: 20_000_000)
         XCTAssertEqual(vm.state.route, .rest,
-            "auto-log dispatches .enterRest — route is .rest after the tick")
+            "work-window expiry dispatches .enterRest — route is .rest after the tick")
 
         // A second tick 1s later must NOT re-enter the helper (route
         // guard on `.active` blocks re-entry) so the enqueue count
@@ -144,21 +150,51 @@ final class TabataAutoLogPushTests: XCTestCase {
         try await Task.sleep(nanoseconds: 20_000_000)
 
         let logs = await recorder.setLogs
-        XCTAssertEqual(logs.count, 1,
-            "repeated ticks inside the rest phase must not re-enqueue the placeholder")
+        XCTAssertTrue(logs.isEmpty,
+            "repeated ticks inside the rest phase must not enqueue a fake strength log")
     }
 
-    /// qa-050 — after a full 8-round Tabata (auto-logs land as placeholders
+    func testTabataRestAutoAdvancesAtRestBoundary() {
+        let start = Date(timeIntervalSince1970: 1_700_000_100)
+        let clock = TabataAutoLogClock(now: start)
+        let (ctx, _) = makeTabataContext()
+        let vm = ExecutionViewModel(context: ctx, clock: clock)
+        vm.start()
+
+        clock.now = start.addingTimeInterval(TabataDriver.workSec)
+        vm.tickBlockTimer()
+
+        XCTAssertEqual(vm.state.route, .rest)
+        XCTAssertEqual(
+            vm.state.restEndsAt?.timeIntervalSince1970,
+            start.timeIntervalSince1970 + TabataDriver.workSec + TabataDriver.restSec
+        )
+
+        clock.now = start.addingTimeInterval(TabataDriver.workSec + TabataDriver.restSec)
+        vm.tickBlockTimer()
+
+        XCTAssertEqual(vm.state.route, .active)
+        XCTAssertEqual(vm.state.cursor.setIndex, 2)
+        XCTAssertEqual(
+            vm.state.workEndsAt?.timeIntervalSince1970,
+            start.timeIntervalSince1970
+                + TabataDriver.workSec
+                + TabataDriver.restSec
+                + TabataDriver.workSec
+        )
+    }
+
+    /// After a full 8-round cardio Tabata (auto-logs land as duration rows
     /// on each work-window expiry), `saveAndDone` must ship all 8 rows to
     /// the local WorkoutCache so History renders the session immediately
     /// without waiting for a server round-trip. This is the "local cache
     /// write works on save & done" clause of the fix brief — the cache
     /// writer reads `state.items`, so the auto-logs that flow through
     /// `apply(_:)` already land there; this test proves the end-to-end.
-    func testTabataAutoLogUpdatesLocalCacheOnSave() async throws {
+    func testCardioTabataAutoLogUpdatesLocalCacheOnSave() async throws {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let clock = TabataAutoLogClock(now: start)
-        let (ctx, itemID) = makeTabataContext()
+        let (ctx, itemID) = makeCardioTabataContext()
         let pushRecorder = AutoLogEnqueueRecorder()
         let cacheRecorder = AutoLogCompletionRecorder()
         let hooks = ExecutionPushHooks(
@@ -175,7 +211,7 @@ final class TabataAutoLogPushTests: XCTestCase {
         vm.start()
 
         // Walk through all 8 rounds. Each round's cycle: tick at the
-        // work-window boundary (auto-log placeholder + enter rest),
+        // work-window boundary (duration auto-log + enter rest),
         // tick past the rest boundary (reducer advances into the next
         // round on `advance()` — we drive it here by calling
         // `vm.advance()` so the cursor bumps and `workEndsAt`
@@ -207,11 +243,12 @@ final class TabataAutoLogPushTests: XCTestCase {
         let cachedSetLogs = call.setLogs.filter { $0.workoutItemID == itemID }
         XCTAssertEqual(
             cachedSetLogs.count, TabataDriver.rounds,
-            "each of the 8 Tabata rounds lands in the local cache"
+            "each of the 8 cardio Tabata rounds lands in the local cache"
         )
-        // Every cached row is the placeholder shape: 0 reps, nil rir.
+        // Every cached row is the cardio duration shape.
         for log in cachedSetLogs {
-            XCTAssertEqual(log.reps, 0)
+            XCTAssertEqual(log.durationSec, TabataDriver.workSec)
+            XCTAssertNil(log.reps)
             XCTAssertNil(log.rir)
         }
         // And the push path saw the same 8 rows, deterministic id each.

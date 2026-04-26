@@ -117,6 +117,7 @@ final class ExecutionViewModelTests: XCTestCase {
         let (ctx, itemID) = makeContext(targetRir: 2)
         let vm = ExecutionViewModel(context: ctx)
         vm.start()
+        vm.startCurrentSet()
 
         // Log set 1 with RIR 4 → overshoot by +2 → proposal.
         vm.logSet(reps: 5, rir: 4)
@@ -129,6 +130,7 @@ final class ExecutionViewModelTests: XCTestCase {
         let (ctx, _) = makeContext(reps: 8, targetRir: 2)
         let vm = ExecutionViewModel(context: ctx)
         vm.start()
+        vm.startCurrentSet()
 
         // Logged 6 vs prescribed 8 → missed 2 → undershoot.
         vm.logSet(reps: 6, rir: 1)
@@ -139,6 +141,8 @@ final class ExecutionViewModelTests: XCTestCase {
         let (ctx, _) = makeContext(sets: 1)
         let vm = ExecutionViewModel(context: ctx)
         vm.start()
+
+        vm.startCurrentSet()
 
         vm.logSet(reps: 5, rir: 4)
         XCTAssertNil(vm.currentProposal)
@@ -151,6 +155,8 @@ final class ExecutionViewModelTests: XCTestCase {
         let vm = ExecutionViewModel(context: ctx)
         vm.start()
 
+        vm.startCurrentSet()
+
         vm.logSet(reps: 5, rir: 4)
         XCTAssertNotNil(vm.currentProposal)
 
@@ -162,6 +168,7 @@ final class ExecutionViewModelTests: XCTestCase {
 
         // Advance to set 2, log again → no new proposal because held.
         vm.advance()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 4)
         XCTAssertNil(vm.currentProposal)
     }
@@ -170,6 +177,8 @@ final class ExecutionViewModelTests: XCTestCase {
         let (ctx, itemID) = makeContext(targetRir: 2, restSec: 60)
         let vm = ExecutionViewModel(context: ctx)
         vm.start()
+
+        vm.startCurrentSet()
 
         vm.logSet(reps: 5, rir: 4)
         let proposalLoad = vm.currentProposal?.newLoadKg
@@ -196,16 +205,20 @@ final class ExecutionViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state.route, .active)
 
         // Block 0 item 0: 2 sets
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 1)
         XCTAssertEqual(vm.state.route, .rest)
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(vm.state.route, .active)
 
         vm.logSet(reps: 5, rir: 1)
         XCTAssertEqual(vm.state.route, .rest)
         vm.advance()
 
-        // Should be on block 1 item 0 set 1 now.
+        // Should transition before block 1 item 0 set 1 now.
+        XCTAssertEqual(vm.state.route, .transition)
+        vm.beginBlockTransition()
         XCTAssertEqual(vm.state.route, .active)
         XCTAssertEqual(vm.state.cursor.blockIndex, 1)
         XCTAssertEqual(vm.state.cursor.itemIndex, 0)
@@ -214,8 +227,11 @@ final class ExecutionViewModelTests: XCTestCase {
         // Finish block 1.
         vm.logSet(reps: 8, rir: 1)
         vm.advance()
+        vm.startCurrentSet()
         vm.logSet(reps: 8, rir: 1)
         vm.advance()
+
+        vm.startCurrentSet()
 
         XCTAssertEqual(vm.state.route, .complete)
     }
@@ -304,9 +320,11 @@ final class ExecutionViewModelTests: XCTestCase {
         XCTAssertEqual(vm.state.cursor.blockIndex, 0)
 
         // Log both sets of block 0.
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         XCTAssertEqual(vm.state.route, .rest)
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(vm.state.route, .active)
         XCTAssertEqual(vm.state.cursor.setIndex, 2)
 
@@ -332,6 +350,7 @@ final class ExecutionViewModelTests: XCTestCase {
         // Advance from the rest block → should land on block 2 set 1
         // active screen (NOT on another rest).
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(vm.state.route, .active)
         XCTAssertEqual(vm.state.cursor.blockIndex, 2)
         XCTAssertEqual(vm.state.cursor.itemIndex, 0)
@@ -390,6 +409,7 @@ final class ExecutionViewModelTests: XCTestCase {
         )
 
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(vm.state.route, .active)
         XCTAssertEqual(vm.state.cursor.blockIndex, 1)
     }
@@ -470,6 +490,7 @@ final class ExecutionViewModelTests: XCTestCase {
         let (ctx, _) = makeContext(sets: 2)
         let vm = ExecutionViewModel(context: ctx)
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         // Mid-rest state — ensure restEndsAt and route survive.
 
@@ -488,6 +509,7 @@ final class ExecutionViewModelTests: XCTestCase {
         let (ctx, _) = makeContext()
         let vm1 = ExecutionViewModel(context: ctx, sessionStore: store)
         vm1.start()
+        vm1.startCurrentSet()
         vm1.logSet(reps: 5, rir: 2)
 
         // Wait for fire-and-forget save to land.
@@ -517,10 +539,13 @@ final class ExecutionViewModelTests: XCTestCase {
         )
         vm.start()
         // Log both sets so the writer sees set_logs in the expected shape.
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         vm.advance()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 1)
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(vm.state.route, .complete)
 
         vm.saveAndDone()
@@ -568,10 +593,14 @@ final class ExecutionViewModelTests: XCTestCase {
             }
         )
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         vm.advance()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 1)
         vm.advance()
+
+        vm.startCurrentSet()
 
         vm.saveAndDone()
         try await Task.sleep(nanoseconds: 50_000_000)
@@ -590,6 +619,42 @@ final class ExecutionViewModelTests: XCTestCase {
                 + "pushes a mismatched id and the server inserts a duplicate row"
             )
         }
+    }
+
+    func testSaveAndDoneLocalCachePreservesSkippedWithoutPerformanceMetrics() async throws {
+        let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_075))
+        let (ctx, itemID) = makeContext(sets: 1, restSec: 0)
+        let recorder = CompletionRecorder()
+        let vm = ExecutionViewModel(
+            context: ctx,
+            clock: fixed,
+            localCompletionWriter: { [recorder] workout, setLogs in
+                await recorder.record(workout: workout, setLogs: setLogs)
+            }
+        )
+        vm.start()
+        vm.startCurrentSet()
+        vm.skipCurrentSet()
+        XCTAssertEqual(vm.state.route, .complete)
+
+        vm.saveAndDone()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let calls = await recorder.calls
+        let call = try XCTUnwrap(calls.first)
+        let log = try XCTUnwrap(call.setLogs.first)
+        XCTAssertEqual(log.workoutItemID, itemID)
+        XCTAssertEqual(log.setIndex, 1)
+        XCTAssertTrue(log.skipped)
+        XCTAssertNil(log.reps)
+        XCTAssertNil(log.weight)
+        XCTAssertNil(log.weightUnit)
+        XCTAssertNil(log.rir)
+        XCTAssertNil(log.durationSec)
+        XCTAssertNil(log.distanceM)
+        XCTAssertNil(log.hrAvgBpm)
+        XCTAssertNil(log.cadenceAvgSpm)
+        XCTAssertEqual(log.side, .bilateral)
     }
 
     func testCompletionWriteStampsPerSetTimestamps() async throws {
@@ -627,6 +692,7 @@ final class ExecutionViewModelTests: XCTestCase {
         // `start()` stamps workStartedAt = t0. Set 1 logs at t0 → its
         // startedAt == t0 (session-start anchor, zero-duration set).
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         // advance() at T stamps workStartedAt = T. But next log moves
         // clock forward, so we'll bump the clock FIRST, then advance
@@ -640,13 +706,16 @@ final class ExecutionViewModelTests: XCTestCase {
         //   set 3: startedAt = T+80s, completedAt = T+90s   (10s working)
         clock.now = t0.addingTimeInterval(20)
         vm.advance()
+        vm.startCurrentSet()
         clock.now = t0.addingTimeInterval(30)
         vm.logSet(reps: 5, rir: 2)
         clock.now = t0.addingTimeInterval(80)
         vm.advance()
+        vm.startCurrentSet()
         clock.now = t0.addingTimeInterval(90)
         vm.logSet(reps: 5, rir: 1)
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(vm.state.route, .complete)
 
         // `saveAndDone` runs at T + 120s — the completion writer's own
@@ -708,19 +777,22 @@ final class ExecutionViewModelTests: XCTestCase {
                 await recorder.record(workout: workout, setLogs: setLogs)
             }
         )
-        // start() stamps workStartedAt = t0. Advance clock, then log
+        // Set Start stamps workStartedAt = t0. Advance clock, then log
         // set 1 at t0+10. Set 1's startedAt = t0, completedAt = t0+10.
         vm.start()
+        vm.startCurrentSet()
         clock.now = t0.addingTimeInterval(10)
         vm.logSet(reps: 5, rir: 2)
         // Rest ends at t0+100; advance stamps workStartedAt = t0+100.
         clock.now = t0.addingTimeInterval(100)
         vm.advance()
+        vm.startCurrentSet()
         // Set 2 logs at t0+110. Set 2's startedAt should be t0+100
         // (NOT t0+10, set 1's completedAt).
         clock.now = t0.addingTimeInterval(110)
         vm.logSet(reps: 5, rir: 1)
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(vm.state.route, .complete)
 
         clock.now = t0.addingTimeInterval(200)
@@ -764,11 +836,13 @@ final class ExecutionViewModelTests: XCTestCase {
                 await recorder.record(workout: workout, setLogs: setLogs)
             }
         )
-        // start() stamps workStartedAt = t0. User logs at t0+15.
+        // Set Start stamps workStartedAt = t0. User logs at t0+15.
         vm.start()
+        vm.startCurrentSet()
         clock.now = t0.addingTimeInterval(15)
         vm.logSet(reps: 5, rir: 2)
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(vm.state.route, .complete)
 
         clock.now = t0.addingTimeInterval(60)
@@ -804,8 +878,10 @@ final class ExecutionViewModelTests: XCTestCase {
             }
         )
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(vm.state.route, .complete)
 
         vm.saveAndDone(note: "felt strong", bodyweightKg: nil)
@@ -834,6 +910,7 @@ final class ExecutionViewModelTests: XCTestCase {
             }
         )
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
 
         vm.saveAndDone(note: "   ")
@@ -865,6 +942,7 @@ final class ExecutionViewModelTests: XCTestCase {
             push: hooks
         )
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
 
         vm.saveAndDone(bodyweightKg: 82.5)
@@ -898,6 +976,7 @@ final class ExecutionViewModelTests: XCTestCase {
             push: hooks
         )
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
 
         vm.saveAndDone()
@@ -914,6 +993,7 @@ final class ExecutionViewModelTests: XCTestCase {
         let (ctx, _) = makeContext(sets: 1, restSec: 60)
         let vm = ExecutionViewModel(context: ctx)
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         vm.saveAndDone()
         try await Task.sleep(nanoseconds: 20_000_000)
@@ -960,11 +1040,13 @@ final class ExecutionViewModelTests: XCTestCase {
         let (ctx, itemID) = makeContext(sets: 4, restSec: 60)
         let vm = ExecutionViewModel(context: ctx)
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         // Advance out of rest into set 2's active screen so the "End from
         // any screen" contract is exercised — the docs call out End on
         // both Active and Rest.
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(
             vm.state.route, .active,
             "precondition: cursor should be on set 2's Active screen"
@@ -1030,9 +1112,10 @@ final class ExecutionViewModelTests: XCTestCase {
         return (ctx, itemIDs)
     }
 
-    func testAMRAPBlockCompletesAtTimeCap() {
+    func testAMRAPBlockWaitsForResultCaptureAtTimeCap() {
         // Time cap 30s. After 2 logs the block cap elapses → tickBlockTimer
-        // should flip the route to .complete.
+        // must leave the block active so the AMRAP result sheet can
+        // capture the partial score.
         let start = Date(timeIntervalSince1970: 1_000_000)
         let clock = MutableClock(now: start)
         let (ctx, _) = makeSingleBlockContext(
@@ -1057,7 +1140,8 @@ final class ExecutionViewModelTests: XCTestCase {
         // Fast-forward past the time cap.
         clock.now = start.addingTimeInterval(35)
         vm.tickBlockTimer()
-        XCTAssertEqual(vm.state.route, .complete)
+        XCTAssertEqual(vm.state.route, .active)
+        XCTAssertEqual(vm.state.cursor.blockIndex, 0)
     }
 
     func testEMOMCursorRoundRobinsPerInterval() {
@@ -1085,18 +1169,21 @@ final class ExecutionViewModelTests: XCTestCase {
         // Log item 0 interval 1 → cursor lands on item 1 interval 1.
         vm.logSet(reps: 5, rir: nil)
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(vm.state.cursor.itemIndex, 1)
         XCTAssertEqual(vm.state.cursor.setIndex, 1)
 
         // Log item 1 interval 1 → cursor lands on item 0 interval 2.
         vm.logSet(reps: 10, rir: nil)
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(vm.state.cursor.itemIndex, 0)
         XCTAssertEqual(vm.state.cursor.setIndex, 2)
 
         // Log item 0 interval 2 → item 1 interval 2.
         vm.logSet(reps: 5, rir: nil)
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(vm.state.cursor.itemIndex, 1)
         XCTAssertEqual(vm.state.cursor.setIndex, 2)
     }
@@ -1138,7 +1225,112 @@ final class ExecutionViewModelTests: XCTestCase {
             }
         }
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(vm.state.route, .complete)
+    }
+
+    func testSupersetBatchModeAdvancesWithoutLoggingUntilRoundRest() {
+        let start = Date(timeIntervalSince1970: 4_000_000)
+        let clock = MutableClock(now: start)
+        let (ctx, itemIDs) = makeSingleBlockContext(
+            timingMode: .superset,
+            timingConfigJSON: #"{"rest_between_rounds_sec":20}"#,
+            rounds: 2,
+            items: [
+                (name: "DB Press", prescriptionJSON: #"{"reps":10,"load_kg":30}"#),
+                (name: "DB Row", prescriptionJSON: #"{"reps":12,"load_kg":35}"#),
+            ]
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: clock)
+        vm.start()
+
+        XCTAssertTrue(vm.isCurrentRoundRobinBatchMode)
+        clock.now = start.addingTimeInterval(10)
+        vm.advanceRoundRobinBatchStation()
+
+        XCTAssertEqual(vm.state.route, .active)
+        XCTAssertEqual(vm.state.cursor.itemIndex, 1)
+        XCTAssertFalse(vm.state.items[0].sets[0].done)
+        XCTAssertEqual(vm.state.items[0].sets[0].startedAt, start)
+        XCTAssertNil(vm.state.items[0].sets[0].adjust)
+
+        clock.now = start.addingTimeInterval(25)
+        vm.advanceRoundRobinBatchStation()
+
+        XCTAssertEqual(vm.state.route, .rest)
+        XCTAssertTrue(vm.isRoundRobinBatchRoundRest)
+        XCTAssertFalse(vm.isFinalRoundRobinBatchRoundRest)
+        XCTAssertEqual(vm.roundRobinBatchRows().map(\.exerciseName), ["DB Press", "DB Row"])
+        XCTAssertEqual(vm.roundRobinBatchRows().map(\.done), [false, false])
+
+        vm.editRoundRobinBatchSet(
+            itemID: itemIDs[0],
+            setIndex: 1,
+            loadKg: 32.5,
+            reps: 9,
+            rir: 2
+        )
+        XCTAssertEqual(vm.roundRobinBatchRows()[0].loadKg, 32.5)
+        XCTAssertEqual(vm.roundRobinBatchRows()[0].reps, 9)
+        XCTAssertEqual(vm.roundRobinBatchRows()[0].rir, 2)
+
+        vm.advance()
+
+        XCTAssertEqual(vm.state.route, .active)
+        XCTAssertEqual(vm.state.cursor.itemIndex, 0)
+        XCTAssertEqual(vm.state.cursor.setIndex, 2)
+        XCTAssertTrue(vm.state.items[0].sets[0].done)
+        XCTAssertTrue(vm.state.items[1].sets[0].done)
+        XCTAssertEqual(vm.state.items[0].sets[0].loadKg, 32.5)
+        XCTAssertEqual(vm.state.items[0].sets[0].reps, 9)
+        XCTAssertEqual(vm.state.items[0].sets[0].rir, 2)
+        XCTAssertEqual(vm.state.items[1].sets[0].reps, 12)
+        XCTAssertEqual(vm.state.items[0].sets[0].startedAt, start)
+        XCTAssertEqual(vm.state.items[1].sets[0].startedAt, start.addingTimeInterval(10))
+    }
+
+    func testSupersetBatchModeCommitsFinalRoundBeforeComplete() {
+        let (ctx, _) = makeSingleBlockContext(
+            timingMode: .superset,
+            timingConfigJSON: #"{"rest_between_rounds_sec":20}"#,
+            rounds: 1,
+            items: [
+                (name: "Curl", prescriptionJSON: #"{"reps":10,"load_kg":15}"#),
+                (name: "Pressdown", prescriptionJSON: #"{"reps":15,"load_kg":25}"#),
+            ]
+        )
+        let vm = ExecutionViewModel(context: ctx)
+        vm.start()
+
+        vm.advanceRoundRobinBatchStation()
+        vm.advanceRoundRobinBatchStation()
+
+        XCTAssertEqual(vm.state.route, .rest)
+        XCTAssertTrue(vm.isRoundRobinBatchRoundRest)
+        XCTAssertTrue(vm.isFinalRoundRobinBatchRoundRest)
+        XCTAssertEqual(vm.roundRobinBatchRows().map(\.done), [false, false])
+
+        vm.advance()
+
+        XCTAssertEqual(vm.state.route, .complete)
+        XCTAssertTrue(vm.state.items[0].sets[0].done)
+        XCTAssertTrue(vm.state.items[1].sets[0].done)
+    }
+
+    func testCircuitDefaultsToStationLoggingMode() {
+        let (ctx, _) = makeSingleBlockContext(
+            timingMode: .circuit,
+            timingConfigJSON: #"{"rest_between_exercises_sec":1,"rest_between_rounds_sec":30}"#,
+            rounds: 2,
+            items: [
+                (name: "A", prescriptionJSON: #"{"reps":10}"#),
+                (name: "B", prescriptionJSON: #"{"reps":12}"#),
+            ]
+        )
+        let vm = ExecutionViewModel(context: ctx)
+        vm.start()
+
+        XCTAssertFalse(vm.isCurrentRoundRobinBatchMode)
     }
 
     func testForTimeRoundSchemeRendersEachRoundReps() {
@@ -1197,12 +1389,48 @@ final class ExecutionViewModelTests: XCTestCase {
         let (ctx, _) = makeContext(restSec: 180)
         let vm = ExecutionViewModel(context: ctx, clock: fixed)
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 1)
 
         XCTAssertEqual(
             vm.state.restEndsAt?.timeIntervalSince1970,
             1_000_000 + 180
         )
+    }
+
+    func testExtendRestAddsRecoveryTimeToRestEndsAt() {
+        let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_000_000))
+        let (ctx, _) = makeContext(restSec: 180)
+        let vm = ExecutionViewModel(context: ctx, clock: fixed)
+        vm.start()
+        vm.startCurrentSet()
+        vm.logSet(reps: 5, rir: 1)
+
+        vm.extendRest(by: 30)
+
+        XCTAssertEqual(
+            vm.state.restEndsAt?.timeIntervalSince1970,
+            1_000_000 + 210
+        )
+    }
+
+    func testLogSetWithEditedLoadWritesActualLoadBeforeLogging() {
+        let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_000_000))
+        let (ctx, itemID) = makeContext(restSec: 180)
+        let vm = ExecutionViewModel(context: ctx, clock: fixed)
+        vm.start()
+
+        vm.startCurrentSet()
+
+        vm.logSet(loadKg: 92.5, reps: 5, rir: 1)
+
+        let logged = vm.state.items
+            .first(where: { $0.itemID == itemID })?
+            .sets.first(where: { $0.setIndex == 1 })
+        XCTAssertEqual(logged?.loadKg, 92.5)
+        XCTAssertEqual(logged?.reps, 5)
+        XCTAssertEqual(logged?.rir, 1)
+        XCTAssertEqual(logged?.done, true)
     }
 
     // MARK: - bug-038
@@ -1255,12 +1483,14 @@ final class ExecutionViewModelTests: XCTestCase {
         )
         let vm = ExecutionViewModel(context: ctx, clock: clock)
         vm.start()
+        vm.startCurrentSet()
         vm.logSet(reps: 18, rir: nil)
         XCTAssertEqual(vm.state.route, .rest)
 
         // Advance clock past rest and advance cursor.
         clock.now = start.addingTimeInterval(12)
         vm.advance()
+        vm.startCurrentSet()
         XCTAssertEqual(vm.state.route, .active)
         XCTAssertEqual(vm.state.cursor.setIndex, 2)
 

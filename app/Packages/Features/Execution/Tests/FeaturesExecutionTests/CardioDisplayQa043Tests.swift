@@ -15,9 +15,8 @@
 //
 //   * `ActiveContent.kind = .cardio` (driver-populated) flips the
 //     Active hero to render the primary target without " reps".
-//   * `CompleteView.ledgerSummary(for:)` branches on "any done row
-//     has durationSec / distanceM" and renders via
-//     `formatCardioSummary`.
+//   * `CompleteView.ledgerSummary(for:)` branches on cardio-shaped
+//     rows and renders them via `formatCardioSummary`.
 
 import XCTest
 import CoreAutoreg

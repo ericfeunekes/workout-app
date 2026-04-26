@@ -14,6 +14,7 @@ import FeaturesExecution
 import FeaturesToday
 import Persistence
 import Sync
+import WorkoutCoreFoundation
 
 extension AppBootstrap {
 
@@ -47,7 +48,8 @@ extension AppBootstrap {
         syncAPI: SyncAPI,
         telemetry: TelemetryEmitter,
         sessionStateBinding: (@Sendable (SessionMutation) -> Void)?,
-        executionHolder: ExecutionVMHolder?
+        executionHolder: ExecutionVMHolder?,
+        onEmptyTodayRefresh: (@Sendable @MainActor () async -> Bool)? = nil
     ) async throws -> BootstrapResult {
         let completed = try await persistence.workoutCache.loadWorkouts(
             status: .completed, since: nil
@@ -61,6 +63,11 @@ extension AppBootstrap {
             telemetry: telemetry,
             sessionStateBinding: sessionStateBinding
         )
+        if let onEmptyTodayRefresh {
+            todayVM.setRefreshAction {
+                await onEmptyTodayRefresh()
+            }
+        }
         // Leave `executionHolder.vm` as-is (typically nil from the
         // ExecutionVMHolder initializer). No per-workout rebuild path
         // fires here because the completion writer needs a starting VM
@@ -79,7 +86,7 @@ extension AppBootstrap {
     /// Grouped args for `buildReady`. Keeps the function under SwiftLint's
     /// `function_parameter_count` cap.
     struct ReadyInputs {
-        let todayContext: TodayContext
+        let todayPlanContext: TodayPlanContext
         let workoutContext: WorkoutContext
         /// Kept past build time so `makeCompletionWriter` can call
         /// `todayVM.reload(using:)` after save-and-done — the completed
@@ -88,6 +95,7 @@ extension AppBootstrap {
         let todayLoader: TodayLoader
         let sessionStore: SessionStore
         let workoutCache: WorkoutCache
+        let syncMetadataStore: SyncMetadataStore
         /// "LAST · …" chip map store. Threaded through to the per-
         /// workout rebuild path (qa-001 + qa-020) so the next workout's
         /// `WorkoutContext.lastPerformed` carries the same pulled
@@ -96,6 +104,7 @@ extension AppBootstrap {
         let syncAPI: SyncAPI
         let telemetry: TelemetryEmitter
         let afterLocalCompletion: (@Sendable () async -> Void)?
+        let onManualRefreshTokenRejected: (@Sendable @MainActor () async -> Void)?
         /// Observable holder the shell uses to both (a) route the Today
         /// start binding to the current VM and (b) drive RootTabView's
         /// routing against `holder.vm.state.route`. The completion
@@ -145,7 +154,7 @@ extension AppBootstrap {
     /// or `.rest` lands directly on `ExecutionView`, not Today.
     static func buildReady(_ inputs: ReadyInputs) async -> BootstrapResult {
         let todayVM = TodayViewModel(
-            context: inputs.todayContext,
+            planContext: inputs.todayPlanContext,
             telemetry: inputs.telemetry
         )
         let pushFlusher = PushFlusher(api: inputs.syncAPI)
@@ -170,6 +179,41 @@ extension AppBootstrap {
                 rebuild: rebuildVM.factory
             )
         )
+        let refreshDeps = TodayRefreshDependencies(
+            syncAPI: inputs.syncAPI,
+            workoutCache: inputs.workoutCache,
+            syncMetadataStore: inputs.syncMetadataStore,
+            lastPerformedStore: inputs.lastPerformedStore,
+            todayLoader: inputs.todayLoader,
+            executionHolder: inputs.executionHolder,
+            rebuild: rebuildVM.factory,
+            telemetry: inputs.telemetry,
+            onTokenRejected: inputs.onManualRefreshTokenRejected
+        )
+        todayVM.setRefreshAction { [weak todayVM, refreshDeps] in
+            guard let todayVM else { return false }
+            return await refreshTodayPlan(inputs: TodayRefreshInputs(
+                syncAPI: refreshDeps.syncAPI,
+                workoutCache: refreshDeps.workoutCache,
+                syncMetadataStore: refreshDeps.syncMetadataStore,
+                lastPerformedStore: refreshDeps.lastPerformedStore,
+                todayViewModel: todayVM,
+                todayLoader: refreshDeps.todayLoader,
+                executionHolder: refreshDeps.executionHolder,
+                rebuild: refreshDeps.rebuild,
+                telemetry: refreshDeps.telemetry,
+                onTokenRejected: refreshDeps.onTokenRejected
+            ))
+        }
+        todayVM.setStartWorkoutAction { [startDeps = refreshDeps] workoutID in
+            await startWorkoutFromPlan(
+                workoutID: workoutID,
+                workoutCache: startDeps.workoutCache,
+                lastPerformedStore: startDeps.lastPerformedStore,
+                executionHolder: startDeps.executionHolder,
+                rebuild: startDeps.rebuild
+            )
+        }
         let initialVM = rebuildVM.factory(inputs.workoutContext)
         // Cold-launch restore: hydrate any persisted mid-workout state
         // (route / cursor / restEndsAt / logged sets) before publishing
@@ -184,6 +228,104 @@ extension AppBootstrap {
             executionHolder: inputs.executionHolder,
             pushFlusher: pushFlusher
         )
+    }
+
+    struct TodayRefreshDependencies: Sendable {
+        let syncAPI: SyncAPI
+        let workoutCache: WorkoutCache
+        let syncMetadataStore: SyncMetadataStore
+        let lastPerformedStore: LastPerformedStore?
+        let todayLoader: TodayLoader
+        let executionHolder: ExecutionVMHolder
+        let rebuild: @Sendable @MainActor (WorkoutContext) -> ExecutionViewModel
+        let telemetry: TelemetryEmitter
+        let onTokenRejected: (@Sendable @MainActor () async -> Void)?
+    }
+
+    struct TodayRefreshInputs: Sendable {
+        let syncAPI: SyncAPI
+        let workoutCache: WorkoutCache
+        let syncMetadataStore: SyncMetadataStore
+        let lastPerformedStore: LastPerformedStore?
+        let todayViewModel: TodayViewModel
+        let todayLoader: TodayLoader
+        let executionHolder: ExecutionVMHolder
+        let rebuild: @Sendable @MainActor (WorkoutContext) -> ExecutionViewModel
+        let telemetry: TelemetryEmitter
+        let onTokenRejected: (@Sendable @MainActor () async -> Void)?
+    }
+
+    static func refreshTodayPlan(inputs: TodayRefreshInputs) async -> Bool {
+        do {
+            let lastSyncAt = await inputs.syncMetadataStore.getLastSyncAt()
+            let result = try await inputs.syncAPI.pullLatest(since: lastSyncAt)
+            try await savePull(result, into: inputs.workoutCache)
+            if !result.lastPerformed.isEmpty, let store = inputs.lastPerformedStore {
+                let lastPerformedMap = LastPerformedFormatter.buildMap(
+                    from: result.lastPerformed
+                )
+                await store.save(lastPerformedMap)
+            }
+            await inputs.syncMetadataStore.setLastSyncAt(result.serverTime)
+            await inputs.todayViewModel.reload(using: inputs.todayLoader)
+            await rebuildExecutionVMForNextWorkout(
+                workoutCache: inputs.workoutCache,
+                lastPerformedStore: inputs.lastPerformedStore,
+                todayLoader: inputs.todayLoader,
+                executionHolder: inputs.executionHolder,
+                rebuild: inputs.rebuild
+            )
+            return true
+        } catch SyncError.tokenRejected {
+            inputs.telemetry.emit(Event(
+                sessionID: TelemetrySession.id,
+                kind: "error",
+                name: "today.refresh.token_rejected"
+            ))
+            await inputs.onTokenRejected?()
+            return false
+        } catch {
+            return false
+        }
+    }
+
+    static func startWorkoutFromPlan(
+        workoutID: WorkoutID,
+        workoutCache: WorkoutCache,
+        lastPerformedStore: LastPerformedStore?,
+        executionHolder: ExecutionVMHolder,
+        rebuild: @escaping @Sendable @MainActor (WorkoutContext) -> ExecutionViewModel
+    ) async -> Bool {
+        if executionHolder.vm?.context.workout.id == workoutID {
+            executionHolder.vm?.start()
+            return true
+        }
+        let workout: Workout
+        do {
+            let planned = try await workoutCache.loadWorkouts(
+                status: .planned,
+                since: nil
+            )
+            guard let match = planned.first(where: { $0.id == workoutID }) else {
+                return false
+            }
+            workout = match
+        } catch {
+            return false
+        }
+        let workoutContext: WorkoutContext
+        do {
+            workoutContext = try await AppBootstrap.buildWorkoutContext(
+                for: workout,
+                cache: workoutCache,
+                lastPerformedStore: lastPerformedStore
+            )
+        } catch {
+            return false
+        }
+        executionHolder.vm = rebuild(workoutContext)
+        executionHolder.vm?.start()
+        return true
     }
 
     /// Bundle of the rebuild factory closure + the shared

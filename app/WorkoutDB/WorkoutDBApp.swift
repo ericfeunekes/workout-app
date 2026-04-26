@@ -31,16 +31,9 @@
 // bypass bootstrap and use `ExecutionPreviewSeed.pushA()` directly — keeps
 // screenshots fast and offline.
 //
-// TODO(settings): `FeaturesSettings.SettingsView` exists but has no entry
-// point yet. Add a gear icon to the Today header (or a nav-bar button on
-// the shell) that presents SettingsView in a `.sheet`. Wire `onSyncNow`
-// to `AppBootstrap.pull`, `onResetCache` to `WorkoutCache.clear`, and
-// `onChangeServer` to `TokenStore.clear` + cache clear + flip hasConnection
-// back to false so FirstRun re-renders. Pass
-// `PersistenceFactory.syncMetadataStore` in as `syncMetadata:` — the view
-// model reads it on `.task` via `refreshAsync()`. Deferred until
-// sync-integration lands so this slice doesn't collide with its RootView
-// rewrite.
+// Settings is mounted through `Shell.RootTabView`. The app shell owns the
+// concrete persistence/bootstrap closures because Settings only depends on
+// protocols and does not know about app-level phase transitions.
 
 import SwiftUI
 import CoreDomain
@@ -50,6 +43,7 @@ import DesignSystem
 import FeaturesExecution
 import FeaturesFirstRun
 import FeaturesHistory
+import FeaturesSettings
 import FeaturesToday
 import Persistence
 import Shell
@@ -254,10 +248,8 @@ struct RootView: View {
     // MARK: - Routed execution vs today
 
     /// Once bootstrap is done (or a DEBUG launch arg short-circuited
-    /// it) we enter the three-tab root. The History tab is the fifth
-    /// and final v1 Feature; Settings remains TODO-wired per the shell
-    /// header note. `RootTabView` lives in `Shell` — the one package
-    /// allowed to see multiple `Features/*` at once.
+    /// it) we enter the three-tab root. `RootTabView` lives in `Shell`
+    /// — the one package allowed to see multiple `Features/*` at once.
     @ViewBuilder
     private func tabbedView(
         todayVM: TodayViewModel,
@@ -266,7 +258,24 @@ struct RootView: View {
         RootTabView(
             todayVM: todayVM,
             executionHolder: executionHolder,
-            historyVM: historyVM
+            historyVM: historyVM,
+            settingsVM: makeSettingsViewModel()
+        )
+    }
+
+    private func makeSettingsViewModel() -> SettingsViewModel {
+        SettingsViewModel(
+            tokenStore: persistence.tokenStore,
+            syncMetadata: persistence.syncMetadataStore,
+            onSyncNow: { @MainActor in
+                await rerunBootstrapFromReady()
+            },
+            onResetCache: { @MainActor in
+                await resetLocalDataFromSettings()
+            },
+            onChangeServer: { @MainActor in
+                await changeServer()
+            }
         )
     }
 
@@ -283,10 +292,20 @@ struct RootView: View {
         let args = ProcessInfo.processInfo.arguments
         let forceBypass = args.contains("--start-active")
             || args.contains("--jump-rest")
+            || args.contains("--jump-transition")
             || args.contains("--jump-complete")
+            || args.contains("--debug-today-plan")
         if forceBypass {
             applyDebugLaunchArguments(args: args)
             return
+        }
+        if let serverIdx = args.firstIndex(of: "--server"),
+           serverIdx + 2 < args.count {
+            let urlStr = args[serverIdx + 1]
+            let token = args[serverIdx + 2]
+            if let url = URL(string: urlStr) {
+                try? persistence.tokenStore.saveConnection(url: url, token: token)
+            }
         }
         #endif
         do {
@@ -368,6 +387,13 @@ struct RootView: View {
                 afterLocalCompletion: { [historyVM] in
                     await historyVM.load()
                 },
+                onManualRefreshTokenRejected: {
+                    await routeBackToFirstRunForTokenRejected()
+                },
+                onEmptyTodayRefresh: {
+                    await rerunBootstrapFromReady()
+                    return true
+                },
                 historyViewModel: historyVM,
                 executionHolder: executionHolder
             )
@@ -404,6 +430,35 @@ struct RootView: View {
         }
     }
 
+    private func routeBackToFirstRunForTokenRejected() async {
+        if case .ready(_, _, let pushFlusher) = phase {
+            await pushFlusher.stop()
+        }
+        try? persistence.tokenStore.clear()
+        didStartBootstrap = false
+        phase = .firstRun(prefill: nil)
+    }
+
+    private func rerunBootstrapFromReady() async {
+        if case .ready(_, _, let pushFlusher) = phase {
+            await pushFlusher.stop()
+        }
+        didStartBootstrap = false
+        phase = .bootstrapping
+        await runBootstrap()
+    }
+
+    private func resetLocalDataFromSettings() async {
+        if case .ready(_, _, let pushFlusher) = phase {
+            await pushFlusher.stop()
+        }
+        try? await persistence.workoutCache.clear()
+        await historyVM.load()
+        didStartBootstrap = false
+        phase = .bootstrapping
+        await runBootstrap()
+    }
+
     #if DEBUG
     /// Debug-only: honor launch args like `--start-active` so screenshots
     /// can jump to a specific route without tap automation.
@@ -415,7 +470,7 @@ struct RootView: View {
     /// would show the empty state even though the save path works — making
     /// E2E screenshot verification impossible to distinguish from a bug.
     private func applyDebugLaunchArguments(args: [String]) {
-        let (todayVM, executionHolder) = buildDebugSeedViewModels()
+        let (todayVM, executionHolder) = buildDebugSeedViewModels(args: args)
         if let vm = executionHolder.vm {
             applyDebugLaunchJumps(args: args, executionVM: vm)
         }

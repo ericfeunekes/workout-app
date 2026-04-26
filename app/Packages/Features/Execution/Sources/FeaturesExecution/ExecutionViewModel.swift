@@ -157,6 +157,20 @@ public final class ExecutionViewModel {
         driver.activeContent(state: state, context: context)
     }
 
+    /// The pending SetPlan at the active cursor. Used by log-time UI so a
+    /// user can correct load before committing the set; the reducer remains
+    /// the source of truth for the value that push/history later read.
+    public var activeSetPlan: SetPlan? {
+        let c = state.cursor
+        guard let item = context.item(at: c.blockIndex, itemIndex: c.itemIndex) else {
+            return nil
+        }
+        guard let itemLog = state.items.first(where: { $0.itemID == item.id }) else {
+            return nil
+        }
+        return itemLog.sets.first(where: { $0.setIndex == c.setIndex })
+    }
+
     /// Rest duration for the current cursor (in seconds). Used by the
     /// view model itself to fire `.enterRest`; exposed here so the view
     /// can render the ring's total.
@@ -334,6 +348,7 @@ public final class ExecutionViewModel {
         apply([.start])
         enterRestIfZeroItemBlock()
         enterBlockTimerIfNeeded()
+        prepareExplicitSetStartIfNeeded()
     }
 
     /// Log the current set with the given reps + optional RIR. Fires
@@ -346,8 +361,14 @@ public final class ExecutionViewModel {
     /// fires. This matches the contract in
     /// `CoreSession/SessionMutation.swift`.
     public func logSet(reps: Int, rir: Int?) {
+        guard canLogCurrentWork() else { return }
         let c = state.cursor
+        let previousBlockIndex = c.blockIndex
         guard let item = context.item(at: c.blockIndex, itemIndex: c.itemIndex) else {
+            return
+        }
+        if isCurrentCompositeSet {
+            logCompositeSet(item: item, reps: reps, rir: rir)
             return
         }
         let event = SetLogEvent(
@@ -375,12 +396,38 @@ public final class ExecutionViewModel {
             item: item,
             postLogState: postLogState
         ))
+        completeAccumulateIfTargetReached()
+        if !enterBlockTransitionIfNeeded(from: previousBlockIndex) {
+            prepareExplicitSetStartIfNeeded()
+        }
         handleLogSetSideEffects(
             item: item,
             event: event,
             outcome: outcome,
             prescribedLoadKg: prescribedLoadKg
         )
+    }
+
+    /// Correct the active set's load and then log it. This keeps the
+    /// log-time sheet row-based without creating a separate logged-load
+    /// channel: the existing SetPlan remains authoritative for push,
+    /// history, rest "just did" pills, and completion ledger.
+    public func logSet(loadKg: Double?, reps: Int, rir: Int?) {
+        guard canLogCurrentWork() else { return }
+        let c = state.cursor
+        guard let item = context.item(at: c.blockIndex, itemIndex: c.itemIndex) else {
+            return
+        }
+        if activeSetPlan?.loadKg != loadKg {
+            editPendingSet(
+                itemID: item.id,
+                setIndex: c.setIndex,
+                loadKg: loadKg,
+                reps: nil,
+                rir: nil
+            )
+        }
+        logSet(reps: reps, rir: rir)
     }
 
     /// Accept the current proposal. The apply has already happened in
@@ -410,6 +457,10 @@ public final class ExecutionViewModel {
     /// the cursor-model rationale.
     public func advance() {
         emitSessionMutation("advance")
+        let previousBlockIndex = state.cursor.blockIndex
+        if isRoundRobinBatchRoundRest {
+            commitRoundRobinBatchRoundIfNeeded()
+        }
         // An active proposal at advance time is an implicit accept — the
         // user dismissed the banner by moving on rather than tapping undo.
         // Per `docs/features/telemetry.md`, analytics needs the
@@ -429,6 +480,11 @@ public final class ExecutionViewModel {
         // "when rest ended", NOT "when prior set completed". See
         // `SessionState.workStartedAt`.
         apply([.advanceFromRest])
+        if enterBlockTransitionIfNeeded(from: previousBlockIndex) {
+            currentProposal = nil
+            currentProposalItemID = nil
+            return
+        }
         // Any lingering proposal is moot on advance — the next set is a
         // fresh log.
         currentProposal = nil
@@ -439,6 +495,16 @@ public final class ExecutionViewModel {
         // wraps back to item 0 in a new round.
         enterTabataWorkWindowIfNeeded()
         enterBlockTimerIfNeeded()
+        prepareExplicitSetStartIfNeeded()
+    }
+
+    /// Add recovery time to the current rest window. This is intentionally
+    /// session-state, not view-local display state, so persistence / restore
+    /// and the visible timer agree after the user opts into more rest.
+    public func extendRest(by seconds: TimeInterval) {
+        guard seconds > 0, !currentRestShouldAutoAdvance else { return }
+        emitSessionMutation("extend_rest")
+        apply([.extendRest(durationSec: seconds)])
     }
 
     /// Force-complete. Available via an "End" affordance in the nav bar.
@@ -487,13 +553,17 @@ public final class ExecutionViewModel {
         itemID: UUID,
         setIndex: Int,
         loadKg: Double?,
-        reps: Int?
+        reps: Int?,
+        rir: Int? = nil,
+        startedAt: Date? = nil
     ) {
         apply([.editPendingSet(
             itemID: itemID,
             setIndex: setIndex,
             loadKg: loadKg,
-            reps: reps
+            reps: reps,
+            rir: rir,
+            startedAt: startedAt
         )])
     }
 
@@ -525,6 +595,7 @@ public struct DriverRegistry: Sendable {
             .intervals: IntervalsDriver(),
             .tabata: TabataDriver(),
             .continuous: ContinuousDriver(),
+            .accumulate: AccumulateDriver(),
             .custom: CustomDriver(),
             .rest: RestBlockDriver(),
         ]

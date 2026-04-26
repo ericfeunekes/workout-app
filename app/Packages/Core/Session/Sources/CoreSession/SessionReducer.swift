@@ -36,9 +36,12 @@ public enum SessionReducer {
         _ mutation: SessionMutation
     ) -> SessionState {
         switch mutation {
-        case .start, .enterRest, .advanceFromRest, .complete:
+        case .start, .enterRest, .extendRest, .advanceFromRest,
+             .enterTransition, .beginTransition, .complete:
             return reduceRouteMutation(state, mutation)
-        case .save, .logSet, .logCardioSet, .editPendingSet, .editPastSet, .applyAutoregProposal:
+        case .save, .logSet, .skipSet, .startCompositeSlot, .completeCompositeSlot,
+             .finalizeCompositeSet, .logCardioSet, .editPendingSet,
+             .markPendingSetStarted, .editPastSet, .applyAutoregProposal:
             return reduceSetMutation(state, mutation)
         case .swap, .holdAutoreg, .appendNote:
             return reduceItemOrNoteMutation(state, mutation)
@@ -65,8 +68,29 @@ public enum SessionReducer {
             next.workEndsAt = nil
             next.route = .rest
             return next
+        case .extendRest(let durationSec):
+            guard state.route == .rest,
+                  durationSec > 0,
+                  let restEndsAt = state.restEndsAt else {
+                return state
+            }
+            var next = state
+            next.restEndsAt = restEndsAt.addingTimeInterval(durationSec)
+            return next
         case .advanceFromRest:
             return advanceCursor(from: state)
+        case .enterTransition:
+            var next = state
+            next.route = .transition
+            next.restEndsAt = nil
+            next.workStartedAt = nil
+            next.workReadyAt = nil
+            return next
+        case .beginTransition:
+            var next = state
+            guard next.route == .transition else { return state }
+            next.route = .active
+            return next
         case .complete:
             var next = state
             next.route = .complete
@@ -93,15 +117,55 @@ public enum SessionReducer {
                 now: now
             )
             return applyLogSet(state: state, input: log)
+        case .skipSet(let itemID, let setIndex, let now):
+            return applySkipSet(
+                state: state,
+                itemID: itemID,
+                setIndex: setIndex,
+                now: now
+            )
+        case .startCompositeSlot(let itemID, let setIndex, let slotIndex, let startedAt):
+            return applyStartCompositeSlot(
+                state: state,
+                itemID: itemID,
+                setIndex: setIndex,
+                slotIndex: slotIndex,
+                startedAt: startedAt
+            )
+        case .completeCompositeSlot(let itemID, let setIndex, let now):
+            return applyCompleteCompositeSlot(
+                state: state,
+                itemID: itemID,
+                setIndex: setIndex,
+                now: now
+            )
+        case .finalizeCompositeSet(let itemID, let setIndex, let loggedReps, let loggedRir, let now):
+            let log = LogSetInput(
+                itemID: itemID,
+                setIndex: setIndex,
+                loggedReps: loggedReps,
+                loggedRir: loggedRir,
+                now: now
+            )
+            return applyFinalizeCompositeSet(state: state, input: log)
         case .logCardioSet:
             return reduceLogCardioSet(state: state, mutation: mutation)
-        case .editPendingSet(let itemID, let setIndex, let loadKg, let reps):
+        case .editPendingSet(let itemID, let setIndex, let loadKg, let reps, let rir, let startedAt):
             return applyEditPendingSet(
                 state: state,
                 itemID: itemID,
                 setIndex: setIndex,
                 loadKg: loadKg,
-                reps: reps
+                reps: reps,
+                rir: rir,
+                startedAt: startedAt
+            )
+        case .markPendingSetStarted(let itemID, let setIndex, let startedAt):
+            return applyMarkPendingSetStarted(
+                state: state,
+                itemID: itemID,
+                setIndex: setIndex,
+                startedAt: startedAt
             )
         case .editPastSet(let itemID, let setIndex, let loadKg, let reps, let rir):
             let edit = PastSetEdit(

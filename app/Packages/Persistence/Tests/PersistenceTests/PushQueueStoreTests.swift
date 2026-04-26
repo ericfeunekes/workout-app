@@ -644,4 +644,26 @@ final class PushQueueStoreTests: XCTestCase {
             XCTFail("expected statusUpdate payload")
         }
     }
+
+    func testWorkoutResetPayloadRoundTrip() async throws {
+        let factory = try makeFactory()
+        let store = factory.pushQueueStore
+
+        let workoutID = UUID()
+        let item = PushItem(
+            id: UUID(),
+            payload: .workoutReset(workoutID: workoutID),
+            enqueuedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            attempts: 0
+        )
+        try await store.enqueue(item)
+
+        let peeked = try await store.peek(max: 10)
+        XCTAssertEqual(peeked.count, 1)
+        if case .workoutReset(let wid) = peeked[0].payload {
+            XCTAssertEqual(wid, workoutID)
+        } else {
+            XCTFail("expected workoutReset payload")
+        }
+    }
 }

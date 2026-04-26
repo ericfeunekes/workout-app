@@ -1,4 +1,4 @@
-# WorkoutDB v2 — Architecture Spec
+# Setmark v2 — Architecture Spec
 
 **Date:** 2026-04-15 (accepted 2026-04-17)
 **Status:** Accepted — this is the target architecture. v1 (current Python CLI + YAML + Google Calendar) is legacy-in-transition.
@@ -86,11 +86,12 @@ A group of exercises with a timing contract. Blocks nest.
 | `superset` | `rest_between_rounds_sec` | Cycle through exercises, rest after each round |
 | `circuit` | `rest_between_exercises_sec`, `rest_between_rounds_sec` | Same as superset but more exercises |
 | `emom` | `interval_sec` (typically 60) | Minute timer, new exercise each minute |
-| `amrap` | `time_cap_sec` | Countdown timer, count rounds + reps |
+| `amrap` | `time_cap_sec` | Countdown timer; each `next` records the completed station, then finish asks for partial reps on the current station only |
 | `for_time` | `time_cap_sec` (optional) | Stopwatch, optional cap |
 | `intervals` | `work_sec` OR `work_distance_m`; `rest_sec` OR `rest_distance_m`; optional `target_pace_sec_per_km` | Work/rest alternating timer; distance- or time-based |
 | `tabata` | (fixed: work=20, rest=10, rounds=8) | Tabata timer |
 | `continuous` | `target_duration_sec?`, `target_distance_m?`, `target_pace_sec_per_km?` | Running clock, optional targets |
+| `accumulate` | `target_duration_sec?`, `target_reps?`, `target_distance_m?` | Free-rest bouts accumulated toward one total target |
 | `custom` | `segments: [{type: "work"|"rest", duration_sec, label?}]` | Arbitrary sequence of timed segments |
 | `rest` | `duration_sec` | Countdown rest block between other blocks (e.g., between metcons) |
 
@@ -135,6 +136,7 @@ An exercise placed inside a block.
 - Per-set variation (pyramids, wave loading): `{"sets_detail": [{"reps": 12, "load_kg": 60}, {"reps": 10, "load_kg": 65}, {"reps": 8, "load_kg": 70}, {"reps": 6, "load_kg": 75}]}` — when `sets_detail` is present, flat `sets/reps/load` are ignored
 - Drop sets: `{"sets_detail": [{"reps": 10, "load_kg": 20}, {"reps": "amrap", "load_kg": 15, "drop": true}, {"reps": "amrap", "load_kg": 10, "drop": true}]}` — `drop: true` tells the app to collapse the group under one rest timer
 - Cluster sets / rest-pause / myo-reps: `{"sets": 4, "reps": 5, "load_kg": 100, "sub_sets": 4, "intra_set_rest_sec": 15}` — each of the 4 top-level sets = 4 sub-sets of 5 reps with 15s rest between sub-sets; `rest_between_sets_sec` still applies between top-level sets
+- Cluster stations in round-based blocks may omit `sets`; the block `rounds` supplies the top-level count while the station keeps `sub_sets` and `intra_set_rest_sec`.
 
 Keeping this as JSON means new prescription shapes don't require schema changes. **The authoritative catalog of prescription shapes lives in `docs/prescription.md`** — that doc is the source the upstream "planning Claude" will be built against. If a shape appears in code but not in `docs/prescription.md`, the doc is wrong; fix the doc in the same commit that adds the shape.
 
@@ -300,11 +302,14 @@ GET    /api/user-parameters?key=X&since=Y     — Full history for a key since t
 **Results (App → Server):**
 
 ```
-POST   /api/sync/results       — Push completed workout data (set_logs, status changes)
-                                 Body: { set_logs: [...], status_updates: [...] }
+POST   /api/sync/results       — Push completed workout data or same-day reset requests
+                                 Body: { set_logs: [...], status_updates: [...],
+                                         workout_resets: [...] }
                                  Each set_log MUST carry the UUID the app assigned; re-pushing
                                  the same id updates in place (idempotent). Status updates bump
                                  workout.updated_at so a subsequent /api/sync/pull sees them.
+                                 Workout resets delete the workout's set_logs and return it
+                                 to planned so accidental same-day logs can be started over.
 ```
 
 **Sync (App pull):**

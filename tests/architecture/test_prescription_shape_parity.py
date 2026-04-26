@@ -41,6 +41,7 @@ EXPECTED_SHAPES = {
     "intervals",
     "tabata",
     "continuous",
+    "accumulate",
     "custom",
     "rest_block",
     # Parametric

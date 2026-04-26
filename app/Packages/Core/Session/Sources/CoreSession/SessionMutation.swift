@@ -39,9 +39,22 @@ public enum SessionMutation: Equatable, Sendable {
     /// calls inside `reduce`.
     case enterRest(durationSec: Double, now: Date)
 
+    /// Extend the current rest window by `durationSec`. Used by the rest
+    /// screen when the user intentionally wants more recovery time during
+    /// or after the prescribed rest window.
+    case extendRest(durationSec: Double)
+
     /// Rest → Active (or Rest → Complete on the last set). Advances the
     /// cursor and clears `restEndsAt`.
     case advanceFromRest
+
+    /// Active block boundary → Transition. Cursor already points at the
+    /// next block's first work unit; this only gates the setup surface.
+    case enterTransition
+
+    /// Transition → Active. Used after the user has physically set up for
+    /// the next block.
+    case beginTransition
 
     /// Force route to `.complete`. Does not clear state (the ledger
     /// surfaces the log). `.save` is the real "I'm done, clear everything"
@@ -85,6 +98,45 @@ public enum SessionMutation: Equatable, Sendable {
         now: Date
     )
 
+    /// Deliberately skip the current set. Marks the row done and skipped
+    /// without recording reps/load/RIR performance. Cursor advancement is
+    /// still handled by the Features layer through the normal rest/advance
+    /// mutations after this reducer mutation lands.
+    case skipSet(
+        itemID: WorkoutItemID,
+        setIndex: Int,
+        now: Date
+    )
+
+    /// Start a work slot inside a composed top-level set. Does not mark the
+    /// top-level `SetPlan` as done and does not trigger rest/autoreg.
+    case startCompositeSlot(
+        itemID: WorkoutItemID,
+        setIndex: Int,
+        slotIndex: Int,
+        startedAt: Date
+    )
+
+    /// Complete the current work slot inside a composed top-level set.
+    /// Non-final slots enter intra-set rest; final slots become pending
+    /// top-level log.
+    case completeCompositeSlot(
+        itemID: WorkoutItemID,
+        setIndex: Int,
+        now: Date
+    )
+
+    /// Finalize a composed top-level set into its single SetPlan / set_log
+    /// row. This is the strength sibling of `.logSet` that can stamp
+    /// duration while preserving reps/load/RIR semantics.
+    case finalizeCompositeSet(
+        itemID: WorkoutItemID,
+        setIndex: Int,
+        loggedReps: Int,
+        loggedRir: Int?,
+        now: Date
+    )
+
     /// Cardio log variant. Stamps `durationSec` / `distanceM` /
     /// `hrAvgBpm` / `cadenceAvgSpm` / `startedAt` on the SetPlan plus
     /// `done=true` and `completedAt = now`. `reps` is set to 0 (cardio
@@ -103,15 +155,26 @@ public enum SessionMutation: Equatable, Sendable {
         now: Date
     )
 
-    /// Edit a pending (not-yet-logged) set. Updates loadKg/reps (either
-    /// may be nil for "leave unchanged"), marks `adjust = .manual`.
+    /// Edit a pending (not-yet-logged) set. Updates loadKg/reps/rir/startedAt
+    /// (any may be nil for "leave unchanged"), marks `adjust = .manual`.
     /// Session-local; the workout template is not mutated (that's a
     /// Features-layer concern — Core/Session doesn't know about templates).
     case editPendingSet(
         itemID: WorkoutItemID,
         setIndex: Int,
         loadKg: Double?,
-        reps: Int?
+        reps: Int?,
+        rir: Int?,
+        startedAt: Date?
+    )
+
+    /// Stamp the work-start anchor for a pending set without marking the
+    /// set as manually adjusted. Used by batch round-robin logging where
+    /// actual rows are committed later at shared rest.
+    case markPendingSetStarted(
+        itemID: WorkoutItemID,
+        setIndex: Int,
+        startedAt: Date
     )
 
     /// Edit a past (logged) set. Corrective — does NOT retrigger autoreg.

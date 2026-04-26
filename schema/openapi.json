@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "WorkoutDB Home Server",
+    "title": "Setmark Home Server",
     "version": "0.0.1"
   },
   "paths": {
@@ -811,6 +811,7 @@
               "intervals",
               "tabata",
               "continuous",
+              "accumulate",
               "custom",
               "rest"
             ],
@@ -1694,6 +1695,13 @@
             },
             "type": "array",
             "title": "Status Updates"
+          },
+          "workout_resets": {
+            "items": {
+              "$ref": "#/components/schemas/WorkoutReset"
+            },
+            "type": "array",
+            "title": "Workout Resets"
           }
         },
         "type": "object",
@@ -2217,6 +2225,20 @@
           "blocks"
         ],
         "title": "WorkoutRead"
+      },
+      "WorkoutReset": {
+        "properties": {
+          "workout_id": {
+            "type": "string",
+            "title": "Workout Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "workout_id"
+        ],
+        "title": "WorkoutReset",
+        "description": "App tells server to erase same-day execution data for a workout.\n\nThis is the inverse of a completed-workout push: delete the set_logs\ntied to the workout tree and put the workout back into `planned` so a\nsubsequent pull does not resurrect a locally reset History row."
       },
       "WorkoutStatusUpdate": {
         "properties": {

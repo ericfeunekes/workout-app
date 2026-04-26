@@ -143,7 +143,7 @@ class Block(Base):
     __table_args__ = (
         CheckConstraint(
             "timing_mode IN ('straight_sets', 'superset', 'circuit', 'emom', 'amrap', "
-            "'for_time', 'intervals', 'tabata', 'continuous', 'custom', 'rest')",
+            "'for_time', 'intervals', 'tabata', 'continuous', 'accumulate', 'custom', 'rest')",
             name="block_timing_mode_check",
         ),
         Index("idx_block_workout", "workout_id"),

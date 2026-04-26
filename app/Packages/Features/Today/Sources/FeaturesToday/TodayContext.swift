@@ -71,3 +71,17 @@ public struct TodayContext: Sendable {
         self.sessionStateBinding = sessionStateBinding
     }
 }
+
+/// Multi-workout read model for the Today plan queue. The selected context
+/// is the default execution target; sibling contexts are still read-only
+/// previews, but the shell may rebuild execution for any visible planned
+/// workout when the user explicitly starts that card.
+public struct TodayPlanContext: Sendable {
+    public let selected: TodayContext
+    public let workouts: [TodayContext]
+
+    public init(selected: TodayContext, workouts: [TodayContext]) {
+        self.selected = selected
+        self.workouts = workouts
+    }
+}

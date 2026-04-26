@@ -280,6 +280,40 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         XCTAssertEqual(obj["setIndex"] as? Int, firstLog.setLog.setIndex)
     }
 
+    func testSameDayResetDeletesLocalLogsAndEnqueuesServerReset() async throws {
+        let (cache, firstLog) = try makeSingleLogFixture()
+        let recorder = ResetRecorder()
+        let telemetry = HistoryTelemetryRecorder()
+        let hook: HistoryWorkoutResetHook = { [recorder] workoutID in
+            await recorder.append(workoutID)
+        }
+        let vm = HistoryViewModel(
+            cache: cache,
+            calendar: utcCalendar,
+            now: { [now] in now },
+            telemetry: telemetry,
+            onWorkoutReset: hook
+        )
+        await vm.load()
+        XCTAssertTrue(vm.canResetToday(workoutID: firstLog.workoutID))
+
+        let didReset = await vm.resetWorkout(workoutID: firstLog.workoutID)
+
+        XCTAssertTrue(didReset)
+        XCTAssertTrue(cache.setLogsByWorkout[firstLog.workoutID]?.isEmpty == true)
+        XCTAssertTrue(vm.groups.isEmpty, "reset workout should leave History after reload")
+        let planned = cache.workouts.filter { $0.status == .planned }
+        XCTAssertEqual(planned.map(\.id), [firstLog.workoutID])
+        XCTAssertNil(planned[0].completedAt)
+
+        let pushed = await recorder.workoutIDs
+        XCTAssertEqual(pushed, [firstLog.workoutID])
+        XCTAssertEqual(
+            telemetry.events.filter { $0.name == "history.workout_reset" }.count,
+            1
+        )
+    }
+
     // MARK: - Fixtures
 
     /// Build a cache with one completed workout, one exercise, one
@@ -348,6 +382,14 @@ private actor EditRecorder {
 
     func append(_ log: SetLog) {
         pushed.append(log)
+    }
+}
+
+private actor ResetRecorder {
+    private(set) var workoutIDs: [UUID] = []
+
+    func append(_ workoutID: UUID) {
+        workoutIDs.append(workoutID)
     }
 }
 

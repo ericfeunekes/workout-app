@@ -30,7 +30,8 @@ actions, what remains in the current block, and what comes after the current
 block. Active, rest, and transition surfaces should be information-dense without
 filler copy.
 
-The target loop supports skip persistence, per-side logging, bodyweight edits,
+The target loop supports skip persistence, explicit unilateral work where it is
+authored as separate exercise/workout items, bodyweight edits,
 carry/distance/duration logging, current-block "what's next," superset logging
 at rest, and between-block setup through `block-transition.md`.
 
@@ -124,8 +125,10 @@ Do not regress to the old pattern where Active renders `REST 0:00` while a block
   simulator with `transition_setup`.
 - Superset logging is proven at round rest, not mid-superset.
 - Rest timer continuity requires simulator or pinned UI proof.
-- Per-side logging and carry/distance/duration logging need active/log/history
-  parity.
+- Unilateral logging and carry/distance/duration logging need
+  active/log/history parity. Do not infer unilateral grouping from
+  `set_log.side`; that field is shipped/reserved unless a later phase promotes
+  it.
 - ETA remaining remains later polish.
 - Set-index render (bug-020) closed — `formatSetRow` uses `setIndex` as-is; pipeline is 1-based throughout.
 - `SetPlan.loadKg` is now `Double?` (nil means bodyweight / loadless — bug-053). Drivers, formatters, and CompleteView+Ledger render "BW" on nil; only nil (not 0) is treated as BW so a genuine 0 lb / 0 kg authored row renders with the unit.

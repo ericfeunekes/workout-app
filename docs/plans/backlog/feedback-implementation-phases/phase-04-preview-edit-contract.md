@@ -17,13 +17,14 @@ covers:
 
 Change workout entry to preview-first, add explicit Start, make "what's next"
 include current-block remaining work, and introduce the shared SetEditSheet
-contract for preview/future/past corrections.
+shell/model for preview/future/past corrections. Editor families are
+mode-specific; a uniform sheet must not be assumed for every timing mode.
 
 ## Boundaries Touched
 
 - Today surface and workout preview route.
 - Execution "what's next" preview.
-- SetEditSheet shared UI and edit intent model.
+- SetEditSheet shared shell/model and mode-specific editor registration.
 - Execution pending/future edit path.
 - Past-set edit invariant remains preserved.
 
@@ -33,6 +34,10 @@ contract for preview/future/past corrections.
 - Phase 2 fields are preferred but not all UI affordances need to write every
   new field in this phase.
 - Past edits must mark `.manual` and never retrigger autoreg.
+- Preview-edit persistence must be built against the server's whole-tree
+  replacement + last-write-wins contract. No app-side workout PUT publisher
+  exists today; concurrency/freshness is a fresh decision when that publisher
+  lands.
 
 ## Uncertainty Reduction Summary
 
@@ -44,8 +49,8 @@ contract for preview/future/past corrections.
 ## Approach
 
 Make preview the default entry point and keep Start as the only execution
-handoff. Build one edit sheet model, then adopt it in the smallest surfaces
-needed by this phase.
+handoff. Build the shared edit vocabulary/shell first, then adopt
+mode-specific editor families only where this phase needs them.
 
 ## Steps
 
@@ -53,9 +58,9 @@ needed by this phase.
 2. Change Today tap to open preview; keep explicit Start action.
 3. Add Execution "what's next" preview that includes current-block remaining
    work before future blocks.
-4. Build `SetEditSheet` with field contracts from `docs/set-edit-sheet.md`,
-   including load, reps, RIR, bodyweight, per-side, distance, duration, and
-   carry/load-plus-distance fields.
+4. Build the SetEditSheet shell/model with field contracts from
+   `docs/set-edit-sheet.md`, including load, reps, RIR, bodyweight, side,
+   distance, duration, and carry/load-plus-distance fields.
 5. Wire preview/future pending edits where safe.
 6. Preserve existing history/past edit behavior through adapter or shared sheet.
 7. Add tests and simulator QA.
@@ -72,8 +77,9 @@ needed by this phase.
 - Today tap opens preview.
 - Start explicitly enters execution.
 - Current-block remaining appears in the "what's next" preview.
-- Shared SetEditSheet is used or the remaining legacy edit surface is documented
-  with an expiry.
+- Shared SetEditSheet shell/model exists, with mode-specific editor families
+  either implemented for this phase's surfaces or explicitly routed as current
+  gaps.
 - Simulator QA proves tap targets and flow.
 
 ## Proof Map
@@ -82,8 +88,8 @@ needed by this phase.
   - Boundary: cross-module/user flow.
   - Proves: tap opens preview, explicit start, current-block remaining order.
   - Expected: pass.
-- Check: SetEditSheet tests for load/reps/RIR/bodyweight/per-side/distance/
-  duration/carry fields.
+- Check: SetEditSheet shell/model tests for load/reps/RIR/bodyweight/side/
+  distance/duration/carry fields.
   - Boundary: UI component + pure edit model.
   - Proves: edit payloads are correct and past edit invariants hold.
   - Expected: pass.
@@ -125,6 +131,11 @@ layout except the preview sheet triggered from execution.
 - `DesignSystem.SetEditSheetModel` owns the shared edit intent vocabulary. The
   History visual sheet remains a documented adapter until the active/rest
   redesign phase can migrate all call sites together.
+- Feedback-ripple disposition: this phase should be read as the shared edit
+  vocabulary/shell phase, not proof that one visual editor covers every timing
+  mode. Straight-sets, superset, and circuit can share the strength-style
+  family; EMOM, intervals, continuous, accumulate, Tabata, custom, and rest
+  need explicit mode-specific contracts or current gaps.
 - Simulator QA artifact: `scratch/qa-runs/phase-04-preview-edit-contract.md`.
 - Codex review thread `019dcab7-c502-7a51-b540-aa11f3fabc98` is clean after the
   duplicate-row and accumulate-target fixes.
@@ -134,6 +145,10 @@ layout except the preview sheet triggered from execution.
 - Some structural edits may need narrower scope after implementation.
   - Accepted if documented as current gaps.
   - Signal: preview edit creates an execution state the reducer cannot seed.
+- App-side workout PUT publishing is not implemented.
+  - Accepted because Phase 4 delivered preview-first entry and edit vocabulary.
+  - Signal: preview edits need to persist server-side or merge with newer
+    workout trees.
 
 ## Escalation Triggers
 

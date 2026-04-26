@@ -42,7 +42,13 @@ The persisted snapshot captures everything needed to resume: `workoutID`, `route
 - `docs/architecture/hotspots.md` SwiftData transaction caveat — documented, enforced by convention + `WorkoutCacheTests`, but not lint-enforced.
 - No explicit schema version for `SessionStateCodable` bytes — if the shape changes we rely on decode failure + fresh session; data loss is bounded to the one live session.
 - **SwiftData schema is versioned** (bug-047, perf-002): `WorkoutDBSchemaV1` → `V2` (exercise defaults) → `V3` (`SetLog.workoutID` + `plannedExerciseID` denormalization) → `V4` (`PushItemModel.priority` + `dedupKey` for perf-002). V2→V3 uses a lightweight stage with a backfill that walks the surviving-items map so logs keep their workoutID reference. V3→V4 uses a lightweight stage with a backfill that decodes each row's envelope and populates the two new columns. Pinned by `SchemaMigrationTests`.
-- **Subtree reconcile** (bug-046): `WorkoutCache.save` reconciles per workout id — diff incoming vs cached blocks/items/alternatives, detach children before deleting the orphan, re-upsert. SetLogs explicitly preserved via detach-before-delete. New `loadOrphanedSetLogs()` API returns logs whose item was removed so History can still surface them.
+- **Local subtree reconcile** (bug-046): `WorkoutCache.save` reconciles per
+  workout id — diff incoming vs cached blocks/items/alternatives, detach
+  children before deleting the local orphan, re-upsert. This preserves local
+  SetLogs so History can still surface rows whose cached item was removed.
+  Server-side whole-tree PUT is different: current schema/cascade behavior
+  deletes old set logs when their parent block/item is replaced. See
+  `docs/open-questions.md` for the preservation decision.
 - **Session-persistence pipeline** (bug-043 + perf-001): every `apply(_:)` enqueues a monotonic-revision snapshot on a VM-owned `SessionPersistencePipeline` handle (replaced the `Task {}` + `ObjectIdentifier` static table). FIFO preserved; restore applies a normalization pass that re-runs `enterRestIfZeroItemBlock` / `enterBlockTimerIfNeeded` / `enterTabataWorkWindowIfNeeded` so a timer-midflight kill can't restore malformed. **Saves are coalesced**: the pipeline op carries the raw `SessionStateCodable` snapshot (not encoded bytes), and a save whose revision is below the latest-enqueued save revision is dropped before it encodes or writes. Bursts of rapid `apply()` (log → advance → edit) now produce ≤ a handful of encodes + writes rather than one per tap. Clears are still FIFO ordered against saves; they don't coalesce.
 - Persist pipeline swallows encode/save errors. In-memory state wins; bounded loss ≤ 1 mutation.
 

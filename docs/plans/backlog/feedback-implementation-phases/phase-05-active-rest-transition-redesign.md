@@ -21,12 +21,15 @@ current position, remaining work, rest progress, skip, and next-block setup.
 - Execution UI: `ActiveView`, `RestView`, transition route/screen.
 - Execution state transitions and reducer mutations for skip/advance.
 - Read models from Phase 3.
-- Persisted fields from Phase 2 for skip and side where needed.
+- Persisted fields from Phase 2 for skip. `set_log.side` is reserved; Phase 5
+  does not use it as the unilateral-work authoring model.
 - Active/log-time support for carries and duration/distance work targets.
 
 ## Dependencies And Preconditions
 
-- Phase 2 schema cutover is complete for `set_log.skipped` and `set_log.side`.
+- Phase 2 schema cutover is complete for `set_log.skipped`. `set_log.side`
+  exists as a shipped/reserved round-trip field, but Phase 5 reads/renders
+  unilateral work through exercise-level authoring rather than side grouping.
 - Phase 3 read models exist.
 - Phase 4 preview/edit contract is complete.
 - Simulator QA is required for visual/tap-target claims.
@@ -56,8 +59,9 @@ then add only the mutations required for skip and transition.
    **Done for work-block handoffs.**
 5. Add skip affordance and persist skipped logs. **Done for eligible active
    row-based routes.**
-6. Add per-side active/logging behavior where prescribed. **Deferred to the
-   execution data/history parity phase; schema foundation exists.**
+6. Add unilateral active/logging behavior where prescribed. **Deferred to the
+   execution data/history parity phase; the active authoring model is
+   exercise-level, not `set_log.side` grouping.**
 7. Add active/log-time capture for carries and duration/distance prescriptions.
    **Done for active/transition display and log-time capture; history edit parity
    remains downstream.**
@@ -91,7 +95,9 @@ then add only the mutations required for skip and transition.
 - At any moment the screen answers "what do I do now?" and "what comes next?"
 - Rest shows real progress through the block, not filler text.
 - Skip is deliberate and persisted.
-- Per-side/manual work is explicit; the app does not fake automatic completion.
+- Manual and target-owned work is explicit; the app does not fake automatic
+  completion. Unilateral work should stay explicit at the authored
+  exercise/item level until a later phase chooses a stronger taxonomy.
 
 ## Done
 
@@ -99,16 +105,16 @@ then add only the mutations required for skip and transition.
 - Timer continuity for Phase 5 routes is proven by tests or simulator
   observation.
 - Skip persists through local cache and sync payloads.
-- Per-side and history edit parity are tracked as downstream gaps, not Phase 5
-  closeout blockers.
+- Unilateral/history edit parity is tracked as a downstream gap, not a Phase 5
+  closeout blocker.
 - Carries and duration/distance work render and log during execution; later
   correction parity is tracked downstream.
 - Feature docs/gap map updated.
 
 ## Proof Map
 
-- Check: reducer and execution VM tests for skip, advance, per-side,
-  carry/duration/distance logging, transition.
+- Check: reducer and execution VM tests for skip, advance,
+  carry/duration/distance logging, transition, and explicit-start boundaries.
   - Boundary: pure state + cross-module.
   - Proves: mutations and cursor transitions are correct.
   - Expected: pass.
@@ -126,8 +132,8 @@ then add only the mutations required for skip and transition.
 - Artifact: execution redesign diff, reducer changes, tests, simulator QA.
 - Reviewer: Codex review focused on state corruption, logging ownership, and
   visual proof overclaims.
-- Reopen condition: skipped/per-side logs do not persist, or timer proof is only
-  code inspection.
+- Reopen condition: skipped logs do not persist, transition corrupts cursor/log
+  state, or timer proof is only code inspection.
 
 ## Closeout
 
@@ -169,6 +175,12 @@ correction scope here.
 - Some polish around ETA remains later.
   - Accepted because ETA is later polish.
   - Signal: user cannot complete workout without ETA.
+- Feedback-ripple disposition D1 reframed per-side behavior after this phase
+  closed.
+  - Accepted because Phase 5 completed active/rest/transition UX without using
+    `set_log.side` as a UI grouping primitive.
+  - Signal: a future plan tries to infer unilateral grouping from `set_log.side`
+    instead of exercise-level authoring or an explicit taxonomy link.
 - Test harness follow-up completed on 2026-04-26.
   - `FeaturesExecutionTests` passes through the Xcode-generated package scheme
     (`380 passed, 0 failed`).

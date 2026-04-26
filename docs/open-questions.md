@@ -29,9 +29,10 @@ Docs say v1 doesn't support delete. If a user eventually needs it, soft-delete (
 - **Disposition:** defer-to-v1.1+.
 
 ### `workout.updated_at` vs prescription-change cascade
-A PUT on a workout replaces nested blocks/items. Set logs referencing the old `workout_item_id` become orphans if the item was removed.
-- **Assumption:** orphaned set_logs are preserved and remain queryable by `workout_id`; their `workout_item_id` FK stays pointing at a deleted row (needs the FK to be nullable or the delete to be a soft-delete).
-- **Disposition:** decide-next. Either make `workout_item` soft-deletable, or forbid replacement of items that have set_logs. This affects the PUT /api/workouts contract.
+A PUT on a workout replaces nested blocks/items. The original concern was that set logs referencing removed `workout_item_id` rows might become orphans.
+- **Current behavior:** cascade delete removes set logs when their parent block/item is replaced via whole-tree PUT. The initial migration defines `set_log.workout_item_id REFERENCES workout_item(id) ON DELETE CASCADE`, and the workout update path clears old blocks before inserting the replacement tree.
+- **Assumption:** deletion is acceptable for planned-workout replacement before execution logs exist.
+- **Disposition:** decide-next if preservation is desired. Preservation is a separate schema/API decision: options include soft-deleting blocks/items, nullable FK plus archived item metadata, an archive table, or forbidding replacement of items that already have set logs.
 
 ### Alternative prescription shape cap
 An alternative can override any prescription keys. There is no validation that the override produces a shape the block's timing_mode can execute (e.g., swapping a loaded strength item into a bodyweight-reps item inside a straight_sets block).

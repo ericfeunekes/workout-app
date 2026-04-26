@@ -24,7 +24,8 @@ workflow yet.
 
 - `FeaturesExecution`: read-model builders and projection types.
 - `CoreSession`: cursor/state inputs remain pure; no UI dependency added.
-- `CorePrescription`: parsed work target and per-side metadata are consumed.
+- `CorePrescription`: parsed work target and per-implement load conventions are
+  consumed.
 - Future consumers: Preview, Active/Rest, History, Watch projection.
 
 ## Dependencies And Preconditions
@@ -62,7 +63,7 @@ watch-neutral and UI-neutral enough that Shell can later map them to watch DTOs.
 4. Replace existing direct derivation in Active/Rest only where behavior stays
    unchanged.
 5. Add fixture-heavy tests for straight sets, superset, AMRAP, rest block,
-   per-side, skip/defaults, and block intent null/non-null.
+   unilateral item variants, skip/defaults, and block intent null/non-null.
 6. Update docs with the new internal seam and ownership rule.
 
 ## Good

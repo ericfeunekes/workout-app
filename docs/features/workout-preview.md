@@ -48,8 +48,10 @@ gym context where taps are imprecise.
 
 Preview edits are planned-workout edits before a session starts. They can change
 values that are safe to seed into execution, such as load, reps, RIR target,
-duration, distance, bodyweight, side, or carry/load details when the authored
-prescription supports them.
+duration, distance, bodyweight, or carry/load details when the authored
+prescription supports them. Unilateral work stays at the authored
+exercise/workout-item level; preview does not choose left/right variants or
+perform local exercise selection.
 
 Preview edits must not become app-side programming logic. If the desired change
 is workout design rather than execution setup, the app should surface a Claude
@@ -60,6 +62,10 @@ handoff instead of inventing a local plan mutation.
 - No local workout programming, periodization, or exercise selection.
 - No server sync from the preview unless a later selected phase explicitly owns
   planned-workout mutation.
+- No app-side workout PUT publisher exists today. Server-side workout mutation
+  uses whole-tree replacement with last-write-wins semantics; when preview
+  persistence is built, concurrency/freshness is a fresh decision rather than an
+  inherited sync guarantee.
 - No automatic start from card body tap.
 - No Watch-specific layout here.
 
@@ -67,6 +73,9 @@ handoff instead of inventing a local plan mutation.
 
 - Today card-body entry is preview-first; Start is an explicit preview action.
 - Preview editability is not proven for all target fields.
+- Preview edit persistence is not implemented. Any future publisher must be
+  built against the server's whole-tree replacement contract and must decide how
+  to handle stale local previews versus newer server workout trees.
 - Preview still uses Today's read-side block detail instead of directly
   importing `ExecutionProjection`; that preserves the feature-package boundary
   that only Shell may compose sibling features. Execution-side preview work now

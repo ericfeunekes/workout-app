@@ -102,11 +102,14 @@ Keep the pass lean. Do not implement app behavior, do not start schema migration
 4. Rewrite existing feature docs.
    - Rewrite `docs/features/execute-loop.md` to target shape.
    - Rewrite `docs/features/today.md`, `docs/features/past-set-edit.md`, and `docs/features/history.md` as target contracts with explicit `Current gaps`.
-   - Update `docs/prescription.md` with `## Block intent`, the `block.intent` authoring rule, per-side `set_log.side` semantics, and the new target/current documentation doctrine.
+   - Update `docs/prescription.md` with `## Block intent`, the `block.intent`
+     authoring rule, exercise-level unilateral authoring, the reserved
+     `set_log.side` field, and the new target/current documentation doctrine.
    - Split `post-workout-edit.md` only if the rewritten `history.md` lands within 10 lines of the 200-line smell threshold in either direction; otherwise fold post-workout edit into `history.md`.
 5. Draft the schema cutover backlog plan.
    - Add `docs/plans/backlog/plan_schema-2026-04-26-skipped-side-intent.md`.
-   - Include migration scope, read semantics for per-side aggregates, block-intent null policy, proof map, and escalation triggers.
+   - Include migration scope, the reserved `set_log.side` field, block-intent
+     null policy, proof map, and escalation triggers.
    - Keep it out of `docs/plans/active/`.
 6. Validate and review.
    - Run the proof map below.
@@ -115,7 +118,9 @@ Keep the pass lean. Do not implement app behavior, do not start schema migration
 
 ## Completion Milestones
 
-- [x] Verify sweep complete and reflected in feedback spec plus gap map.
+- [ ] Verify sweep deferred to
+  `docs/plans/backlog/feedback-verify-sweep-2026-04-25.md`; do not treat
+  feedback items needing simulator/UI proof as resolved until that plan runs.
 - [x] Doctrine/routing docs updated.
 - [x] New docs written.
 - [x] Existing feature docs rewritten.

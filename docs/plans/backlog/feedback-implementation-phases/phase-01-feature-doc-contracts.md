@@ -71,7 +71,8 @@ reverse-engineering the app.
 - `docs/feature-gap-map.md` maps each feedback item to a current gap, resolved
   item, later polish, or future design route.
 - `docs/QA.md` defines what `verified` means.
-- `docs/prescription.md` owns block intent and per-side authoring vocabulary.
+- `docs/prescription.md` owns block intent, unilateral authoring, and
+  per-implement load vocabulary.
 - No feedback item is left orphaned because it feels like "later."
 
 ## Done
@@ -117,8 +118,19 @@ reverse-engineering the app.
   route.
 - Phase 1 closed in `docs/plans/active/feature-docs-feedback-contracts.md` with
   docs checks and Codex review complete.
+- Feedback-ripple follow-up, captured after this phase closed, found transition
+  cleanup that should not reopen Phase 1 implementation:
+  - the `[verify]` sweep remains owed as its own timeboxed session;
+  - stale per-side wording must be reframed around exercise-level unilateral
+    authoring;
+  - feature docs must avoid implying audit-grade edit provenance until that
+    structural unit exists.
+  The owning plan is
+  `docs/plans/backlog/feedback-implementation-phases/transition-feedback-ripple-alignment.md`.
 
 ## Recovery Context
 
 Resume from `docs/plans/active/feature-docs-feedback-contracts.md`, then check
-this file for the durable phase contract and downstream phase alignment.
+this file for the durable phase contract and downstream phase alignment. If the
+feedback-ripple transition is still open, complete or explicitly defer it before
+Phase 6 or Watch work continues.

@@ -1,8 +1,8 @@
 ---
-title: Schema cutover — skipped side intent
-status: backlog
+title: Superseded schema cutover — skipped side intent
+status: superseded
 last_reviewed: 2026-04-26
-purpose: Backlog implementation plan for adding skipped set logs, side-aware logging, and block intent across server, schema, app, sync, and docs.
+purpose: Superseded backlog implementation plan for adding skipped set logs, the reserved side round-trip field, and block intent across server, schema, app, sync, and docs.
 covers:
   - server/workoutdb_server/models.py
   - server/db/migrations/
@@ -14,6 +14,15 @@ covers:
 ---
 
 # Schema Cutover — Skipped / Side / Intent
+
+Superseded by completed Phase 2:
+`docs/plans/backlog/feedback-implementation-phases/phase-02-schema-cutover-foundation.md`
+and commit `b81ab85`.
+
+Feedback-ripple disposition D1 keeps the shipped `set_log.side` field as a
+reserved round-trip field. It is not the active authoring model for unilateral
+work; unilateral work is authored with separate exercise/workout items unless a
+future phase deliberately promotes `set_log.side`.
 
 ## Unit statement
 
@@ -40,7 +49,8 @@ This is a complete cutover, not a compatibility layer.
 - `side` values are `left`, `right`, or `bilateral`; no `n/a` value.
 - New Claude-authored blocks should include `block.intent`, but server accepts
   null and the app renders no placeholder when null.
-- Per-side aggregates must not double-count bilateral work as two sides.
+- Aggregate semantics must not infer left/right grouping from the reserved
+  `side` field unless a later taxonomy phase explicitly promotes it.
 
 ## Proof map
 
@@ -64,4 +74,5 @@ This is a complete cutover, not a compatibility layer.
 
 - A fourth persisted field becomes necessary.
 - SwiftData migration cannot be lightweight for local set logs.
-- Server aggregate semantics for side-aware logs remain ambiguous.
+- A later taxonomy phase deliberately promotes `set_log.side` from reserved
+  round-trip field to active grouping/analytics semantics.

@@ -14,8 +14,10 @@ covers:
 
 ## Target behavior
 
-`SetEditSheet` is the shared UI contract for editing workout values. It should
-feel like one sheet even when different call sites expose different field sets.
+`SetEditSheet` is the shared shell and intent model for editing workout values.
+It should feel like one surface while allowing mode-specific editor families for
+strength rows, scored work, cardio targets, carries, and other timing-mode
+shapes.
 
 The sheet is context-sensitive:
 
@@ -33,7 +35,7 @@ allows them:
 - reps
 - RIR, including clear/unknown
 - bodyweight
-- side: `left`, `right`, `bilateral`
+- side, only when an explicit caller owns that shipped/reserved field
 - distance
 - duration
 - carry/load-plus-distance details
@@ -41,11 +43,20 @@ allows them:
 Fields that do not apply to the source prescription should be absent, not
 disabled filler.
 
+Editor families are mode-specific. Straight sets, supersets, and circuits can
+share a strength-style editor. EMOM, intervals, continuous, accumulate, Tabata,
+custom, scored, rest, and loaded carry contexts need explicit field families or
+documented current gaps; do not force them through one visual form just because
+the shell/model can express the fields.
+
 ## Invariants
 
 - Past corrections mark the row manual and never retrigger autoreg.
 - History edits update the existing logical set log instead of creating a
   duplicate row.
+- History edits are same-row overwrite under the current schema. They do not
+  create an audit-grade field-diff trail unless a later structural unit adds
+  that provenance.
 - Leaving a field untouched preserves the existing value.
 - Clearing a value is explicit when the field supports it.
 - The sheet emits edit intents; callers own persistence and sync side effects.
@@ -62,16 +73,18 @@ disabled filler.
 
 - `DesignSystem.SetEditSheetModel` now defines the shared edit intent contract
   for load, reps, RIR, bodyweight, side, distance, duration, and carry fields.
+  Side remains a shipped/reserved field, not the active unilateral authoring
+  model.
 - Existing visual edit surfaces are still split across preview/detail, active
   rest pills, and the History `EditSetSheet`.
 - History's legacy sheet must migrate onto the shared contract or be deleted by
-  the active/rest redesign phase; until then, it remains the compatibility
+  the Phase 6/history-edit work; until then, it remains the compatibility
   adapter for past corrections.
 - Apply-to-remaining scope for preview/future and active setup edits is not yet
   implemented or proven.
-- Distance, duration, side, bodyweight, and carry fields are contract-tested at
-  the shared model layer but do not yet have unified visual proof across active,
-  preview, and history contexts.
+- Distance, duration, bodyweight, side, and carry fields are contract-tested at
+  the shared model layer but do not yet have visual proof across their
+  mode-specific active, preview, and history contexts.
 - Visual proof is required for small-phone layout and disabled/available field
   contrast.
 

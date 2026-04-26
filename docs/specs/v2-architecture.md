@@ -130,7 +130,9 @@ An exercise placed inside a block.
 - Time-based: `{"duration_sec": 45}` (e.g. plank hold within a circuit)
 - Distance: `{"distance_m": 400, "target_pace_sec_per_km": 270}`
 - Rep range: `{"sets": 3, "reps_min": 8, "reps_max": 12, "load_kg": 70}`
-- Per-side: `{"sets": 3, "reps": 10, "per_side": true}`
+- Unilateral: author left/right variants as separate exercise/workout items when
+  actuals matter, with `load_kg` interpreted as per-implement load; see
+  `docs/prescription.md`.
 - Percentage-based: `{"sets": 5, "reps": 3, "percent_1rm": 0.85}` — app resolves from user_parameters
 - Tempo (eccentric-bottom-concentric-top): `{"sets": 4, "reps": 5, "load_kg": 80, "tempo": "3-0-1-0"}`
 - Per-set variation (pyramids, wave loading): `{"sets_detail": [{"reps": 12, "load_kg": 60}, {"reps": 10, "load_kg": 65}, {"reps": 8, "load_kg": 70}, {"reps": 6, "load_kg": 75}]}` — when `sets_detail` is present, flat `sets/reps/load` are ignored
@@ -176,7 +178,7 @@ What actually happened. One row per set performed.
 | `rir` | Int? | Reps in Reserve (0–5 scale). 0 = failure, 5 = very easy. See `docs/prescription.md` § "RIR" for the full scale and `docs/decisions/ADR-2026-04-17-rir-autoreg-sync.md` for why this replaced RPE. |
 | `is_warmup` | Bool | |
 | `skipped` | Bool | True when the user explicitly skipped the planned work unit. Existing/migrated rows default false. |
-| `side` | Enum | `left`, `right`, or `bilateral`. Existing/migrated rows default `bilateral`; full per-side UX and aggregation live in later feature phases. |
+| `side` | Enum | `left`, `right`, or `bilateral`. Existing/migrated rows default `bilateral`. This is a shipped/reserved round-trip field, not the active unilateral authoring model; app UX and analytics must not infer left/right grouping from it unless a later taxonomy phase explicitly promotes the field. |
 | `started_at` | Timestamp? | When the user tapped "start set" or the timed set began (watch) |
 | `completed_at` | Timestamp | |
 | `hr_avg_bpm` | Integer? | Average HR during the set (from HealthKit) |

@@ -26,8 +26,10 @@ completed sessions, let the user inspect work by session or exercise, and allow
 post-workout correction for every logged field that the app can capture during
 execution.
 
-Corrections update the existing logical log row, preserve provenance as a
-manual correction, and never retrigger autoreg.
+Corrections update the existing logical log row, mark the row as a manual
+correction where that field exists, and never retrigger autoreg. They are not
+audit-grade today: the current server contract overwrites the row in place and
+does not store a field-level edit trail.
 
 ## Current implementation
 `HistoryViewModel.load()` pulls completed workouts (limit 200) from `WorkoutCache.loadCompletedWorkouts` newest-first by `completedAt` (`WorkoutCache+History.swift:39`), plus their set_logs and item lookups, into `rawSessions` (`HistoryViewModel+Load.swift:34`). Derivation filters by `activeSplit`, groups by `(year, weekOfYear)` into `WeekGroup`s with headers "THIS WEEK" / "LAST WEEK" / "APR · WEEK 15" (`HistoryViewModel+Derivation.swift:198`). `HistoryListView` renders groups in a `DSCard` of `NavigationLink(value: workoutID)` rows (`HistoryListView.swift:74`). Tap → `HistorySessionDetailView` bound to a `SessionDetailViewModel` that buckets set_logs by `performedExerciseID ?? plannedExerciseByItem[itemID] ?? workoutItemID` (`SessionDetailViewModel.swift:116`) and renders "N · weight × reps · RIR" set rows (`:146`). A "BY EXERCISE →" chip flips `tab` to `.byExercise` → current-program-first picker → per-exercise detail with `TrendComputation.compute` producing "↑ 12.5 KG / 12 WK" (`TrendComputation.swift:82`).
@@ -55,10 +57,18 @@ manual correction, and never retrigger autoreg.
 ## Current gaps
 
 - Full-field post-workout correction is not complete until the shared edit
-  surface covers load, reps, RIR, bodyweight, side, distance, duration, and
-  carry/load-plus-distance details.
-- Per-side history display and aggregate semantics require the schema cutover.
+  shell covers load, reps, RIR, bodyweight, distance, duration, skipped state,
+  and carry/load-plus-distance details for the relevant mode-specific editor
+  families.
+- Unilateral history display should use exercise-level identity unless a later
+  taxonomy phase adds a stronger canonical link between left/right variants.
+  `set_log.side` exists as a shipped/reserved field, not the active history
+  grouping model.
 - Duration/distance/carry corrections need parity with active logging.
+- Post-workout correction is same-row overwrite and is not audit-grade: there is
+  no `set_log.updated_at`, no field-diff telemetry event, no durable History
+  edit log, and event-log retention is not enough to reconstruct corrections
+  indefinitely.
 - Block intent display depends on `block.intent` and should render nothing when
   intent is null.
 - Set-index render bug (bug-020) closed — `formatSetRow` now uses `setIndex` as-is; runtime pipeline is 1-based throughout.

@@ -16,7 +16,7 @@ Claude authors workouts. The server stores them. The app executes them. This doc
 Scope:
 - **RIR scale** and **autoregulation** — how the app adapts load mid-session.
 - **Per-mode prescriptions** — what keys each of the 12 timing modes reads.
-- **Parametric shapes** — reusable shapes (percent_1rm, tempo, drop, cluster, per-side, ranges, per-set variation) that layer onto any mode.
+- **Parametric shapes** — reusable shapes (percent_1rm, tempo, drop, cluster, unilateral/per-implement load conventions, ranges, per-set variation) that layer onto any mode.
 
 See also:
 - `docs/specs/v2-architecture.md` for the entity schema.
@@ -535,13 +535,29 @@ App resolves the load by reading the latest `1rm_<exercise_slug>_kg` user_parame
 
 App displays "8–12 reps @ 70 kg". Autoreg undershoot triggers on `actual < reps_min − undershoot_at`; overshoot triggers as usual on RIR.
 
-### Per-side
+### Unilateral / per-implement load work
 
 ```jsonc
-{ "sets": 3, "reps": 10, "per_side": true, "load_kg": 20 }
+{ "sets": 3, "reps": 10, "load_kg": 20 }
 ```
 
-App displays "3 × 10/side @ 20 kg". **`load_kg` is per-implement** — for per-side work the number is what each hand (or each foot, each dumbbell) is holding, not the sum across sides. A 20 kg dumbbell single-arm row means `load_kg: 20` per side; total work done is 40 kg over two sides but the prescription carries the per-side value. Logs `reps` as the per-side count (not doubled). Target logging records side explicitly: `set_log.side = left`, `right`, or `bilateral`; `bilateral` means both sides worked together and is the default for non-per-side work. Server analytics collapse left/right pairs into the intended set before aggregate calculations.
+Author unilateral work as separate exercise/workout items when left and right
+actuals matter, for example `DB Row (Left)` and `DB Row (Right)`. The app then
+logs each side as its own explicit work item instead of hiding asymmetry inside
+one ambiguous set row.
+
+**`load_kg` is per-implement** — for unilateral work the number is what each
+hand, foot, dumbbell, or side-specific implement carries, not the sum across
+sides. A 20 kg dumbbell single-arm row means `load_kg: 20` for that side; total
+work across left and right may be 40 kg, but each authored item carries the
+per-implement value. Logs `reps` as the performed count for that authored item, not a
+doubled aggregate.
+
+`set_log.side` exists as a shipped/reserved round-trip field with values
+`left`, `right`, and `bilateral`; `bilateral` is the default for normal
+both-sides-together work. It is not the active authoring model, and analytics
+must not infer left/right grouping from it unless a later taxonomy phase
+explicitly promotes the field.
 
 ### Bodyweight and weighted bodyweight
 
@@ -653,12 +669,12 @@ Whole-item flag for a separate warm-up item:
 
 ```jsonc
 // Original item: 4 × 5 barbell bench @ 102.5 kg
-// Alternative: dumbbell bench press — higher reps, lower per-side load
+// Alternative: dumbbell bench press — higher reps, lower per-implement load
 {
   "exercise_id": "<dumbbell-bench-uuid>",
   "reason": "bench platform taken",
   "parameter_overrides_json": {
-    "sets": 3, "reps": 10, "load_kg": 32.5, "per_side": true,
+    "sets": 3, "reps": 10, "load_kg": 32.5,
     "target_rir": 2
   }
 }
@@ -666,7 +682,7 @@ Whole-item flag for a separate warm-up item:
 
 On swap, the app merges the override onto the original prescription (override keys win). `autoreg` can be overridden too — if the alternative wants different steps (machine → stack-based), set `autoreg` in the override.
 
-**`sets` override scope (R2.8).** The `sets` key is honored only for blocks whose advancement is **set-major** — `straight_sets`, `custom`, `intervals`, `continuous`. Round-robin blocks (`superset`, `circuit`, `amrap`, `emom`, `tabata`, `for_time`) replicate a single `rounds` count across every item, so rewriting one item's row count would either skew the cursor walk or silently collapse the whole block. `accumulate` also drops `sets` because target completion, not row count, owns the exit. On those blocks the app **drops** the `sets` portion of the override and applies the rest of the keys (`reps`, `load_kg`, `weight_unit`, `target_rir`, `per_side`, `autoreg`) unchanged. If Claude needs to change the round count for a round-robin block, edit the block's `rounds` in the next planned workout rather than smuggling it through an alternative's `sets` override. The drop is surfaced via the `execution.swap_sets_override_rejected` telemetry event so authoring drift is visible.
+**`sets` override scope (R2.8).** The `sets` key is honored only for blocks whose advancement is **set-major** — `straight_sets`, `custom`, `intervals`, `continuous`. Round-robin blocks (`superset`, `circuit`, `amrap`, `emom`, `tabata`, `for_time`) replicate a single `rounds` count across every item, so rewriting one item's row count would either skew the cursor walk or silently collapse the whole block. `accumulate` also drops `sets` because target completion, not row count, owns the exit. On those blocks the app **drops** the `sets` portion of the override and applies the rest of the keys (`reps`, `load_kg`, `weight_unit`, `target_rir`, `autoreg`) unchanged. If Claude needs to change the round count for a round-robin block, edit the block's `rounds` in the next planned workout rather than smuggling it through an alternative's `sets` override. The drop is surfaced via the `execution.swap_sets_override_rejected` telemetry event so authoring drift is visible.
 
 **Unit inheritance on overrides (R2.10).** Alternative overrides treat `weight_unit` as fully optional. When the override carries `weight_unit`, it wins; when it omits the key, the override's `load_kg` inherits the parent SetPlan's unit. This matches the real-world case: swapping a barbell bench (authored in lb) for a dumbbell bench press usually keeps the same unit. Claude should only declare `weight_unit` on an override when the alternative is fundamentally different equipment (e.g., a machine with a kg stack substituting for a pound-authored free-weight lift).
 

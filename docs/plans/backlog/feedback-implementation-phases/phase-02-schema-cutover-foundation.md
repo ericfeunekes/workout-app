@@ -2,7 +2,7 @@
 title: Phase 2 — schema cutover foundation implementation plan
 status: completed
 last_reviewed: 2026-04-26
-purpose: Implement the coordinated schema foundation for skip persistence, per-side logging, and block intent.
+purpose: Implement the coordinated schema foundation for skip persistence, a reserved side field, and block intent.
 covers:
   - server/workoutdb_server/models.py
   - server/workoutdb_server/api/schemas.py
@@ -23,7 +23,8 @@ covers:
 
 Land one coordinated data-model cutover for `set_log.skipped`,
 `set_log.side`, and `block.intent` across server, shared schema, SwiftData,
-sync payloads, domain models, tests, and docs.
+sync payloads, domain models, tests, and docs. `set_log.side` is a shipped
+round-trip field, not the active unilateral-work authoring model.
 
 ## Boundaries Touched
 
@@ -78,7 +79,8 @@ all behavior.
 - Existing logs survive migration and read as non-skipped, bilateral.
 - New fields round-trip server -> app -> server without data loss.
 - Block intent can be null; app renders no placeholder where it is not yet used.
-- No UI phase is forced to infer per-side behavior before its own plan.
+- No UI phase is forced to infer per-side behavior from `set_log.side` before a
+  later plan deliberately promotes that field.
 
 ## Done
 
@@ -116,7 +118,7 @@ all behavior.
     schema cutover.
   - Result: passed after `clean`; stale incremental build artifacts initially
     linked old `Block` and `SetLog` initializer symbols.
-  - Risk remaining: full per-side UX is Phase 5/6.
+  - Risk remaining: full unilateral work UX and history semantics are Phase 5/6.
 
 ## Independent Review
 
@@ -132,6 +134,12 @@ all behavior.
   the existing append-only/lightweight pattern.
 - `docs/feature-gap-map.md` rows for skip, side, and intent are marked
   partially built with simulator proof.
+- Feedback-ripple disposition D1: `set_log.side` stays in the schema as a
+  shipped/reserved field. Eric's 2026-04-26 per-side correction reframed
+  unilateral authoring to exercise-level identity, so active UI, history, and
+  analytics must not use `set_log.side` as the primary model unless a later
+  phase explicitly promotes it. No migration 009 is planned just to drop the
+  field.
 - Simulator QA evidence: build/run succeeded on `WorkoutDB-Dev`
   (`22A47946-FD68-4C83-BC3C-FE62BB8E2748`); UI snapshot showed the Today screen
   and screenshot was captured at
@@ -144,9 +152,12 @@ watch behavior in this phase.
 
 ## Residual Uncertainty / Accepted Risks
 
-- Per-side aggregate semantics may need refinement under real history usage.
-  - Accepted because Phase 6 owns history UX.
-  - Signal: trend/history tests reveal misleading left/right aggregation.
+- Unilateral aggregate semantics need a future explicit model if exercise-level
+  left/right authoring is not enough for analysis.
+  - Accepted because Phase 6 owns readable history and a later taxonomy pass can
+    add canonical links between left/right exercise variants if needed.
+  - Signal: trend/history tests or real analysis need "DB Row" aggregation
+    across `DB Row (Left)` and `DB Row (Right)`.
 
 ## Escalation Triggers
 

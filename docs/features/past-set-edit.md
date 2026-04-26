@@ -53,15 +53,20 @@ Correctively edit a logged set's load, reps, or RIR. **In active session** (Rest
 
 - Active-session and History corrections are still separate sheet
   implementations; target behavior uses the shared SetEditSheet contract.
-- Distance, duration, side, bodyweight, and carry correction parity remains
-  open.
+- Distance, duration, skipped state, bodyweight, and carry correction parity
+  remains open. Side is only a shipped/reserved round-trip field unless a later
+  phase promotes it; unilateral work is authored at the exercise/workout-item
+  level.
 - Apply-to-remaining/future-set scope is target behavior for selected preview or
   active setup edits, but it is not part of completed past-log correction.
 - History-screen edit sheet shipped (bug-015) and is unit-aware (bug-051): labels per source `weightUnit`, reps capped at 999, RIR clear via explicit-clear enum state.
 - `completedAt` preservation (bug-054): `enqueueEditedSet` now carries the original `completedAt` instead of stamping edit time. The Active-session and History-tab edit paths now agree on timestamps.
 - Per-set `startedAt` provenance (bug-054): `SessionState.workStartedAt` anchor is stamped on `.start` + `.advanceFromRest`, consumed by the reducer in `.logSet` / `.logCardioSet`, and preserved through completion + edit.
 - Set-index render bug (bug-020) closed — `formatSetRow` uses `setIndex` as-is; pipeline is 1-based throughout.
-- `set_log.updated_at` still not a server column — no provenance for edits on the server side.
+- `set_log.updated_at` still not a server column, and there is no field-diff
+  telemetry event or durable History edit log. Past corrections overwrite the
+  existing logical set-log row; the current SetEditSheet `past` mode contract is
+  not audit-grade until that structural unit lands.
 
 ## QA scenarios
 

@@ -531,14 +531,14 @@ Rules:
 - Pair with RIR when progression depends on the athlete's effort.
 - Autoreg can be useful, but be explicit about whether the load should move during the current session or only in the next authored workout.
 
-### Per-side work
+### Unilateral work
 
-Use per-side metadata for lunges, split squats, carries, suitcase holds, single-arm presses, and similar work.
+Author unilateral variants as explicit exercise/workout items for lunges, split squats, carries, suitcase holds, single-arm presses, and similar work when left/right actuals matter.
 
 Rules:
 
-- Make the side expectation explicit in prescription or notes.
-- If left/right actuals may differ materially, use notes or a shape that preserves side-level meaning. Do not hide asymmetry inside one ambiguous number.
+- Make the side expectation explicit in the exercise identity or workout item.
+- Treat `load_kg` as per-implement load for the authored item. Do not hide meaningful left/right asymmetry inside one ambiguous number.
 
 ### Tempo
 

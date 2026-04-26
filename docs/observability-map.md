@@ -58,7 +58,7 @@ This doc is the matrix. A "✓" means that layer records this action; "—" mean
 | Advance from rest (auto or tap next) | route: rest → active (or complete if last); cursor advances; `workStartedAt` re-stamped | — | — | — | `execution.session_mutation (advance)` ✓ |
 | Tap past-set pill in Rest, edit reps/rir | SetPlan[idx] mutated; original `completedAt` preserved | — | re-enqueued with **same deterministic UUID** → server upsert | server updates same SetLog row | `execution.past_set_edited` ✓ |
 | Long-press exercise → swap alternative | `.swap` mutation: item's `overrides` set; reps/loadKg applied to non-done sets | — | — | (next log_set push carries `performed_exercise_id`) | `execution.exercise_swap` ✓ |
-| Long-press + swap with `parameter_overrides_json` | `overrides: { sets, reps, load_kg, target_rir, per_side, autoreg }` stored on ItemLog | — | — | — | `execution.exercise_swap (hadOverrides: true)` ✓ |
+| Long-press + swap with `parameter_overrides_json` | `overrides: { sets, reps, load_kg, weight_unit, target_rir, autoreg }` stored on ItemLog | — | — | — | `execution.exercise_swap (hadOverrides: true)` ✓ |
 | Swap with `sets` override on round-robin block | Reducer drops `sets` portion; other keys apply | — | — | — | `execution.swap_sets_override_rejected (item_id, block_index, advancement_mode)` ✓ |
 | Multi-item Tabata seeded | Seeder collapses to `items[0]` | — | — | — | `execution.tabata_multi_item_collapsed` ✓ |
 | Tap "skip" on RIR sheet | SetPlan[idx].rir = nil, done=true | — | `.setLogs(SetLog)` with rir=nil enqueued | on flush: upsert with rir=NULL | `execution.session_mutation (logSet)` ✓ |

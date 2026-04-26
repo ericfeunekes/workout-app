@@ -54,7 +54,7 @@ A tour of the main patterns I'd ask Claude to program, grouped by dominant train
 | Rest-pause | `Press — 1 set of 10 reps, rest 15s, AMRAP, rest 15s, AMRAP` | **GAP** — intra-set rest + sub-sets |
 | Myo-reps | `Leg press — 15 activation reps, then 5 mini-sets of 5 with 5 deep breaths between` | Covered by rest-pause variant |
 | Mechanical drop set | `DB incline press → DB flat press → DB decline press, no rest, 8 reps each` | `superset` with `rest_between_rounds_sec=0` and 3 items ✓ |
-| Unilateral | `Bulgarian split squat — 3×10 per side` | prescription `{sets, reps, per_side: true}` ✓ |
+| Unilateral | `Bulgarian split squat — 3×10 per side` | left/right variants as explicit exercise/workout items when side-level actuals matter; `load_kg` remains per-implement ✓ |
 
 ### CrossFit / GPP / Metcon
 

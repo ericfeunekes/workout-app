@@ -14,6 +14,40 @@ import WorkoutCoreFoundation
 @MainActor
 final class TodayViewModelTests: XCTestCase {
 
+    func testWorkoutAccessibilityVisibilityHidesOffscreenCards() {
+        let visibleID = UUID()
+        let belowID = UUID()
+        let aboveID = UUID()
+        let frames: [UUID: CGRect] = [
+            visibleID: CGRect(x: 16, y: 120, width: 320, height: 240),
+            belowID: CGRect(x: 16, y: 950, width: 320, height: 240),
+            aboveID: CGRect(x: 16, y: -260, width: 320, height: 120),
+        ]
+
+        let visible = TodayWorkoutAccessibilityVisibility.visibleWorkoutIDs(
+            frames: frames,
+            viewport: CGRect(x: 0, y: 0, width: 402, height: 874)
+        )
+
+        XCTAssertEqual(visible, [visibleID])
+    }
+
+    func testWorkoutAccessibilityVisibilityKeepsPartiallyVisibleCards() {
+        let topClippedID = UUID()
+        let bottomClippedID = UUID()
+        let frames: [UUID: CGRect] = [
+            topClippedID: CGRect(x: 16, y: -20, width: 320, height: 120),
+            bottomClippedID: CGRect(x: 16, y: 840, width: 320, height: 120),
+        ]
+
+        let visible = TodayWorkoutAccessibilityVisibility.visibleWorkoutIDs(
+            frames: frames,
+            viewport: CGRect(x: 0, y: 0, width: 402, height: 874)
+        )
+
+        XCTAssertEqual(visible, [topClippedID, bottomClippedID])
+    }
+
     func testDerivesSummariesInBlockAndPositionOrder() {
         let userID = UUID()
         let workoutID = UUID()
@@ -94,6 +128,242 @@ final class TodayViewModelTests: XCTestCase {
         XCTAssertEqual(vm.exercises[2].prescriptionLine, "3 \u{00D7} 10 BW")
     }
 
+    func testPlanSectionsGroupMissedTodayAndUpcomingWorkouts() {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let userID = UUID()
+        let missed = makeContext(
+            userID: userID,
+            name: "Lower Body",
+            scheduledDate: now.addingTimeInterval(-86_400),
+            tagsJSON: #"["lower","strength"]"#
+        )
+        let today = makeContext(
+            userID: userID,
+            name: "Push Pull",
+            scheduledDate: now,
+            tagsJSON: #"["upper","strength"]"#
+        )
+        let tomorrow = makeContext(
+            userID: userID,
+            name: "Conditioning",
+            scheduledDate: now.addingTimeInterval(86_400),
+            tagsJSON: #"["metcon"]"#
+        )
+
+        let plan = TodayPlanContext(
+            selected: today,
+            workouts: [today, missed, tomorrow]
+        )
+        let sections = TodayViewModel.derivePlanSections(from: plan, now: now)
+
+        XCTAssertEqual(sections.map(\.kind), [.today, .missed, .upcoming])
+        XCTAssertEqual(sections[0].workouts.first?.name, "Push Pull")
+        XCTAssertEqual(sections[0].workouts.first?.badge, "ready")
+        XCTAssertEqual(sections[0].workouts.first?.tagLine, "upper · strength")
+        XCTAssertTrue(sections[0].workouts.first?.isStartable == true)
+        XCTAssertEqual(sections[1].workouts.first?.name, "Lower Body")
+        XCTAssertEqual(sections[1].workouts.first?.badge, "needs reschedule")
+        XCTAssertFalse(sections[1].workouts.first?.isStartable == true)
+        XCTAssertEqual(sections[2].workouts.first?.name, "Conditioning")
+        XCTAssertNil(sections[2].workouts.first?.badge)
+    }
+
+    func testPlanSectionsTreatScheduledDateAsUTCDateOnly() {
+        let originalTimeZone = NSTimeZone.default
+        NSTimeZone.default = TimeZone(identifier: "America/Halifax")!
+        defer { NSTimeZone.default = originalTimeZone }
+
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd"
+        let scheduledDate = formatter.date(from: "2026-04-24")!
+        let now = ISO8601DateFormatter().date(from: "2026-04-24T12:00:00Z")!
+        let context = makeContext(
+            userID: UUID(),
+            name: "Today By Wire Date",
+            scheduledDate: scheduledDate,
+            tagsJSON: nil
+        )
+
+        let sections = TodayViewModel.derivePlanSections(
+            from: TodayPlanContext(selected: context, workouts: [context]),
+            now: now
+        )
+
+        XCTAssertEqual(sections.first?.kind, .today)
+        XCTAssertEqual(sections.first?.title, "TODAY · FRI APR 24")
+    }
+
+    func testWorkoutDetailShowsBlockTimingAndAllExercises() throws {
+        let workoutID = UUID()
+        let blockID = UUID()
+        let benchID = UUID()
+        let rowID = UUID()
+        let dipsID = UUID()
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let workout = Workout(
+            id: workoutID,
+            userID: UUID(),
+            name: "Upper Superset",
+            scheduledDate: now,
+            status: .planned,
+            source: .claude,
+            notes: "Keep two reps in reserve.",
+            createdAt: now,
+            updatedAt: now,
+            completedAt: nil,
+            tagsJSON: #"["upper","density"]"#
+        )
+        let block = Block(
+            id: blockID,
+            workoutID: workoutID,
+            parentBlockID: nil,
+            position: 0,
+            name: "A-series",
+            timingMode: .superset,
+            timingConfigJSON: #"{"rest_between_rounds_sec":90}"#,
+            rounds: 3,
+            roundsRepSchemeJSON: nil,
+            notes: "Move quickly between lifts."
+        )
+        let context = TodayContext(
+            workout: workout,
+            blocks: [block],
+            items: [
+                WorkoutItem(
+                    id: UUID(),
+                    blockID: blockID,
+                    position: 0,
+                    exerciseID: benchID,
+                    prescriptionJSON: #"{"sets":3,"reps":8,"load_kg":80}"#
+                ),
+                WorkoutItem(
+                    id: UUID(),
+                    blockID: blockID,
+                    position: 1,
+                    exerciseID: rowID,
+                    prescriptionJSON: #"{"sets":3,"reps":10,"load_kg":60}"#
+                ),
+                WorkoutItem(
+                    id: UUID(),
+                    blockID: blockID,
+                    position: 2,
+                    exerciseID: dipsID,
+                    prescriptionJSON: #"{"sets":3,"reps":12}"#
+                ),
+            ],
+            exercises: [
+                benchID: Exercise(id: benchID, name: "Bench Press"),
+                rowID: Exercise(id: rowID, name: "Row"),
+                dipsID: Exercise(id: dipsID, name: "Dips"),
+            ],
+            lastPerformed: [benchID: "3×8 @ 75 kg"]
+        )
+        let vm = TodayViewModel(
+            planContext: TodayPlanContext(selected: context, workouts: [context])
+        )
+        let card = try XCTUnwrap(vm.planSections.first?.workouts.first)
+        XCTAssertEqual(card.cardBlocks.count, 1)
+        XCTAssertEqual(card.cardBlocks[0].title, "A-series")
+        XCTAssertEqual(card.cardBlocks[0].timingLabel, "superset")
+        XCTAssertEqual(card.cardBlocks[0].timingDetail, "3 rounds · rest between rounds 1:30")
+        XCTAssertEqual(card.cardBlocks[0].exercises.map(\.name), ["Bench Press", "Row"])
+        XCTAssertTrue(card.cardBlocks[0].hasMoreExercises)
+
+        let detail = try XCTUnwrap(vm.detail(for: workoutID))
+        XCTAssertEqual(detail.name, "Upper Superset")
+        XCTAssertEqual(detail.tagLine, "upper · density")
+        XCTAssertEqual(detail.notes, "Keep two reps in reserve.")
+        XCTAssertEqual(detail.blocks.count, 1)
+        XCTAssertEqual(detail.blocks[0].title, "A-series")
+        XCTAssertEqual(detail.blocks[0].timingLabel, "superset")
+        XCTAssertEqual(detail.blocks[0].timingDetail, "3 rounds · rest between rounds 1:30")
+        XCTAssertEqual(detail.blocks[0].notes, "Move quickly between lifts.")
+        XCTAssertEqual(detail.blocks[0].exercises.map(\.name), ["Bench Press", "Row", "Dips"])
+        XCTAssertEqual(detail.blocks[0].exercises.first?.lastTime, "3×8 @ 75 kg")
+    }
+
+    func testAdjustmentDraftIncludesWorkoutContext() throws {
+        let workoutID = UUID()
+        let blockID = UUID()
+        let benchID = UUID()
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let context = TodayContext(
+            workout: Workout(
+                id: workoutID,
+                userID: UUID(),
+                name: "Push Pull",
+                scheduledDate: now,
+                status: .planned,
+                source: .claude,
+                notes: "Avoid overhead pressing.",
+                createdAt: now,
+                updatedAt: now,
+                completedAt: nil,
+                tagsJSON: #"["upper"]"#
+            ),
+            blocks: [Block(
+                id: blockID,
+                workoutID: workoutID,
+                parentBlockID: nil,
+                position: 0,
+                name: "Main Strength",
+                timingMode: .straightSets,
+                timingConfigJSON: #"{"rest_between_sets_sec":120}"#,
+                rounds: nil,
+                roundsRepSchemeJSON: nil,
+                notes: nil
+            )],
+            items: [WorkoutItem(
+                id: UUID(),
+                blockID: blockID,
+                position: 0,
+                exerciseID: benchID,
+                prescriptionJSON: #"{"sets":4,"reps":5,"load_kg":100}"#
+            )],
+            exercises: [benchID: Exercise(id: benchID, name: "Bench Press")],
+            lastPerformed: [:]
+        )
+        let vm = TodayViewModel(
+            planContext: TodayPlanContext(selected: context, workouts: [context])
+        )
+        let detail = try XCTUnwrap(vm.detail(for: workoutID))
+        let draft = vm.adjustmentDraft(for: detail)
+
+        XCTAssertTrue(draft.body.contains("Please adjust this planned workout:"))
+        XCTAssertTrue(draft.body.contains("Workout: Push Pull"))
+        XCTAssertTrue(draft.body.contains("Notes: Avoid overhead pressing."))
+        XCTAssertTrue(draft.body.contains("- Main Strength (straight sets)"))
+        XCTAssertTrue(draft.body.contains("  - Bench Press — 4 × 5 @ 100 lb"))
+    }
+
+    func testRefreshActionUpdatesRefreshState() async {
+        final class CaptureBox: @unchecked Sendable {
+            var callCount = 0
+        }
+        let box = CaptureBox()
+        let context = makeContext(
+            userID: UUID(),
+            name: "Refreshable",
+            scheduledDate: Date(timeIntervalSince1970: 1_700_000_000),
+            tagsJSON: nil
+        )
+        let vm = TodayViewModel(
+            planContext: TodayPlanContext(selected: context, workouts: [context])
+        )
+        vm.setRefreshAction {
+            box.callCount += 1
+            return false
+        }
+
+        await vm.refresh()
+
+        XCTAssertEqual(box.callCount, 1)
+        XCTAssertEqual(vm.refreshState, .failed)
+    }
+
     func testUnknownExerciseDoesNotCrash() {
         let workoutID = UUID()
         let blockID = UUID()
@@ -128,6 +398,34 @@ final class TodayViewModelTests: XCTestCase {
         XCTAssertEqual(vm.exercises[0].prescriptionLine, "3 \u{00D7} 5 @ 60 lb")
     }
 
+    private func makeContext(
+        userID: UUID,
+        name: String,
+        scheduledDate: Date,
+        tagsJSON: String?,
+        workoutID: UUID = UUID()
+    ) -> TodayContext {
+        return TodayContext(
+            workout: Workout(
+                id: workoutID,
+                userID: userID,
+                name: name,
+                scheduledDate: scheduledDate,
+                status: .planned,
+                source: .claude,
+                notes: nil,
+                createdAt: scheduledDate,
+                updatedAt: scheduledDate,
+                completedAt: nil,
+                tagsJSON: tagsJSON
+            ),
+            blocks: [],
+            items: [],
+            exercises: [:],
+            lastPerformed: [:]
+        )
+    }
+
     func testStartDispatchesMutation() {
         final class CaptureBox: @unchecked Sendable {
             var captured: [SessionMutation] = []
@@ -151,6 +449,71 @@ final class TodayViewModelTests: XCTestCase {
         let vm = TodayViewModel(context: ctx)
         vm.start()
         XCTAssertEqual(box.captured, [.start])
+    }
+
+    func testStartSpecificWorkoutUsesInjectedAction() async {
+        final class CaptureBox: @unchecked Sendable {
+            var started: [WorkoutID] = []
+        }
+        let box = CaptureBox()
+        let selectedID = UUID()
+        let alternateID = UUID()
+        let selected = makeContext(
+            userID: UUID(),
+            name: "Today",
+            scheduledDate: Date(),
+            tagsJSON: nil,
+            workoutID: selectedID
+        )
+        let alternate = makeContext(
+            userID: selected.workout.userID,
+            name: "Tomorrow",
+            scheduledDate: Date().addingTimeInterval(86_400),
+            tagsJSON: nil,
+            workoutID: alternateID
+        )
+        let vm = TodayViewModel(planContext: TodayPlanContext(
+            selected: selected,
+            workouts: [selected, alternate]
+        ))
+        vm.setStartWorkoutAction { id in
+            box.started.append(id)
+            return true
+        }
+
+        await vm.start(workoutID: alternateID)
+
+        XCTAssertEqual(box.started, [alternateID])
+    }
+
+    func testPreviewStartGateRequiresSelectedWorkoutOrInjectedStarter() {
+        let selectedID = UUID()
+        let alternateID = UUID()
+        let selected = makeContext(
+            userID: UUID(),
+            name: "Today",
+            scheduledDate: Date(),
+            tagsJSON: nil,
+            workoutID: selectedID
+        )
+        let alternate = makeContext(
+            userID: selected.workout.userID,
+            name: "Tomorrow",
+            scheduledDate: Date().addingTimeInterval(86_400),
+            tagsJSON: nil,
+            workoutID: alternateID
+        )
+        let vm = TodayViewModel(planContext: TodayPlanContext(
+            selected: selected,
+            workouts: [selected, alternate]
+        ))
+
+        XCTAssertTrue(vm.canStart(workoutID: selectedID))
+        XCTAssertFalse(vm.canStart(workoutID: alternateID))
+
+        vm.setStartWorkoutAction { _ in true }
+
+        XCTAssertTrue(vm.canStart(workoutID: alternateID))
     }
 
     // MARK: - Reload (bug-036)
@@ -472,33 +835,33 @@ private final class MutableFakeCache: WorkoutCache, @unchecked Sendable {
     }
 
     func markCompleted(workoutID: UUID) {
-        lock.lock()
-        defer { lock.unlock() }
-        workouts = workouts.map { workout in
-            guard workout.id == workoutID else { return workout }
-            return Workout(
-                id: workout.id,
-                userID: workout.userID,
-                name: workout.name,
-                scheduledDate: workout.scheduledDate,
-                status: .completed,
-                source: workout.source,
-                notes: workout.notes,
-                createdAt: workout.createdAt,
-                updatedAt: workout.updatedAt,
-                completedAt: Date(),
-                tagsJSON: workout.tagsJSON
-            )
+        lock.withLock {
+            workouts = workouts.map { workout in
+                guard workout.id == workoutID else { return workout }
+                return Workout(
+                    id: workout.id,
+                    userID: workout.userID,
+                    name: workout.name,
+                    scheduledDate: workout.scheduledDate,
+                    status: .completed,
+                    source: workout.source,
+                    notes: workout.notes,
+                    createdAt: workout.createdAt,
+                    updatedAt: workout.updatedAt,
+                    completedAt: Date(),
+                    tagsJSON: workout.tagsJSON
+                )
+            }
         }
     }
 
     func save(_ dataset: PulledDataset) async throws {}
 
     func loadWorkouts(status: WorkoutStatus?, since: Date?) async throws -> [Workout] {
-        lock.lock()
-        defer { lock.unlock() }
-        guard let status else { return workouts }
-        return workouts.filter { $0.status == status }
+        lock.withLock {
+            guard let status else { return workouts }
+            return workouts.filter { $0.status == status }
+        }
     }
 
     func loadBlocks(workoutID: WorkoutID) async throws -> [Block] {
@@ -557,13 +920,15 @@ private final class MutableFakeCache: WorkoutCache, @unchecked Sendable {
 
     func saveSetLogs(_ setLogs: [SetLog], workoutID: WorkoutID) async throws {}
 
+    func resetWorkout(workoutID: WorkoutID) async throws {}
+
     func saveWorkout(_ workout: Workout) async throws {
-        lock.lock()
-        defer { lock.unlock() }
-        if let idx = workouts.firstIndex(where: { $0.id == workout.id }) {
-            workouts[idx] = workout
-        } else {
-            workouts.append(workout)
+        lock.withLock {
+            if let idx = workouts.firstIndex(where: { $0.id == workout.id }) {
+                workouts[idx] = workout
+            } else {
+                workouts.append(workout)
+            }
         }
     }
 
@@ -585,14 +950,12 @@ private final class FakeLastPerformedStore: LastPerformedStore, @unchecked Senda
     }
 
     func load() async -> [UUID: String] {
-        lock.lock()
-        defer { lock.unlock() }
-        return entries
+        lock.withLock { entries }
     }
 
     func save(_ entries: [UUID: String]) async {
-        lock.lock()
-        defer { lock.unlock() }
-        self.entries = entries
+        lock.withLock {
+            self.entries = entries
+        }
     }
 }

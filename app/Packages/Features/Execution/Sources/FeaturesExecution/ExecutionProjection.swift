@@ -146,6 +146,7 @@ public struct ExecutionProjection: Equatable, Sendable {
     public let currentTask: CurrentTaskPresentation
     public let remainingWork: RemainingWorkPresentation
     public let upcomingWork: UpcomingWorkPresentation?
+    public let workQueue: [UpcomingWorkPresentation]
     public let blockProgress: BlockProgressPresentation?
     public let editability: ExecutionEditability
     public let timer: ExecutionTimerPresentation?
@@ -154,6 +155,7 @@ public struct ExecutionProjection: Equatable, Sendable {
         currentTask: CurrentTaskPresentation,
         remainingWork: RemainingWorkPresentation,
         upcomingWork: UpcomingWorkPresentation?,
+        workQueue: [UpcomingWorkPresentation] = [],
         blockProgress: BlockProgressPresentation?,
         editability: ExecutionEditability,
         timer: ExecutionTimerPresentation?
@@ -161,6 +163,7 @@ public struct ExecutionProjection: Equatable, Sendable {
         self.currentTask = currentTask
         self.remainingWork = remainingWork
         self.upcomingWork = upcomingWork
+        self.workQueue = workQueue
         self.blockProgress = blockProgress
         self.editability = editability
         self.timer = timer
@@ -173,6 +176,7 @@ extension ExecutionViewModel {
             currentTask: currentTaskPresentation(),
             remainingWork: remainingWorkPresentation(),
             upcomingWork: upcomingWorkPresentation(),
+            workQueue: workQueuePresentation(),
             blockProgress: blockProgressPresentation(),
             editability: executionEditability(),
             timer: timerPresentation(now: now)
@@ -329,6 +333,86 @@ extension ExecutionViewModel {
         }
     }
 
+    private func workQueuePresentation() -> [UpcomingWorkPresentation] {
+        guard state.route == .today || state.route == .active || state.route == .rest else {
+            return []
+        }
+
+        var rows: [UpcomingWorkPresentation] = []
+        if let blockProgress = blockProgressPresentation(),
+           blockProgress.remainingSets > 0 {
+            rows.append(UpcomingWorkPresentation(
+                label: "current block",
+                title: blockProgress.blockName ?? "Current block",
+                detail: "\(blockProgress.remainingSets) \(blockProgress.remainingSets == 1 ? "set" : "sets") left"
+            ))
+        }
+
+        let upcoming = upcomingWorkPresentation()
+        if let upcoming {
+            rows.append(upcoming)
+        }
+
+        if let future = firstFutureBlockPresentation(),
+           upcoming?.label != "next block" {
+            rows.append(future)
+        }
+        return rows
+    }
+
+    private func firstFutureBlockPresentation() -> UpcomingWorkPresentation? {
+        let nextBlockIndex = state.cursor.blockIndex + 1
+        guard nextBlockIndex < state.structure.itemsPerBlock.count else {
+            return nil
+        }
+        let futureCursor = SessionState.Cursor(
+            blockIndex: nextBlockIndex,
+            itemIndex: 0,
+            setIndex: 1
+        )
+        return previewPresentation(for: futureCursor, label: "future block")
+    }
+
+    private func previewPresentation(
+        for cursor: SessionState.Cursor,
+        label: String
+    ) -> UpcomingWorkPresentation? {
+        if isZeroItemBlock(at: cursor.blockIndex) {
+            return UpcomingWorkPresentation(
+                label: label,
+                title: context.block(at: cursor.blockIndex)?.name ?? "Rest block",
+                detail: nil
+            )
+        }
+        var previewState = state
+        previewState.cursor = cursor
+        guard let block = context.block(at: cursor.blockIndex),
+              let content = driverRegistry
+                .driver(for: block.timingMode)
+                .activeContent(state: previewState, context: context) else {
+            return nil
+        }
+        let nextUp = ExecutionNextUpPresentation(
+            label: label,
+            title: content.exerciseName,
+            detail: previewDetail(for: content)
+        )
+        return UpcomingWorkPresentation(
+            label: nextUp.label,
+            title: nextUp.title,
+            detail: nextUp.detail
+        )
+    }
+
+    private func previewDetail(for content: ActiveContent) -> String {
+        switch content.kind {
+        case .strength:
+            return "\(content.loadDisplay) · \(content.repsDisplay) reps"
+        case .cardio:
+            return "\(content.repsDisplay) · \(content.loadDisplay)"
+        }
+    }
+
     private func blockProgressPresentation() -> BlockProgressPresentation? {
         guard let blockIndex = validBlockIndex(),
               let block = context.block(at: blockIndex) else {
@@ -420,7 +504,7 @@ extension ExecutionViewModel {
     }
 
     private func usesUnboundedSetCount(_ block: Block) -> Bool {
-        block.timingMode == .amrap
+        block.timingMode == .amrap || block.timingMode == .accumulate
     }
 
     private func isZeroItemBlock(at blockIndex: Int) -> Bool {

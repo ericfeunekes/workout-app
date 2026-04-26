@@ -60,12 +60,18 @@ disabled filler.
 
 ## Current gaps
 
-- Existing edit surfaces are split across preview/detail, active rest pills, and
-  history edit sheets.
+- `DesignSystem.SetEditSheetModel` now defines the shared edit intent contract
+  for load, reps, RIR, bodyweight, side, distance, duration, and carry fields.
+- Existing visual edit surfaces are still split across preview/detail, active
+  rest pills, and the History `EditSetSheet`.
+- History's legacy sheet must migrate onto the shared contract or be deleted by
+  the active/rest redesign phase; until then, it remains the compatibility
+  adapter for past corrections.
 - Apply-to-remaining scope for preview/future and active setup edits is not yet
   implemented or proven.
-- Distance, duration, side, bodyweight, and carry fields do not have unified
-  proof across active, preview, and history contexts.
+- Distance, duration, side, bodyweight, and carry fields are contract-tested at
+  the shared model layer but do not yet have unified visual proof across active,
+  preview, and history contexts.
 - Visual proof is required for small-phone layout and disabled/available field
   contrast.
 

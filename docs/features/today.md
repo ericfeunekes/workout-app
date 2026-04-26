@@ -30,9 +30,9 @@ card-body tap should silently start a session. Preview/setup edits route through
 `docs/set-edit-sheet.md`; app-side programming changes still route to Claude.
 
 ## Current implementation
-Plan surface at the start of a session. `TodayLoader.loadPlan()` pulls `.planned` workouts from the local `WorkoutCache`, picks the one whose `scheduledDate` is closest to "now" (past-or-today ranks ahead of future) as the execution-selected workout, and assembles a `TodayPlanContext` around the full local plan queue. `TodayViewModel` groups the queue into date sections such as `MISSED`, `TODAY`, `TOMORROW`, `UPCOMING`, and `UNSCHEDULED`. Each workout card shows the name, decoded tag line, block-level previews, timing summaries, and grouped exercise prescription lines. Tapping a card opens a read-only detail sheet with the full block list, timing configuration summary, notes, all exercise rows, last-time chips, and a copyable Claude adjustment request.
+Plan surface at the start of a session. `TodayLoader.loadPlan()` pulls `.planned` workouts from the local `WorkoutCache`, picks the one whose `scheduledDate` is closest to "now" (past-or-today ranks ahead of future) as the execution-selected workout, and assembles a `TodayPlanContext` around the full local plan queue. `TodayViewModel` groups the queue into date sections such as `MISSED`, `TODAY`, `TOMORROW`, `UPCOMING`, and `UNSCHEDULED`. Each workout card shows the name, decoded tag line, block-level previews, timing summaries, and grouped exercise prescription lines. Tapping a card opens the workout preview/detail sheet with the full block list, timing configuration summary, notes, all exercise rows, last-time chips, a copyable Claude adjustment request, and the only Start control for that workout.
 
-The selected workout remains the default execution target, but any visible planned card can be started. Tapping the selected card's `start workout` uses the existing session binding. Tapping a missed/future card's `start this workout` asks the shell to rebuild the `ExecutionViewModel` for that workout ID, then starts it. This does not reschedule, reorder, or mutate the plan; it is a one-session execution choice. Both paths emit `today.start_tap`.
+The selected workout remains the default execution target, but any preview for a visible planned card can be started when Shell has injected a specific-workout start action. Starting the selected workout uses the existing session binding. Starting a missed/future workout asks Shell to rebuild the `ExecutionViewModel` for that workout ID, then starts it. This does not reschedule, reorder, or mutate the plan; it is a one-session execution choice. Both paths emit `today.start_tap`.
 
 **Refresh.** Shell injects a refresh action into `TodayViewModel` after bootstrap. Pull-to-refresh or the header `REFRESH` action calls `SyncAPI.pullLatest(since: lastSyncAt)`, saves the result into `WorkoutCache`, updates `LastPerformedStore` and `SyncMetadataStore`, reloads the existing `TodayViewModel`, and rebuilds the `ExecutionViewModel` for the newly selected planned workout. Pull failures leave the local cache-rendered plan intact and show a small failure caption.
 
@@ -64,14 +64,14 @@ The selected workout remains the default execution target, but any visible plann
 
 ## Current gaps
 
-- Card-body tap still opens the current detail sheet instead of the target
-  workout preview.
-- Start can still be reached directly from visible planned cards; target
-  behavior requires an explicit preview-first path or a visually separate Start
-  affordance that cannot be confused with opening.
+- Card-body tap opens the current preview/detail sheet; a richer dedicated
+  `WorkoutPreviewView` is still target behavior.
+- Card-level Start has been removed. Start is currently only in the
+  preview/detail sheet when the workout can be started.
 - Preview tap targets and Start affordance need simulator proof before the
   feature can be marked `verified`.
-- Current-block remaining work is not yet proven on the Today/preview path.
+- Current-block remaining work is projection-backed on Execution's next-up
+  preview, but not yet rendered in Today's preview/detail sheet.
 - Today does not mutate plans locally. Reorganization remains conversation-owned by design.
 
 ## QA scenarios

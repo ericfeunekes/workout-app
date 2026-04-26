@@ -65,12 +65,13 @@ handoff instead of inventing a local plan mutation.
 
 ## Current gaps
 
-- Today still documents current direct-start behavior; the target is preview
-  first with explicit Start.
+- Today card-body entry is preview-first; Start is an explicit preview action.
 - Preview editability is not proven for all target fields.
-- Preview has not yet been wired to `ExecutionProjection`, so first-task,
-  current-block remaining, and upcoming-work display are still target behavior
-  rather than verified UI.
+- Preview still uses Today's read-side block detail instead of directly
+  importing `ExecutionProjection`; that preserves the feature-package boundary
+  that only Shell may compose sibling features. Execution-side preview work now
+  exposes a projection-backed work queue for current-block remaining and future
+  work.
 - Simulator proof is required before any preview tap target or layout claim is
   marked `verified`.
 

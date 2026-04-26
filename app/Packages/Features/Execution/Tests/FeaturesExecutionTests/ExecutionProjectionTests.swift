@@ -142,6 +142,340 @@ final class ExecutionProjectionTests: XCTestCase {
         XCTAssertEqual(try XCTUnwrap(overdue.timer?.seconds), 5, accuracy: 0.001)
     }
 
+    func testWorkQueueShowsCurrentBlockRemainingBeforeFutureBlock() {
+        let now = Date(timeIntervalSince1970: 1_800_000_100)
+        let workoutID = UUID()
+        let userID = UUID()
+        let blockA = UUID()
+        let blockB = UUID()
+        let benchItem = UUID()
+        let runItem = UUID()
+        let bench = UUID()
+        let run = UUID()
+        let workout = Workout(
+            id: workoutID,
+            userID: userID,
+            name: "Queue",
+            scheduledDate: now,
+            status: .planned,
+            source: .claude,
+            notes: nil,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: nil,
+            tagsJSON: nil
+        )
+        let main = Block(
+            id: blockA,
+            workoutID: workoutID,
+            position: 0,
+            name: "Main lift",
+            timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":60,"rest_between_exercises_sec":60}"#
+        )
+        let finisher = Block(
+            id: blockB,
+            workoutID: workoutID,
+            position: 1,
+            name: "Finisher",
+            timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":60,"rest_between_exercises_sec":60}"#
+        )
+        let context = WorkoutContext(
+            workout: workout,
+            blocks: [main, finisher],
+            itemsByBlock: [
+                [Self.item(
+                    id: benchItem,
+                    blockID: blockA,
+                    exerciseID: bench,
+                    prescriptionJSON: #"{"sets":2,"reps":5,"load_kg":100,"weight_unit":"kg"}"#
+                )],
+                [Self.item(
+                    id: runItem,
+                    blockID: blockB,
+                    exerciseID: run,
+                    prescriptionJSON: #"{"sets":1,"reps":20}"#
+                )],
+            ],
+            exercises: [
+                bench: Exercise(id: bench, name: "Bench"),
+                run: Exercise(id: run, name: "Run"),
+            ]
+        )
+        let vm = ExecutionViewModel(context: context, clock: FixedClock(now: now))
+        vm.start()
+        vm.startCurrentSet()
+        vm.logSet(reps: 5, rir: 2)
+
+        let queue = vm.executionProjection(now: now).workQueue
+
+        XCTAssertEqual(queue.map(\.label), ["current block", "next set", "future block"])
+        XCTAssertEqual(queue[0].title, "Main lift")
+        XCTAssertEqual(queue[0].detail, "1 set left")
+        XCTAssertEqual(queue[1].title, "Bench")
+        XCTAssertEqual(queue[2].title, "Run")
+    }
+
+    func testWorkQueueDoesNotDuplicateNextBlockWhenCurrentBlockIsDone() {
+        let now = Date(timeIntervalSince1970: 1_800_000_200)
+        let workoutID = UUID()
+        let blockA = UUID()
+        let blockB = UUID()
+        let bench = UUID()
+        let run = UUID()
+        let workout = Workout(
+            id: workoutID,
+            userID: UUID(),
+            name: "Queue",
+            scheduledDate: now,
+            status: .planned,
+            source: .claude,
+            notes: nil,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: nil,
+            tagsJSON: nil
+        )
+        let main = Block(
+            id: blockA,
+            workoutID: workoutID,
+            position: 0,
+            name: "Main lift",
+            timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":60,"rest_between_exercises_sec":60}"#
+        )
+        let finisher = Block(
+            id: blockB,
+            workoutID: workoutID,
+            position: 1,
+            name: "Finisher",
+            timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":60,"rest_between_exercises_sec":60}"#
+        )
+        let context = WorkoutContext(
+            workout: workout,
+            blocks: [main, finisher],
+            itemsByBlock: [
+                [Self.item(
+                    blockID: blockA,
+                    exerciseID: bench,
+                    prescriptionJSON: #"{"sets":1,"reps":5,"load_kg":100,"weight_unit":"kg"}"#
+                )],
+                [Self.item(
+                    blockID: blockB,
+                    exerciseID: run,
+                    prescriptionJSON: #"{"sets":1,"reps":20}"#
+                )],
+            ],
+            exercises: [
+                bench: Exercise(id: bench, name: "Bench"),
+                run: Exercise(id: run, name: "Run"),
+            ]
+        )
+        let vm = ExecutionViewModel(context: context, clock: FixedClock(now: now))
+        vm.start()
+        vm.startCurrentSet()
+        vm.logSet(reps: 5, rir: 2)
+
+        let queue = vm.executionProjection(now: now).workQueue
+
+        XCTAssertEqual(queue.map(\.label), ["next block"])
+        XCTAssertEqual(queue.map(\.title), ["Run"])
+    }
+
+    func testWorkQueueDoesNotDuplicateNextBlockWhenItIsUpcomingAfterOnlyCurrentSet() {
+        let now = Date(timeIntervalSince1970: 1_800_000_250)
+        let workoutID = UUID()
+        let blockA = UUID()
+        let blockB = UUID()
+        let bench = UUID()
+        let run = UUID()
+        let workout = Workout(
+            id: workoutID,
+            userID: UUID(),
+            name: "Queue",
+            scheduledDate: now,
+            status: .planned,
+            source: .claude,
+            notes: nil,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: nil,
+            tagsJSON: nil
+        )
+        let main = Block(
+            id: blockA,
+            workoutID: workoutID,
+            position: 0,
+            name: "Main lift",
+            timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":60,"rest_between_exercises_sec":60}"#
+        )
+        let finisher = Block(
+            id: blockB,
+            workoutID: workoutID,
+            position: 1,
+            name: "Finisher",
+            timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":60,"rest_between_exercises_sec":60}"#
+        )
+        let context = WorkoutContext(
+            workout: workout,
+            blocks: [main, finisher],
+            itemsByBlock: [
+                [Self.item(
+                    blockID: blockA,
+                    exerciseID: bench,
+                    prescriptionJSON: #"{"sets":1,"reps":5,"load_kg":100,"weight_unit":"kg"}"#
+                )],
+                [Self.item(
+                    blockID: blockB,
+                    exerciseID: run,
+                    prescriptionJSON: #"{"sets":1,"reps":20}"#
+                )],
+            ],
+            exercises: [
+                bench: Exercise(id: bench, name: "Bench"),
+                run: Exercise(id: run, name: "Run"),
+            ]
+        )
+        let vm = ExecutionViewModel(context: context, clock: FixedClock(now: now))
+        vm.start()
+
+        let queue = vm.executionProjection(now: now).workQueue
+
+        XCTAssertEqual(queue.map(\.label), ["current block", "next block"])
+        XCTAssertEqual(queue.map(\.title), ["Main lift", "Run"])
+    }
+
+    func testWorkQueueKeepsFutureBlockWhenDisplayMatchesCurrentBlockNextSet() {
+        let now = Date(timeIntervalSince1970: 1_800_000_300)
+        let workoutID = UUID()
+        let blockA = UUID()
+        let blockB = UUID()
+        let bench = UUID()
+        let workout = Workout(
+            id: workoutID,
+            userID: UUID(),
+            name: "Queue",
+            scheduledDate: now,
+            status: .planned,
+            source: .claude,
+            notes: nil,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: nil,
+            tagsJSON: nil
+        )
+        let main = Block(
+            id: blockA,
+            workoutID: workoutID,
+            position: 0,
+            name: "Main lift",
+            timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":60,"rest_between_exercises_sec":60}"#
+        )
+        let second = Block(
+            id: blockB,
+            workoutID: workoutID,
+            position: 1,
+            name: "Second lift",
+            timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":60,"rest_between_exercises_sec":60}"#
+        )
+        let context = WorkoutContext(
+            workout: workout,
+            blocks: [main, second],
+            itemsByBlock: [
+                [Self.item(
+                    blockID: blockA,
+                    exerciseID: bench,
+                    prescriptionJSON: #"{"sets":2,"reps":5,"load_kg":100,"weight_unit":"kg"}"#
+                )],
+                [Self.item(
+                    blockID: blockB,
+                    exerciseID: bench,
+                    prescriptionJSON: #"{"sets":1,"reps":5,"load_kg":100,"weight_unit":"kg"}"#
+                )],
+            ],
+            exercises: [
+                bench: Exercise(id: bench, name: "Bench"),
+            ]
+        )
+        let vm = ExecutionViewModel(context: context, clock: FixedClock(now: now))
+        vm.start()
+        vm.startCurrentSet()
+        vm.logSet(reps: 5, rir: 2)
+
+        let queue = vm.executionProjection(now: now).workQueue
+
+        XCTAssertEqual(queue.map(\.label), ["current block", "next set", "future block"])
+        XCTAssertEqual(queue.map(\.title), ["Main lift", "Bench", "Bench"])
+        XCTAssertEqual(queue.map(\.detail), ["1 set left", "100 kg · 5 reps", "100 kg · 5 reps"])
+    }
+
+    func testWorkQueueDoesNotDuplicateNamedZeroItemRestBlock() {
+        let now = Date(timeIntervalSince1970: 1_800_000_400)
+        let workoutID = UUID()
+        let blockA = UUID()
+        let blockB = UUID()
+        let bench = UUID()
+        let workout = Workout(
+            id: workoutID,
+            userID: UUID(),
+            name: "Queue",
+            scheduledDate: now,
+            status: .planned,
+            source: .claude,
+            notes: nil,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: nil,
+            tagsJSON: nil
+        )
+        let main = Block(
+            id: blockA,
+            workoutID: workoutID,
+            position: 0,
+            name: "Main lift",
+            timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":60,"rest_between_exercises_sec":60}"#
+        )
+        let reset = Block(
+            id: blockB,
+            workoutID: workoutID,
+            position: 1,
+            name: "Reset",
+            timingMode: .rest,
+            timingConfigJSON: #"{"duration_sec":90}"#
+        )
+        let context = WorkoutContext(
+            workout: workout,
+            blocks: [main, reset],
+            itemsByBlock: [
+                [Self.item(
+                    blockID: blockA,
+                    exerciseID: bench,
+                    prescriptionJSON: #"{"sets":1,"reps":5,"load_kg":100,"weight_unit":"kg"}"#
+                )],
+                [],
+            ],
+            exercises: [
+                bench: Exercise(id: bench, name: "Bench"),
+            ]
+        )
+        let vm = ExecutionViewModel(context: context, clock: FixedClock(now: now))
+        vm.start()
+        vm.startCurrentSet()
+        vm.logSet(reps: 5, rir: 2)
+
+        let queue = vm.executionProjection(now: now).workQueue
+
+        XCTAssertEqual(queue.map(\.label), ["next block"])
+        XCTAssertEqual(queue.map(\.title), ["Rest block"])
+    }
+
     func testSupersetProjectionUsesRoundRobinUpcomingWork() {
         let itemA = UUID()
         let itemB = UUID()
@@ -304,6 +638,41 @@ final class ExecutionProjectionTests: XCTestCase {
         XCTAssertEqual(projection.timer?.direction, .countdown)
         XCTAssertTrue(projection.editability.canLogCurrentWork)
         XCTAssertFalse(projection.editability.canStartCurrentSet)
+    }
+
+    func testAccumulateProjectionDoesNotPresentTargetRepsAsRemainingSets() {
+        let itemID = UUID()
+        let (context, _) = Self.context(
+            timingMode: .accumulate,
+            blockName: "Push-up accumulate",
+            blockIntent: "Build total reps in clean chunks",
+            timingConfigJSON: #"{"target_reps":100}"#,
+            items: [
+                Self.item(
+                    id: itemID,
+                    blockID: Self.blockID,
+                    exerciseID: Self.exerciseID,
+                    prescriptionJSON: #"{"reps":25}"#
+                )
+            ],
+            exercises: [Self.exerciseID: "Push-Up"]
+        )
+        let vm = ExecutionViewModel(context: context, clock: FixedClock(now: now))
+        vm.start()
+
+        let projection = vm.executionProjection(now: now)
+
+        XCTAssertEqual(projection.currentTask.kind, .active)
+        XCTAssertEqual(projection.currentTask.title, "Push-Up")
+        XCTAssertEqual(projection.currentTask.primaryMetric, "BW")
+        XCTAssertEqual(projection.currentTask.secondaryMetric, "0 / 100 reps")
+        XCTAssertEqual(projection.remainingWork.totalSets, 0)
+        XCTAssertEqual(projection.blockProgress?.totalSets, 0)
+        XCTAssertEqual(projection.workQueue.map(\.label), ["next set"])
+        XCTAssertFalse(
+            projection.workQueue.contains { $0.detail?.contains("sets left") == true },
+            "Accumulate targets are target-owned work, not finite set counts"
+        )
     }
 
     // MARK: - Fixtures

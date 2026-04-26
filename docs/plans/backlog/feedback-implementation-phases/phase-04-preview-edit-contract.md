@@ -1,6 +1,6 @@
 ---
 title: Phase 4 — preview and edit contract implementation plan
-status: backlog
+status: completed
 last_reviewed: 2026-04-26
 purpose: Implement the preview-first workout entry and shared edit contract before active/rest redesign.
 covers:
@@ -110,6 +110,24 @@ needed by this phase.
 
 This phase owns preview and edit contract. It does not redesign active/rest
 layout except the preview sheet triggered from execution.
+
+## Implementation Notes
+
+- Today card body now opens the existing detail sheet as the workout preview;
+  the direct card-level Start button was removed so execution starts only from
+  the preview Start action.
+- Execution projection exposes `workQueue`, ordered as current-block remaining
+  first, then the next concrete task, then the first future block when present.
+- Simulator QA found and fixed two workQueue presentation bugs:
+  - `NextUpSheet` duplicated `NEXT BLOCK` by rendering both the projection queue
+    and the legacy fallback card.
+  - Accumulate target reps rendered as finite set counts (`100 sets left`).
+- `DesignSystem.SetEditSheetModel` owns the shared edit intent vocabulary. The
+  History visual sheet remains a documented adapter until the active/rest
+  redesign phase can migrate all call sites together.
+- Simulator QA artifact: `scratch/qa-runs/phase-04-preview-edit-contract.md`.
+- Codex review thread `019dcab7-c502-7a51-b540-aa11f3fabc98` is clean after the
+  duplicate-row and accumulate-target fixes.
 
 ## Residual Uncertainty / Accepted Risks
 

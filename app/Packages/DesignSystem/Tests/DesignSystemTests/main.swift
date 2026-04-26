@@ -79,6 +79,48 @@ runCase("DSKeypad constructs with and without decimal") {
     _ = DSKeypad(onDigit: { _ in }, onDelete: {})
 }
 
+runCase("SetEditSheetModel emits only supported touched fields") {
+    let model = SetEditSheetModel(availableFields: [.reps, .rir])
+    model.setLoad(100, unit: "kg")
+    model.setReps(8)
+    model.clearRIR()
+    let intent = model.commit()
+
+    try expectEqual(intent.reps, 8)
+    try expectEqual(intent.rir, .clear)
+    try expectEqual(intent.load, nil)
+    try expectEqual(intent.loadUnit, nil)
+}
+
+runCase("SetEditSheetModel supports target field vocabulary") {
+    let model = SetEditSheetModel(availableFields: Set(SetEditField.allCases), scope: .remaining)
+    model.setLoad(100, unit: "kg")
+    model.setReps(5)
+    model.setRIR(9)
+    model.setBodyweight(82.5, unit: "kg")
+    model.setSide(.left)
+    model.setDistance(400, unit: "m")
+    model.setDuration(seconds: 75)
+    model.setCarry(load: 32, loadUnit: "kg", distance: 40, distanceUnit: "m")
+    let intent = model.commit()
+
+    try expectEqual(intent.scope, .remaining)
+    try expectEqual(intent.load, 100)
+    try expectEqual(intent.loadUnit, "kg")
+    try expectEqual(intent.reps, 5)
+    try expectEqual(intent.rir, .set(5))
+    try expectEqual(intent.bodyweight, 82.5)
+    try expectEqual(intent.bodyweightUnit, "kg")
+    try expectEqual(intent.side, .left)
+    try expectEqual(intent.distance, 400)
+    try expectEqual(intent.distanceUnit, "m")
+    try expectEqual(intent.durationSeconds, 75)
+    try expectEqual(intent.carryLoad, 32)
+    try expectEqual(intent.carryLoadUnit, "kg")
+    try expectEqual(intent.carryDistance, 40)
+    try expectEqual(intent.carryDistanceUnit, "m")
+}
+
 runCase("DSCard wraps arbitrary content") {
     _ = DSCard { Text("hello") }
     _ = DSCard(padding: 0) { Text("flush") }
@@ -99,6 +141,14 @@ runCase("DSWeightLabel constructs at hero and inline sizes") {
         weight: .medium,
         color: DSColors.foreground
     )
+}
+
+runCase("DSExerciseIconView constructs every icon at compact and tiled sizes") {
+    try expectEqual(DSExerciseIcon.allCases.count, 15)
+    for icon in DSExerciseIcon.allCases {
+        _ = DSExerciseIconView(icon: icon, size: 24)
+        _ = DSExerciseIconView(icon: icon, size: 48, showsTile: true)
+    }
 }
 
 // ---- Color token smoke --------------------------------------------------

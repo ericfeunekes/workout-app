@@ -1,13 +1,8 @@
 // TodayViewModel.swift
 //
 // `@Observable` view model for the Today screen. Derives the displayable
-// shape from a `TodayContext` at construction time and exposes a `start()`
-// action that dispatches `.start` into the session state binding.
-//
-// The view model is deliberately stateless beyond the initial derivation —
-// Today is a glance view, not an interactive screen. When the user taps
-// an exercise (plan sheet) we'll layer that in as its own sheet in a
-// follow-up Feature; this package renders the read-side.
+// shape from a `TodayPlanContext` at construction time and exposes start
+// actions for visible planned workouts.
 //
 // Reload (bug-036): on save & done the shell writes the completed workout
 // to the local cache and the session route flips back to `.today`. The
@@ -55,6 +50,73 @@ public final class TodayViewModel {
         }
     }
 
+    public enum PlanSectionKind: String, Equatable, Sendable {
+        case missed
+        case today
+        case upcoming
+        case unscheduled
+    }
+
+    public struct WorkoutSummary: Identifiable, Equatable, Sendable {
+        public let id: UUID
+        public let name: String
+        public let sectionKind: PlanSectionKind
+        public let sectionTitle: String
+        public let tagLine: String?
+        public let cardBlocks: [BlockPreview]
+        public let hasMoreBlocks: Bool
+        public let badge: String?
+        public let isStartable: Bool
+        public let isSelected: Bool
+    }
+
+    public struct BlockPreview: Identifiable, Equatable, Sendable {
+        public let id: UUID
+        public let title: String
+        public let timingLabel: String
+        public let timingDetail: String?
+        public let exercises: [ExerciseSummary]
+        public let hasMoreExercises: Bool
+    }
+
+    public struct PlanSection: Identifiable, Equatable, Sendable {
+        public let title: String
+        public let kind: PlanSectionKind
+        public let workouts: [WorkoutSummary]
+
+        public var id: String { "\(kind.rawValue)-\(title)" }
+    }
+
+    public struct WorkoutDetail: Identifiable, Equatable, Sendable {
+        public let id: UUID
+        public let name: String
+        public let sectionTitle: String
+        public let tagLine: String?
+        public let notes: String?
+        public let blocks: [BlockDetail]
+    }
+
+    public struct BlockDetail: Identifiable, Equatable, Sendable {
+        public let id: UUID
+        public let title: String
+        public let timingLabel: String
+        public let timingDetail: String?
+        public let notes: String?
+        public let exercises: [ExerciseSummary]
+    }
+
+    public struct AdjustmentDraft: Identifiable, Equatable, Sendable {
+        public let id: UUID
+        public let title: String
+        public let body: String
+    }
+
+    public enum RefreshState: Equatable, Sendable {
+        case idle
+        case refreshing
+        case failed
+    }
+
     // MARK: - Published (mutated by `reload`)
     //
     // All five of these need `internal(set) var` rather than `let` so a
@@ -65,6 +127,9 @@ public final class TodayViewModel {
     public internal(set) var programTags: [String]
     public internal(set) var lastSessionSummary: String?
     public internal(set) var exercises: [ExerciseSummary]
+    public internal(set) var planSections: [PlanSection]
+    public internal(set) var workoutDetails: [UUID: WorkoutDetail]
+    public internal(set) var refreshState: RefreshState
     /// `true` when the most recent load found no planned workout. The view
     /// can render a degenerate "nothing scheduled" state; today it falls
     /// through to S8 (header + empty list). Callers that need to flip a
@@ -82,6 +147,15 @@ public final class TodayViewModel {
     /// as a computed property so tests can assert the gate directly
     /// without view-tree inspection. See qa-008.
     public var showsStartButton: Bool { !isEmpty }
+    public var canRefresh: Bool { refreshAction != nil }
+
+    public func canStart(_ workout: WorkoutSummary) -> Bool {
+        canStart(workoutID: workout.id)
+    }
+
+    public func canStart(workoutID targetWorkoutID: WorkoutID) -> Bool {
+        targetWorkoutID == workoutID || startWorkoutAction != nil
+    }
 
     // MARK: - Dependencies for reload
     //
@@ -93,6 +167,8 @@ public final class TodayViewModel {
 
     private let telemetry: TelemetryEmitter
     private let sessionStateBinding: (@Sendable (SessionMutation) -> Void)?
+    private var refreshAction: (@Sendable () async -> Bool)?
+    private var startWorkoutAction: (@Sendable @MainActor (WorkoutID) async -> Bool)?
 
     public init(
         context: TodayContext,
@@ -102,9 +178,31 @@ public final class TodayViewModel {
         self.programTags = context.programTags
         self.lastSessionSummary = context.lastSessionSummary
         self.exercises = Self.deriveExercises(from: context)
+        let planContext = TodayPlanContext(selected: context, workouts: [context])
+        self.planSections = Self.derivePlanSections(from: planContext, now: Date())
+        self.workoutDetails = Self.deriveWorkoutDetails(from: planContext, now: Date())
+        self.refreshState = .idle
         self.isEmpty = false
         self.workoutID = context.workout.id
         self.sessionStateBinding = context.sessionStateBinding
+        self.telemetry = telemetry
+    }
+
+    public init(
+        planContext: TodayPlanContext,
+        telemetry: TelemetryEmitter = NoopTelemetryEmitter()
+    ) {
+        let selected = planContext.selected
+        self.programName = selected.workout.name
+        self.programTags = selected.programTags
+        self.lastSessionSummary = selected.lastSessionSummary
+        self.exercises = Self.deriveExercises(from: selected)
+        self.planSections = Self.derivePlanSections(from: planContext, now: Date())
+        self.workoutDetails = Self.deriveWorkoutDetails(from: planContext, now: Date())
+        self.refreshState = .idle
+        self.isEmpty = false
+        self.workoutID = selected.workout.id
+        self.sessionStateBinding = selected.sessionStateBinding
         self.telemetry = telemetry
     }
 
@@ -141,6 +239,9 @@ public final class TodayViewModel {
         self.programTags = []
         self.lastSessionSummary = nil
         self.exercises = []
+        self.planSections = []
+        self.workoutDetails = [:]
+        self.refreshState = .idle
         self.isEmpty = true
         self.workoutID = nil
         self.sessionStateBinding = sessionStateBinding
@@ -159,6 +260,53 @@ public final class TodayViewModel {
         sessionStateBinding?(.start)
     }
 
+    /// Start a specific visible planned workout. The selected workout can
+    /// use the legacy binding; non-selected cards need the shell-provided
+    /// action to rebuild the execution VM before starting.
+    public func start(workoutID targetWorkoutID: WorkoutID) async {
+        telemetry.emit(Event(
+            sessionID: TelemetrySession.id,
+            kind: "interaction",
+            name: "today.start_tap",
+            workoutID: targetWorkoutID
+        ))
+        if let startWorkoutAction,
+           await startWorkoutAction(targetWorkoutID) {
+            return
+        }
+        if targetWorkoutID == workoutID {
+            sessionStateBinding?(.start)
+        }
+    }
+
+    public func detail(for workoutID: UUID) -> WorkoutDetail? {
+        workoutDetails[workoutID]
+    }
+
+    public func adjustmentDraft(for detail: WorkoutDetail) -> AdjustmentDraft {
+        AdjustmentDraft(
+            id: detail.id,
+            title: "Adjustment request",
+            body: Self.adjustmentDraftBody(for: detail)
+        )
+    }
+
+    public func setRefreshAction(_ action: (@Sendable () async -> Bool)?) {
+        refreshAction = action
+    }
+
+    public func setStartWorkoutAction(
+        _ action: (@Sendable @MainActor (WorkoutID) async -> Bool)?
+    ) {
+        startWorkoutAction = action
+    }
+
+    public func refresh() async {
+        guard refreshState != .refreshing, let refreshAction else { return }
+        refreshState = .refreshing
+        refreshState = await refreshAction() ? .idle : .failed
+    }
+
     // MARK: - Reload (bug-036)
 
     /// Re-run the `TodayLoader` against the current cache and replace the
@@ -174,9 +322,9 @@ public final class TodayViewModel {
     /// and-done side-effect chain). A failure leaves the previous state
     /// intact so the user at least sees something.
     public func reload(using loader: TodayLoader) async {
-        let context: TodayContext?
+        let context: TodayPlanContext?
         do {
-            context = try await loader.load(
+            context = try await loader.loadPlan(
                 sessionStateBinding: sessionStateBinding
             )
         } catch {
@@ -184,7 +332,7 @@ public final class TodayViewModel {
             // than blanking the screen. See `docs/sync.md` § offline.
             return
         }
-        apply(context)
+        applyPlan(context)
     }
 
     /// Apply a fresh context (or `nil` for empty) to the observable
@@ -193,20 +341,33 @@ public final class TodayViewModel {
     /// call into it directly.
     func apply(_ context: TodayContext?) {
         guard let context else {
+            applyPlan(nil)
+            return
+        }
+        applyPlan(TodayPlanContext(selected: context, workouts: [context]))
+    }
+
+    func applyPlan(_ context: TodayPlanContext?) {
+        guard let context else {
             programName = ""
             programTags = []
             lastSessionSummary = nil
             exercises = []
+            planSections = []
+            workoutDetails = [:]
+            refreshState = .idle
             isEmpty = true
             workoutID = nil
             return
         }
-        programName = context.workout.name
-        programTags = context.programTags
-        lastSessionSummary = context.lastSessionSummary
-        exercises = Self.deriveExercises(from: context)
+        programName = context.selected.workout.name
+        programTags = context.selected.programTags
+        lastSessionSummary = context.selected.lastSessionSummary
+        exercises = Self.deriveExercises(from: context.selected)
+        planSections = Self.derivePlanSections(from: context, now: Date())
+        workoutDetails = Self.deriveWorkoutDetails(from: context, now: Date())
         isEmpty = false
-        workoutID = context.workout.id
+        workoutID = context.selected.workout.id
     }
 
     // MARK: - Derivation
@@ -248,5 +409,387 @@ public final class TodayViewModel {
             }
         }
         return out
+    }
+
+    static func derivePlanSections(
+        from context: TodayPlanContext,
+        now: Date,
+        calendar: Calendar = TodayViewModel.makeScheduledDateCalendar()
+    ) -> [PlanSection] {
+        let summaries = context.workouts.map {
+            workoutSummary(
+                from: $0,
+                selectedID: context.selected.workout.id,
+                now: now,
+                calendar: calendar
+            )
+        }
+
+        var sections: [PlanSection] = []
+        for summary in summaries {
+            if let index = sections.firstIndex(where: { $0.title == summary.sectionTitle }) {
+                let existing = sections[index]
+                sections[index] = PlanSection(
+                    title: existing.title,
+                    kind: existing.kind,
+                    workouts: existing.workouts + [summary]
+                )
+            } else {
+                sections.append(PlanSection(
+                    title: summary.sectionTitle,
+                    kind: summary.sectionKind,
+                    workouts: [summary]
+                ))
+            }
+        }
+        return sections
+    }
+
+    static func deriveWorkoutDetails(
+        from context: TodayPlanContext,
+        now: Date,
+        calendar: Calendar = TodayViewModel.makeScheduledDateCalendar()
+    ) -> [UUID: WorkoutDetail] {
+        Dictionary(uniqueKeysWithValues: context.workouts.map { workoutContext in
+            let section = sectionMetadata(
+                scheduledDate: workoutContext.workout.scheduledDate,
+                now: now,
+                calendar: calendar
+            )
+            let detail = WorkoutDetail(
+                id: workoutContext.workout.id,
+                name: workoutContext.workout.name,
+                sectionTitle: section.title,
+                tagLine: tagLine(from: workoutContext.workout.tagsJSON),
+                notes: workoutContext.workout.notes,
+                blocks: deriveBlockDetails(from: workoutContext)
+            )
+            return (detail.id, detail)
+        })
+    }
+
+    private static func workoutSummary(
+        from context: TodayContext,
+        selectedID: WorkoutID,
+        now: Date,
+        calendar: Calendar
+    ) -> WorkoutSummary {
+        let section = sectionMetadata(
+            scheduledDate: context.workout.scheduledDate,
+            now: now,
+            calendar: calendar
+        )
+        let cardBlocks = deriveCardBlockPreviews(from: context)
+        return WorkoutSummary(
+            id: context.workout.id,
+            name: context.workout.name,
+            sectionKind: section.kind,
+            sectionTitle: section.title,
+            tagLine: tagLine(from: context.workout.tagsJSON),
+            cardBlocks: cardBlocks,
+            hasMoreBlocks: context.blocks.count > cardBlocks.count,
+            badge: badge(for: section.kind, isSelected: context.workout.id == selectedID),
+            isStartable: context.workout.id == selectedID,
+            isSelected: context.workout.id == selectedID
+        )
+    }
+
+    private static func sectionMetadata(
+        scheduledDate: Date?,
+        now: Date,
+        calendar: Calendar
+    ) -> (kind: PlanSectionKind, title: String) {
+        guard let scheduledDate else {
+            return (.unscheduled, "UNSCHEDULED")
+        }
+        let day = shortDayMonthDay(scheduledDate)
+        if calendar.isDate(scheduledDate, inSameDayAs: now) {
+            return (.today, "TODAY · \(day)")
+        }
+        if scheduledDate < calendar.startOfDay(for: now) {
+            return (.missed, "MISSED · \(day)")
+        }
+        return (.upcoming, "\(relativeFutureLabel(scheduledDate, now: now, calendar: calendar)) · \(day)")
+    }
+
+    private static func relativeFutureLabel(
+        _ date: Date,
+        now: Date,
+        calendar: Calendar
+    ) -> String {
+        if let tomorrow = calendar.date(byAdding: .day, value: 1, to: now),
+           calendar.isDate(date, inSameDayAs: tomorrow) {
+            return "TOMORROW"
+        }
+        return "UPCOMING"
+    }
+
+    private static func shortDayMonthDay(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = makeScheduledDateCalendar()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = makeScheduledDateTimeZone()
+        formatter.dateFormat = "EEE MMM d"
+        return formatter.string(from: date).uppercased()
+    }
+
+    nonisolated private static func makeScheduledDateTimeZone() -> TimeZone {
+        TimeZone(secondsFromGMT: 0)!
+    }
+
+    nonisolated private static func makeScheduledDateCalendar() -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.locale = Locale(identifier: "en_US_POSIX")
+        calendar.timeZone = makeScheduledDateTimeZone()
+        return calendar
+    }
+
+    private static func tagLine(from tagsJSON: String?) -> String? {
+        guard let tagsJSON,
+              let data = tagsJSON.data(using: .utf8),
+              let tags = try? JSONDecoder().decode([String].self, from: data),
+              !tags.isEmpty else {
+            return nil
+        }
+        return tags
+            .map { $0.replacingOccurrences(of: "_", with: " ") }
+            .joined(separator: " · ")
+    }
+
+    private static func timingLabel(_ mode: TimingMode) -> String {
+        mode.rawValue.replacingOccurrences(of: "_", with: " ")
+    }
+
+    private static func deriveBlockDetails(from context: TodayContext) -> [BlockDetail] {
+        let sortedBlocks = context.blocks.sorted { $0.position < $1.position }
+        var itemsByBlock: [UUID: [WorkoutItem]] = [:]
+        for item in context.items {
+            itemsByBlock[item.blockID, default: []].append(item)
+        }
+
+        return sortedBlocks.map { block in
+            let items = (itemsByBlock[block.id] ?? [])
+                .sorted { $0.position < $1.position }
+            return BlockDetail(
+                id: block.id,
+                title: blockTitle(block),
+                timingLabel: timingLabel(block.timingMode),
+                timingDetail: timingDetail(block),
+                notes: block.notes,
+                exercises: items.map { exerciseSummary(for: $0, in: context) }
+            )
+        }
+    }
+
+    private static func deriveCardBlockPreviews(from context: TodayContext) -> [BlockPreview] {
+        let blockDetails = deriveBlockDetails(from: context)
+        return blockDetails.prefix(2).map { block in
+            BlockPreview(
+                id: block.id,
+                title: block.title,
+                timingLabel: block.timingLabel,
+                timingDetail: block.timingDetail,
+                exercises: Array(block.exercises.prefix(2)),
+                hasMoreExercises: block.exercises.count > 2
+            )
+        }
+    }
+
+    private static func exerciseSummary(
+        for item: WorkoutItem,
+        in context: TodayContext
+    ) -> ExerciseSummary {
+        let parser = PrescriptionParser()
+        let exercise = context.exercises[item.exerciseID]
+        let prescriptionLine: String
+        switch parser.parse(prescriptionJSON: item.prescriptionJSON) {
+        case .success(let prescription):
+            prescriptionLine = formatPrescriptionLine(prescription)
+        case .failure:
+            prescriptionLine = ""
+        }
+        return ExerciseSummary(
+            id: item.id,
+            name: exercise?.name ?? "(unknown exercise)",
+            prescriptionLine: prescriptionLine,
+            lastTime: context.lastPerformed[item.exerciseID]
+        )
+    }
+
+    private static func blockTitle(_ block: Block) -> String {
+        if let name = block.name, !name.isEmpty {
+            return name
+        }
+        return timingLabel(block.timingMode).capitalized
+    }
+
+    private static func timingDetail(_ block: Block) -> String? {
+        let parser = PrescriptionParser()
+        guard case .success(let config) = parser.parseTimingConfig(
+            timingMode: block.timingMode.rawValue,
+            configJSON: block.timingConfigJSON
+        ) else {
+            return roundsDetail(block.rounds)
+        }
+
+        var parts: [String] = []
+        if let rounds = block.rounds {
+            parts.append("\(rounds) rounds")
+        }
+        if let roundsRepSchemeJSON = block.roundsRepSchemeJSON,
+           !roundsRepSchemeJSON.isEmpty,
+           roundsRepSchemeJSON != "[]" {
+            parts.append("rep scheme \(roundsRepSchemeJSON)")
+        }
+        parts.append(contentsOf: timingConfigDetails(config))
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    private static func roundsDetail(_ rounds: Int?) -> String? {
+        guard let rounds else { return nil }
+        return "\(rounds) rounds"
+    }
+
+    private static func timingConfigDetails(_ config: TimingConfig) -> [String] {
+        switch config {
+        case .straightSets(let restBetweenSetsSec, let restBetweenExercisesSec):
+            return compactDurationParts([
+                ("rest between sets", restBetweenSetsSec),
+                ("rest between exercises", restBetweenExercisesSec),
+            ])
+        case .superset(let restBetweenRoundsSec, _):
+            return compactDurationParts([("rest between rounds", restBetweenRoundsSec)])
+        case .circuit(let restBetweenExercisesSec, let restBetweenRoundsSec, _):
+            return compactDurationParts([
+                ("rest between exercises", restBetweenExercisesSec),
+                ("rest between rounds", restBetweenRoundsSec),
+            ])
+        case .emom(let intervalSec, let totalMinutes):
+            return ["\(totalMinutes) min total", "every \(formatDuration(seconds: intervalSec))"]
+        case .amrap(let timeCapSec):
+            return ["cap \(formatDuration(seconds: timeCapSec))"]
+        case .forTime(let timeCapSec):
+            guard let timeCapSec else { return [] }
+            return ["cap \(formatDuration(seconds: timeCapSec))"]
+        case .intervals(
+            let workSec,
+            let restSec,
+            let workDistanceM,
+            let restDistanceM,
+            let intervalCount,
+            let targetPaceSecPerKm
+        ):
+            var parts = ["\(intervalCount) intervals"]
+            if let workSec { parts.append("work \(formatDuration(seconds: workSec))") }
+            if let restSec { parts.append("rest \(formatDuration(seconds: restSec))") }
+            if let workDistanceM { parts.append("work \(distanceLabel(workDistanceM))") }
+            if let restDistanceM { parts.append("rest \(distanceLabel(restDistanceM))") }
+            if let targetPaceSecPerKm {
+                parts.append("pace \(formatDuration(seconds: targetPaceSecPerKm))/km")
+            }
+            return parts
+        case .tabata:
+            return ["8 rounds", "20s work / 10s rest"]
+        case .continuous(
+            let targetDurationSec,
+            let targetDistanceM,
+            let targetPaceSecPerKm,
+            let targetHrZone
+        ):
+            var parts: [String] = []
+            if let targetDurationSec {
+                parts.append("duration \(formatDuration(seconds: targetDurationSec))")
+            }
+            if let targetDistanceM {
+                parts.append("distance \(distanceLabel(targetDistanceM))")
+            }
+            if let targetPaceSecPerKm {
+                parts.append("pace \(formatDuration(seconds: targetPaceSecPerKm))/km")
+            }
+            if let targetHrZone {
+                parts.append("zone \(targetHrZone)")
+            }
+            return parts
+        case .accumulate(let targetDurationSec, let targetReps, let targetDistanceM):
+            var parts: [String] = []
+            if let targetDurationSec {
+                parts.append("accumulate \(formatDuration(seconds: targetDurationSec))")
+            }
+            if let targetReps {
+                parts.append("accumulate \(targetReps) reps")
+            }
+            if let targetDistanceM {
+                parts.append("accumulate \(distanceLabel(targetDistanceM))")
+            }
+            return parts
+        case .custom(let segments):
+            return ["\(segments.count) segments"]
+        case .rest(let durationSec):
+            return ["duration \(formatDuration(seconds: durationSec))"]
+        }
+    }
+
+    private static func compactDurationParts(_ specs: [(String, Double)]) -> [String] {
+        specs.compactMap { label, seconds in
+            seconds > 0 ? "\(label) \(formatDuration(seconds: seconds))" : nil
+        }
+    }
+
+    private static func distanceLabel(_ metres: Double) -> String {
+        if metres >= 1000 {
+            return "\(formatDecimal(metres / 1000)) km"
+        }
+        return "\(formatDecimal(metres)) m"
+    }
+
+    private static func formatDecimal(_ value: Double) -> String {
+        if value.rounded() == value {
+            return String(Int(value))
+        }
+        return String(format: "%.1f", value)
+    }
+
+    private static func adjustmentDraftBody(for detail: WorkoutDetail) -> String {
+        var lines: [String] = [
+            "Please adjust this planned workout:",
+            "",
+            "Workout: \(detail.name)",
+            "Schedule: \(detail.sectionTitle)",
+        ]
+        if let tagLine = detail.tagLine {
+            lines.append("Tags: \(tagLine)")
+        }
+        if let notes = detail.notes, !notes.isEmpty {
+            lines.append("Notes: \(notes)")
+        }
+        lines.append("")
+        lines.append("Requested change:")
+        lines.append("- ")
+        lines.append("")
+        lines.append("Current plan:")
+        for block in detail.blocks {
+            lines.append("- \(block.title) (\(block.timingLabel))")
+            if let timingDetail = block.timingDetail {
+                lines.append("  Timing: \(timingDetail)")
+            }
+            if let notes = block.notes, !notes.isEmpty {
+                lines.append("  Notes: \(notes)")
+            }
+            for exercise in block.exercises {
+                let prescription = exercise.prescriptionLine.isEmpty
+                    ? ""
+                    : " — \(exercise.prescriptionLine)"
+                lines.append("  - \(exercise.name)\(prescription)")
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    private static func badge(for kind: PlanSectionKind, isSelected: Bool) -> String? {
+        if isSelected { return "ready" }
+        switch kind {
+        case .missed: return "needs reschedule"
+        case .today, .upcoming, .unscheduled: return nil
+        }
     }
 }

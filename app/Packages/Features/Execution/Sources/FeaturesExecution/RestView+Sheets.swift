@@ -21,7 +21,37 @@ extension RestView {
             case .load: loadSheet(set: set, item: item)
             case .reps: repsSheet(set: set, item: item)
             case .rir: rirSheet(set: set, item: item)
+            case .batchLoad(let itemID, let setIndex):
+                batchLoadSheet(itemID: itemID, setIndex: setIndex)
+            case .batchReps(let itemID, let setIndex):
+                batchRepsSheet(itemID: itemID, setIndex: setIndex)
+            case .batchRir(let itemID, let setIndex):
+                batchRirSheet(itemID: itemID, setIndex: setIndex)
+            case .nextUp: nextUpSheet()
             }
+        } else {
+            switch sheet {
+            case .batchLoad(let itemID, let setIndex):
+                batchLoadSheet(itemID: itemID, setIndex: setIndex)
+            case .batchReps(let itemID, let setIndex):
+                batchRepsSheet(itemID: itemID, setIndex: setIndex)
+            case .batchRir(let itemID, let setIndex):
+                batchRirSheet(itemID: itemID, setIndex: setIndex)
+            case .nextUp:
+                nextUpSheet()
+            case .load, .reps, .rir:
+                EmptyView()
+            }
+        }
+    }
+
+    @ViewBuilder
+    func nextUpSheet() -> some View {
+        if let nextUp = viewModel.nextUpPresentation {
+            NextUpSheet(
+                nextUp: nextUp,
+                workQueue: viewModel.executionProjection(now: Date()).workQueue
+            )
         }
     }
 
@@ -91,12 +121,88 @@ extension RestView {
         )
     }
 
+    @ViewBuilder
+    func batchLoadSheet(itemID: UUID, setIndex: Int) -> some View {
+        if let row = batchRow(itemID: itemID, setIndex: setIndex) {
+            NumPadSheet(
+                title: "load",
+                unit: row.unit.rawValue,
+                initialValue: row.loadKg ?? 0,
+                step: 2.5,
+                allowsDecimal: true,
+                subtitle: "round log · no autoreg",
+                confirmTitle: "save",
+                onCommit: { v in
+                    activeSheet = nil
+                    viewModel.editRoundRobinBatchSet(
+                        itemID: itemID,
+                        setIndex: setIndex,
+                        loadKg: v,
+                        reps: nil,
+                        rir: nil
+                    )
+                }
+            )
+        }
+    }
+
+    @ViewBuilder
+    func batchRepsSheet(itemID: UUID, setIndex: Int) -> some View {
+        if let row = batchRow(itemID: itemID, setIndex: setIndex) {
+            NumPadSheet(
+                title: "reps",
+                unit: nil,
+                initialValue: Double(row.reps),
+                step: 1,
+                allowsDecimal: false,
+                subtitle: "round log · no autoreg",
+                confirmTitle: "save",
+                onCommit: { v in
+                    activeSheet = nil
+                    viewModel.editRoundRobinBatchSet(
+                        itemID: itemID,
+                        setIndex: setIndex,
+                        loadKg: nil,
+                        reps: Int(v),
+                        rir: nil
+                    )
+                }
+            )
+        }
+    }
+
+    @ViewBuilder
+    func batchRirSheet(itemID: UUID, setIndex: Int) -> some View {
+        if let row = batchRow(itemID: itemID, setIndex: setIndex) {
+            RirSheet(
+                initialValue: row.rir,
+                onPick: { rir in
+                    activeSheet = nil
+                    viewModel.editRoundRobinBatchSet(
+                        itemID: itemID,
+                        setIndex: setIndex,
+                        loadKg: nil,
+                        reps: nil,
+                        rir: rir
+                    )
+                },
+                onSkip: { activeSheet = nil }
+            )
+        }
+    }
+
     func currentItem() -> RestViewItem? {
         let c = viewModel.state.cursor
         return viewModel.context.item(
             at: c.blockIndex,
             itemIndex: c.itemIndex
         ).map { RestViewItem(id: $0.id) }
+    }
+
+    private func batchRow(itemID: UUID, setIndex: Int) -> RoundRobinBatchSetRow? {
+        viewModel.roundRobinBatchRows().first {
+            $0.itemID == itemID && $0.setIndex == setIndex
+        }
     }
 }
 

@@ -7,7 +7,7 @@
 //   - progress pips for the sets in this item
 //   - hero prescription block: big load (mono) / unit / "N reps"
 //   - "LAST TIME" chip at the bottom (when history present)
-//   - primary "log set N" pinned at the bottom
+//   - primary mode-aware log button pinned at the bottom
 //
 // Dark-only. All color / type / spacing tokens come from DesignSystem.
 
@@ -31,11 +31,14 @@ struct ActiveView: View {
     // `internal` so the swap-sheet helpers in `ActiveView+Swap.swift`
     // can toggle the binding.
     @State var showSwapSheet = false
+    @State var showMetconResultSheet = false
+    @State private var showNextUpSheet = false
 
     // qa-028: End confirmation alert. Tapping the nav-bar End button
     // surfaces the alert instead of firing `complete()` directly so a
     // stray tap mid-workout doesn't silently skip remaining sets.
     @State private var showEndConfirm = false
+    @State private var timerNow = Date()
 
     // Time-cap tick source (bug-042). `TimelineView` is a render-time
     // construct; we need the tick to fire `viewModel.tickBlockTimer()` as
@@ -56,6 +59,9 @@ struct ActiveView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: DSSpacing.xl) {
                             header(content: content)
+                            if let timer = viewModel.timerPresentation(now: timerNow) {
+                                timerHero(timer)
+                            }
                             if content.totalSets > 0 {
                                 progressPips(content: content)
                             }
@@ -63,18 +69,12 @@ struct ActiveView: View {
                             if let lastTime = content.lastTime {
                                 lastTimeChip(lastTime)
                             }
+                            if let nextUp = viewModel.nextUpPresentation {
+                                nextUpCard(nextUp)
+                            }
                         }
                         .padding(.horizontal, DSSpacing.xl)
                         .padding(.top, DSSpacing.lg)
-                        // The whole card is the long-press zone so a sweaty
-                        // finger landing anywhere near the exercise name or
-                        // hero value triggers the swap menu. See
-                        // `app/README.md` § "Swap" — long-press opens the
-                        // swap / adjust affordances.
-                        .contentShape(Rectangle())
-                        .onLongPressGesture(minimumDuration: 0.4) {
-                            openSwapSheet()
-                        }
                     }
 
                     logButton(content: content)
@@ -99,7 +99,21 @@ struct ActiveView: View {
         // the call avoids waking the view model on every interval for
         // blocks that can't possibly auto-complete.
         .onReceive(tickTimer) { _ in
-            if viewModel.state.blockEndsAt != nil {
+            timerNow = Date()
+            if ActiveView.shouldPresentAMRAPResultSheet(
+                timingMode: currentTimingMode,
+                blockEndsAt: viewModel.state.blockEndsAt,
+                now: timerNow,
+                isMetconResultSheetPresented: showMetconResultSheet
+            ) {
+                showMetconResultSheet = true
+                return
+            }
+            if ActiveView.shouldTickBlockTimer(
+                blockEndsAt: viewModel.state.blockEndsAt,
+                workEndsAt: viewModel.state.workEndsAt,
+                isMetconResultSheetPresented: showMetconResultSheet
+            ) {
                 viewModel.tickBlockTimer()
             }
         }
@@ -118,16 +132,42 @@ struct ActiveView: View {
             // `logCurrentSet(...)`.
             if let content = viewModel.activeContent {
                 LogSetSheet(
+                    title: logSheetTitle(content: content),
+                    initialLoad: viewModel.activeSetPlan?.loadKg,
+                    loadUnit: viewModel.activeSetPlan?.unit.rawValue,
                     initialReps: content.reps,
-                    onCommit: { reps, rir in
+                    onCommit: { loadKg, reps, rir in
                         showLogSheet = false
-                        viewModel.logSet(reps: reps, rir: rir)
+                        viewModel.logSet(loadKg: loadKg, reps: reps, rir: rir)
                     }
                 )
             }
         }
         .sheet(isPresented: $showSwapSheet) {
             swapSheet
+        }
+        .sheet(isPresented: $showMetconResultSheet) {
+            MetconResultSheet(
+                timingMode: currentTimingMode,
+                elapsed: currentWorkElapsedSeconds,
+                amrapItems: viewModel.amrapPartialResultItems(),
+                onAMRAPCommit: { extraReps in
+                    showMetconResultSheet = false
+                    viewModel.logAMRAPPartialResult(extraReps: extraReps)
+                },
+                onForTimeCommit: {
+                    showMetconResultSheet = false
+                    viewModel.logForTimeResult()
+                }
+            )
+        }
+        .sheet(isPresented: $showNextUpSheet) {
+            if let nextUp = viewModel.nextUpPresentation {
+                NextUpSheet(
+                    nextUp: nextUp,
+                    workQueue: viewModel.executionProjection(now: Date()).workQueue
+                )
+            }
         }
         // qa-028: confirm before force-completing. Ending mid-workout is
         // destructive (unlogged sets vanish), so a stray tap or sweaty
@@ -155,7 +195,11 @@ struct ActiveView: View {
         HStack {
             Spacer()
             Button {
-                showEndConfirm = true
+                if currentTimingMode == .amrap {
+                    showMetconResultSheet = true
+                } else {
+                    showEndConfirm = true
+                }
             } label: {
                 Text("end")
                     .font(DSTypography.subLabel)
@@ -179,45 +223,134 @@ struct ActiveView: View {
             Text(content.exerciseName)
                 .font(DSTypography.title)
                 .foregroundStyle(DSColors.foreground)
-            // Meta line moved from `caption` (11pt) to `subtitle` (14pt
-            // semibold) — set counter + rest duration are the most
-            // action-critical info on this screen for a user
-            // glancing mid-lift (bug-022). The hero load stays the
-            // visual anchor at 64pt, so this still reads as sub-
-            // header, not title; the bump just makes it legible at
-            // arm's length.
+            // Meta line stays structural; the running timer has its own
+            // primary hero below so the two don't compete or duplicate.
             Text(metaLine(content: content))
                 .font(DSTypography.subtitle)
                 .foregroundStyle(DSColors.foregroundMuted)
+            Text("hold exercise to swap")
+                .font(DSTypography.caption)
+                .tracking(0.4)
+                .foregroundStyle(DSColors.foregroundDim)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onLongPressGesture(minimumDuration: 0.4) {
+            openSwapSheet()
+        }
+        .accessibilityHint("Long press to open exercise alternatives")
     }
 
     /// Active-screen meta line. Contract for unbounded time-capped modes
-    /// (AMRAP — driver passes `totalSets == 0`): render "ROUND N · REST
-    /// mm:ss" with no denominator. Bounded modes (StraightSets / Circuit
-    /// / Tabata / ForTime / EMOM / etc.) keep the "SET N OF M" shape.
+    /// (AMRAP — driver passes `totalSets == 0`): render "ROUND N"
+    /// with no denominator. Other modes use the user's workout vocabulary
+    /// where the cursor represents intervals or rounds rather than a
+    /// strength set.
     /// Fixes bug-037 — prior code dereferenced `totalSets = 999` into
     /// a visible denominator and rendered 999 progress dots off-screen.
     private func metaLine(content: ActiveContent) -> String {
         ActiveView.formattedMetaLine(
             content: content,
-            restSeconds: viewModel.restDurationSeconds
+            timingMode: currentTimingMode
         )
     }
 
     /// Pure-swift helper exposed for unit tests. Mirrors the bug-037
-    /// contract: `totalSets > 0` → "SET n OF m · REST …"; `totalSets
-    /// <= 0` → "ROUND n · REST …" (unbounded rounds).
+    /// contract for unbounded modes while allowing bounded modes to use
+    /// mode-native language.
     static func formattedMetaLine(
         content: ActiveContent,
-        restSeconds: Double
+        timingMode: TimingMode = .straightSets
     ) -> String {
-        let rest = formatDuration(seconds: restSeconds)
-        if content.totalSets > 0 {
-            return "SET \(content.setIndex) OF \(content.totalSets) · REST \(rest)"
+        switch timingMode {
+        case .straightSets:
+            guard content.totalSets > 0 else { return "ROUND \(content.setIndex)" }
+            return "SET \(content.setIndex) OF \(content.totalSets)"
+        case .emom, .intervals:
+            guard content.totalSets > 0 else { return "INTERVAL \(content.setIndex)" }
+            return "INTERVAL \(content.setIndex) OF \(content.totalSets)"
+        case .superset, .circuit, .forTime, .tabata:
+            guard content.totalSets > 0 else { return "ROUND \(content.setIndex)" }
+            return "ROUND \(content.setIndex) OF \(content.totalSets)"
+        case .continuous:
+            return "CONTINUOUS"
+        case .accumulate:
+            return "ACCUMULATE"
+        case .amrap:
+            return "ROUND \(content.setIndex)"
+        case .custom:
+            guard content.totalSets > 0 else { return "SEGMENT \(content.setIndex)" }
+            return "SEGMENT \(content.setIndex) OF \(content.totalSets)"
+        case .rest:
+            return "REST"
         }
-        return "ROUND \(content.setIndex) · REST \(rest)"
+    }
+
+    func logSheetTitle(content: ActiveContent) -> String {
+        let bi = viewModel.state.cursor.blockIndex
+        switch viewModel.context.block(at: bi)?.timingMode {
+        case .accumulate:
+            return "log chunk"
+        case .emom:
+            return "log interval \(content.setIndex)"
+        case .forTime, .tabata:
+            return "log round \(content.setIndex)"
+        case .custom:
+            return "log segment \(content.setIndex)"
+        case .superset, .circuit, .amrap:
+            return "log station"
+        case .straightSets, .rest, .intervals, .continuous, nil:
+            return "log set"
+        }
+    }
+
+    static func shouldTickBlockTimer(
+        blockEndsAt: Date?,
+        workEndsAt: Date?,
+        isMetconResultSheetPresented: Bool
+    ) -> Bool {
+        guard !isMetconResultSheetPresented else { return false }
+        return blockEndsAt != nil || workEndsAt != nil
+    }
+
+    static func shouldPresentAMRAPResultSheet(
+        timingMode: TimingMode,
+        blockEndsAt: Date?,
+        now: Date,
+        isMetconResultSheetPresented: Bool
+    ) -> Bool {
+        guard timingMode == .amrap,
+              !isMetconResultSheetPresented,
+              let blockEndsAt else { return false }
+        return now >= blockEndsAt
+    }
+
+    private var currentTimingMode: TimingMode {
+        let bi = viewModel.state.cursor.blockIndex
+        return viewModel.context.block(at: bi)?.timingMode ?? .straightSets
+    }
+
+    private var currentWorkElapsedSeconds: TimeInterval {
+        guard let startedAt = viewModel.state.workStartedAt else { return 0 }
+        return max(0, Date().timeIntervalSince(startedAt))
+    }
+
+    private func timerHero(_ timer: ExecutionTimerPresentation) -> some View {
+        VStack(spacing: DSSpacing.xs) {
+            Text(timer.label)
+                .font(DSTypography.subLabel)
+                .tracking(1.4)
+                .foregroundStyle(DSColors.foregroundMuted)
+            Text(timer.formattedValue)
+                .font(.system(size: 56, weight: .light, design: .monospaced))
+                .monospacedDigit()
+                .foregroundStyle(DSColors.accentInk)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, DSSpacing.xl)
+        .background(DSColors.surfaceElevated)
+        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .accessibilityIdentifier("execution.active.primaryTimer")
     }
 
     /// Pure-swift helper for the bug-037 progress-dot contract: dots
@@ -262,6 +395,45 @@ struct ActiveView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, DSSpacing.xxl)
+        .contentShape(Rectangle())
+        .onLongPressGesture(minimumDuration: 0.4) {
+            openSwapSheet()
+        }
+        .accessibilityHint("Long press to open exercise alternatives")
+    }
+
+    private func nextUpCard(_ nextUp: ExecutionNextUpPresentation) -> some View {
+        Button {
+            showNextUpSheet = true
+        } label: {
+            VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                HStack(alignment: .firstTextBaseline) {
+                    Text(nextUp.label.uppercased())
+                        .font(DSTypography.subLabel)
+                        .tracking(1.2)
+                        .foregroundStyle(DSColors.foregroundDim)
+                    Spacer()
+                    Text("tap to preview")
+                        .font(DSTypography.caption)
+                        .foregroundStyle(DSColors.foregroundDim)
+                }
+                Text(nextUp.title)
+                    .font(DSTypography.subtitle)
+                    .foregroundStyle(DSColors.foreground)
+                if let detail = nextUp.detail {
+                    Text(detail)
+                        .font(DSTypography.mono)
+                        .foregroundStyle(DSColors.foregroundMuted)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(DSSpacing.md)
+            .background(DSColors.surface)
+            .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("execution.active.nextUp")
+        .accessibilityHint("Tap to preview what is coming next")
     }
 
     /// Hero primary face. Strength shows `loadDisplay` (which may split
@@ -289,7 +461,7 @@ struct ActiveView: View {
     private func heroSecondary(content: ActiveContent) -> String {
         switch content.kind {
         case .strength:
-            return "\(content.repsDisplay) reps"
+            return viewModel.currentCompositeRepsDisplay ?? "\(content.repsDisplay) reps"
         case .cardio:
             return content.loadDisplay
         }

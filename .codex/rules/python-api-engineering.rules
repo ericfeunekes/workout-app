@@ -1,0 +1,6 @@
+# Python API engineering (UV-only)
+
+# allow uv-run pytest markers
+prefix_rule(pattern=["uv", "run", "pytest", "-m", "integration"], decision="allow")
+prefix_rule(pattern=["uv", "run", "pytest", "-m", "contract"], decision="allow")
+prefix_rule(pattern=["uv", "run", "pytest", "-m", "e2e"], decision="allow")

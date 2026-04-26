@@ -7,6 +7,9 @@ covers:
   - app/Packages/Features/Execution/Sources/FeaturesExecution/ExecutionViewModel.swift
   - app/Packages/Features/Execution/Sources/FeaturesExecution/ExecutionViewModel+Persistence.swift
   - app/Packages/Features/Execution/Sources/FeaturesExecution/ExecutionViewModel+Push.swift
+  - app/Packages/Features/Execution/Sources/FeaturesExecution/ExecutionProjection.swift
+  - app/Packages/Features/Execution/Sources/FeaturesExecution/ExecutionNextUpPresentation.swift
+  - app/Packages/Features/Execution/Sources/FeaturesExecution/ExecutionTimerPresentation.swift
   - app/Packages/Features/Execution/Sources/FeaturesExecution/ActiveView.swift
   - app/Packages/Features/Execution/Sources/FeaturesExecution/RestView.swift
   - app/Packages/Features/Execution/Sources/FeaturesExecution/RestView+Banner.swift
@@ -40,6 +43,7 @@ Once `SessionState.route` flips out of `.today`, `ExecutionView` renders the act
 - **State transitions (`SessionState.Route`):** `.today → .active` (start); `.active → .rest` (logSet with rest > 0); `.active → .active next set` (logSet with rest == 0 — `advanceFromRest` fires directly — see `ExecutionViewModel.swift:262-268`); `.rest → .active` (advance); `.rest → .complete` (advance past last set); `.active → .complete` (explicit End button); `.complete → .today` (saveAndDone clears state).
 - **Timer anchors:** `restEndsAt` (rest countdown), `blockEndsAt` (AMRAP / ForTime / EMOM / Tabata total cap), `workEndsAt` (Tabata / intervals / custom work window), `intervalAnchorAt` (EMOM boundary), `workReadyAt` (straight-set ready/prep count-up), and `workStartedAt` (active-set elapsed anchor). These anchors are state, not presentation; views should not independently infer timer labels from driver metadata.
 - **Next-up read model:** Active and Rest derive next-up context from the current cursor and the loaded workout structure. It can label the next set, next exercise, next block, rest block, or workout completion. The compact card is tappable for a read-only preview sheet. This is display context only; it must not perform workout reorganization or programming logic.
+- **Execution projection:** `ExecutionProjection` is the shared read-model seam for execution surfaces. Preview, Active/Rest, History correction, and Watch mapping should ask it for current task, remaining work, upcoming work, block progress, editability, and timer state rather than re-deriving cursor, driver, and timer rules from SwiftUI. This layer is view-neutral and watch-neutral: it may consume `WorkoutContext` and `SessionState`, but `FeaturesExecution` must not import Watch packages or sync/protocol DTOs. Unbounded modes such as AMRAP must not leak internal sentinel set counts into remaining/progress displays.
 - **Interaction model:** timer surfaces own timer semantics; Active's exercise name / hero prescription is the long-press swap target; Rest's "just logged" load / reps / RIR pills are tap-to-correct controls. Hidden interactions need small visible cues because the gym context is sweaty, distracted, and usually one-handed.
 
 ## Timer boundary contract
@@ -67,6 +71,7 @@ Do not regress to the old pattern where Active renders `REST 0:00` while a block
 
 ## Edge cases handled in code
 - **Progress-dot / meta-line contract (bug-037).** `ActiveView` gates progress dots on `content.totalSets > 0` and uses timing-mode language for the header line: straight strength = `SET`, round-based modes = `ROUND`, EMOM / intervals = `INTERVAL`, custom = `SEGMENT`, continuous = `CONTINUOUS`. Drivers for unbounded time-capped modes (AMRAP → `AMRAPDriver.unboundedRoundsCount == 0`) pass `totalSets = 0` to declare "no bound"; the view collapses the dot row and the meta line reads `ROUND N`. Bounded modes pass their real count and render the dots. If a future mode goes unbounded, seed `totalSets = 0` — do NOT reach for a large-integer sentinel (a prior AMRAP sentinel of 999 rendered 999 dots off-screen at x = -5797). Pinned by `AMRAPDriverBug037Tests` + `ActiveViewMetaLineTests`.
+- **Projection count contract.** `ExecutionProjection` treats AMRAP set counts as unbounded even if `SessionState` carries an internal cap for cursor advancement. Remaining/progress models should show no fake denominator for those blocks. Pinned by `ExecutionProjectionTests.testAMRAPProjectionKeepsUnboundedRoundsReadable`.
 - Straight-set logging is guarded behind `startCurrentSet()`: workout start and rest advance land on Active with `workReadyAt` and nil `workStartedAt`; `Set Start` stamps `workStartedAt`; `logSet` / `logSet(loadKg:reps:rir:)` no-op until that stamp exists. This prevents fake/default actuals from entering push/autoreg while still keeping a visible prep timer.
 - Unknown itemID / setIndex is a silent no-op (`SessionReducer.swift:6-8`, `SessionReducer+Handlers.swift:164-178`).
 - `rest_sec == 0` collapses rest entirely and advances directly (`ExecutionViewModel.swift:262-268`).

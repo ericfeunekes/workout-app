@@ -9,6 +9,7 @@ covers:
   - docs/set-edit-sheet.md
   - app/Packages/Features/Today/
   - app/Packages/Features/Execution/
+  - app/Packages/Features/Execution/Sources/FeaturesExecution/ExecutionProjection.swift
 ---
 
 # workout-preview
@@ -36,6 +37,10 @@ gym context where taps are imprecise.
   state if one exists.
 - **Outputs:** preview read model, explicit start action, scoped edit intents
   routed through `docs/set-edit-sheet.md`.
+- **Projection ownership:** preview should consume the shared execution
+  projection seam for first-task, remaining-work, upcoming-work, block-intent,
+  and editability answers. It should not re-derive execution cursor rules or
+  driver-specific display strings in a separate preview-only model.
 - **State transitions:** preview has no live timers. `Start` is the only route
   from preview into execution.
 
@@ -63,8 +68,9 @@ handoff instead of inventing a local plan mutation.
 - Today still documents current direct-start behavior; the target is preview
   first with explicit Start.
 - Preview editability is not proven for all target fields.
-- "What's next" must include remaining work in the current block, not only the
-  next block.
+- Preview has not yet been wired to `ExecutionProjection`, so first-task,
+  current-block remaining, and upcoming-work display are still target behavior
+  rather than verified UI.
 - Simulator proof is required before any preview tap target or layout claim is
   marked `verified`.
 

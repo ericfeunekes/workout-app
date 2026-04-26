@@ -1,6 +1,6 @@
 ---
 title: Phase 3 — execution read-model seams implementation plan
-status: backlog
+status: completed
 last_reviewed: 2026-04-26
 purpose: Create shared execution read models so preview, active/rest, history, and watch do not re-derive workout structure independently.
 covers:
@@ -107,6 +107,29 @@ watch-neutral and UI-neutral enough that Shell can later map them to watch DTOs.
 - Update feature docs if read-model terms become part of implementation
   vocabulary.
 - Update downstream phase plans if names differ.
+
+## Implementation Notes
+
+- Added `ExecutionProjection` as the shared read-model seam over
+  `WorkoutContext` and `SessionState`.
+- Made projection DTOs and `ExecutionTimerPresentation` public so downstream
+  Preview, Shell, History, and Watch mapping code can consume or fixture them.
+- Kept `FeaturesExecution` watch-neutral; `WatchBridge` remains absent from the
+  package.
+- `.today` projection now exposes the first executable task and upcoming work,
+  so Preview does not need to re-derive driver/cursor display strings.
+- Overdue rest projects as `OVER REST` elapsed instead of clamped `REST 0:00`.
+
+## Completion Proof
+
+- `FeaturesExecutionTests.ExecutionProjectionTests`: 6 tests passed.
+- `FeaturesExecution` package tests: 357 tests passed.
+- `rg -n "WatchBridge" app/Packages/Features/Execution`: no hits.
+- Codex review thread `019dcaa4-41de-7de1-b52a-fe17b080b77e`: initial
+  findings fixed; re-review clean.
+- iOS simulator `build_run_sim`: succeeded for `WorkoutDB` on `WorkoutDB-Dev`.
+- Simulator snapshot: Today screen rendered with planned workout cards and root
+  tabs.
 
 ## Recovery Context
 

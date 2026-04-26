@@ -33,10 +33,6 @@ A PUT on a workout replaces nested blocks/items. Set logs referencing the old `w
 - **Assumption:** orphaned set_logs are preserved and remain queryable by `workout_id`; their `workout_item_id` FK stays pointing at a deleted row (needs the FK to be nullable or the delete to be a soft-delete).
 - **Disposition:** decide-next. Either make `workout_item` soft-deletable, or forbid replacement of items that have set_logs. This affects the PUT /api/workouts contract.
 
-### `rounds_rep_scheme` not in the prescription doc
-Documented in the v2 spec (block-level rep scheme) but not in `docs/prescription.md` except via the Fran example.
-- **Disposition:** decide-next. Fold a short section into `docs/prescription.md` § "Per-timing-mode prescription shapes" under `for_time` (and anywhere else it applies).
-
 ### Alternative prescription shape cap
 An alternative can override any prescription keys. There is no validation that the override produces a shape the block's timing_mode can execute (e.g., swapping a loaded strength item into a bodyweight-reps item inside a straight_sets block).
 - **Assumption:** Claude authors alternatives sensibly. App fails gracefully if the shape is wrong.
@@ -93,10 +89,10 @@ Each set has its own prescribed load; autoreg's "remaining" is well-defined (set
 - **Assumption:** autoreg adjusts each remaining set's *own* prescribed load by `step_kg`, preserving the shape of the pyramid.
 - **Disposition:** resolve-in-code. Write a test fixture when building the applier.
 
-### Autoreg in cluster sets (`sub_sets`)
-Autoreg fires "after a set is logged." In a cluster, does "set" mean the top-level set (5 reps × 4 sub-sets) or each sub-set?
-- **Assumption:** top-level set only. Sub-sets are internal to one `set_log` row.
-- **Disposition:** decide-next. Worth writing into `docs/prescription.md` § Cluster when the pattern is first used.
+### Cluster per-slot actual editing
+Cluster/rest-pause execution now tracks sub-set slots and logs one top-level `set_log`, but expanded after-the-fact editing of individual sub-slot actuals is not yet modeled.
+- **Assumption:** v1 stores the top-level actual total, load, duration, and final-effort RIR. Per-slot actual rows wait until the first real workout shows that the extra edit detail is needed.
+- **Disposition:** watchlist.
 
 ### Autoreg on tempo reps
 Undershoot rule treats reps as a uniform signal; tempo reps are harder per rep.
@@ -114,9 +110,13 @@ User enters a manual load for a `percent_1rm` set (because the parameter wasn't 
 
 ---
 
-## Authoring gaps (for a future planning-Claude CLI)
+## Work-type coverage interview
 
-These are authoring patterns the vocabulary doesn't yet support. None block v1 — they emerged from trying to mentally author a real program. Most can be added to `docs/prescription.md` incrementally.
+These are not current bug-fix items. Current execution work is about fixing modes and logging surfaces the app already claims to support. After those bugs are closed, run a dedicated interview/spec pass on this broader question:
+
+**Have we fully enumerated every type of work Eric might need to perform, time, and log, and does the app have the right primitive for each one without pretending it is just reps × load?**
+
+The output should be a work/logging taxonomy, not a grab bag of special cases. Each pattern needs a clear answer for: how Claude authors it, what the active face shows, what timer boundary exists, what the user edits at log time, and what fields land in `set_log`.
 
 ### Dynamic load reference ("today's top set as baseline")
 5/3/1-style "top single, then back-off sets at X% of the top" has no shape. `percent_1rm` is static.
@@ -129,6 +129,24 @@ No timing mode covers "fixed reps+load, variable number of sets, time-capped."
 ### Time-capped strength ("5×5 in under 30 min")
 Same gap as density sets — no timing mode covers fixed-prescription-with-time-cap.
 - **Disposition:** decide-next. Resolve alongside the density-sets decision — same shape of answer.
+
+### Loaded carries / weighted distance efforts
+Farmer's walks, sled pushes, yoke carries, and sandbag carries combine distance + load, often as either "carry X kg for Y meters" or "rounds for time with a loaded carry station." The current item-level shape is `target.kind = "distance"` with an authored display unit plus optional load. The app displays the distance target as primary, keeps load visible, and pushes canonical `distance_m` plus `(weight, weight_unit)`.
+- **Examples:** farmer's walk 2 × 40 m @ 48 kg per hand; 5 rounds for time of 100 m sandbag carry @ 70 kg + burpees; sled push 20 m @ 140 kg.
+- **Assumption:** short-term, author loaded carries as `circuit`, `for_time`, or `accumulate` items using `target: {kind, value, unit}` plus `load_kg` / `weight_unit`. Use notes to say whether load is per-hand, total implement load, sled load, or bodyweight-inclusive.
+- **Disposition:** partially-resolved. The generic distance+load display/log path exists. Still decide later whether carries deserve per-hand load semantics, split rows, or sensor-driven distance completion.
+
+### Weighted holds / max-duration holds
+Static holds split into at least two shapes: fixed-duration holds ("hold 24 kg suitcase carry position for 30s") and max-duration tests ("max dead hang with 20 lb vest"). Fixed-duration holds fit the current item-level shape: `target.kind = "duration"` with an authored display unit plus optional load. The app displays the duration target as primary, keeps load visible, and logs actual elapsed `duration_sec` plus `(weight, weight_unit)`.
+- **Examples:** plank 45s with 20 kg plate; wall sit 60s with sandbag; max hang with 20 lb vest; suitcase hold max time per side.
+- **Assumption:** fixed-duration loaded holds should use `target: { "kind": "duration", "value": N, "unit": "sec|min" }` plus load. Max-duration efforts still need a distinct "until failure / log actual duration" scoring contract.
+- **Disposition:** partially-resolved. Fixed-duration holds are executable; max-duration tests remain decide-next.
+
+### First-class block results
+AMRAP and For Time now have mode-native finish sheets, but the minimal v1 persistence shape records the result through existing `set_log` rows plus a workout note. AMRAP uses station logs during the block and a partial-station row at the end; For Time records elapsed duration against the first item. That is enough to stop presenting strength-shaped per-movement logging, but it is not a first-class block-result table.
+- **Examples:** For Time result = 8:43; scored interval block = total distance; max-duration hold = 54s.
+- **Assumption:** keep v1 on `set_log` + note unless result querying becomes painful. If Claude needs structured block scores for analysis, add a dedicated `block_result` entity in one coordinated schema cutover.
+- **Disposition:** decide-next. Resolve as part of the work/logging taxonomy rather than one-off per mode.
 
 ### Complexes
 Barbell complex (deadlift + clean + squat + press as one round, N rounds). Superset works for 2 exercises; circuit works but the inter-exercise-rest semantics are wrong (a complex has zero rest between exercises and rest only between rounds).
@@ -208,11 +226,6 @@ Ring total-duration is captured on first render via `@State anchor`. If the phon
 Tests use a 50ms `Task.sleep` to let the detached `Task { await vm.start() }` register its `bridge.messages()` continuation before the test delivers messages.
 - **Assumption:** add an `awaitSubscription()` hook on `FakeWatchBridge` that yields until a continuation is registered.
 - **Disposition:** watchlist.
-
-### Tab bar accessibility IDs missing (harder than expected)
-SwiftUI `TabView` in `Shell.RootTabView` doesn't expose child tab items as individually-tappable accessibility elements. Tried `.accessibilityIdentifier("tab-today")` on each tab view — the identifier lands on the content view, NOT on the tab bar button. Coordinate-tap still works for MCP automation but `tap(label:)` / `tap(id:)` does not.
-- **Assumption:** real fix is either (a) `.accessibilityLabel` on the `Label` inside `.tabItem` plus `.tabItem` customization hooks, (b) switch to a custom tab bar (visible `HStack` of buttons below the content), or (c) use UIKit `UITabBarController` via `UIViewControllerRepresentable`. Worth a short investigation before picking.
-- **Disposition:** watchlist. Coordinate-tap is fine for now. Revisit if/when we want UI-test automation of the tab surface. Companion to `bug-029` (deferred to v1.1+).
 
 ### FirstRun connection string format — URL + token vs unified QR payload
 `docs/sync.md` describes the connection string as a single paste-or-QR payload (URL + embedded token). `Features/FirstRun` as shipped has two separate text fields (URL, bearer token). They diverge.

@@ -2,6 +2,7 @@
 title: Closeout checklist
 status: stable
 date: 2026-04-17
+last_reviewed: 2026-04-26
 purpose: "What to check before declaring a change done. Enforces the complete-cutover philosophy so nothing partial lands."
 covers:
   - all
@@ -69,6 +70,14 @@ If the change introduces a new top-level module, package split, or layering boun
 
 - [ ] Invariant landed in `AGENTS.md` (if it applies to every future change) or in an ADR under `docs/decisions/` (if it's a single decision with rationale worth pinning).
 - [ ] Spec updated if the invariant constrains the schema or sync story.
+
+## Feature contract / gap map
+
+If the change implements or proves target behavior tracked in a feature doc:
+
+- [ ] The affected `docs/features/*` contract is updated in the same commit.
+- [ ] Any closed item is removed from or updated in the feature doc's `Current gaps` section.
+- [ ] `docs/feature-gap-map.md` is updated with the new state and proof reference.
 
 ## After context loss
 

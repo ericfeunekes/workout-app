@@ -1,18 +1,19 @@
 ---
-title: WorkoutDB — product spec & status tracker
+title: Setmark — product spec & status tracker
 status: living
+last_reviewed: 2026-04-26
 purpose: Single source of truth for what we're building, what's done, and how we know.
 covers:
   - whole project
 ---
 
-# WorkoutDB
+# Setmark
 
 **One-liner.** Dumb iOS workout app + smart home server. Claude authors sessions; the app shows, times, and logs; the server stores and syncs. Single user. Single home deployment.
 
 **Authoritative architecture spec:** `docs/specs/v2-architecture.md`. Read it before touching schema, sync, or the app shell.
 
-**Feature behavior specs:** `docs/features/` (per-feature behavioral contract + QA scenarios). Start at `docs/features/INDEX.md`.
+**Feature behavior specs:** `docs/features/` (per-feature target behavioral contracts + QA scenarios). Start at `docs/features/INDEX.md`; use `docs/feature-gap-map.md` for current gaps grouped into implementation phases.
 
 **Unresolved design questions:** `docs/open-questions.md`.
 
@@ -26,7 +27,7 @@ covers:
 
 _One paragraph, kept current as work moves. Update when starting a new slice; mark stale if untouched > 1 week._
 
-**2026-04-18 (R1 + R2 + P2 cutover complete):** Shipped ~18 multi-bucket fix waves (5 R1 + 10 R2 + 3 P2 sweeps plus a final closeout). Each wave was Claude-implement → Codex-review → Claude-fix-it → Codex-review until clean; synthesis in `scratch/codex-reviews/SYNTHESIS.md`. Structural highlights: session-persistence pipeline with FIFO + monotonic revisions + restore-time normalization (bug-043); deterministic client-owned UUIDs everywhere (SetLog, UserParameter, wire lowercase — bug-044 / bug-045); SwiftData V2 + V3 + reconcile-before-upsert with detach-before-delete so SetLogs survive server edits (bug-046 / bug-047); cardio logging contract via `.logCardioSet` mutation + `SetPlan.loadKg: Double?` optional cascade (bug-049 / bug-053); EMOM minute-boundary driven via `intervalAnchorAt` (bug-050); swap overrides widened to sets/per_side/autoreg with sets-on-round-robin rejection telemetry (bug-057); pound-default trunk refactor — default `.lb`, per-unit autoreg steps, centralized `formatLoad(weight:unit:)` (bug-059); push queue got exponential backoff `[10,30,60,120,300]`s, priority-weighted FIFO (results before telemetry), logical dedup, dead-letter-after-5-persistent-4xx (bug-060); server enforces `Z`-suffix datetimes + 90-day `event_log` retention + tenant-guarded UserParameter id. Final closeout: CompleteView+Ledger treats only nil (not 0) as BW; cardio duration = elapsed (not authored); Tabata narrowed to strength-only for v0; server persists workout notes on status push; HistoryPreviewSeed includes a bodyweight sample. All 11 timing modes built + tested; gates green (pytest 183/183, xcodebuild iPhone 17 Pro BUILD SUCCEEDED, >800 Swift cases green). **Active bug tracker has zero open P0/P1/P2 rows;** the full fix list is in `docs/bugs.md` bug-043 – bug-060.
+**2026-04-24 (post simulator UX QA):** Today plan visibility is closed and the execution timer boundary is pinned: Active now renders one primary visible timer (`CAP`, `WORK`, `INTERVAL`, or `SET ELAPSED`) immediately after start instead of silently ticking internal cap state. Active and Rest also show smaller next-up context so the user can see what follows without asking the app to reorganize the plan. The Today plan surface covers the local queue, drill-in detail, refresh, block-level previews, start-any-visible-card execution handoff, and a copyable Claude adjustment request; local plan mutation remains deliberately out of scope. `docs/bugs.md` is the canonical active tracker. Earlier R1/R2/P2 execution fixes remain closed in git history; do not maintain a second closed-bug list.
 
 ---
 
@@ -36,7 +37,7 @@ Target: "first workout in the gym, basically no bugs, just works." The scope has
 
 ### In-scope — must work
 
-- **Execution loop** across **all 11 timing modes:** `straight_sets`, `superset`, `circuit`, `emom`, `amrap`, `for_time`, `intervals`, `tabata`, `continuous`, `custom`, `rest`.
+- **Execution loop** across **all 12 timing modes:** `straight_sets`, `superset`, `circuit`, `emom`, `amrap`, `for_time`, `intervals`, `tabata`, `continuous`, `accumulate`, `custom`, `rest`.
 - **Per-exercise autoreg** with accept-by-default + undo (hold session-scoped per-item). Negative-load clamp.
 - **Exercise swap** mid-workout via long-press → alternatives sheet.
 - **Alternative overrides** applied at runtime (`parameter_overrides_json`).
@@ -67,6 +68,12 @@ Target: "first workout in the gym, basically no bugs, just works." The scope has
 
 Status ladder — **a feature only advances to a higher state with evidence, cited in the Evidence column.** No optimism.
 
+This matrix is the product-level release tracker. Feature docs use section-level
+states (`planned`, `building`, `built`, `verified`) for target-contract slices.
+A feature-doc section reaching `verified` does not automatically promote the
+product matrix; this matrix moves only when the evidence below is strong enough
+for the whole feature row.
+
 | State | Meaning | Evidence required |
 |---|---|---|
 | `draft` | Feature doc exists, intent clear. Code may or may not compile. | Feature doc path. |
@@ -81,9 +88,9 @@ Status ladder — **a feature only advances to a higher state with evidence, cit
 |---|---|---|---|
 | firstrun | [firstrun](features/firstrun.md) | `tested` | `FeaturesFirstRunTests` — re-entrancy + transport tests. After bug-048 cutover, FirstRun only hits `/api/version`; `testFirstRunHandsOffToBootstrapWithoutSecondPull` pins the scope boundary. Not yet MCP-validated against real server. |
 | bootstrap | [bootstrap](features/bootstrap.md) | `tested` | `ShellTests.AppBootstrapTests` including `testBootstrapFiresExactlyOnePullPerRun`. MCP E2E 2026-04-18 validated token→pull→ready path. `.empty` gained a "change server" route with URL+token pre-fill (bug-048). |
-| today | [today](features/today.md) | `tested` | `FeaturesTodayTests.TodayLoaderTests` + `TodayViewModelTests` — includes `testTodayViewModelReloadPicksNextPlannedAfterCompletion` + `testTodayViewModelReloadToEmptyWhenNoPlannedWorkouts` pinning the post-save reload (bug-036). MCP E2E 2026-04-18 validated "start workout" after the holder fix. |
-| execute-loop | [execute-loop](features/execute-loop.md) | `validated (straight_sets) / tested (other 10 modes)` | 149+ tests in FeaturesExecutionPackageTests + 34 in CoreSessionTests. **MCP E2E 2026-04-18**: Push A hypertrophy end-to-end (13 set_logs pushed, workout status → completed, History auto-refreshed, autoreg overshoot banner applied to remaining sets). Recording: `scratch/e2e/recordings/validation-01-hypertrophy.mp4`. Restore-time normalization pass runs zero-item / timer helpers (bug-043); cardio blocks routed through `logCurrentSet` → `.logCardioSet` with elapsed-wins duration (bug-049). Other 10 modes unit+integration tested; no MCP E2E yet. |
-| timing-modes | [timing-modes](features/timing-modes.md) | `tested (all 11 modes)` | Per-mode driver tests (Straight / Superset / Circuit / EMOM / AMRAP / ForTime / Intervals / Tabata / Continuous / Custom / RestBlock). Integration: `testAMRAPBlockCompletesAtTimeCap`, `testEMOMCursorRoundRobinsPerInterval`, `testCircuitRoundsWalkItemsThenRoundBumps`, `testForTimeRoundSchemeRendersEachRoundReps`, `testContinuousSingleItemCompletesAfterLog`, `EMOMBoundaryTests` (bug-050 minute-boundary advance via `intervalAnchorAt`). Tabata narrowed to strength-only for v0; multi-item Tabata collapses to `items[0]` with telemetry (bug-055). Time-cap tick wiring pinned by `testActiveViewWiresTickBlockTimerViaPeriodicTimer` + rest view counterpart (bug-042). |
+| today | [today](features/today.md) | `tested` | `FeaturesTodayTests.TodayLoaderTests` + `TodayViewModelTests` — includes post-save reload, plan queue grouping, UTC scheduled-date handling, detail sheet read models, adjustment draft generation, start-specific-workout action, and refresh-state tests. Shell `testTodayRefreshRunsPullAndKeepsReadyState` pins the refresh pull/reload/rebuild path; `testTodayCanStartNonSelectedPlannedWorkout` pins starting a missed/future queued card. MCP E2E 2026-04-18 validated "start workout" after the holder fix. |
+| execute-loop | [execute-loop](features/execute-loop.md) | `tested` | 149+ tests in FeaturesExecutionPackageTests + 34 in CoreSessionTests. **MCP E2E 2026-04-18**: Push A hypertrophy end-to-end (13 set_logs pushed, workout status → completed, History auto-refreshed, autoreg overshoot banner applied to remaining sets). Recording: `scratch/e2e/recordings/validation-01-hypertrophy.mp4`. Restore-time normalization pass runs zero-item / timer helpers (bug-043); cardio blocks routed through `logCurrentSet` → `.logCardioSet` with elapsed-wins duration (bug-049). Timer boundary regression pinned by `testForTimeStartExposesCapTimerPresentationImmediately`, `testAMRAPStartExposesGlobalCapTimerPresentationImmediately`, and `testStraightSetStartExposesElapsedTimerWhenNoCountdownExists`; next-up context pinned by `testForTimeStartExposesNextExerciseContext`, `testStraightSetStartExposesNextSetContext`, and `testRestBlockStartExposesNextBlockContext`; simulator QA on 2026-04-24 confirmed Active renders a visible global AMRAP cap timer. Other 10 modes unit+integration tested; no MCP E2E yet. |
+| timing-modes | [timing-modes](features/timing-modes.md) | `tested (all 12 modes)` | Per-mode driver tests (Straight / Superset / Circuit / EMOM / AMRAP / ForTime / Intervals / Tabata / Continuous / Accumulate / Custom / RestBlock). Integration: `testAMRAPNextLogsCompletedStationThenPartialResultRoutesToNextBlock`, `testAMRAPCapPresentsResultSheetInsteadOfAutoCompleting`, `testEMOMCursorRoundRobinsPerInterval`, `testCircuitRoundsWalkItemsThenRoundBumps`, `testForTimeRoundSchemeRendersEachRoundReps`, `testContinuousSingleItemCompletesAfterLog`, `AccumulateDriverTests`, `CompleteViewLedgerSwapTests.testBlockResultsSummarizeAccumulatedRepsAgainstTarget`, and `EMOMBoundaryTests` (bug-050 minute-boundary advance via `intervalAnchorAt`). Tabata narrowed to strength-only for v0; multi-item Tabata collapses to `items[0]` with telemetry (bug-055). Time-cap tick wiring pinned by `testActiveViewWiresTickBlockTimerViaPeriodicTimer` + rest view counterpart (bug-042). |
 | autoreg | [autoreg](features/autoreg.md) | `validated (overshoot) / tested (other branches)` | `CoreAutoregTests` (19+ cases, clamp + per-unit step). MCP E2E 2026-04-18 overshoot applied. `apply_to` parse failure now isolated by `parseTolerantOfAutoreg` so the base prescription survives an unknown value (bug-052). Autoreg step defaults per unit (5 lb / 1.25 kg, bug-059). `execution.autoreg_proposed` carries typed payload with `step_kg` + canonical reason tokens (bug-060). |
 | save-and-done | [save-and-done](features/save-and-done.md) | `tested` | `testSaveAndDoneInvokesLocalCompletionWriterOnce`, `testSaveAndDoneEnqueuesStatusExactlyOnce`, `testCompleteAloneDoesNotEnqueueStatus`, `testSaveAndDoneWritesNoteToCompletedWorkout`, `testSaveAndDoneEmptyNoteCollapsesToNil`, `testSaveAndDoneEnqueuesBodyweightUserParameter`, `testSaveAndDoneNilBodyweightDoesNotFire`, `testSaveAndDoneReEntrancyGuardDropsDoubleTap` (bug-044). Server `test_append_accepts_app_shaped_bodyweight_payload` + `test_user_parameter_tenant_guard_returns_403`. Server persists workout notes on status push (previously overwritten on next pull). Dictation-mic on the note deferred. |
 | history | [history](features/history.md) | `tested` | `FeaturesHistoryTests.HistoryViewModelTests` + `TrendComputationTests` + `HistoryViewModelEditPastSetTests` (bug-015 sheet landed). EditSetSheet is unit-aware (bug-051 — labels lb/kg per source unit via `formatLoad(weight:unit:)`); reps capped at 999; RIR explicit-clear via new enum. Recent-sessions grouping keyed by `workoutID` (denormalized per bug-047 V3 migration). SessionDetail bodyweight surfaces via `loadUserParameters(key:)` ±2min window (bug-060). HistoryPreviewSeed now includes a bodyweight sample. |
@@ -95,7 +102,7 @@ Status ladder — **a feature only advances to a higher state with evidence, cit
 | cardio-logging | [execute-loop](features/execute-loop.md) / [timing-modes](features/timing-modes.md) | `tested` | `.logCardioSet` mutation on `CoreSession.SessionMutation` carries `durationSec` / `distanceM` / `hrAvgBpm` / `cadenceAvgSpm` / `startedAt`. `SetPlan` grew the matching cardio fields. VM-level `logCurrentSet()` branches on `isCurrentBlockCardio` so ActiveView routes cardio blocks to `logCardioSet(...)` with elapsed-wins duration (not authored target pace × distance). IntervalsDriver suppresses trailing rest on the final interval. Pinned by `ExecutionViewModelLogCardioSetTests`, `ExecutionViewModelLogCurrentSetTests`, `EMOMBoundaryTests` (bug-049). Schema was already cardio-ready at every layer. |
 | pound-default | cross-cutting (prescription + drivers + server merge) | `tested` | Default weight unit is `.lb`. `PrescriptionParser` defaults to `.lb`. All 9 drivers render via centralized `formatLoad(weight:unit:)` in `WorkoutCoreFoundation`. Autoreg step defaults per unit (5 lb / 1.25 kg). Server `prescription_merge` defaults to `.lb`. `RestView` / `CompleteView+Ledger` render unit from data, not hardcoded. `SetPlan.loadKg: Double?` optional cascade so loadless rows render "BW" instead of "0 lb"; CompleteView+Ledger treats only nil (not 0) as BW. See `scratch/codex-reviews/findings/r2-10-lb-default.md` for the sweep notes. Pinned by `PostLogUnitDisplayTests`, `WorkoutCoreFoundationTests`, server `test_prescription_merge_defaults_lb` (bug-059 / bug-053). |
 
-_Only two features are at `validated` today (execute-loop straight_sets, exercise-swap)._ Everything else has unit + integration coverage but awaits MCP E2E runs against the real server to promote to `validated`.
+_Product-level validation evidence exists today for execute-loop straight_sets and exercise-swap. The execute-loop row remains `tested` overall until the broader feature has MCP E2E coverage; everything else has unit + integration coverage but awaits MCP E2E runs against the real server to promote to `validated`._
 
 ---
 
@@ -104,7 +111,7 @@ _Only two features are at `validated` today (execute-loop straight_sets, exercis
 **When you believe a feature has advanced, don't update this doc alone.** The update requires three things in the same PR / commit:
 
 1. **Evidence artifact.** The thing that proves it — a test name, a recording path, a telemetry event-log query, an img-ask report.
-2. **The feature doc.** Each scenario covered gets `(tested: <test_name>)` or `(validated: <session-id>)` next to its heading.
+2. **The feature doc.** Each scenario covered gets `(tested: <test_name>)`, `(verified: <qa-run-id>)`, or product-matrix validation evidence next to its heading.
 3. **This matrix.** Only then update the State column.
 
 **Demotions** don't need the same ceremony — anyone observing a regression updates the state down and files a bug. Evidence for demotion is the failing test / failing E2E / reported defect.

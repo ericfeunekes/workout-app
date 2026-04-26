@@ -1,6 +1,7 @@
 ---
 title: past-set-edit
 status: living
+last_reviewed: 2026-04-26
 purpose: Behavioral contract + QA scenarios for past-set-edit
 covers:
   - app/Packages/Features/Execution/Sources/FeaturesExecution/ExecutionViewModel.swift
@@ -14,7 +15,16 @@ covers:
 
 # past-set-edit
 
-## What it does
+## Target behavior
+
+Past-set edit is the corrective path for logged work. The target surface is the
+shared `docs/set-edit-sheet.md` contract, with field availability determined by
+the source prescription and log row.
+
+Any past correction marks the row manual, updates the existing logical set log,
+and never retriggers autoreg.
+
+## Current implementation
 Correctively edit a logged set's load, reps, or RIR. **In active session** (RestView): tap the corresponding `DSPill` in the "JUST LOGGED" row. Load and reps open `NumPadSheet`; RIR opens `RirSheet` (`RestView+Sheets.swift:17-87`). Only the `lastLoggedSet` is editable here — `RestView.swift:144` reads `viewModel.lastLoggedSet` and the pills dispatch to the sheet for that single set. Commit calls `viewModel.editPastSet(...)` which dispatches the `.editPastSet` reducer mutation AND — after the apply — enqueues the corrected `SetLog` through `onSetLogged` with the SAME deterministic UUID as the original log push so the server upserts the existing row in place (`ExecutionViewModel.swift:editPastSet` → `ExecutionViewModel+Push.swift:handlePastSetEditSideEffects` → `enqueueEditedSet`). The shared UUID is derived by `ExecutionViewModel.setLogID(itemID:setIndex:)` via `Insecure.MD5` of `"\(itemID)|\(setIndex)"` fed into `UUID(uuid:)` — deterministic, so the original log and every edit push always carry the same id. Reducer updates load/reps/rir, stamps `adjust=.manual`, never fires autoreg (`SessionReducer+Handlers.swift:81-101`, comment: "Corrective — does NOT retrigger autoreg"). **In History** (`HistorySessionDetailView`): set rows are tap-to-edit — tapping a row opens `EditSetSheet` which calls back into `HistoryViewModel.editPastSet`, reusing the same deterministic `setLogID` so the server upserts in place (bug-015 / bug-051).
 
 ## State surface
@@ -39,7 +49,14 @@ Correctively edit a logged set's load, reps, or RIR. **In active session** (Rest
 - RirSheet "skip" returns without committing (`:85`) — intended behavior for RIR-only edits that the user opens then abandons.
 - `adjustGlyph` renders `✎` for `.manual` on `ActiveView.swift:154-156`. The "adjusted" glyph shows in the active hero block.
 
-## Known issues / gaps
+## Current gaps
+
+- Active-session and History corrections are still separate sheet
+  implementations; target behavior uses the shared SetEditSheet contract.
+- Distance, duration, side, bodyweight, and carry correction parity remains
+  open.
+- Apply-to-remaining/future-set scope is target behavior for selected preview or
+  active setup edits, but it is not part of completed past-log correction.
 - History-screen edit sheet shipped (bug-015) and is unit-aware (bug-051): labels per source `weightUnit`, reps capped at 999, RIR clear via explicit-clear enum state.
 - `completedAt` preservation (bug-054): `enqueueEditedSet` now carries the original `completedAt` instead of stamping edit time. The Active-session and History-tab edit paths now agree on timestamps.
 - Per-set `startedAt` provenance (bug-054): `SessionState.workStartedAt` anchor is stamped on `.start` + `.advanceFromRest`, consumed by the reducer in `.logSet` / `.logCardioSet`, and preserved through completion + edit.

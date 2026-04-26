@@ -1,0 +1,123 @@
+---
+title: Phase 4 — preview and edit contract implementation plan
+status: backlog
+last_reviewed: 2026-04-26
+purpose: Implement the preview-first workout entry and shared edit contract before active/rest redesign.
+covers:
+  - app/Packages/Features/Today/
+  - app/Packages/Features/Execution/
+  - app/Packages/Features/History/
+  - docs/features/workout-preview.md
+  - docs/set-edit-sheet.md
+---
+
+# Phase 4 — Preview And Edit Contract
+
+## Unit Statement
+
+Change workout entry to preview-first, add explicit Start, make "what's next"
+include current-block remaining work, and introduce the shared SetEditSheet
+contract for preview/future/past corrections.
+
+## Boundaries Touched
+
+- Today surface and workout preview route.
+- Execution "what's next" preview.
+- SetEditSheet shared UI and edit intent model.
+- Execution pending/future edit path.
+- Past-set edit invariant remains preserved.
+
+## Dependencies And Preconditions
+
+- Phase 3 read models exist for remaining/upcoming work and editability.
+- Phase 2 fields are preferred but not all UI affordances need to write every
+  new field in this phase.
+- Past edits must mark `.manual` and never retrigger autoreg.
+
+## Uncertainty Reduction Summary
+
+- Architecture/history: Today currently can start selected workouts; execution
+  has existing sheets for logging/past edits; history has past-set edit.
+- Blast radius: changing Today tap behavior affects first workout entry.
+- Contract/testing: UI interaction and simulator proof are mandatory.
+
+## Approach
+
+Make preview the default entry point and keep Start as the only execution
+handoff. Build one edit sheet model, then adopt it in the smallest surfaces
+needed by this phase.
+
+## Steps
+
+1. Add/finish `WorkoutPreviewView` using Phase 3 read models.
+2. Change Today tap to open preview; keep explicit Start action.
+3. Add Execution "what's next" preview that includes current-block remaining
+   work before future blocks.
+4. Build `SetEditSheet` with field contracts from `docs/set-edit-sheet.md`,
+   including load, reps, RIR, bodyweight, per-side, distance, duration, and
+   carry/load-plus-distance fields.
+5. Wire preview/future pending edits where safe.
+6. Preserve existing history/past edit behavior through adapter or shared sheet.
+7. Add tests and simulator QA.
+
+## Good
+
+- Accidental workout starts are gone.
+- Preview answers "what am I about to do?" and allows scoped edits.
+- "What's next" means remaining current block plus upcoming work.
+- Editing semantics are consistent across preview and past corrections.
+
+## Done
+
+- Today tap opens preview.
+- Start explicitly enters execution.
+- Current-block remaining appears in the "what's next" preview.
+- Shared SetEditSheet is used or the remaining legacy edit surface is documented
+  with an expiry.
+- Simulator QA proves tap targets and flow.
+
+## Proof Map
+
+- Check: Today and Execution view-model tests.
+  - Boundary: cross-module/user flow.
+  - Proves: tap opens preview, explicit start, current-block remaining order.
+  - Expected: pass.
+- Check: SetEditSheet tests for load/reps/RIR/bodyweight/per-side/distance/
+  duration/carry fields.
+  - Boundary: UI component + pure edit model.
+  - Proves: edit payloads are correct and past edit invariants hold.
+  - Expected: pass.
+- Check: iOS simulator QA.
+  - Boundary: user-facing.
+  - Proves: preview flow is usable and CTA tap targets work.
+  - Expected: recording or screenshots saved under `scratch/qa-runs/`.
+
+## Independent Review
+
+- Artifact: Today/Preview/Edit diff and tests.
+- Reviewer: Codex review focused on accidental-start regressions and edit
+  semantic drift.
+- Reopen condition: preview bypasses Start, past edits retrigger autoreg, or
+  "what's next" omits current-block remaining.
+
+## Closeout
+
+- Update feature docs and gap map for #1, #2, #3, #6, #7, #12, #13, #15,
+  #21, #26 as applicable.
+- Attach simulator QA evidence.
+
+## Recovery Context
+
+This phase owns preview and edit contract. It does not redesign active/rest
+layout except the preview sheet triggered from execution.
+
+## Residual Uncertainty / Accepted Risks
+
+- Some structural edits may need narrower scope after implementation.
+  - Accepted if documented as current gaps.
+  - Signal: preview edit creates an execution state the reducer cannot seed.
+
+## Escalation Triggers
+
+- Preview editing requires schema changes not in Phase 2.
+- Shared SetEditSheet cannot preserve past-edit autoreg invariant.

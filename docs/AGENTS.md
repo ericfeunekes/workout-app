@@ -1,6 +1,7 @@
 ---
 title: docs navigator
 status: accepted
+last_reviewed: 2026-04-26
 purpose: Index of durable documentation for WorkoutDB. When landing in docs/, start here.
 covers:
   - docs/
@@ -15,7 +16,14 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 ## Read first
 
 - `specs/v2-architecture.md` — **accepted** target architecture. Every non-trivial change is evaluated against this. Read in full before working on schema, sync, or the app.
+- `workout-generation.md` — canonical workout authoring guide. Start here when generating plans: data model, safe current timing modes, autoreg, result persistence, examples, and generator checklist.
 - `prescription.md` — authoring vocabulary. What Claude must put in a workout so the app can execute it. Per-timing-mode shapes, RIR + autoregulation rules, parametric shapes.
+- `workout-taxonomy.md` — bootstrap workout-domain and block-archetype taxonomy. Use this before authoring new workout shapes so training intent maps to the right timing/logging primitive.
+- `workout-execution-requirements.md` — athlete-facing timer, transition, logging, and summary requirements for workout archetypes.
+- `workout-execution-design-plan.md` — pass-based plan for aligning the execution docs, then designing each flow before implementation.
+- `features.md` and `features/INDEX.md` — target feature contracts and QA scenarios. Use `feature-gap-map.md` to see the current gaps grouped into implementation phases.
+- `plans/backlog/feedback-implementation-phases/` — downstream implementation phase directory for the 2026-04-25 feedback and watch redesign sequence. Start here when selecting the next phase after the feature-docs contract pass.
+- `watch-metrics.md` — target watchOS slot, metric, target-window, and phone/watch lifecycle contract.
 - `sync.md` — sync cadence, conflict rules, first-run UX, offline behavior, auth posture.
 - `ARCHITECTURE.md` — one-page system map; routes into the spec and per-package READMEs.
 - `TESTING.md` — proof contract (server, app, cross-stack contract).
@@ -25,18 +33,30 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `ARCHITECTURE.md` — top-level system map and domain router.
 - `WORKFLOW.md` — development lifecycle (idea → spec → plan → implement → verify → close → deploy), CI scope, branching, deploy flow.
 - `TESTING.md` — proof contract; what each test tier covers and how to run it.
+- `QA.md` — exploratory/simulator QA recording rules; keeps `docs/bugs.md` as the only active issue tracker and `scratch/qa-runs/` as raw evidence only.
 - `MIGRATIONS.md` — schema migration mechanics for server SQL + SwiftData, the single-user cutover flow, and recovery procedures.
+- `workout-generation.md` — generator-facing authoring guide that composes the data model, taxonomy, timing modes, prescriptions, autoregulation, support boundaries, and examples into one workflow.
 - `prescription.md` — prescription authoring vocabulary. Per-timing-mode shapes, RIR + autoreg rules, parametric shapes, authoring checklist.
+- `workout-taxonomy.md` — maps workout domains to mutually-exclusive block archetypes and current timing modes.
+- `workout-execution-requirements.md` — documents how each archetype should execute from the athlete perspective before implementation details are chosen.
+- `workout-execution-design-plan.md` — tracks the alignment and flow-design passes that must happen before build planning.
+- `features.md` — narrative entry point for user-visible feature contracts.
+- `features/INDEX.md` — per-feature target contracts, QA scenario index, and current-gap convention.
+- `feature-gap-map.md` — cross-feature index of target behavior that is not implemented or not yet proven.
+- `watch-metrics.md` — target watchOS contract for the three watch views, persistent HR, target windows, sensor fallbacks, and phone/watch action versioning.
 - `sync.md` — sync cadence, conflict rules, first-run UX, offline behavior, auth posture.
 - `runbooks/closeout.md` — per-change closeout checklist (enforces the complete-cutover philosophy).
 - `runbooks/first-real-workout.md` — critical path from "alpha-ready codebase" to "first real workout logged to server." Lists Eric-actions (credentials, hardware, decisions) vs Claude-actions (last-mile code + wiring). The hand-off sequence.
-- `infrastructure/home-server.md` — one-time setup + ongoing deploy for the Python server (Tailscale, systemd, backup, rollback).
+- `infrastructure/home-server.md` — one-time setup + ongoing deploy for the Python server (Tailscale, launchd, backup, rollback).
 - `specs/` — accepted specs (`v2-architecture.md`) and decision explorations (`data-model-exploration.md`).
 - `architecture/` — the structural contract. Start at `architecture/context.md` (the 9-question answers), then `boundaries.md` (allowed dependency directions), `fitness-functions.md` (every rule → automated check), `hotspots.md` (preemptive risk register), `swift-packages.md` (iOS package graph).
 - `ios-dev-loop.md` — how an agent drives the iOS app (build / launch / screenshot / tap / iterate). Recommends XcodeBuildMCP; documents the ad-hoc fallback (xcrun simctl + debug launch args) that works without it.
 - `decisions/` — ADRs. Current set: `ADR-2026-04-17-ux-scope.md`, `ADR-2026-04-17-rir-autoreg-sync.md`, `ADR-2026-04-17-architecture.md`, `ADR-2026-04-18-shell-package-placement.md`, `ADR-2026-04-18-smart-defaults.md`.
 - `open-questions.md` — the living gap register. Items that surfaced from consistency passes but aren't decided yet, with working assumptions and disposition (decide-next / defer / resolve-in-code / watchlist).
 - `design/` — Claude Design handoff bundle (HTML/CSS/JSX prototypes, wireframes, rules). Read `design/ORIGIN.md` first, then `design/HANDOFF.md`. Reference, not spec.
+- `plans/active/` — current implementation plans. Start here before continuing an in-flight multi-slice build.
+- `plans/backlog/feedback-implementation-phases/` — phase-by-phase implementation plans for carrying the 2026-04-25 feedback through schema, execution UX, history, watch authority, watch UI, and future in-app Claude/chat.
+- `bugs.md` — active QA issue tracker. Closed issues are removed; use git history for past rows.
 
 See also `schema/README.md` (outside `docs/`) — the shared schema package (OpenAPI + Swift DTOs) and its drift-prevention contract tests. Common dev commands: `make help` at the repo root.
 
@@ -52,8 +72,7 @@ See also `schema/README.md` (outside `docs/`) — the shared schema package (Ope
 These canonical surfaces haven't been needed yet. Add when:
 
 - `CORE-BELIEFS.md` — when invariants in root `AGENTS.md` outgrow it.
-- `QA.md` — when the iOS app exists and visual/exploratory QA becomes a routine concern.
-- `plans/active/`, `plans/backlog/`, `plans/debt/` — when `skill:feature-planning` produces its first plan file.
+- `plans/debt/` — when active implementation work starts producing durable non-current follow-ups.
 
 ## Front matter
 

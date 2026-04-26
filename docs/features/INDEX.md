@@ -1,6 +1,7 @@
 ---
 title: Features — index
 status: living
+last_reviewed: 2026-04-26
 purpose: Single entry point for per-feature behavioral contracts + QA scenarios.
 covers:
   - docs/features/*.md
@@ -8,9 +9,22 @@ covers:
 
 # Features
 
-This directory holds one doc per user-visible feature. Each doc is a **behavioral contract + QA scenarios** — what the CODE does today (not what specs wish it did), the edge cases, and a driveable scenario list that persona-based QA agents can execute against the running app.
+This directory holds one doc per user-visible feature. Each doc is a **target behavioral contract + QA scenarios**: how the feature is supposed to work, the edge cases that matter, the proof expected from tests or simulator QA, and the current gaps between that target and the implementation.
 
 Authoritative spec content (data model, timing-mode shapes, sync protocol) still lives in `docs/specs/`, `docs/prescription.md`, `docs/sync.md`. These feature docs cross-reference those — they don't duplicate.
+
+## Status model
+
+Feature-doc status is allowed to describe target behavior, not only shipped behavior.
+
+| Status | Meaning |
+|---|---|
+| `planned` | Target contract is documented; implementation or proof is missing. |
+| `building` | Implementation is in progress or partly merged; proof is incomplete. |
+| `built` | Implementation exists and is covered by local tests. |
+| `verified` | Implementation is proven with the required external check. See `../QA.md` for accepted proof artifacts. |
+
+Each rewritten feature doc should use `Current gaps` for target-contract pieces that are not implemented or not yet proven. Cross-feature sequencing lives in `../feature-gap-map.md`.
 
 ## Reading order for a cold start
 
@@ -24,35 +38,35 @@ Authoritative spec content (data model, timing-mode shapes, sync protocol) still
 
 ## Feature list
 
-| Feature | One-line summary | Status (2026-04-18) |
+| Feature | One-line summary | Status |
 |---|---|---|
-| [firstrun](firstrun.md) | URL+token entry, validate, kick off first pull | ✅ Tested + MCP-validated at bug-048 scope boundary |
-| [bootstrap](bootstrap.md) | Pull → cache → build VMs → wire push flusher | ✅ Tested; MCP E2E validated 2026-04-18 |
-| [today](today.md) | Show the picked workout's card + start button | ✅ Tested (last-session chip + `lastPerformed` remain pass-through stubs — `PullService.lastPerformed` is returned by sync but not threaded through `AppBootstrap` into `TodayLoader`) |
-| [execute-loop](execute-loop.md) | Log sets, rest timer, autoreg banner, advance | ✅ Validated (straight_sets); tested (other 10 modes) |
-| [timing-modes](timing-modes.md) | 11 declared timing modes drive the Execute loop | ✅ All 11 drivers built + tested |
-| [autoreg](autoreg.md) | Per-item RIR/rep-driven load adjustments, accept/undo | ✅ Validated (overshoot) / tested (other branches); negative-load floor shipped |
-| [save-and-done](save-and-done.md) | Finalize workout: note + bw, local cache, status push | ✅ Tested; bodyweight + note capture shipped |
-| [history](history.md) | Completed workouts list, session detail, by-exercise view | ✅ Tested; edit sheet + bodyweight chip shipped |
-| [exercise-swap](exercise-swap.md) | Substitute alternative exercise mid-workout | ✅ Validated; long-press UI shipped; sets-override drop on round-robin + telemetry |
-| [past-set-edit](past-set-edit.md) | Tap past set to correct load/reps/RIR | ✅ Tested; same-UUID upsert; History edit sheet shipped |
-| [persistence](persistence.md) | Live session survives backgrounding/relaunch | ✅ Tested; V3 migration + subtree reconcile + normalization pass |
-| [push-queue](push-queue.md) | Durable queue for set_logs, status, telemetry events | ✅ Tested; backoff, dead-letter, priority FIFO, dedup |
-| [telemetry](telemetry.md) | Structured event log, local-first, lazy sync to server | ✅ Tested; typed payloads; 90-day server retention |
-
-**Legend:** ✅ built and tested. See the feature doc for scenario-level coverage and any known gaps.
+| [firstrun](firstrun.md) | URL+token entry, validate, kick off first pull | verified at bug-048 scope boundary |
+| [bootstrap](bootstrap.md) | Pull -> cache -> build VMs -> wire push flusher | verified 2026-04-18 |
+| [today](today.md) | Show the local plan queue, selected workout, preview entry, and refresh | built with current gaps |
+| [workout-preview](workout-preview.md) | Preview a selected workout and make Start explicit before execution | planned |
+| [execute-loop](execute-loop.md) | Log sets, rest timer, autoreg banner, advance | built with current gaps |
+| [block-transition](block-transition.md) | Between-block setup surface before entering the next block | planned |
+| [timing-modes](timing-modes.md) | 12 declared timing modes drive the Execute loop | built + tested |
+| [autoreg](autoreg.md) | Per-item RIR/rep-driven load adjustments, accept/undo | built + tested |
+| [save-and-done](save-and-done.md) | Finalize workout: note + bodyweight, local cache, status push | built + tested |
+| [history](history.md) | Completed workouts list, session detail, by-exercise view | built with current gaps |
+| [exercise-swap](exercise-swap.md) | Substitute alternative exercise mid-workout | built + tested |
+| [past-set-edit](past-set-edit.md) | Tap past set to correct logged values | built with current gaps |
+| [persistence](persistence.md) | Live session survives backgrounding/relaunch | built + tested |
+| [push-queue](push-queue.md) | Durable queue for set_logs, status, telemetry events | built + tested |
+| [telemetry](telemetry.md) | Structured event log, local-first, lazy sync to server | built + tested |
 
 ## How to use these for QA
 
 1. Pick a feature doc.
 2. Walk the scenario list. Each scenario is a self-contained case — setup, steps, expected, optional notes.
 3. Drive it against a running simulator (XcodeBuildMCP or manual). Observe against the "expected" line.
-4. If you find a gap, file it in `docs/open-questions.md` with a link back to the scenario ID (e.g. "autoreg S12 — no negative-load floor").
+4. If you find a gap, file defects in `docs/bugs.md`; use `docs/open-questions.md` only for unresolved product or design decisions. Link back to the scenario ID.
 5. For ambitious passes, run a persona agent (coach, athlete, impatient user) across multiple docs; cross-reference their report with the server-side telemetry event log.
 
 ## Maintenance rules
 
-- If a feature's behavior changes, update its doc in the same commit. Stale feature docs are worse than missing ones.
+- If a feature's intended behavior changes, update its doc in the same commit. If implementation lags the target, add or update `Current gaps` and `../feature-gap-map.md`.
 - Don't split a feature into two files — if the scenario list exceeds ~25, the feature is too broad; split *the feature*, not the doc.
 - When a scenario is proven by a test, add `(tested: <test_name>)` next to its header so future readers know what's backstopped.
 - Keep under ~200 lines per doc. Length is a smell.

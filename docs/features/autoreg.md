@@ -1,6 +1,7 @@
 ---
 title: autoreg
 status: living
+last_reviewed: 2026-04-26
 purpose: Behavioral contract + QA scenarios for autoreg
 covers:
   - app/Packages/Core/Autoreg/Sources/CoreAutoreg/Autoreg.swift
@@ -18,12 +19,12 @@ covers:
 Client-side load adjustment computed per set-log against **per-item** prescription config. On `logSet`, `StraightSetsDriver.onSetLogged` reads `autoreg` + `target_rir` from the current item's `prescriptionJSON` (`StraightSetsDriver.swift:149-158`), calls `Autoreg.propose` (`Autoreg.swift:107`), and — **accept-by-default** — the view model immediately dispatches `.applyAutoregProposal` which rewrites remaining non-done, non-manual sets' loads (`ExecutionViewModel+Persistence.swift:74-75`). A banner on the Rest screen shows the proposal with an "undo" affordance; Undo reverts the loads and sets `autoregHeld=true` on *that* item for the rest of the session (`ExecutionViewModel.swift:260-305`). Three trigger rules: overshoot (`loggedRir >= targetRir + overshoot_at`), undershoot-reps (`prescribed - logged >= undershoot_at`), hit-failure (`loggedRir == 0 && targetRir > 0`). Precedence: undershoot-reps > hit-failure > overshoot (`Autoreg.swift:111-151`).
 
 ## State surface
-- **Inputs:** per-set `logSet(reps, rir)`; per-item prescription carries its own `autoreg` sub-object with `target_rir`, `overshoot_at`, `overshoot_step_kg`, `undershoot_at`, `undershoot_step_kg`, `apply_to` (`Prescription/Autoreg.swift:16-42`). Defaults fill in: `overshoot_at=2`, `overshoot_step_kg=2.5`, `undershoot_at=2`, `undershoot_step_kg=2.5`, `apply_to=remaining` (`PrescriptionParser+Autoreg.swift:79-94`). `target_rir` is **required** when the `autoreg` sub-object is present (`PrescriptionParser+Autoreg.swift:60-62`).
+- **Inputs:** per-set `logSet(reps, rir)`; per-item prescription carries its own `autoreg` sub-object with `target_rir`, `overshoot_at`, `overshoot_step_kg`, `undershoot_at`, `undershoot_step_kg`, `apply_to` (`Prescription/Autoreg.swift:16-42`). Defaults fill in: `overshoot_at=2`, unit-aware step defaults (`5.0` when `weight_unit` is `lb`, `1.25` when `weight_unit` is `kg`), `undershoot_at=2`, `apply_to=remaining` (`PrescriptionParser+Autoreg.swift:79-94`). `target_rir` is **required** when the `autoreg` sub-object is present (`PrescriptionParser+Autoreg.swift:60-62`).
 - **Outputs / side effects:** remaining non-done non-manual `SetPlan` rows have `loadKg` overwritten + `adjust` set to `.up` or `.down` (`Autoreg.swift:176-187`). `currentProposal` + `currentProposalItemID` on the view model feed the banner. `autoregHeld` flag flips per-item on Undo. A `execution.autoreg_proposed` / `_accepted` / `_undo` telemetry event fires.
 - **State transitions:** `.logSet` → (optional) `.applyAutoregProposal` → `.enterRest` / `.advanceFromRest`, all in one `apply(_:)` batch (`ExecutionViewModel+Persistence.swift:65-87`). Undo emits `[editPendingSet×N, holdAutoreg]` (`ExecutionViewModel.swift:292-301`). Accept is a no-op on state — the apply already happened inline.
 
 ## What it deliberately doesn't do
-- Autoreg runs **only in `StraightSetsDriver`** (`DriverRegistry` v0 registers only `.straightSets`, `ExecutionViewModel.swift:406-419`). Other timing modes fall back to `StraightSetsDriver()` so anything authored as another mode today still gets autoreg — but shapes other than `.straightSets / .repRange / .setsDetail` return `(nil, nil)` in `autoregAndTarget` and produce no proposal (`StraightSetsDriver.swift:208-221`).
+- Autoreg is proposed only by `StraightSetsDriver` for straight-set-adjacent prescription shapes: `.straightSets`, `.repRange`, and top-level `.cluster`. All 12 timing modes have dedicated drivers in `DriverRegistry`; round-robin, scored, interval, continuous, accumulate, custom, and rest modes do not propose autoreg unless their driver explicitly adds support later.
 - No cross-exercise downscaling. `apply_to` enum has **only `.remaining`** (`Prescription/Autoreg.swift:24-26`); "next" / "all-future" are reserved-unimplemented.
 - No proposal fires on the last set of an item — `hasRemaining` guard in `StraightSetsDriver.swift:167-170` (comment: "mirrors the JSX prototype `hasRemaining = si + 1 < block.sets`").
 - Does not consume `bodyweight_kg` — noted in `docs/open-questions.md` § "Body weight freshness".
@@ -47,7 +48,7 @@ Client-side load adjustment computed per set-log against **per-item** prescripti
 - `apply_to` parse failure no longer degrades the whole item to `0 kg / 0 reps` — `parseTolerantOfAutoreg` isolates autoreg parse errors from the base prescription, and the server rejects unknown `apply_to` values at ingest (bug-052).
 - `execution.autoreg_proposed` telemetry carries a typed `Encodable` payload with `step_kg` + canonical reason tokens (bug-060).
 - **Settings vs prescription precedence unresolved** (`docs/open-questions.md` § "Autoreg defaults — Settings vs prescription"). Current assumption: per-item wins; Settings are display-only.
-- **Pyramid / cluster / tempo ambiguity** — those prescription shapes return `(nil, nil)` from `autoregAndTarget` so no proposal fires; ambiguity is latent, not live.
+- **Pyramid / tempo ambiguity** — `sets_detail` and tempo-heavy shapes return `(nil, nil)` from `autoregAndTarget` so no proposal fires; top-level cluster is supported as a single composed set and proposes only after the top-level set logs.
 - Undo's `.manual` stamp on reverted sets means a subsequent hold-lift wouldn't re-enable autoreg on those rows. Documented trade-off.
 - No per-item proposal history / audit trail. `currentProposal` clears on advance/accept/undo; prior proposals leave no evidence beyond the `adjust` glyph.
 
@@ -133,9 +134,9 @@ Client-side load adjustment computed per set-log against **per-item** prescripti
 - **steps:** after the swap, log next bench set with RIR 4.
 - **expected:** proposal fires using the **original item's** autoreg config — `performedExerciseID` overrides display only; `StraightSetsDriver` reads `item.prescriptionJSON` which is unchanged by `.swap` (`SessionReducer+Handlers.swift:216-275`). If the chosen alternative carries a non-empty `parameter_overrides_json`, R2.8 applies those reps / load / unit overrides to remaining non-done `SetPlan` rows AND stashes the full overrides on `ItemLog.overrides` for drivers that read per-side / `target_rir` / nested `autoreg`. R2.8b narrowed the `sets` sub-override: it is only honored on **set-major** blocks (straight sets). Round-robin blocks (superset / circuit / AMRAP / EMOM / Tabata / forTime) drop the `sets` portion and apply the rest of the override — rewriting one item's row count in a round-robin structure would skew the cursor walk or silently collapse peer items (`SessionReducer+Handlers.swift:236-268`, `SessionReducer+SwapOverrides.swift`). The dropped `sets` override emits telemetry event `execution.swap_sets_override_rejected` (NOT `swap.sets_override_rejected` — the event is scoped under the `execution.` family; see `ExecutionViewModel+Swap.swift:138`).
 
-### S17. Autoreg only in StraightSetsDriver
+### S17. Autoreg only in straight-set-adjacent execution
 - **setup:** workout with a block whose `timing_mode` is something other than `straight_sets`.
-- **expected:** `DriverRegistry` falls back to `StraightSetsDriver` (`ExecutionViewModel.swift:416-418`), but the parsed Prescription shape (e.g. `.cluster`, `.amrapToken`, `.bodyweight`, `.warmup`, `.empty`) returns `(nil, nil)` from `autoregAndTarget` (`StraightSetsDriver.swift:218-220`). No proposal fires.
+- **expected:** dedicated non-straight drivers do not propose autoreg. Unsupported parsed prescription shapes (e.g. `.setsDetail`, `.amrapToken`, `.bodyweight`, `.warmup`, `.empty`) return `(nil, nil)` from `autoregAndTarget` in `StraightSetsDriver`. Cluster is the exception: when authored with `autoreg`, it proposes only after the top-level composed set logs, never per sub-set.
 
 ### S18. Across workouts — no carry-over
 - **setup:** yesterday's bench undershot heavily; today's bench is a freshly-pulled workout.

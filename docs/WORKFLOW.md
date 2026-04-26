@@ -2,6 +2,7 @@
 title: Development workflow
 status: stable
 date: 2026-04-17
+last_reviewed: 2026-04-26
 purpose: "How work progresses in this repo — the lifecycle from idea to deployed code, and the rules that hold across every cycle."
 covers:
   - AGENTS.md
@@ -31,7 +32,7 @@ Claude's job is to classify out loud at the start of a conversation. "This is no
 
 ### Spec
 
-For non-trivial work, use `skill:interview` (asks adaptive questions, writes a decisions doc) or update `docs/specs/v2-architecture.md` directly when the change is a refinement.
+For non-trivial work, use `collaboration:interview` (asks adaptive questions, writes a decisions doc) or update `docs/specs/v2-architecture.md` directly when the change is a refinement.
 
 A spec is done when someone without this conversation's context could implement it.
 
@@ -41,8 +42,8 @@ A spec is done when someone without this conversation's context could implement 
 
 For any work beyond trivial, write a plan before implementing. Options:
 
-- `skill:feature-planning` for high-level scope (multi-unit)
-- `skill:implementation-planning` for a single unit of work
+- `scoping:feature-planning` for high-level scope (multi-unit)
+- `scoping:implementation-planning` for a single unit of work
 - Inline plan in the conversation for smaller scoped changes — no separate doc
 
 Plans capture: what's changing, which files, what proves it works, what the closeout looks like. The plan is the shared artifact Eric can scan before greenlighting implementation.
@@ -125,7 +126,7 @@ Claude Code exposes named skills for specific phases of work. Use them rather th
 | `code-analysis:diagnose-problem-pattern` | When several recent bugs or tests point at a shared structural issue — surface the pattern before patching another symptom. |
 | `codex:review` / `codex:second-opinion` | When the main agent's reasoning needs a fresh set of eyes from a different model (Codex). Especially useful after deep-context work where the main agent may have blind spots. |
 
-Skills are composable. A non-trivial change typically goes: feature-planning → architecture (if structural) → implementation-planning → implementer subagent → reviewer (via code-analysis:review) → fix-it loop → close.
+Skills are composable. A non-trivial change typically goes: `scoping:feature-planning` → `code-analysis:architecture` (if structural) → `scoping:implementation-planning` → implementer subagent → reviewer (via `code-analysis:review`) → fix-it loop → close.
 
 ## iOS development loop
 

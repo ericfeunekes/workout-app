@@ -1,6 +1,7 @@
 ---
 title: history
 status: living
+last_reviewed: 2026-04-26
 purpose: Behavioral contract + QA scenarios for history
 covers:
   - app/Packages/Features/History/Sources/FeaturesHistory/HistoryViewModel.swift
@@ -18,13 +19,23 @@ covers:
 
 # history
 
-## What it does
+## Target behavior
+
+History is the completed-workout review and correction surface. It should show
+completed sessions, let the user inspect work by session or exercise, and allow
+post-workout correction for every logged field that the app can capture during
+execution.
+
+Corrections update the existing logical log row, preserve provenance as a
+manual correction, and never retrigger autoreg.
+
+## Current implementation
 `HistoryViewModel.load()` pulls completed workouts (limit 200) from `WorkoutCache.loadCompletedWorkouts` newest-first by `completedAt` (`WorkoutCache+History.swift:39`), plus their set_logs and item lookups, into `rawSessions` (`HistoryViewModel+Load.swift:34`). Derivation filters by `activeSplit`, groups by `(year, weekOfYear)` into `WeekGroup`s with headers "THIS WEEK" / "LAST WEEK" / "APR · WEEK 15" (`HistoryViewModel+Derivation.swift:198`). `HistoryListView` renders groups in a `DSCard` of `NavigationLink(value: workoutID)` rows (`HistoryListView.swift:74`). Tap → `HistorySessionDetailView` bound to a `SessionDetailViewModel` that buckets set_logs by `performedExerciseID ?? plannedExerciseByItem[itemID] ?? workoutItemID` (`SessionDetailViewModel.swift:116`) and renders "N · weight × reps · RIR" set rows (`:146`). A "BY EXERCISE →" chip flips `tab` to `.byExercise` → current-program-first picker → per-exercise detail with `TrendComputation.compute` producing "↑ 12.5 KG / 12 WK" (`TrendComputation.swift:82`).
 
 ## State surface
-- **Inputs:** `WorkoutCache` (completed workouts, blocks, items, set_logs, exercises, planned workouts), `calendar`, `now`, `telemetry: TelemetryEmitter`, `onSetLogEdited: HistorySetLogEditHook?` (shell-wired to `SyncAPI.pushLog`).
-- **Outputs / side effects:** `groups: [WeekGroup]`, `pickerRows: [ExercisePickerRow]`, `isLoading: Bool`, `tab: Tab`, `activeSplit: SplitFilter`. History is mostly read-only; the single write path is `editPastSet(workoutID:setLogID:reps:rir:loadKg:)` — writes the updated SetLog to `WorkoutCache.saveSetLogs`, emits `history.past_set_edited`, fires `onSetLogEdited` for server push (same UUID → upsert-in-place), and re-runs `load()` so the detail view re-derives.
-- **State transitions:** `setSplit` → re-derive groups only (no reload). `setTab` → flip list/byExercise (no reload). `load()` → set `isLoading`, re-pull everything, re-derive. `editPastSet(...)` → local write, push enqueue, telemetry emit, reload. Errors during load leave cached shapes as-is (`HistoryViewModel+Load.swift:25`).
+- **Inputs:** `WorkoutCache` (completed workouts, blocks, items, set_logs, exercises, planned workouts), `calendar`, `now`, `telemetry: TelemetryEmitter`, `onSetLogEdited: HistorySetLogEditHook?` (shell-wired to `SyncAPI.pushLog`), `onWorkoutReset: HistoryWorkoutResetHook?` (shell-wired to `SyncAPI.resetWorkout`).
+- **Outputs / side effects:** `groups: [WeekGroup]`, `pickerRows: [ExercisePickerRow]`, `isLoading: Bool`, `tab: Tab`, `activeSplit: SplitFilter`. History has two write paths: `editPastSet(...)` writes the updated SetLog to `WorkoutCache.saveSetLogs`, emits `history.past_set_edited`, fires `onSetLogEdited`, and reloads; `resetWorkout(workoutID:)` is same-day-only, deletes local logs via `WorkoutCache.resetWorkout`, emits `history.workout_reset`, fires `onWorkoutReset`, and reloads so the row leaves History.
+- **State transitions:** `setSplit` → re-derive groups only (no reload). `setTab` → flip list/byExercise (no reload). `load()` → set `isLoading`, re-pull everything, re-derive. `editPastSet(...)` → local write, push enqueue, telemetry emit, reload. `resetWorkout(...)` → local reset, server reset enqueue, telemetry emit, reload. Errors during load leave cached shapes as-is (`HistoryViewModel+Load.swift:25`).
 
 ## What it deliberately doesn't do
 - Does NOT show charts, body-weight trends, volume/RIR heatmaps, PR detection (`app/README.md:153`).
@@ -41,7 +52,15 @@ covers:
 - Tag parser accepts `push`, `push_day`, `PushDay`, `pushday` case-insensitively (`SessionDetail.swift:28`).
 - Session detail card order is "first set_log appears" order — cache returns in (block position, item position, setIndex) so deterministic per pull (`SessionDetailViewModel.swift:99`).
 
-## Known issues / gaps
+## Current gaps
+
+- Full-field post-workout correction is not complete until the shared edit
+  surface covers load, reps, RIR, bodyweight, side, distance, duration, and
+  carry/load-plus-distance details.
+- Per-side history display and aggregate semantics require the schema cutover.
+- Duration/distance/carry corrections need parity with active logging.
+- Block intent display depends on `block.intent` and should render nothing when
+  intent is null.
 - Set-index render bug (bug-020) closed — `formatSetRow` now uses `setIndex` as-is; runtime pipeline is 1-based throughout.
 - `SessionDetail.bodyweightKg` now hydrates from `WorkoutCache.loadUserParameters(key: "bodyweight_kg")` with a ±2min window around `completedAt` (bug-060). HistoryPreviewSeed includes a bodyweight sample so the chip exercises in previews too.
 - `EditSetSheet` is unit-aware (bug-051): labels per source `weightUnit`, carries the unit through the write path via `formatLoad(weight:unit:)`, caps reps at 999, and exposes RIR clear via an explicit enum state instead of a nil-sentinel.
@@ -120,6 +139,12 @@ covers:
 - **steps:** Switch to History tab.
 - **expected:** The just-completed workout appears at the top of "THIS WEEK" without a manual pull-to-refresh. The `afterLocalCompletion` hook wired in `AppBootstrap+Hooks.swift:66-83` calls `historyViewModel.load()` after the local-cache write and the today-loader rerun, so `groups` re-derives before the user can navigate.
 - **notes:** Ordering guarantee: cache write → TodayLoader reload → History reload. If the hook is ever unwired, this scenario degrades to the pre-R1.6 "stale until .task re-fires" behaviour — keep the hook in `AppBootstrap` plumbed.
+
+### S14. Same-day reset
+- **setup:** A workout completed today appears in History.
+- **steps:** Open the session detail, tap "reset workout", confirm.
+- **expected:** The app deletes that workout's local set_logs, flips the local workout back to planned, queues `workout_resets: [{workout_id}]` through `/api/sync/results`, emits `history.workout_reset`, dismisses the detail screen, and removes the row from History after reload. The next pull must not resurrect the completed workout.
+- **notes:** The reset affordance is intentionally same-day-only. Older history remains editable at the set level but not erasable through this v1 surface.
 
 ### S14. Very long exercise name + long note layout
 - **setup:** Seed a workout with a 120-char exercise name and a 500-char workout note.

@@ -1,6 +1,7 @@
 ---
 title: Prescription vocabulary
 status: accepted
+last_reviewed: 2026-04-26
 purpose: What Claude must author for the app to execute a workout. This is the authoring vocabulary for every timing mode, every prescription shape, and the autoregulation configuration. When we later build a planning CLI for the upstream Claude, it will lean on this doc.
 covers:
   - schema/Sources/WorkoutDBSchema/*.swift
@@ -14,11 +15,15 @@ Claude authors workouts. The server stores them. The app executes them. This doc
 
 Scope:
 - **RIR scale** and **autoregulation** — how the app adapts load mid-session.
-- **Per-mode prescriptions** — what keys each of the 11 timing modes reads.
+- **Per-mode prescriptions** — what keys each of the 12 timing modes reads.
 - **Parametric shapes** — reusable shapes (percent_1rm, tempo, drop, cluster, per-side, ranges, per-set variation) that layer onto any mode.
 
 See also:
 - `docs/specs/v2-architecture.md` for the entity schema.
+- `docs/workout-taxonomy.md` for the target block archetypes and domain lenses.
+- `docs/workout-execution-requirements.md` for target athlete-facing timer, transition, logging, and summary behavior.
+- `docs/workout-execution-design-plan.md` for the pass sequence that aligns target behavior with current implementation.
+- `docs/watch-metrics.md` for the target watchOS slot contract, metric windows, sensor fallbacks, and phone/watch lifecycle.
 - `docs/sync.md` for how prescriptions reach the app and what wins on conflict.
 - `docs/design/RULES.md` (in the design bundle) for the underlying app-behavior rules.
 
@@ -78,6 +83,55 @@ feature flag and no deprecation period — adopt defaults as you go.
 - **`rounds` default.** A block with `rounds: null` or omitted means one round. `rounds: 0` and negatives are invalid.
 - **Timing config is strict.** The app reads only the keys documented per mode. Extraneous keys in `timing_config_json` are ignored — no error, but Claude should avoid littering.
 
+## Work targets
+
+Every executable item has a primary work target. Reps, duration, and distance are the same concept at the authoring layer:
+
+```jsonc
+{ "target": { "kind": "reps", "value": 12, "unit": "reps" } }
+{ "target": { "kind": "duration", "value": 2, "unit": "min" } }
+{ "target": { "kind": "distance", "value": 200, "unit": "ft" } }
+```
+
+Use this shape whenever the item is not ordinary reps, or whenever the display unit matters. The app keeps the authored unit for the active screen (`2 min`, `200 ft`) and logs canonical analytics fields:
+
+| Target kind | Display units | Canonical log field |
+|---|---|---|
+| `reps` | `reps` | `set_log.reps` |
+| `duration` | `sec`, `min` | `set_log.duration_sec` |
+| `distance` | `m`, `km`, `ft`, `yd`, `mi` | `set_log.distance_m` |
+
+Loaded duration/distance work carries load beside the target:
+
+```jsonc
+{
+  "target": { "kind": "distance", "value": 200, "unit": "ft" },
+  "load_kg": 53,
+  "weight_unit": "lb"
+}
+```
+
+That represents a 200 ft loaded carry at 53 lb. The active face shows the distance as the primary work target and the load as the secondary load target. The pushed log has `reps = null`, `distance_m = 60.96`, `weight = 53`, and `weight_unit = "lb"`.
+
+Flat scalar authoring (`reps`, `duration_sec`, `distance_m`, plus `duration_unit` / `distance_unit` when needed) is still parsed, but new workout generation should prefer `target.kind/value/unit` because it prevents duration and distance stations from collapsing into fake `0 reps` rows.
+
+## Block intent
+
+`block.intent` is the freeform qualitative purpose of a block. It explains why
+the block exists: heavy strength, hypertrophy volume, tempo pacing, skill
+practice, recovery, or another human-readable training intent.
+
+Authoring rules:
+
+- New Claude-authored blocks should populate `block.intent`.
+- The server accepts `null` indefinitely for old workouts, imports, and cases
+  where Claude deliberately punts.
+- The app may display intent where it helps orientation, but it must render no
+  placeholder when intent is null.
+- Intent is not an enum and not app-side classification. Structured goals,
+  targets, timers, and autoreg rules stay in `timing_config_json` and
+  `workout_item.prescription_json`.
+
 ## Invariants
 
 1. **The app is a renderer + logger.** It does not compute prescriptions. Everything downstream of "read `prescription_json`" is display + timing + logging.
@@ -85,6 +139,7 @@ feature flag and no deprecation period — adopt defaults as you go.
 3. **Timing and prescription are separable.** `block.timing_mode` + `block.timing_config_json` tell the app *how to drive time*. `workout_item.prescription_json` tells the app *what to do inside that time*. A straight-sets block times rest; a superset block alternates items; the prescription in each case is what the item itself looks like.
 4. **One item per exercise.** A single block has N `workout_item`s. Straight-sets blocks have N=1. Supersets/circuits have N≥2. Conditioning modes (amrap, for_time, etc.) have as many items as the WOD has exercises.
 5. **Autoreg is advisory and session-scoped.** The app applies it to remaining sets and can be "held" by the user for the rest of the session. Past-set edits never retrigger it. See `app/README.md` § "Autoregulation" for UX semantics.
+6. **Current vs target behavior must be explicit.** `docs/features/*.md` describe target feature behavior and carry `Current gaps` for anything unimplemented or unproven. If this file names a target shape before the app supports it, mark it as a current gap rather than implying it is shipped.
 
 ---
 
@@ -106,6 +161,8 @@ feature flag and no deprecation period — adopt defaults as you go.
 **Half-steps:** not supported in v1. If that ever bites, revisit.
 
 **RIR is logged, not prescribed-for-the-log.** The prescription carries a `target_rir` (what Claude wants); the set log carries `rir` (what actually happened). They don't have to match — the difference is the signal autoreg reads.
+
+**Scope:** RIR is primarily for strength, hypertrophy, and load-bearing skill work. Author `target_rir` on exercises/sets where proximity to failure is meaningful. Do not force RIR onto metcon, running, mobility, or sensor-scored work unless the author intentionally wants that signal.
 
 ---
 
@@ -188,16 +245,17 @@ In practice, skipping RIR turns off overshoot detection for that set but leaves 
 
 | Timing mode | Autoreg applies? |
 |---|---|
-| `straight_sets` | Yes |
-| `superset` | Yes (per item, applies to remaining rounds of the superset) |
-| `circuit` | Yes, but typically unused — circuits are movement-based, not load-based |
+| `straight_sets` | Yes; current implementation and target behavior are aligned. |
+| `superset` | Target behavior: yes when authored on strength-like stations, applying to remaining rounds. Current implementation gap: round-robin autoreg is not fully supported yet. |
+| `circuit` | Target behavior: yes only when authored on strength-like stations. Current implementation gap: round-robin autoreg is not fully supported yet. |
 | `emom` | No (conditioning) |
 | `amrap` | No |
 | `for_time` | No |
 | `intervals` | No |
 | `tabata` | No |
 | `continuous` | No |
-| `custom` | Usually no — if a segment is a load-based strength piece, add `autoreg` to that item |
+| `accumulate` | No by default; reps/duration accumulation is logged as chunks, not autoregulated set progression. |
+| `custom` | Avoid by default. If a stricter load-bearing archetype fits, use that instead. |
 | `rest` | N/A |
 
 Rule of thumb: autoreg is for load-bearing strength work where the user has a number of remaining sets that a bump/drop can still reach.
@@ -255,7 +313,8 @@ Two or more exercises performed back-to-back with one shared rest.
 
 **Block `timing_config_json`:**
 ```jsonc
-{ "rest_between_rounds_sec": 120 }
+{ "rest_between_rounds_sec": 120,
+  "logging_mode": "batch_at_round_rest" } // optional; this is the default
 ```
 
 **Block:** carries `rounds` (total times through the pair/group).
@@ -266,7 +325,7 @@ Two or more exercises performed back-to-back with one shared rest.
 { "reps": 10, "load_kg": 60, "target_rir": 2, "autoreg": { ... } }
 ```
 
-Active face shows NOW (current exercise) + THEN (next in the superset, muted). User does not log mid-round — logging happens on the shared rest screen for all items of that round. Logs per round per item: `reps`, `weight`, `rir`.
+Active face shows NOW (current exercise) + THEN (next in the superset, muted). User does not log mid-round — `next station` advances through the round, and logging happens on the shared rest screen for all items of that round. `finish round` on the final round commits before completion because there is no shared rest screen. Logs per round per item: `reps`, `weight`, `rir`.
 
 ### `circuit`
 
@@ -275,7 +334,8 @@ N exercises in a loop, possibly with a short between-exercise rest and a longer 
 **Block `timing_config_json`:**
 ```jsonc
 { "rest_between_exercises_sec": 0,
-  "rest_between_rounds_sec": 120 }
+  "rest_between_rounds_sec": 120,
+  "logging_mode": "station_by_station" } // optional; this is the default
 ```
 
 **Block:** carries `rounds`.
@@ -306,11 +366,11 @@ Perform the prescribed reps within each minute; rest the remainder of the minute
 { "reps": 10, "load_kg": 95 }             // 10 Power Cleans @ 95 kg each minute
 ```
 
-Active face shows ring progress within the minute + warn tone under ~15s left. Logs per round: `reps`, `weight`, `completed_at` (used to derive "finish time" within the minute). No autoreg.
+Active face shows interval countdown + warn tone under ~15s left. Strength-style EMOM work still requires `Set Start` before `Done` can log the set, even though the interval clock is already running. If the scheduled boundary passes before the user logs, the app advances to the next interval without creating a fake completed `0 reps` set; a first-class missed/partial row is a future data-model addition. Logs per completed round: `reps`, `weight`, `completed_at` (used to derive "finish time" within the minute). No autoreg.
 
 ### `amrap` (As Many Rounds As Possible)
 
-Fixed time cap; count rounds (and partial reps) of a defined circuit.
+Fixed time cap; rotate through a defined circuit and record completed stations plus any partial station at the buzzer.
 
 **Block `timing_config_json`:**
 ```jsonc
@@ -325,7 +385,7 @@ Fixed time cap; count rounds (and partial reps) of a defined circuit.
 { "reps": 20 }   // item for Air Squats
 ```
 
-Active face shows giant timer + huge round count. "+1 round" button is the only action. At the buzzer, the app presents a partial-rep picker to capture how many of each exercise the user completed in the last unfinished round. Logs: `rounds_complete`, `partial_reps` per exercise (stored as `set_log` rows — one per exercise per round, plus one for the partial if any). No autoreg.
+Active face shows the cap timer, current station, round count, and a single `next` action. Each `next` logs the current station as completed and advances to the next station in the round. At the buzzer, the app presents a partial picker: completed prior stations are checkmarked, the current station accepts extra reps, and later stations are locked. Logs are normal station-level `set_log` rows — one per completed station tap, plus one for the partial station if any. No autoreg.
 
 ### `for_time`
 
@@ -369,7 +429,7 @@ Or distance-based:
 
 **Items:** usually a single cardio exercise (run, bike, row).
 
-Active face shows ring countdown for the current phase + target pace / HR zone. Logs per interval: `duration_sec`, `distance_m`, `hr_avg_bpm`, `cadence_avg_spm` where available. No autoreg.
+Active face shows a countdown for time-based work/rest phases and elapsed time for distance-based phases until GPS/sensor detection exists. Target pace / HR zone is guidance, not completion logic. Logs per interval: `duration_sec`, `distance_m`, `hr_avg_bpm`, `cadence_avg_spm` where available. No autoreg.
 
 ### `tabata`
 
@@ -384,7 +444,7 @@ Fixed 8 rounds of 20s work / 10s rest. Configuration locked.
 
 Active face shows 8 pips + current phase timer. Haptic on every transition. Logs per round: `reps`, `hr_avg_bpm`. No autoreg.
 
-**v0 scope:** Tabata is **reps-based only** — the app routes tabata through the strength log path so the user's reps count survives. Cardio-shaped tabata (20s run / 10s walk, no reps to count) should be authored as `intervals` with `work_sec: 20`, `rest_sec: 10`, `interval_count: 8` — that path already logs `duration_sec` / `distance_m` via the cardio dispatch.
+**Execution scope:** Tabata supports both strength-shaped and cardio-shaped work. Strength-shaped rows keep the reps path so the user's reps count survives; if the work window expires before the user logs, the app enters rest without writing a fake `0 reps` completion. Loadless/cardio rows render a 20s work window and auto-log `duration_sec` because duration is clock-detectable.
 
 ### `continuous`
 
@@ -400,11 +460,28 @@ One long piece at a target zone/pace. Z2 ride, easy run, row.
 
 **Items:** one exercise.
 
-Active face shows elapsed + avg HR + zone + distance. Ambient, not attention-heavy. Logs once: `duration_sec`, `distance_m`, `hr_avg_bpm`, `hr_max_bpm`, `cadence_avg_spm`. No autoreg.
+Active face shows elapsed + avg HR + zone + distance. Duration targets show a `TARGET` countdown; at zero, standalone efforts offer `complete` or `continue`, while composed detectable efforts route into the next block. Distance targets stay manual until sensor-derived distance exists. Logs once: `duration_sec`, `distance_m`, `hr_avg_bpm`, `hr_max_bpm`, `cadence_avg_spm`. No autoreg.
+
+### `accumulate`
+
+Free-rest bouts toward one accumulated target. Examples: `100 push-ups`, `2:00 total dead hang`, or `100 ft loaded carry`.
+
+**Block `timing_config_json`:**
+```jsonc
+{ "target_duration_sec": null,
+  "target_reps": 100,
+  "target_distance_m": null }
+```
+
+Exactly one target key should be authored. Priority if multiple are present is duration, then reps, then distance.
+
+**Items:** one exercise. The item prescription can carry the per-bout default, such as `{ "reps": 25 }` or `{ "load_kg": 24, "weight_unit": "kg" }`.
+
+Active face shows accumulated progress (`25 / 100`, `1:17 / 2:00`, `50 m / 100 m`). The user taps `set start` before each bout; `break` / `log chunk` records the chunk and returns to a ready state for free rest. The app completes the block once the accumulated target is met or exceeded, routing to the next block when the workout is composed. Distance accumulation is representable, but without sensor/manual distance entry UI it currently needs a richer metric-entry sheet to be useful for carries.
 
 ### `custom`
 
-Catch-all for mixed-segment sessions that don't fit another mode. A threshold workout ("3 × 5min @ Z4 with 2min easy") is a canonical example.
+Catch-all for mixed-segment sessions that do not fit a stricter mode. Prefer `intervals`, `continuous`, `for_time`, `amrap`, or composed blocks when they can express the workout. For example, threshold repeats should usually be authored as intervals or composed continuous blocks, not `custom`, unless the structure genuinely exceeds the stricter modes.
 
 **Block `timing_config_json`:**
 ```jsonc
@@ -464,7 +541,7 @@ App displays "8–12 reps @ 70 kg". Autoreg undershoot triggers on `actual < rep
 { "sets": 3, "reps": 10, "per_side": true, "load_kg": 20 }
 ```
 
-App displays "3 × 10/side @ 20 kg". **`load_kg` is per-implement** — for per-side work the number is what each hand (or each foot, each dumbbell) is holding, not the sum across sides. A 20 kg dumbbell single-arm row means `load_kg: 20` per side; total work done is 40 kg over two sides but the prescription carries the per-side value. Logs `reps` as the per-side count (not doubled); `per_side=true` is preserved in the log for downstream analysis.
+App displays "3 × 10/side @ 20 kg". **`load_kg` is per-implement** — for per-side work the number is what each hand (or each foot, each dumbbell) is holding, not the sum across sides. A 20 kg dumbbell single-arm row means `load_kg: 20` per side; total work done is 40 kg over two sides but the prescription carries the per-side value. Logs `reps` as the per-side count (not doubled). Target logging records side explicitly: `set_log.side = left`, `right`, or `bilateral`; `bilateral` means both sides worked together and is the default for non-per-side work. Server analytics collapse left/right pairs into the intended set before aggregate calculations.
 
 ### Bodyweight and weighted bodyweight
 
@@ -518,10 +595,19 @@ When `sets_detail` is present, flat `sets/reps/load` keys are ignored. Each elem
 ```jsonc
 { "sets": 4, "reps": 5, "load_kg": 100,
   "sub_sets": 4, "intra_set_rest_sec": 15,
-  "target_rir": 1 }
+  "target_rir": 1,
+  "autoreg": { "overshoot_at": 2, "overshoot_step_kg": 5,
+               "undershoot_at": 2, "undershoot_step_kg": 5,
+               "apply_to": "remaining" } }
 ```
 
-Each top-level set is 4 sub-sets of 5 reps with 15s between sub-sets. The block's `rest_between_sets_sec` applies between top-level sets only. App displays the cluster shape and times the intra-set rest. Logs: one `set_log` per top-level set, with total reps summed and `duration_sec` covering the cluster.
+Each top-level set is 4 sub-sets of 5 reps with 15s between sub-sets. The block's `rest_between_sets_sec` applies between top-level sets only. Intended logging shape: one `set_log` per top-level set, with total reps summed and `duration_sec` covering the cluster.
+
+When a cluster appears as a station inside a round-based block such as a superset or circuit, `sets` may be omitted; the block's `rounds` supplies the top-level set count. The station still logs one top-level row per round with `reps * sub_sets` total reps.
+
+Autoreg, when authored, fires only after the top-level composed set is logged. Sub-sets never trigger autoreg. RIR is the athlete's final-effort RIR for the composed set, and undershoot compares actual total reps against `reps * sub_sets`.
+
+**Current app status:** parsing, Today summary rendering, live slot execution, intra-set rest timing, top-level duration logging, and top-level cluster autoreg are supported for `straight_sets`; cluster stations also execute with slots inside round-based superset/circuit blocks. Expanded per-slot actual editing remains a later enhancement.
 
 ### AMRAP token
 
@@ -580,7 +666,7 @@ Whole-item flag for a separate warm-up item:
 
 On swap, the app merges the override onto the original prescription (override keys win). `autoreg` can be overridden too — if the alternative wants different steps (machine → stack-based), set `autoreg` in the override.
 
-**`sets` override scope (R2.8).** The `sets` key is honored only for blocks whose advancement is **set-major** — `straight_sets`, `custom`, `intervals`, `continuous`. Round-robin blocks (`superset`, `circuit`, `amrap`, `emom`, `tabata`, `for_time`) replicate a single `rounds` count across every item, so rewriting one item's row count would either skew the cursor walk or silently collapse the whole block. On those blocks the app **drops** the `sets` portion of the override and applies the rest of the keys (`reps`, `load_kg`, `weight_unit`, `target_rir`, `per_side`, `autoreg`) unchanged. If Claude needs to change the round count for a round-robin block, edit the block's `rounds` in the next planned workout rather than smuggling it through an alternative's `sets` override. The drop is surfaced via the `execution.swap_sets_override_rejected` telemetry event so authoring drift is visible.
+**`sets` override scope (R2.8).** The `sets` key is honored only for blocks whose advancement is **set-major** — `straight_sets`, `custom`, `intervals`, `continuous`. Round-robin blocks (`superset`, `circuit`, `amrap`, `emom`, `tabata`, `for_time`) replicate a single `rounds` count across every item, so rewriting one item's row count would either skew the cursor walk or silently collapse the whole block. `accumulate` also drops `sets` because target completion, not row count, owns the exit. On those blocks the app **drops** the `sets` portion of the override and applies the rest of the keys (`reps`, `load_kg`, `weight_unit`, `target_rir`, `per_side`, `autoreg`) unchanged. If Claude needs to change the round count for a round-robin block, edit the block's `rounds` in the next planned workout rather than smuggling it through an alternative's `sets` override. The drop is surfaced via the `execution.swap_sets_override_rejected` telemetry event so authoring drift is visible.
 
 **Unit inheritance on overrides (R2.10).** Alternative overrides treat `weight_unit` as fully optional. When the override carries `weight_unit`, it wins; when it omits the key, the override's `load_kg` inherits the parent SetPlan's unit. This matches the real-world case: swapping a barbell bench (authored in lb) for a dumbbell bench press usually keeps the same unit. Claude should only declare `weight_unit` on an override when the alternative is fundamentally different equipment (e.g., a machine with a kg stack substituting for a pound-authored free-weight lift).
 

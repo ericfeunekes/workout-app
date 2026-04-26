@@ -22,7 +22,7 @@ status: draft (PM-synthesized; not yet reviewed by Eric)
 
 ## TL;DR
 
-Three Must-fix bugs (#5, #12, #16). One large, coordinated UX redesign across four screens (Preview / Active / Rest / Transition — items #1, #2, #3, #6, #7, #8, #10, #14, #15, #17, #20). One first-class data-model addition (`block.intent`, #25). Two items left explicitly open as design work (#22 modifier modeling, #24 in-app chat). One nice-to-have (#9 ETA).
+Three Must-fix bugs (#5, #12, #16). One large, coordinated UX redesign across four screens (Preview / Active / Rest / Transition — items #1, #2, #3, #6, #7, #8, #10, #14, #15, #17, #20). Three coordinated data-model additions (`set_log.skipped`, `set_log.side`, `block.intent`). Two items left explicitly open as design work (#22 modifier modeling, #24 in-app chat). One nice-to-have (#9 ETA).
 
 ---
 
@@ -251,7 +251,7 @@ Replace the "waiting to start" dead copy (P0-1) with a 2-D dot grid that visuali
 
 **Schema:** **two `set_log` rows per set** — one per side. **Decision (Eric, 2026-04-25):** asymmetry between left and right is real and load-bearing. Example: single-arm DB bench press where one arm can't match the other's load. Need to log left and right independently — different reps, different load, different RIR per side.
 
-Migration: introduce a `side` column on `set_log` (enum: `left`, `right`, `n/a`). For non-per-side logs, `side = n/a`; for per-side, two rows with `side = left` and `side = right` per set. Server migration + SwiftData migration + parity contract test per `docs/MIGRATIONS.md`.
+Migration: introduce a `side` column on `set_log` (enum: `left`, `right`, `bilateral`). For non-per-side logs, `side = bilateral`; for per-side, two rows with `side = left` and `side = right` per set. Server migration + SwiftData migration + parity contract test per `docs/MIGRATIONS.md`.
 
 [verify] — confirm `per_side` is read by the active-set rendering layer, not just the prescription parser.
 
@@ -360,6 +360,8 @@ These two are different intents on a block that might have the same exercises. A
 **Schema change:**
 - Add `block.intent` (TEXT, nullable) to the `block` table. Server migration + SwiftData migration + schema parity contract test + spec update — coordinated cutover per `docs/MIGRATIONS.md`.
 - Wire-format: `block.intent` is a freeform string; null = "intent not declared" (legacy / Claude punted).
+- Server write policy: accept null indefinitely. `docs/prescription.md` owns the authoring requirement that new Claude-authored blocks should carry intent; this is not a server rejection rule.
+- App render policy: if intent is null, render no placeholder copy.
 - No starter taxonomy — Claude (the conversation layer) generates the intent text per block when authoring the prescription. The app reads and displays it; doesn't validate against a closed set.
 
 **Goals vs intent (separate concepts):**
@@ -456,10 +458,10 @@ Future feature. Eric's spec: "not a near-term build but worth designing the data
 | Item | Schema touch | Notes |
 |---|---|---|
 | #4 / P0-5 Skip | `set_log.skipped: Bool` (or status enum) | Mini-migration. Coordinate with SwiftData. |
-| #19 / P1-8 Per-side asymmetry | None for v1 (PM decision); flagged for future ADR | Status quo: one row, `per_side: true` flag preserved. |
-| #25 / P2-1 Block intent | `block.intent: Enum?` | Full coordinated cutover (server + SwiftData + schema/openapi.json + parity test + spec). |
+| #19 / P1-8 Per-side asymmetry | `set_log.side: Text` (`left` / `right` / `bilateral`) | Required for two-row left/right logging. `bilateral` means both sides worked together; it is not a missing value. Server analytics must collapse sides to the intended set before aggregate calculations. |
+| #25 / P2-1 Block intent | `block.intent: Text?` | Freeform qualitative text. Full coordinated cutover (server + SwiftData + schema/openapi.json + parity test + spec). |
 | #22 / P3-1 Modifiers | Defer; sketch as JSON-blob extension first | No migration until ADR locks. |
-| #24 / P3-2 In-app chat | None for v1; design doc only | Future schema may extend `set_log.notes` semantics. |
+| #24 / P3-2 In-app chat | No v1 schema change; design doc only | Future schema may extend `set_log.notes` semantics. |
 
 **Verify before scheduling any schema work** — the repo I'm working from is 1–2 days stale. Confirm the current `block` and `set_log` shape before authoring migrations.
 

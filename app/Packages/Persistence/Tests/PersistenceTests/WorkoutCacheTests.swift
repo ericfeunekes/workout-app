@@ -131,6 +131,56 @@ final class WorkoutCacheTests: XCTestCase {
         XCTAssertNil(planned[0].completedAt)
     }
 
+    func testLoadSetLogsUsesPerformedExerciseIdentityForSwaps() async throws {
+        let factory = try makeFactory()
+        let cache = factory.workoutCache
+
+        let plannedExerciseID = UUID()
+        let performedExerciseID = UUID()
+        var workout = Fixtures.sampleWorkout(status: .completed)
+        workout.completedAt = Fixtures.baseDate.addingTimeInterval(3_600)
+        let block = Fixtures.sampleBlock(workoutID: workout.id)
+        let item = Fixtures.sampleItem(
+            blockID: block.id,
+            exerciseID: plannedExerciseID
+        )
+        let log = SetLog(
+            id: UUID(),
+            workoutItemID: item.id,
+            performedExerciseID: performedExerciseID,
+            setIndex: 1,
+            reps: 10,
+            weight: 70,
+            weightUnit: .lb,
+            rir: 2,
+            isWarmup: false,
+            skipped: false,
+            startedAt: nil,
+            completedAt: Fixtures.baseDate.addingTimeInterval(60),
+            notes: nil
+        )
+
+        try await cache.save(PulledDataset(
+            workouts: [workout],
+            blocks: [block],
+            items: [item],
+            exercises: [
+                Fixtures.sampleExercise(id: plannedExerciseID, name: "Bench Press"),
+                Fixtures.sampleExercise(id: performedExerciseID, name: "DB Bench Press"),
+            ]
+        ))
+        try await cache.saveSetLogs([log], workoutID: workout.id)
+
+        let plannedRows = try await cache.loadSetLogs(exerciseID: plannedExerciseID, limit: 10)
+        let performedRows = try await cache.loadSetLogs(exerciseID: performedExerciseID, limit: 10)
+
+        XCTAssertTrue(
+            plannedRows.isEmpty,
+            "swapped-away planned exercise must not keep the performed row in by-exercise history"
+        )
+        XCTAssertEqual(performedRows.map(\.id), [log.id])
+    }
+
     func testLatestUserParameterPerKey() async throws {
         let factory = try makeFactory()
         let cache = factory.workoutCache

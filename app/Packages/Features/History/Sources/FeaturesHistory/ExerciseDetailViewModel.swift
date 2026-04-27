@@ -20,10 +20,23 @@ public final class ExerciseDetailViewModel {
 
     /// One recent session row in the mono list.
     public struct SessionRow: Identifiable, Equatable, Sendable {
-        /// Stable id — day-start date's ISO8601 string.
+        /// Stable id — the session bucket's workoutItemID.
         public let id: String
+        /// Completed workout this session belongs to, when the parent
+        /// HistoryViewModel can resolve it from the loaded history slice.
+        public let workoutID: WorkoutID?
         /// "MON APR 14 · 4 × 100 × 5 · RIR 1.5"
         public let display: String
+
+        public init(
+            id: String,
+            workoutID: WorkoutID? = nil,
+            display: String
+        ) {
+            self.id = id
+            self.workoutID = workoutID
+            self.display = display
+        }
     }
 
     // MARK: - Public state
@@ -44,6 +57,7 @@ public final class ExerciseDetailViewModel {
 
     private let cache: WorkoutCache
     private let calendar: Calendar
+    private let workoutIDByItem: [WorkoutItemID: WorkoutID]
 
     /// Most-recent N set_logs to pull. The view shows ~10 rows; we pull
     /// more so the trend has enough data points to be meaningful.
@@ -53,12 +67,14 @@ public final class ExerciseDetailViewModel {
         exerciseID: ExerciseID,
         exerciseName: String,
         cache: WorkoutCache,
-        calendar: Calendar = .current
+        calendar: Calendar = .current,
+        workoutIDByItem: [WorkoutItemID: WorkoutID] = [:]
     ) {
         self.exerciseID = exerciseID
         self.exerciseName = exerciseName
         self.cache = cache
         self.calendar = calendar
+        self.workoutIDByItem = workoutIDByItem
     }
 
     /// Load the set_logs and derive trend + recent sessions. Idempotent
@@ -83,7 +99,8 @@ public final class ExerciseDetailViewModel {
         trendDisplay = trend.displayString
         recentSessions = Self.buildRecentRows(
             setLogs: logs,
-            calendar: calendar
+            calendar: calendar,
+            workoutIDByItem: workoutIDByItem
         )
     }
 
@@ -106,7 +123,8 @@ public final class ExerciseDetailViewModel {
     /// helper even if upstream data somehow mixed units.
     static func buildRecentRows(
         setLogs: [SetLog],
-        calendar: Calendar
+        calendar: Calendar,
+        workoutIDByItem: [WorkoutItemID: WorkoutID] = [:]
     ) -> [SessionRow] {
         // Order sessions by their latest set's completedAt. Using the
         // first-seen ordering preserves the input's newest-first layout
@@ -132,13 +150,18 @@ public final class ExerciseDetailViewModel {
 
         return sortedKeys.compactMap { key in
             let logs = buckets[key] ?? []
-            guard !logs.isEmpty, let latest = logs.map(\.completedAt).max() else {
+            let workingLogs = logs.filter { !$0.isWarmup && !$0.skipped }
+            guard !workingLogs.isEmpty, let latest = workingLogs.map(\.completedAt).max() else {
                 return nil
             }
             let display = formatRecentRow(latestAt: latest, logs: logs, calendar: calendar)
             // Row id uniquely identifies the session on screen —
             // workoutItemID is stable across reloads.
-            return SessionRow(id: key.uuidString, display: display)
+            return SessionRow(
+                id: key.uuidString,
+                workoutID: workoutIDByItem[key],
+                display: display
+            )
         }
     }
 
@@ -180,6 +203,23 @@ public final class ExerciseDetailViewModel {
             parts.append("\(count) × \(formatKilograms(weight)) \(unitLabel) × \(reps)")
         } else if let reps = topSet?.reps {
             parts.append("\(count) × BW × \(reps)")
+        } else if let top = topSet {
+            var metricParts: [String] = []
+            if let weight = top.weight {
+                let unitLabel = sessionUnit == .kg ? "kg" : "lb"
+                metricParts.append("\(formatKilograms(weight)) \(unitLabel)")
+            }
+            let cardio = formatCardioSummary(
+                durationSec: top.durationSec,
+                distanceM: top.distanceM,
+                count: 1
+            )
+            if cardio != "no data" {
+                metricParts.append(cardio)
+            }
+            if !metricParts.isEmpty {
+                parts.append("\(count) × \(metricParts.joined(separator: " · "))")
+            }
         }
 
         let rirValues = workingSets.compactMap(\.rir)

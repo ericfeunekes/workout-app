@@ -281,7 +281,21 @@ public final class HistoryViewModel {
             exerciseID: id,
             exerciseName: name,
             cache: cache,
-            calendar: calendar
+            calendar: calendar,
+            workoutIDByItem: workoutIDByItem(for: id)
         )
+    }
+
+    private func workoutIDByItem(for exerciseID: ExerciseID) -> [WorkoutItemID: WorkoutID] {
+        var out: [WorkoutItemID: WorkoutID] = [:]
+        for session in rawSessions {
+            for log in session.setLogs where !log.skipped {
+                let loggedExercise = log.performedExerciseID
+                    ?? session.plannedExerciseByItem[log.workoutItemID]
+                guard loggedExercise == exerciseID else { continue }
+                out[log.workoutItemID] = session.workout.id
+            }
+        }
+        return out
     }
 }

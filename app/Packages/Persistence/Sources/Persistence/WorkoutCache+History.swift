@@ -105,17 +105,18 @@ extension WorkoutCacheImpl {
     public func loadSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [SetLog] {
         guard limit > 0 else { return [] }
 
-        // Direct predicate against the denormalized `plannedExerciseID`
-        // (set to the parent WorkoutItem's `exerciseID` at log time) or
-        // `performedExerciseID` (the swap target when the user mid-
-        // workout swapped). Both columns live on SetLog itself, so this
-        // query no longer needs a WorkoutItem fetch and survives the
-        // case where the parent item was reconciled away — the hole
-        // the R1.4 fix-it exists to close.
+        // Direct predicate against performed-first exercise identity.
+        // `performedExerciseID` is the swap target when the user mid-
+        // workout swapped; once present, it owns the row. Otherwise we
+        // fall back to the denormalized `plannedExerciseID` stamped from
+        // the parent WorkoutItem at log time. Both columns live on
+        // SetLog itself, so this query no longer needs a WorkoutItem
+        // fetch and survives the case where the parent item was
+        // reconciled away — the hole the R1.4 fix-it exists to close.
         let descriptor = FetchDescriptor<SetLogModel>(
             predicate: #Predicate<SetLogModel> { log in
-                log.plannedExerciseID == exerciseID
-                    || log.performedExerciseID == exerciseID
+                log.performedExerciseID == exerciseID
+                    || (log.performedExerciseID == nil && log.plannedExerciseID == exerciseID)
             }
         )
         let rows = try modelContext.fetch(descriptor)

@@ -43,7 +43,9 @@ struct HistorySessionDetailView: View {
             .padding(.horizontal, DSSpacing.xl)
             .padding(.top, DSSpacing.lg)
             .padding(.bottom, DSSpacing.xxl)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DSColors.background)
         .sheet(item: editingSetLogBinding) { editing in
             EditSetSheet(

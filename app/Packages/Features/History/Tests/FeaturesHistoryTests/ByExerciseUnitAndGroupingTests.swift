@@ -280,4 +280,59 @@ final class ByExerciseUnitAndGroupingTests: XCTestCase {
         XCTAssertTrue(rows[0].display.contains("RIR 3.0"),
                       "skipped set must not affect RIR mean — got \(rows[0].display)")
     }
+
+    func testSkippedOnlyRecentBucketIsDropped() {
+        let itemID = UUID()
+        let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let skipped = SetLog(
+            id: UUID(), workoutItemID: itemID,
+            performedExerciseID: nil, setIndex: 1,
+            reps: nil, weight: nil, weightUnit: nil, rir: nil,
+            isWarmup: false,
+            skipped: true,
+            startedAt: nil,
+            completedAt: baseDate,
+            notes: nil
+        )
+
+        let rows = ExerciseDetailViewModel.buildRecentRows(
+            setLogs: [skipped],
+            calendar: utcCalendar,
+            workoutIDByItem: [itemID: UUID()]
+        )
+
+        XCTAssertTrue(
+            rows.isEmpty,
+            "skipped-only sessions must not render date-only dead rows"
+        )
+    }
+
+    func testRecentRowRendersCarryDistanceAndLoad() {
+        let itemID = UUID()
+        let workoutID = UUID()
+        let baseDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let log = SetLog(
+            id: UUID(), workoutItemID: itemID,
+            performedExerciseID: nil, setIndex: 1,
+            reps: nil, weight: 53, weightUnit: .lb,
+            durationSec: nil,
+            distanceM: 30.5,
+            rir: nil,
+            isWarmup: false,
+            startedAt: nil,
+            completedAt: baseDate,
+            notes: nil
+        )
+
+        let rows = ExerciseDetailViewModel.buildRecentRows(
+            setLogs: [log],
+            calendar: utcCalendar,
+            workoutIDByItem: [itemID: workoutID]
+        )
+
+        XCTAssertEqual(rows.count, 1)
+        XCTAssertEqual(rows[0].workoutID, workoutID)
+        XCTAssertTrue(rows[0].display.contains("1 × 53 lb · 30.5 m"),
+                      "carry rows must show load and distance — got \(rows[0].display)")
+    }
 }

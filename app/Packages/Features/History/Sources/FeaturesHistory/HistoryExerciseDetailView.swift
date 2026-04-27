@@ -27,7 +27,9 @@ struct HistoryExerciseDetailView: View {
             .padding(.horizontal, DSSpacing.xl)
             .padding(.top, DSSpacing.lg)
             .padding(.bottom, DSSpacing.xxl)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(DSColors.background)
         .task { await viewModel.load() }
     }
@@ -74,13 +76,26 @@ struct HistoryExerciseDetailView: View {
             } else {
                 VStack(alignment: .leading, spacing: DSSpacing.xs) {
                     ForEach(viewModel.recentSessions) { row in
-                        Text(row.display)
-                            .font(DSTypography.mono)
-                            .monospacedDigit()
-                            .foregroundStyle(DSColors.foregroundMuted)
+                        if let workoutID = row.workoutID {
+                            NavigationLink(value: workoutID) {
+                                recentSessionRow(row)
+                            }
+                            .buttonStyle(.plain)
+                        } else {
+                            recentSessionRow(row)
+                        }
                     }
                 }
             }
         }
+    }
+
+    private func recentSessionRow(_ row: ExerciseDetailViewModel.SessionRow) -> some View {
+        Text(row.display)
+            .font(DSTypography.mono)
+            .monospacedDigit()
+            .foregroundStyle(DSColors.foregroundMuted)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
     }
 }

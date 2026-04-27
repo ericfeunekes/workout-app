@@ -6,11 +6,16 @@
 //
 // Shape parity with the shared SetEditSheet contract:
 //   - reps/load/duration/distance use the same keypad
-//   - skipped, side, notes, and RIR are explicit controls
+//   - skipped, notes, and RIR are explicit controls
 //   - inline "save" commit key on the keypad (one-thumb flow)
 //   - every field is optional: committing without touching a field means
 //     "preserve the existing value" — HistoryViewModel.editPastSet
 //     applies only the overrides the user actually changed.
+//
+// Reserved side semantics: `set_log.side` still round-trips through the
+// History surface because the caller passes the current value in, but
+// this sheet does not author it. D1's unilateral model is exercise-item
+// based, not "toggle side on a generic set row."
 //
 // Weight-unit correctness: the loaded `SetLog.weightUnit` (`.kg` / `.lb`)
 // is threaded through. The LOAD field's label flips between "LOAD KG" /
@@ -40,6 +45,10 @@
 //     is cheaper than the boundary break.
 //   - Edits don't propose autoreg and don't need the "log set N / M"
 //     counter — simpler surface than the live-log flow.
+//   - The sheet locally blocks the invalid skipped→performed transition
+//     where reps/load/duration/distance would all remain nil. That keeps
+//     the user in the sheet with a visible error instead of dismissing
+//     into a no-op save path.
 //
 // State lives in `EditSetSheetModel` so the commit contract is unit-
 // testable without ViewInspector. The view holds it as @State; tests
@@ -73,6 +82,9 @@ public final class EditSetSheetModel {
     public let initialDurationSec: Double?
     public let initialDistanceM: Double?
     public let initialSkipped: Bool
+    /// Current stored side. Threaded through unchanged so History edits
+    /// preserve the row's round-tripped value, but the sheet does not
+    /// expose side as an editable control.
     public let initialSide: SetLogSide
     public let initialNotes: String?
     /// Unit the loaded SetLog was recorded in. Defaults to `.kg` when
@@ -97,8 +109,7 @@ public final class EditSetSheetModel {
     public private(set) var notesTouched: Bool = false
     public private(set) var skippedValue: Bool
     public private(set) var skippedTouched: Bool = false
-    public private(set) var sideValue: SetLogSide
-    public private(set) var sideTouched: Bool = false
+    public private(set) var validationMessage: String?
     /// Which field the on-screen keypad drives.
     public private(set) var activeField: Field = .reps
     /// Picked RIR. nil = user didn't touch the row OR explicitly cleared;
@@ -143,7 +154,6 @@ public final class EditSetSheetModel {
         self.onCommit = onCommit
         self.notesText = initialNotes ?? ""
         self.skippedValue = initialSkipped
-        self.sideValue = initialSide
         self.pickedRir = initialRir
     }
 
@@ -199,10 +209,12 @@ public final class EditSetSheetModel {
     }
 
     public func selectField(_ field: Field) {
+        clearValidationMessage()
         activeField = field
     }
 
     public func pressDigit(_ digit: Int) {
+        clearValidationMessage()
         switch activeField {
         case .reps:
             appendRepsDigit(digit)
@@ -216,6 +228,7 @@ public final class EditSetSheetModel {
     }
 
     public func pressDecimal() {
+        clearValidationMessage()
         switch activeField {
         case .reps:
             return
@@ -229,6 +242,7 @@ public final class EditSetSheetModel {
     }
 
     public func pressDelete() {
+        clearValidationMessage()
         switch activeField {
         case .reps: pressDeleteOn(&repsBuffer)
         case .load: pressDeleteOn(&loadBuffer)
@@ -238,6 +252,7 @@ public final class EditSetSheetModel {
     }
 
     public func pressRir(_ value: Int) {
+        clearValidationMessage()
         rirTouched = true
         if pickedRir == value {
             pickedRir = nil
@@ -252,30 +267,29 @@ public final class EditSetSheetModel {
     /// clears via `pressRir`) because it always clears regardless of
     /// current state. Commits as `.clear` downstream.
     public func clearRir() {
+        clearValidationMessage()
         rirTouched = true
         pickedRir = nil
     }
 
     public func setSkipped(_ skipped: Bool) {
+        clearValidationMessage()
         skippedTouched = true
         skippedValue = skipped
     }
 
-    public func setSide(_ side: SetLogSide) {
-        sideTouched = true
-        sideValue = side
-    }
-
     public func setNotes(_ notes: String) {
+        clearValidationMessage()
         notesTouched = true
         notesText = notes
     }
 
     public func commit() {
+        guard validateCommit() else { return }
         let contract = DesignSystem.SetEditSheetModel(
             availableFields: [
                 .load, .reps, .rir, .distance, .duration,
-                .skipped, .side, .notes,
+                .skipped, .notes,
             ]
         )
         if let reps = parsedReps() {
@@ -299,10 +313,6 @@ public final class EditSetSheetModel {
         }
         if skippedTouched {
             contract.setSkipped(skippedValue)
-        }
-        if sideTouched,
-           let side = SetEditSide(rawValue: sideValue.rawValue) {
-            contract.setSide(side)
         }
         if notesTouched {
             contract.setNotes(notesText)
@@ -334,6 +344,38 @@ public final class EditSetSheetModel {
     private func parsedDistance() -> Double? {
         guard let value = Double(distanceBuffer) else { return nil }
         return max(0, value)
+    }
+
+    private func validateCommit() -> Bool {
+        guard !(initialSkipped && skippedTouched && skippedValue == false && resultingMetricsAreAllNil) else {
+            validationMessage = "add at least one metric before marking performed"
+            return false
+        }
+        validationMessage = nil
+        return true
+    }
+
+    private var resultingMetricsAreAllNil: Bool {
+        resultingReps == nil &&
+        resultingLoad == nil &&
+        resultingDuration == nil &&
+        resultingDistance == nil
+    }
+
+    private var resultingReps: Int? {
+        parsedReps() ?? initialReps
+    }
+
+    private var resultingLoad: Double? {
+        parsedLoad()?.value ?? initialLoad
+    }
+
+    private var resultingDuration: Double? {
+        parsedDuration() ?? initialDurationSec
+    }
+
+    private var resultingDistance: Double? {
+        parsedDistance() ?? initialDistanceM
     }
 
     /// Append a digit to the reps buffer, rejecting the input when the
@@ -378,6 +420,10 @@ public final class EditSetSheetModel {
     private func pressDeleteOn(_ buffer: inout String) {
         guard !buffer.isEmpty else { return }
         buffer.removeLast()
+    }
+
+    private func clearValidationMessage() {
+        validationMessage = nil
     }
 
     private func formatNumber(_ value: Double) -> String {
@@ -436,7 +482,7 @@ struct EditSetSheet: View {
                 fieldRow
                 cardioFieldRow
                 statusRow
-                sideRow
+                validationRow
                 notesField
                 rirRow
                 DSKeypad(
@@ -464,6 +510,15 @@ struct EditSetSheet: View {
         }
     }
 
+    @ViewBuilder
+    private var validationRow: some View {
+        if let message = model.validationMessage {
+            Text(message)
+                .font(DSTypography.caption)
+                .foregroundStyle(DSColors.warn)
+        }
+    }
+
     private var fieldRow: some View {
         HStack(spacing: DSSpacing.md) {
             fieldTile(title: "REPS", display: model.repsDisplay, field: .reps)
@@ -488,33 +543,6 @@ struct EditSetSheet: View {
     private func statusButton(title: String, skipped: Bool) -> some View {
         let selected = model.skippedValue == skipped
         return Button(action: { model.setSkipped(skipped) }, label: {
-            Text(title)
-                .font(DSTypography.subLabel)
-                .tracking(1.2)
-                .foregroundStyle(selected ? DSColors.accentInk : DSColors.foregroundMuted)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, DSSpacing.sm)
-                .background(selected ? DSColors.accentMuted : DSColors.surfaceElevated)
-                .overlay(
-                    RoundedRectangle(cornerRadius: DSRadius.control, style: .continuous)
-                        .strokeBorder(selected ? DSColors.accent : DSColors.border, lineWidth: 1)
-                )
-                .clipShape(RoundedRectangle(cornerRadius: DSRadius.control, style: .continuous))
-        })
-        .buttonStyle(.plain)
-    }
-
-    private var sideRow: some View {
-        HStack(spacing: DSSpacing.sm) {
-            sideButton(title: "BILAT", side: .bilateral)
-            sideButton(title: "LEFT", side: .left)
-            sideButton(title: "RIGHT", side: .right)
-        }
-    }
-
-    private func sideButton(title: String, side: SetLogSide) -> some View {
-        let selected = model.sideValue == side
-        return Button(action: { model.setSide(side) }, label: {
             Text(title)
                 .font(DSTypography.subLabel)
                 .tracking(1.2)

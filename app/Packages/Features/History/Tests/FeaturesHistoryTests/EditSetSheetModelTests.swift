@@ -14,6 +14,8 @@
 //   • testEditPreservesWeightUnit — committing a load edit returns a
 //     `LoadCommit` that carries the original unit. The sheet never
 //     silently converts or stamps `.kg`.
+//   • testEditSheetOmitsSideFromCommitWhileStillEmittingOtherFields —
+//     History no longer authors `set_log.side` from this sheet.
 //   • testEditSheetCanClearRir — the "clear" affordance zeroes out the
 //     RIR selection and commits as `.clear`, distinct from "untouched".
 //   • testEditSheetCapsRepsAt999 — typing "1000" leaves the buffer at
@@ -162,7 +164,7 @@ final class EditSetSheetModelTests: XCTestCase {
                        "digits past the 999 cap must be no-ops")
     }
 
-    func testEditSheetEmitsFullFieldIntent() {
+    func testEditSheetOmitsSideFromCommitWhileStillEmittingOtherFields() {
         var captured: SetEditIntent?
         let model = EditSetSheetModel(
             setIndex: 1,
@@ -186,7 +188,6 @@ final class EditSetSheetModelTests: XCTestCase {
         model.pressDigit(0)
         model.pressDigit(0)
         model.setSkipped(true)
-        model.setSide(.left)
         model.setNotes("missed by watch")
         model.commit()
 
@@ -194,8 +195,34 @@ final class EditSetSheetModelTests: XCTestCase {
         XCTAssertEqual(captured?.distance, 400)
         XCTAssertEqual(captured?.distanceUnit, "m")
         XCTAssertEqual(captured?.skipped, true)
-        XCTAssertEqual(captured?.side, .left)
+        XCTAssertNil(captured?.side)
         XCTAssertEqual(captured?.notes, .set("missed by watch"))
+    }
+
+    func testUnskipWithoutMetricsShowsValidationErrorAndDoesNotCommit() {
+        var captured: SetEditIntent?
+        let model = EditSetSheetModel(
+            setIndex: 1,
+            initialReps: nil,
+            initialRir: nil,
+            initialLoad: nil,
+            initialDurationSec: nil,
+            initialDistanceM: nil,
+            initialSkipped: true,
+            initialSide: .bilateral,
+            initialNotes: nil,
+            weightUnit: .lb,
+            onCommit: { intent in captured = intent }
+        )
+
+        model.setSkipped(false)
+        model.commit()
+
+        XCTAssertNil(captured)
+        XCTAssertEqual(
+            model.validationMessage,
+            "add at least one metric before marking performed"
+        )
     }
 
     // MARK: - Helpers

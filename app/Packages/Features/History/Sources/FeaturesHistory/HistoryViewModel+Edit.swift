@@ -20,16 +20,20 @@
 // Weight-unit correctness: the shared `SetEditIntent` carries both the
 // numeric load and its unit. We write the SetLog's `weight` /
 // `weightUnit` together — the unit is preserved as what the user just
-// confirmed, not silently stamped as `.kg`. That prevents the footgun
-// where a `.lb` row gets corrected and becomes a `.kg` row numerically
-// equal to the old pounds (a 100 lb row "corrected" would read as
-// 100 kg, twice the actual load).
+// confirmed, not silently stamped as `.kg`. Marking a row skipped also
+// preserves `weightUnit`; skip clears performed metrics, not the
+// prescription-side unit semantics the row was authored with.
 //
 // RIR three-state: the commit carries `.preserve` / `.clear` / `.set(n)`
 // so the edit can distinguish "user didn't touch RIR" (leave existing)
 // from "user explicitly cleared RIR" (write nil). Plain `Int?` would
 // collapse those two — the earlier shape did, which is why an explicit
 // clear from the sheet never reached the SetLog.
+//
+// Empty unskip guard: a skipped row cannot be marked "performed" if the
+// resulting row would still have nil reps/load/duration/distance. The
+// sheet blocks this with a visible error, and this path re-checks it so
+// crafted intents cannot persist an empty performed row.
 //
 // Why the History edit is local-cache + push, not reducer-dispatched:
 //   History looks at COMPLETED workouts. The in-memory SessionState for
@@ -100,23 +104,26 @@ extension HistoryViewModel {
         if let distance = intent.distance {
             edited.distanceM = distance
         }
-        if let side = intent.side,
-           let mapped = SetLogSide(rawValue: side.rawValue) {
-            edited.side = mapped
-        }
         switch intent.notes {
         case .preserve:
             break
         case .set(let value):
             edited.notes = value?.nilIfBlank
         }
+        let isSkippedToPerformedTransition = existing.skipped && intent.skipped == false
         if let skipped = intent.skipped {
             edited.skipped = skipped
+        }
+        if isSkippedToPerformedTransition,
+           edited.reps == nil,
+           edited.weight == nil,
+           edited.durationSec == nil,
+           edited.distanceM == nil {
+            return
         }
         if edited.skipped {
             edited.reps = nil
             edited.weight = nil
-            edited.weightUnit = nil
             edited.durationSec = nil
             edited.distanceM = nil
             edited.rir = nil

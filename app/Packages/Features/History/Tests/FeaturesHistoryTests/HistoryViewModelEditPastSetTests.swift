@@ -305,8 +305,8 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         )
     }
 
-    func testHistoryEditCorrectsFullFieldSetInPlace() async throws {
-        let (cache, firstLog) = try makeSingleLogFixture()
+    func testHistoryEditCorrectsFullFieldSetInPlaceWithoutChangingSide() async throws {
+        let (cache, firstLog) = try makeSingleLogFixture(side: .right)
         let recorder = EditRecorder()
         let hook: HistorySetLogEditHook = { [recorder] log in
             await recorder.append(log)
@@ -343,12 +343,12 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         XCTAssertEqual(pushed.weightUnit, .lb)
         XCTAssertEqual(pushed.durationSec, 75)
         XCTAssertEqual(pushed.distanceM, 400)
-        XCTAssertEqual(pushed.side, .left)
+        XCTAssertEqual(pushed.side, .right)
         XCTAssertEqual(pushed.notes, "watch missed first rep")
     }
 
     func testHistoryEditMarkSkippedClearsPerformanceMetrics() async throws {
-        let (cache, firstLog) = try makeSingleLogFixture()
+        let (cache, firstLog) = try makeSingleLogFixture(weight: 225, weightUnit: .lb)
         let recorder = EditRecorder()
         let hook: HistorySetLogEditHook = { [recorder] log in
             await recorder.append(log)
@@ -372,14 +372,14 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         XCTAssertTrue(pushed.skipped)
         XCTAssertNil(pushed.reps)
         XCTAssertNil(pushed.weight)
-        XCTAssertNil(pushed.weightUnit)
+        XCTAssertEqual(pushed.weightUnit, .lb)
         XCTAssertNil(pushed.durationSec)
         XCTAssertNil(pushed.distanceM)
         XCTAssertNil(pushed.rir)
     }
 
     func testHistoryEditPreservesSkippedRowsWithoutPerformanceMetrics() async throws {
-        let (cache, firstLog) = try makeSingleLogFixture(skipped: true)
+        let (cache, firstLog) = try makeSingleLogFixture(skipped: true, weightUnit: .kg)
         let recorder = EditRecorder()
         let hook: HistorySetLogEditHook = { [recorder] log in
             await recorder.append(log)
@@ -403,10 +403,87 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         XCTAssertTrue(pushed.skipped)
         XCTAssertNil(pushed.reps)
         XCTAssertNil(pushed.weight)
-        XCTAssertNil(pushed.weightUnit)
+        XCTAssertEqual(pushed.weightUnit, .kg)
         XCTAssertNil(pushed.durationSec)
         XCTAssertNil(pushed.distanceM)
         XCTAssertNil(pushed.rir)
+    }
+
+    func testLbRowSurvivesSkipRoundTrip() async throws {
+        let (cache, firstLog) = try makeSingleLogFixture(weight: 225, weightUnit: .lb)
+        let recorder = EditRecorder()
+        let hook: HistorySetLogEditHook = { [recorder] log in
+            await recorder.append(log)
+        }
+        let vm = HistoryViewModel(
+            cache: cache,
+            calendar: utcCalendar,
+            now: { [now] in now },
+            onSetLogEdited: hook
+        )
+        await vm.load()
+
+        await vm.editPastSet(
+            workoutID: firstLog.workoutID,
+            setLogID: firstLog.setLog.id,
+            intent: makeIntent(skipped: true)
+        )
+
+        let pushedAfterSkip = await recorder.pushed
+        let skippedLog = try XCTUnwrap(pushedAfterSkip.first)
+        XCTAssertTrue(skippedLog.skipped)
+        XCTAssertEqual(skippedLog.weightUnit, .lb)
+        XCTAssertEqual(
+            cache.setLogsByWorkout[firstLog.workoutID]?.first?.weightUnit,
+            .lb,
+            "skip must preserve the original load unit so the next edit reopens in lb"
+        )
+
+        await vm.editPastSet(
+            workoutID: firstLog.workoutID,
+            setLogID: firstLog.setLog.id,
+            intent: makeIntent(reps: 5, load: 225, loadUnit: "lb", skipped: false)
+        )
+
+        let pushedLogs = await recorder.pushed
+        XCTAssertEqual(pushedLogs.count, 2)
+        let restored = try XCTUnwrap(pushedLogs.last)
+        XCTAssertFalse(restored.skipped)
+        XCTAssertEqual(restored.reps, 5)
+        XCTAssertEqual(restored.weight, 225)
+        XCTAssertEqual(restored.weightUnit, .lb)
+    }
+
+    func testUnskipWithoutMetricsIsRejected() async throws {
+        let (cache, firstLog) = try makeSingleLogFixture(skipped: true, weightUnit: .lb)
+        let recorder = EditRecorder()
+        let hook: HistorySetLogEditHook = { [recorder] log in
+            await recorder.append(log)
+        }
+        let vm = HistoryViewModel(
+            cache: cache,
+            calendar: utcCalendar,
+            now: { [now] in now },
+            onSetLogEdited: hook
+        )
+        await vm.load()
+
+        await vm.editPastSet(
+            workoutID: firstLog.workoutID,
+            setLogID: firstLog.setLog.id,
+            intent: makeIntent(skipped: false)
+        )
+
+        let pushedLogs = await recorder.pushed
+        XCTAssertTrue(pushedLogs.isEmpty)
+        XCTAssertTrue(cache.savedSetLogBatches.isEmpty)
+        let stored = try XCTUnwrap(cache.setLogsByWorkout[firstLog.workoutID]?.first)
+        XCTAssertTrue(stored.skipped)
+        XCTAssertEqual(stored.weightUnit, .lb)
+        XCTAssertNil(stored.reps)
+        XCTAssertNil(stored.weight)
+        XCTAssertNil(stored.durationSec)
+        XCTAssertNil(stored.distanceM)
     }
 
     // MARK: - Fixtures
@@ -453,7 +530,10 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
     /// than a freshly generated one (bug-040).
     private func makeSingleLogFixture(
         setLogID: UUID = UUID(),
-        skipped: Bool = false
+        skipped: Bool = false,
+        weight: Double = 100,
+        weightUnit: WeightUnit = .kg,
+        side: SetLogSide = .bilateral
     ) throws -> (FakeHistoryCache, LogHandle) {
         let (userID, workoutID, blockID, itemID, exerciseID) =
             (UUID(), UUID(), UUID(), UUID(), UUID())
@@ -479,9 +559,14 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         )
         let log = SetLog(
             id: setLogID, workoutItemID: itemID, performedExerciseID: nil,
-            setIndex: 1, reps: 5, weight: 100, weightUnit: .kg, rir: 2,
+            setIndex: 1,
+            reps: skipped ? nil : 5,
+            weight: skipped ? nil : weight,
+            weightUnit: weightUnit,
+            rir: skipped ? nil : 2,
             isWarmup: false,
             skipped: skipped,
+            side: side,
             startedAt: completedAt.addingTimeInterval(-60),
             completedAt: completedAt,
             notes: nil

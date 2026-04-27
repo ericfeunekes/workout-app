@@ -59,8 +59,14 @@ the shell/model can express the fields.
 - History edits are same-row overwrite under the current schema. They do not
   create an audit-grade field-diff trail unless a later structural unit adds
   that provenance.
+- `side` is not user-authored from this sheet. Per D1, unilateral work is
+  authored as separate exercise items rather than by toggling `set_log.side`.
 - Leaving a field untouched preserves the existing value.
 - Clearing a value is explicit when the field supports it.
+- Marking a row skipped preserves `weightUnit`. The stored unit belongs to the
+  prescription-side row semantics, not the performed metrics.
+- Moving a row from skipped to performed requires at least one metric (`reps`,
+  `load`, `duration`, or `distance`) before the edit can save.
 - The sheet emits edit intents; callers own persistence and sync side effects.
 
 ## Deliberate non-goals
@@ -81,7 +87,8 @@ the shell/model can express the fields.
   rest pills, and the History `EditSetSheet`.
 - History's visual sheet now emits the shared intent and is proven for set-log
   correction fields: load/unit, reps, RIR set/clear, duration, distance,
-  skipped/performed state, side round-trip, and notes.
+  skipped/performed state, and notes. `set_log.side` still round-trips on the
+  stored row but is no longer authored from this sheet.
 - Apply-to-remaining scope for preview/future and active setup edits is not yet
   implemented or proven.
 - Bodyweight remains contract-level and display-level only for History; editing

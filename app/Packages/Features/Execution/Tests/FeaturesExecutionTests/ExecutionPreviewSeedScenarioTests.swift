@@ -51,6 +51,29 @@ final class ExecutionPreviewSeedScenarioTests: XCTestCase {
         XCTAssertEqual(context.itemsByBlock.map(\.count), [1, 1, 1, 1, 0])
     }
 
+    func testTransitionSetupCoversRepeatedExerciseAndMultiSetCarry() throws {
+        let context = try XCTUnwrap(ExecutionPreviewSeed.qaScenario("transition_setup"))
+
+        XCTAssertEqual(context.blocks.map(\.name), [
+            "Press primer",
+            "Press repeat",
+            "Carry test",
+        ])
+        XCTAssertEqual(context.itemsByBlock.map(\.count), [1, 1, 1])
+
+        let firstBench = try XCTUnwrap(context.itemsByBlock[0].first)
+        let secondBench = try XCTUnwrap(context.itemsByBlock[1].first)
+        let carry = try XCTUnwrap(context.itemsByBlock[2].first)
+
+        XCTAssertEqual(
+            firstBench.exerciseID,
+            secondBench.exerciseID,
+            "same exercise name repeated across blocks must reuse one exercise identity"
+        )
+        XCTAssertNotEqual(firstBench.id, secondBench.id)
+        XCTAssertTrue(carry.prescriptionJSON.contains(#""sets":3"#))
+    }
+
     func testUnknownScenarioReturnsNil() {
         XCTAssertNil(ExecutionPreviewSeed.qaScenario("not_a_scenario"))
     }

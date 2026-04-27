@@ -371,13 +371,21 @@ public enum ExecutionPreviewSeed {
                         ]
                     ),
                     FixtureBlock(
+                        name: "Press repeat",
+                        timingMode: .straightSets,
+                        timingConfigJSON: #"{"rest_between_sets_sec":6,"rest_between_exercises_sec":6}"#,
+                        items: [
+                            ("DB Bench Press", #"{"sets":2,"reps":8,"load_kg":24,"weight_unit":"kg","target_rir":3}"#),
+                        ]
+                    ),
+                    FixtureBlock(
                         name: "Carry test",
                         timingMode: .straightSets,
                         timingConfigJSON: #"{"rest_between_sets_sec":6,"rest_between_exercises_sec":6}"#,
                         items: [
                             (
                                 "Farmer Carry",
-                                #"{"sets":1,"target":{"kind":"distance","value":100,"unit":"ft"},"load_kg":53,"weight_unit":"lb"}"#
+                                #"{"sets":3,"target":{"kind":"distance","value":100,"unit":"ft"},"load_kg":53,"weight_unit":"lb"}"#
                             ),
                         ]
                     ),
@@ -585,6 +593,7 @@ public enum ExecutionPreviewSeed {
         let now = Date()
         var exercises: [UUID: Exercise] = [:]
         var lastPerformed: [UUID: String] = [:]
+        var exerciseIDByName: [String: UUID] = [:]
         var resolvedBlocks: [Block] = []
         var itemsByBlock: [[WorkoutItem]] = []
 
@@ -593,9 +602,10 @@ public enum ExecutionPreviewSeed {
             var workoutItems: [WorkoutItem] = []
 
             for (itemPosition, item) in fixtureBlock.items.enumerated() {
-                let exerciseID = UUID()
+                let exerciseID = exerciseIDByName[item.name] ?? UUID()
+                exerciseIDByName[item.name] = exerciseID
                 exercises[exerciseID] = Exercise(id: exerciseID, name: item.name)
-            lastPerformed[exerciseID] = "recent: target hit"
+                lastPerformed[exerciseID] = "recent: target hit"
                 workoutItems.append(WorkoutItem(
                     id: UUID(),
                     blockID: blockID,

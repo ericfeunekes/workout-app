@@ -99,6 +99,6 @@ Why: when Eric reports "something didn't work at the gym," the telemetry event l
 - **expected:** row `execution.autoreg_proposed` with `data_json` containing `{"reason": "overshoot", "rir": 4, "newLoadKg": 105.0}` (shape-check; exact keys may evolve). `workoutID` + `setLogID` populated.
 
 ### S9. Persona QA event diff
-- **setup:** run a persona scenario (see `scratch/e2e/personas/*`) end-to-end
+- **setup:** run a committed or freshly authored persona scenario end-to-end
 - **steps:** capture telemetry during the run; compare to the persona's expected event stream
 - **expected:** the event log is a replayable script of what the persona did. Any anomaly (missing event, duplicated event, out-of-order event) = a bug.

@@ -3,9 +3,10 @@ title: Development workflow
 status: stable
 date: 2026-04-17
 last_reviewed: 2026-05-17
-purpose: "How work progresses in this repo — the lifecycle from idea to deployed code, and the rules that hold across every cycle."
+purpose: "How work progresses in this repo — the lifecycle from request to deployed code, and the rules that hold across every cycle."
 covers:
   - AGENTS.md
+  - docs/sdlc.md
   - docs/MIGRATIONS.md
   - docs/runbooks/closeout.md
 ---
@@ -14,29 +15,41 @@ covers:
 
 This repo has one developer and one user (both Eric). There are no sprints, no standups, no PR review boards. The workflow below exists to keep decisions and rationale durable across Claude conversations so that future sessions — without the context of this one — can continue to improve the system safely.
 
-## The lifecycle
+For the progressive-disclosure planning model, read `docs/sdlc.md`: durable
+requirements -> gap map -> backlog lanes -> active work tree -> scratch phase
+or implementation plan -> closeout.
+
+## The operational lifecycle
 
 ```
-idea → spec → plan → implement → verify → close → deploy
+request → requirements → backlog/plan → implement → verify → close → deploy
 ```
 
-### Idea
+### Request
 
 Eric starts a conversation. Work classifies into one of three sizes:
 
 - **Trivial** (typo, rename, one-line fix) — skip straight to implement.
-- **Scoped change** (one module, known shape) — skip spec; go to plan.
-- **Non-trivial** (new feature, schema change, cross-stack) — start with a spec interview.
+- **Scoped change** (one module, known shape) — skip new requirements; go to plan.
+- **Non-trivial** (new feature, schema change, cross-stack) — start with
+  `scoping:requirements-planning` when the durable requirement is missing,
+  stale, or too thin. Use interview only as optional discovery that feeds the
+  requirements update.
 
-Claude's job is to classify out loud at the start of a conversation. "This is non-trivial; interviewing first." Or "this is scoped; jumping to the plan." Eric can overrule.
+Claude's job is to classify out loud at the start of a conversation. "This is
+non-trivial; updating requirements first." Or "this is scoped; jumping to the
+plan." Eric can overrule.
 
-### Spec
+### Requirements
 
-For non-trivial work, use `collaboration:interview` (asks adaptive questions, writes a decisions doc) or update `docs/specs/v2-architecture.md` directly when the change is a refinement.
+For non-trivial work, use `scoping:requirements-planning` when the durable
+requirement is missing, stale, or too thin. Feature, domain, and aspect changes
+update their owning docs first. Architecture and schema contracts live in
+`docs/specs/`. ADRs capture decisions and rationale, not active work plans.
 
-A spec is done when someone without this conversation's context could implement it.
-
-**Specs live in `docs/specs/`.** ADRs live in `docs/decisions/`. Exploration docs that support a spec live next to the spec with a "decisions-applied" status once their findings are merged.
+A requirement is done when someone without this conversation's context can
+understand the intended behavior, authority, scope, acceptance bar, and current
+gaps.
 
 ### Plan
 
@@ -48,6 +61,11 @@ For any work beyond trivial, write a plan before implementing. Options:
   outcome-level delivery chunks
 - `scoping:implementation-planning` for a single unit of work
 - Inline plan in the conversation for smaller scoped changes — no separate doc
+
+Use `docs/sdlc.md` to decide where the plan belongs. Requirements and gaps live
+in durable docs. Backlog lanes live in `docs/backlog.md`. Phase and
+implementation plans live in `scratch/` and are only for the selected active
+work tree.
 
 Plans capture: what's changing, which files, what proves it works, what the closeout looks like. The plan is the shared artifact Eric can scan before greenlighting implementation.
 
@@ -103,7 +121,10 @@ The loop:
      --service-name review-<domain> --effort medium \
      -f path/to/review-prompt.md
    ```
-   The review prompt cites: what the implementer claims they did, the files to focus on, the questions to answer, the specific hazards to probe, and the gates Codex should re-run. See `scratch/codex-reviews/_template-header.md` + `_session-context.md` for the methodology baseline.
+   The review prompt cites: what the implementer claims they did, the files to
+   focus on, the questions to answer, the specific hazards to probe, and the
+   gates Codex should re-run. Write prompts under `scratch/codex-reviews/` on
+   demand; if the directory is absent, there is no active review handoff.
 4. **Lead synthesizes in the main thread.** Codex verdict = ship / needs-another-round. If needs-another-round, the lead dispatches another Claude implementer with Codex's findings inline. Loop until Codex signs off.
 
 **Sweeps and investigations also use Codex.** Codebase-state sweeps ("what might be broken?"), hypothesis-driven bug investigations, and adversarial reviews all run via `cxd task --sandbox read-only --detach` in separate lanes. Read-only sandbox keeps them safe; the different-model constraint keeps them productive.
@@ -116,7 +137,10 @@ Codex sees the codebase cold. It doesn't carry the rationalizations the implemen
 
 ### Parallel Codex reviews
 
-For multi-domain work (e.g. a feature cutover touching drivers + sync + UI), fire parallel Codex reviews — one per domain — via `_dispatch.sh`. Monitor with `_monitor.sh`. Pattern lives in `scratch/codex-reviews/` as a working template.
+For multi-domain work (e.g. a feature cutover touching drivers + sync + UI),
+fire parallel Codex reviews — one per domain. Keep prompt files and monitor
+notes in `scratch/codex-reviews/` while the review is active, then delete them
+after findings are resolved or promoted into durable docs.
 
 ### Lightweight Codex reviews
 
@@ -133,11 +157,11 @@ Claude Code exposes named skills for specific phases of work. Use them rather th
 | `scoping:implementation-planning` | When one phase or unit is ready to become a proof-mapped build plan with concrete files, tests, review gates, and closeout. |
 | `code-analysis:architecture` | Any question about where a piece of code belongs, what a new module's dependencies should look like, or whether two concerns should share a file. Three modes: audit (existing), greenfield (new), enforcement (automated checks). |
 | `code-analysis:review` | Multi-perspective review of a change. Lead agent understands the context, subagents attack from distinct angles, lead synthesizes. Uses the implementer/reviewer cycle described above. |
-| `code-analysis:debugging` | Hypothesis-driven bug investigation. If you've done two rounds of guessing and haven't isolated the root cause, invoke this instead of guessing a third time. |
+| `code-analysis:investigate` | Hypothesis-driven problem investigation. If you've done two rounds of guessing and haven't isolated the root cause, invoke this instead of guessing a third time. |
 | `code-analysis:diagnose-problem-pattern` | When several recent bugs or tests point at a shared structural issue — surface the pattern before patching another symptom. |
-| `codex:review` / `codex:second-opinion` | When the main agent's reasoning needs a fresh set of eyes from a different model (Codex). Especially useful after deep-context work where the main agent may have blind spots. |
+| Codex review via `cxd task` | When non-trivial implementation needs a different-model review. Use the implementer/reviewer cycle above. |
 
-Skills are composable. A non-trivial change typically goes: `scoping:requirements-planning` when the contract is missing or stale → `scoping:phase-planning` when the unit needs sequencing → `code-analysis:architecture` if structural decisions are still open → `scoping:implementation-planning` → implementer subagent → Codex review → fix-it loop → close.
+Skills are composable. A non-trivial change typically goes: `scoping:requirements-planning` when the contract is missing or stale → update `docs/feature-gap-map.md` and `docs/backlog.md` → select the active work tree → `scoping:phase-planning` when the selected lane or unit needs sequencing → `code-analysis:architecture` if structural decisions are still open → `scoping:implementation-planning` → implementer subagent → Codex review → fix-it loop → close gaps via `docs/runbooks/closeout.md`.
 
 ## iOS development loop
 
@@ -252,5 +276,5 @@ Resuming work without this conversation's context:
 
 - Re-read `AGENTS.md` and this file.
 - Read the affected spec (`docs/specs/v2-architecture.md`) and any ADRs in `docs/decisions/`.
-- Read `docs/backlog.md` for current lanes and gap ownership, then check `scratch/` for ephemeral handoff notes if a slice is already in progress.
+- Read `docs/sdlc.md` for the planning flow, then `docs/backlog.md` for current lanes and gap ownership. Check `scratch/` for ephemeral handoff notes if a slice is already in progress.
 - If confused about history or intent, ask Eric — don't guess.

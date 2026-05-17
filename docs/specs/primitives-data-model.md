@@ -51,7 +51,10 @@ Plus orthogonal overlays: `skipped`, `notes`, `warmup` flag, `manual` flag, `sid
 
 Every pattern today's 12 timing modes express is a composition over this tree. Straight-sets, supersets, circuits, clusters, EMOM, AMRAP, for-time, intervals, continuous, target-bounded, cap-bounded — each is a specific `(set.timing × set.traversal × set.repeat × block.timer × block.repeat)` cell. New patterns land as new compositions, not new enum values.
 
-For the concept-level discussion of the primitives and why they were chosen, see `../../scratch/primitives-stimulus-prescription-type.md` (concept record; not part of this spec's acceptance bar but useful context).
+The concept-level discussion of the primitives and why they were chosen has
+been folded into this spec and its aspect files. If future planning needs more
+history, use git history rather than treating scratch notes as durable
+authority.
 
 ## Outcomes
 
@@ -153,7 +156,11 @@ These are explicit; implementation-planning should treat them as things to inves
 
 Because the repo is single-user dev with no production compatibility constraint, the cutover is a **complete replacement of the active contract**: old prescription JSON and timing-mode shapes stop being accepted, and Claude re-pushes active workouts in the new shape. Completed local workout logs are not disposable. The SwiftData version bump must preserve those history facts through an explicit migration path while dropping legacy authoring and in-flight-session state. See `primitives-data-model/cutover.md` for the specific steps and what ships in the cutover commit.
 
-The 700-line coordinated-cutover machinery in `scratch/primitives-data-model.md` (Phase 4pre outbox drain, per-mode backfill, 30-day legacy acceptance at `/api/sync/results`) converged through dialectic for a production-preservation scenario. It is preserved in the scratch artifact as reference, but the active spec only borrows the local-history preservation obligation. It does not inherit a 30-day dual-shape server window or old-payload acceptance path.
+Earlier coordinated-cutover analysis considered a production-preservation
+scenario with outbox drain, per-mode backfill, and temporary dual-shape server
+acceptance. That is not this repo's active requirement. If broader preservation
+constraints appear, rerun requirements planning and update this spec rather than
+reviving scratch analysis as authority.
 
 ## Handoff to implementation-planning
 

@@ -6,6 +6,7 @@ last_reviewed: 2026-05-17
 purpose: "What to check before declaring a change done. Enforces the complete-cutover philosophy so nothing partial lands."
 covers:
   - all
+  - docs/sdlc.md
 ---
 
 # Closeout checklist
@@ -87,7 +88,27 @@ If the change implements or proves target behavior tracked in a feature doc:
 
 - [ ] The affected `docs/features/*` contract is updated in the same commit.
 - [ ] Any closed item is removed from or updated in the feature doc's `Current gaps` section.
-- [ ] `docs/feature-gap-map.md` is updated with the new state and proof reference.
+- [ ] `docs/feature-gap-map.md` is updated with the new state. Proof references live in the owning feature/aspect doc, QA surface, or test names, not in the gap map.
+
+## App-facing UX QA
+
+If the change affects user-visible iOS behavior:
+
+- [ ] The `docs/QA.md` closeout QA run was completed with XcodeBuildMCP.
+- [ ] The run exercised the relevant taps, swipes, long presses, dismissals, inputs, persistence, edge states, and error/offline paths.
+- [ ] Simulator video and screenshots were captured.
+- [ ] The recording was reviewed with `img ask --video`, and the verdict was read before closeout.
+- [ ] Any bugs or open product/design questions found during QA were routed to `docs/bugs.md` or `docs/open-questions.md`.
+
+## Backlog and scratch planning
+
+If the change closes, narrows, discovers, or reprioritizes a backlog gap:
+
+- [ ] The owning durable requirement docs were updated before the backlog.
+- [ ] `docs/feature-gap-map.md` rows were removed, narrowed, or added to match the owning docs.
+- [ ] `docs/backlog.md` was updated only if lane ownership, posture, or next planning move changed.
+- [ ] Scratch phase or implementation plans that no longer describe active work were deleted. If rationale must survive, its durable conclusion was promoted to the owning docs or an ADR.
+- [ ] No durable phase-plan directory or stale plan doc was added under `docs/`.
 
 ## After context loss
 

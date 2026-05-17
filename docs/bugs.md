@@ -1,22 +1,30 @@
 ---
 title: Bugs — live tracker
 status: living
-purpose: Canonical active QA issue tracker. Closed issues live in git history; raw QA evidence lives outside this tracker.
+last_reviewed: 2026-05-17
+purpose: Canonical active defect tracker. Closed issues live in git history; unbuilt feature gaps live in owning requirement docs and the gap map.
 covers:
   - whole project
 ---
 
 # Bugs
 
-This file is the **single source of truth for active QA issues** — code that does the wrong thing vs. spec, feature gaps surfaced by QA, or things the spec promised and the code didn't deliver.
+This file is the **single source of truth for active defects** — code that does
+the wrong thing against accepted requirements or feature docs.
+
+Unbuilt target behavior is not a bug by itself. If QA discovers missing behavior
+that was never implemented, update the owning requirement docs' `Current gaps`
+sections and `docs/feature-gap-map.md`; route the work through
+`docs/backlog.md`.
 
 **Not here:**
 - Unresolved design decisions → `docs/open-questions.md`
+- Unbuilt feature gaps → owning requirement docs + `docs/feature-gap-map.md`
 - Feature QA scenarios → `docs/features/<slug>.md`
 - Architectural risk register → `docs/architecture/hotspots.md`
 - Raw QA run artifacts → `scratch/qa-runs/` while the run is active; migrate any still-open issue here before ending the run
 
-**Closed bugs are not archived in this file or duplicated in another live tracker.** Git is the changelog — `git log -p -- docs/bugs.md` recovers any prior entry. Invariants that came out of bug fixes live in `AGENTS.md` / `docs/spec.md` / feature docs; the bug entry itself is disposable once it's closed.
+**Closed bugs are not archived in this file or duplicated in another live tracker.** Git is the changelog — `git log -p -- docs/bugs.md` recovers any prior entry. Invariants that came out of bug fixes live in `AGENTS.md`, owning requirement docs, or ADRs; the bug entry itself is disposable once it's closed.
 
 See `docs/QA.md` for the QA recording workflow and evidence rules.
 
@@ -52,7 +60,7 @@ _None._
 |---|---|---|---|---|
 | _None_ | | | | |
 
-### P2 — cosmetic / polish / feature-gap
+### P2 — cosmetic / polish
 
 | ID | Title | Affected feature | Status | Notes |
 |---|---|---|---|---|
@@ -69,8 +77,8 @@ _None._
 
 - **Starting work on a bug:** move it to `in-progress`, put your name/agent ID next to it.
 - **Adding a bug:** use the next ID listed above, pick priority, link affected feature doc.
-- **Fixing a bug:** close it in the same commit as the fix. Delete the row here; make sure the fix's invariant lives somewhere durable (`AGENTS.md`, feature doc, or spec). Cite the regression test in the commit message, not here.
-- **Demoting a feature's status:** file a bug here in the same commit that updates `docs/spec.md`.
+- **Fixing a bug:** close it in the same commit as the fix. Delete the row here; make sure the fix's invariant lives somewhere durable (`AGENTS.md`, owning requirement docs, or an architecture/schema spec when that is the true owner). Cite the regression test in the commit message, not here.
+- **Demoting a feature's release-evidence status:** file a bug here in the same commit that updates `docs/spec.md`.
 - **Wontfix / deferred:** short rationale in Notes; link ADR or open-question if a design decision supports the call.
 
-Cross-ref: `docs/spec.md` feature matrix reflects aggregated state; individual bugs here drive it down as they're found.
+Cross-ref: `docs/spec.md` feature matrix reflects aggregated release-evidence state; individual bugs here drive it down as they're found.

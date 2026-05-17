@@ -129,14 +129,11 @@ server sync path.
 - Route and directions work later under the same rule: when the Watch is
   primary, it can own route progress; the phone still owns server sync.
 
-## Risks And Open Questions
+## Current gaps
 
 - `WATCHCUSTOM-GAP-001`: Real-device behavior is still unproven for `HKHealthStore.startWatchApp`,
   HealthKit session ownership, inactive WatchConnectivity delivery, and
   programmable double tap.
-- The installed project currently targets watchOS 10. Programmable
-  `handGestureShortcut(.primaryAction)` support may require raising the watch
-  target to watchOS 11, but primary authority must not depend on that decision.
 - `WATCHCUSTOM-GAP-001`: The current WatchBridge schema is rendered-string oriented and unversioned.
   Implementation must replace it before enabling watch-primary actions.
 - `WATCHCUSTOM-GAP-001`: The phone-side watch inbox does not exist today, so current Watch taps do not
@@ -144,27 +141,24 @@ server sync path.
 - `WATCHCUSTOM-GAP-002`: Watch durability during app termination must be proven before relying on
   disconnected execution for real workouts.
 
+## Risks And Open Questions
+
+- The installed project currently targets watchOS 10. Programmable
+  `handGestureShortcut(.primaryAction)` support may require raising the watch
+  target to watchOS 11, but primary authority must not depend on that decision.
+
 No rollout flag is planned. This is a single-user app, and the correct rollout
 posture is a complete cutover with strong local proof and a real-device spike
 before relying on Watch-only workouts.
 
-## Handoff Shape
+## Planning Notes
 
-Implementation planning should split this into these units:
-
-1. Primary authority and package contract spike: prove real-device platform
-   behavior and settle watchOS 10 vs 11 implications.
-2. Versioned phone/watch protocol: package, display, action, handoff, event
-   batch, and ack messages with session/cursor/spec/authority fields.
-3. Watch executable cache and event replay: local package persistence,
-   append-only event log, idempotent reconnect replay.
-4. Phone-side watch inbox and mirror state: Shell/Execution integration so the
-   phone mirrors or applies Watch events based on authority.
-5. Three-view watch renderer with persistent HR: Main/Data/Quadrant views from
-   `docs/watch-metrics.md`.
-6. GPS, pace, route, and directions: later sensor/navigation unit on top of
-   watch-primary authority.
+If this later capability becomes active, re-enter phase planning from this
+feature doc, `docs/watch-metrics.md`, `docs/sync.md`, and the exact
+`WATCHCUSTOM-*` gap IDs in `docs/backlog.md`. Do not preserve a durable phase
+split here; the correct implementation sequence depends on the app, WatchKit
+handoff evidence, watchOS target, and HealthKit behavior at that time.
 
 Proof must include Codable protocol tests, pure authority/event replay tests,
-`FakeWatchBridge` boundary tests, watch UI proof for the fixed slots, and
-real-device spikes for platform behavior.
+watch bridge boundary tests, watch UI proof for the fixed slots, and real-device
+spikes for platform behavior.

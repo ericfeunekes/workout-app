@@ -59,10 +59,9 @@ athlete prepare for the next block.
 
 - Codex review thread `019dcbb2-85e7-7340-ba0c-eb4ee8a8007f` returned clean
   after transition, skip, composite, setup-detail, and `READY` timer fixes.
-- Simulator QA: `scratch/qa-runs/phase-05-transition-screen.md`.
-- Screenshots:
-  `scratch/qa-runs/phase-05-transition-screen-final.jpg` and
-  `scratch/qa-runs/phase-05-transition-active-after-start-final.jpg`.
+- Simulator QA summary: transition screen and active-after-start visual checks
+  passed during the phase-05 QA run. Raw local screenshots are not durable
+  proof; this committed summary is the proof pointer.
 
 ## QA scenarios
 

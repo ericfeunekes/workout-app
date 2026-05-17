@@ -17,10 +17,11 @@ See `docs/AGENTS.md` for the docs navigator and `docs/ARCHITECTURE.md` for the s
 
 ## Workflows
 
-See `docs/WORKFLOW.md` for the full lifecycle (idea → spec → plan → implement → verify → close → deploy). Quick pointers:
+See `docs/WORKFLOW.md` for the operational lifecycle and `docs/sdlc.md` for
+the planning flow. Quick pointers:
 
 ### Starting work
-- Classify the change: trivial / scoped / non-trivial. Non-trivial → `skill:interview` or update a spec before coding.
+- Classify the change: trivial / scoped / non-trivial. Non-trivial → `scoping:requirements-planning` if the durable requirement is missing, stale, or too thin. Use interview only as discovery that feeds requirements.
 - Read `docs/specs/v2-architecture.md` (target architecture, accepted) and `docs/ARCHITECTURE.md` (system map at a glance).
 - Read the affected area's README (`server/README.md`, `app/README.md`, `schema/README.md`).
 - Schema change? Read `docs/MIGRATIONS.md` before touching entity definitions.
@@ -37,7 +38,7 @@ See `docs/WORKFLOW.md` for the full lifecycle (idea → spec → plan → implem
 
 ### After context loss
 - Re-read this file, `docs/WORKFLOW.md`, and `docs/specs/v2-architecture.md`.
-- Read `docs/backlog.md` for current lanes and gap ownership, then check `scratch/` for ephemeral handoff notes if a slice is already in progress.
+- Read `docs/sdlc.md` for the planning flow, then `docs/backlog.md` for current lanes and gap ownership. Check `scratch/` for ephemeral handoff notes if a slice is already in progress.
 
 ## Review workflow — Codex is the investigator/sweeper/reviewer, lead Claude synthesizes
 
@@ -58,7 +59,10 @@ The loop for every non-trivial unit of work:
 
 **Sweeping the codebase state to find new issues uses Codex, not Claude subagents.** Same goes for hypothesis-driven bug investigations and adversarial reviews — different-model + read-only sandbox is the pattern. Synthesis of Codex findings always happens in the main conversation.
 
-Working template in `scratch/codex-reviews/`: `_template-header.md` + `_session-context.md` are the methodology baseline; per-domain prompts cite focus files + questions + hazards; `_dispatch.sh` fires N in parallel; `_monitor.sh` polls. Pull findings via `cxd thread read <id> --include-turns --json`.
+Write review prompts under `scratch/codex-reviews/` on demand. If that
+directory does not exist, there is no active review handoff. Per-domain prompts
+cite focus files, questions, hazards, and gates. Pull findings via
+`cxd thread read <id> --include-turns --json`.
 
 Same-model Claude-reviews are acceptable only for trivial scoped fixes, pure doc edits, or config tweaks already guarded by automated checks.
 
@@ -126,6 +130,20 @@ This repo has one user (Eric) and one prod deployment (also Eric). There is no "
 
 - **Boundaries are enforced at lint time, not at review time.** Python server boundaries are checked by `import-linter` contracts in `pyproject.toml` (run `uv run lint-imports`). Contracts run in pre-push and CI.
 - **New architectural boundaries require new contracts.** Adding a module or package? Add an import-linter contract in the same commit. If reaching for an import that would violate an existing contract, extract the shared logic into the right layer — do not loosen the contract. See `docs/WORKFLOW.md` § "Architectural enforcement".
+
+## Planning and backlog lifecycle
+
+Use `docs/sdlc.md` as the progressive-disclosure map. The order is:
+
+1. Requirements planning updates durable feature, domain, aspect, architecture, or spec docs.
+2. Known missing behavior or proof becomes a gap in the owning docs and `docs/feature-gap-map.md`.
+3. `docs/backlog.md` groups gap IDs into lanes and marks which lanes are active, parallel, spikes, requirements-only, or later capabilities.
+4. Pick the active work tree: one lane, a phase series inside a lane, or one phase.
+5. Use `scoping:phase-planning` only when the selected work tree needs outcome-level sequencing. Phase specs live in `scratch/`, not `docs/`.
+6. Use `scoping:implementation-planning` for one selected phase or small unit. Implementation plans live in `scratch/`.
+7. Closeout removes or narrows closed gaps in the owning docs and `docs/feature-gap-map.md`, updates `docs/backlog.md` only when lane routing changed, and removes stale scratch plans.
+
+Do not add durable plan directories under `docs/`. Requirements docs describe how the system should work; backlog says which gaps remain and how they group; scratch carries temporary execution plans.
 
 ## Agent harness
 

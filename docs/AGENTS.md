@@ -22,6 +22,7 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `workout-taxonomy.md` — bootstrap workout-domain and block-archetype taxonomy. Use this before authoring new workout shapes so training intent maps to the right timing/logging primitive.
 - `workout-execution-requirements.md` — athlete-facing timer, transition, logging, and summary requirements for workout archetypes.
 - `features.md` and `features/INDEX.md` — target feature contracts and QA scenarios. Use `feature-gap-map.md` to see unresolved gap IDs for future planning.
+- `sdlc.md` — progressive-disclosure workflow from requirements planning to backlog lanes, active work trees, scratch phase/implementation plans, and gap closeout.
 - `backlog.md` — lightweight lane and gap router. Start here when asking "what lane are we working?" or "which gaps does this close?"
 - `watch-metrics.md` — target watchOS slot, metric, target-window, and phone/watch lifecycle contract.
 - `features/watch-workoutkit-handoff.md` — shorter Apple Watch delivery path: map eligible Setmark workouts into Apple's Workout app through WorkoutKit before building custom watch-primary execution.
@@ -34,7 +35,8 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 ## Standard surfaces
 
 - `ARCHITECTURE.md` — top-level system map and domain router.
-- `WORKFLOW.md` — development lifecycle (idea → spec → plan → implement → verify → close → deploy), CI scope, branching, deploy flow.
+- `WORKFLOW.md` — operational lifecycle (request → requirements → backlog/plan → implement → verify → close → deploy), CI scope, branching, deploy flow.
+- `sdlc.md` — planning lifecycle: requirements docs, gap index, backlog lanes, active work trees, ephemeral scratch phase plans, implementation plans, and closeout.
 - `TESTING.md` — proof contract; what each test tier covers and how to run it.
 - `QA.md` — exploratory/simulator QA recording rules; keeps `docs/bugs.md` as the only active issue tracker and `scratch/qa-runs/` as raw evidence only.
 - `MIGRATIONS.md` — schema migration mechanics for server SQL + SwiftData, the single-user cutover flow, and recovery procedures.
@@ -66,7 +68,7 @@ See also `schema/README.md` (outside `docs/`) — the shared schema package (Ope
 
 - Domain-specific detail that outgrows a README → `docs/{domain}.md` (single file first). Promote to `docs/{domain}/` only when a reader has to scroll past content irrelevant to their task.
 - Cross-cutting decisions → `docs/decisions/ADR-YYYY-MM-DD-{slug}.md` (directory created on first ADR).
-- Ephemeral sketches → `scratch/` at the repo root (gitignored).
+- Ephemeral sketches, phase specs, and implementation plans → `scratch/` at the repo root (gitignored).
 - Per-package design notes → inside the package, not here (e.g. `server/README.md`, `app/README.md`).
 
 ## Not yet present
@@ -74,7 +76,7 @@ See also `schema/README.md` (outside `docs/`) — the shared schema package (Ope
 These canonical surfaces haven't been needed yet. Add when:
 
 - `CORE-BELIEFS.md` — when invariants in root `AGENTS.md` outgrow it.
-- Durable plan directories — do not add them. Use `docs/backlog.md` for current lanes and `scratch/` for ephemeral implementation notes.
+- Durable plan directories — do not add them. Use `docs/sdlc.md` for the lifecycle, `docs/backlog.md` for current lanes, and `scratch/` for ephemeral phase or implementation notes.
 
 ## Front matter
 

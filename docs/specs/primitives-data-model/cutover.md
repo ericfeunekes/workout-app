@@ -14,7 +14,10 @@ The repo is single-user dev. There is no existing user base to migrate and no ba
 
 Completed local workout logs are the exception. They are Eric's authoritative workout history, so they must survive the cutover as user-observable history facts. Preservation does not mean keeping the old schema, accepting old payloads, or supporting a legacy execution path. It means the SwiftData migration exports the old completed-log facts, transforms or archives them into the post-cutover history surface, and proves they remain visible after upgrade.
 
-A converged 700-line migration plan — covering outbox drain, per-timing-mode backfill rules, 30-day legacy-acceptance windows, orphan policies for pre-V3 denormalization — lives in `scratch/primitives-data-model.md` § "Section 4: Migration Plan". That plan is the right shape for a production-preservation scenario with dual-shape server acceptance. It is **not** the cutover for this spec. This spec only carries the narrower local-history preservation requirement.
+Earlier migration analysis considered outbox drain, per-timing-mode backfill
+rules, temporary legacy-acceptance windows, and orphan policies for a broader
+production-preservation scenario. That is **not** the cutover for this spec.
+This spec only carries the narrower local-history preservation requirement.
 
 ## Current gaps
 
@@ -97,4 +100,9 @@ If any of the above fail, the cutover does not land. There is no half-shipped st
 
 ## When broader preservation constraints appear
 
-If at some point this spec ships with broader preservation constraints — a second user is onboarded, old server payloads must be accepted for a window, or queued pre-cutover results must drain after deployment — the clean replacement above becomes inappropriate. The fallback is the full coordinated-cutover plan preserved in `scratch/primitives-data-model.md` § Section 4: Phase 4pre outbox drain (local rewrite using Phase 4c rules before drain), Phase 4a/4b/4c app-side backfill with per-timing-mode rewrite rules, orphan policy, deterministic set_log UUID composition. That plan was pressure-tested through 4 rounds of dialectic and is structurally sound for a production preservation scenario; it remains outside this single-user cutover until those broader constraints exist.
+If at some point this spec ships with broader preservation constraints — a
+second user is onboarded, old server payloads must be accepted for a window, or
+queued pre-cutover results must drain after deployment — the clean replacement
+above becomes inappropriate. Re-enter requirements planning and write the
+broader preservation contract into durable docs before phase or implementation
+planning.

@@ -827,7 +827,7 @@ Coverage rules:
 - Every automatic transition must have a paired manual override scenario.
 - Every manual transition must prove the app does not infer success silently.
 - Every result type must be visible at completion and inspectable after save.
-- Every target-vs-current gap discovered in QA belongs in `docs/bugs.md` if it is a current bug, or the implementation backlog if it is not built yet.
+- Every target-vs-current gap discovered in QA belongs in `docs/bugs.md` if it is a current bug, or in this doc's gaps plus `docs/feature-gap-map.md` if it is not built yet.
 
 ## Current Timing Mode Mapping
 

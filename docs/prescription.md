@@ -571,6 +571,10 @@ both-sides-together work. It is not the active authoring model, and analytics
 must not infer left/right grouping from it unless a later taxonomy phase
 explicitly promotes the field.
 
+See `docs/modifier-equipment.md` for the broader modifier/equipment vocabulary:
+when to use separate exercise identity, notes/display metadata,
+`prescription_json`, alternatives, or tags.
+
 ### Bodyweight and weighted bodyweight
 
 Load convention:

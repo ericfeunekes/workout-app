@@ -1,8 +1,8 @@
 ---
 title: 2026-04-25 feedback implementation phases
-status: backlog
+status: historical source material
 last_reviewed: 2026-05-17
-purpose: Directory of implementation-planning phases for carrying the 2026-04-25 workout feedback from docs alignment through app, watch, and QA.
+purpose: Historical implementation-planning source material for the completed feedback arc; current work starts from feature gaps, not deferred phases.
 covers:
   - FEEDBACK-AND-SPEC-2026-04-25.md
   - docs/feature-gap-map.md
@@ -13,15 +13,13 @@ covers:
 
 # 2026-04-25 Feedback Implementation Phases
 
-This directory is the durable implementation-planning map for the workout
-feedback and watch redesign sequence. Each phase is a scoped delivery unit with
-its own proof map and done criteria. A phase moves from backlog to
-`docs/plans/active/` only when selected for implementation.
+This directory is historical source material for the 2026-04-25 workout
+feedback pass. It is no longer the durable implementation-planning map for
+future work.
 
-This directory is one track in the broader
-`docs/plans/backlog/workout-system-roadmap.md`. It owns the feedback-driven
-execution, history, and watch sequence. The primitives cutover is a downstream
-architectural track in that same roadmap, not a competing or unrelated plan.
+Current requirements and gaps live in the owning feature/aspect docs and are
+indexed by `docs/feature-gap-map.md`. New phase plans are created just in time
+under `docs/plans/active/` and must cite the exact gaps they intend to close.
 
 ## Current Landing Status (2026-05-17)
 
@@ -33,18 +31,16 @@ correction, shared set editing, and history data-integrity fixes.
 T1 is a transition alignment note that constrains later history/watch work; it
 does not add app behavior by itself.
 
-Phases 7-11 remain **provisional backlog**, not ready implementation plans.
-Before starting Phase 7, rerun requirements/phase planning against the completed
-Phase 1-6 work, `docs/features/watch-primary-execution.md`,
-`docs/watch-metrics.md`, and the primitives roadmap. The existing phase files
-are useful source material, but they still contain requirement-settling work
-inside the phase bodies and must not be handed directly to implementation.
+Deferred Phase 7-11 plans have been retired as active backlog authority. Their
+durable requirements now live in:
 
-The new early Watch path is **not** Phase 7. Start with
-`docs/features/watch-workoutkit-handoff.md` if the goal is "get workouts onto
-Apple Watch sooner" by using Apple's Workout app through WorkoutKit. The custom
-watch-primary phases stay deferred until WorkoutKit handoff proves insufficient
-for Setmark-specific logging, offline event replay, or custom metric views.
+- `docs/features/watch-workoutkit-handoff.md`
+- `docs/features/watch-primary-execution.md`
+- `docs/watch-metrics.md`
+- `docs/features/in-app-claude.md`
+- `docs/modifier-equipment.md`
+- `docs/sync.md`
+- `docs/feature-gap-map.md`
 
 ## Context
 
@@ -63,9 +59,9 @@ boundary-driven:
 - `FeaturesWatchFaces` renders watch state but must not own server sync or the
   phone session reducer.
 
-The phase order follows those boundaries: docs, schema, execution read models,
-phone UX, history, watch authority, watch-primary durability, watch UI, then
-future in-app Claude/chat.
+The completed phases followed those boundaries through phone execution and
+history. Future Watch, in-app Claude, and modifier/equipment work should start
+from current requirements and gap IDs, not this historical phase order.
 
 ## Phase Index
 
@@ -76,24 +72,20 @@ future in-app Claude/chat.
 | 3 | [phase-03-execution-read-model-seams.md](phase-03-execution-read-model-seams.md) | Build shared execution read models for current task, remaining/upcoming work, editability, and progress. |
 | 4 | [phase-04-preview-edit-contract.md](phase-04-preview-edit-contract.md) | Implement workout preview, explicit start, current-block "what's next", and unified edit surface. |
 | 5 | [phase-05-active-rest-transition-redesign.md](phase-05-active-rest-transition-redesign.md) | Redesign active/rest/transition execution surfaces with simulator proof. |
-| T1 | [transition-feedback-ripple-alignment.md](transition-feedback-ripple-alignment.md) | Reconcile feedback-ripple findings before Phase 6/Watch work continues: side semantics, audit-trail limits, verify sweep, and orphan-preservation disposition. |
+| T1 | [transition-feedback-ripple-alignment.md](transition-feedback-ripple-alignment.md) | Historical feedback-ripple alignment note: side semantics, audit-trail limits, verify sweep, and orphan-preservation disposition. |
 | 6 | [phase-06-history-post-workout-correction.md](phase-06-history-post-workout-correction.md) | Add full post-workout correction, unilateral history display, and duration/distance edit parity inside the current non-audit-grade provenance contract. |
-| 7 | [phase-07-watch-protocol-foundation.md](phase-07-watch-protocol-foundation.md) | Prove Watch platform constraints, then replace weak watch messages with versioned identity and authority protocol. |
-| 8 | [phase-08-watch-primary-offline-execution.md](phase-08-watch-primary-offline-execution.md) | Let the Watch start/run offline and replay events idempotently to the phone. |
-| 9 | [phase-09-watch-metrics-directions-ui.md](phase-09-watch-metrics-directions-ui.md) | Build the three fixed watch views, metric slots, HR slot, target windows, and only proven route/directions states. |
-| 10 | [phase-10-in-app-claude-chat-design.md](phase-10-in-app-claude-chat-design.md) | Design in-app Claude/chat as a separate future surface, not history notes. |
-| 11 | [phase-11-modifier-equipment-modeling.md](phase-11-modifier-equipment-modeling.md) | Define authored modifier/equipment modeling so exercise variants stay explicit without app-side programming logic. |
 
-Phases 7-11 are intentionally listed here so the roadmap has continuity. Their
-current status is provisional: use them to recover intent, then refresh the
-requirements and phase boundaries before moving any of them to `plans/active/`.
+Future Watch, in-app Claude, and modifier/equipment work is intentionally not
+listed here as deferred phases. Use `docs/feature-gap-map.md` to find the owning
+gap IDs, then create a fresh phase or implementation plan when the work is
+selected.
 
-## Shared Done Standard
+## Historical Done Standard
 
-A phase is done only when:
+These were the done standards for this completed phase arc:
 
-- Its implementation plan has been moved to `docs/plans/active/` or explicitly
-  refreshed in place before work starts.
+- Its implementation plan had been moved to `docs/plans/active/` or explicitly
+  refreshed in place before work started.
 - Code/docs are implemented for that phase only.
 - The proof map has run with the strongest practical boundary checks.
 - iOS simulator QA has been captured for user-facing app changes.
@@ -103,15 +95,10 @@ A phase is done only when:
 
 ## Transition Gates
 
-Transition plans are short cleanup units between numbered phases. They do not
-add app behavior. They exist when a later investigation finds that an earlier
-phase closed with the right implementation but incomplete planning language,
-feature-doc routing, or deferred-risk disposition.
-
-Run the transition plan before starting the next numbered phase when it affects
-that phase's scope. Current gate: T1 must be reviewed before Phase 6 History
-work continues, because it narrows Phase 6 to full-field correction inside the
-current non-audit-grade provenance contract.
+Transition plans were short cleanup units between numbered phases. They did not
+add app behavior. T1 is kept here as historical context for the Phase 6 history
+scope and the current non-audit-grade provenance contract; it is not a standing
+gate for future work.
 
 ## What Is Not Generalized Yet
 
@@ -119,7 +106,8 @@ current non-audit-grade provenance contract.
 - No legacy compatibility layer for old watch messages.
 - No direct Watch-to-server sync.
 - No route/directions work before watch authority and GPS ownership are proven.
-- No in-app Claude/chat implementation until the separate design phase is done.
+- No in-app Claude/chat implementation until the requirements/design workflow in
+  `docs/features/in-app-claude.md` is selected and planned.
 - No CloudKit replication or Cloudflare Zero Trust endpoint replacement until
   `docs/sync.md` future replication and endpoint directions are spiked
   independently.

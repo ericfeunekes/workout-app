@@ -1,6 +1,6 @@
 ---
 title: Watch-primary execution
-status: planned / deferred
+status: planned
 last_reviewed: 2026-05-17
 purpose: Feature spec for starting, mirroring, handing off, and reconciling Apple Watch workout execution.
 covers:
@@ -131,17 +131,17 @@ server sync path.
 
 ## Risks And Open Questions
 
-- Real-device behavior is still unproven for `HKHealthStore.startWatchApp`,
+- `WATCHCUSTOM-GAP-001`: Real-device behavior is still unproven for `HKHealthStore.startWatchApp`,
   HealthKit session ownership, inactive WatchConnectivity delivery, and
   programmable double tap.
 - The installed project currently targets watchOS 10. Programmable
   `handGestureShortcut(.primaryAction)` support may require raising the watch
   target to watchOS 11, but primary authority must not depend on that decision.
-- The current WatchBridge schema is rendered-string oriented and unversioned.
+- `WATCHCUSTOM-GAP-001`: The current WatchBridge schema is rendered-string oriented and unversioned.
   Implementation must replace it before enabling watch-primary actions.
-- The phone-side watch inbox does not exist today, so current Watch taps do not
+- `WATCHCUSTOM-GAP-001`: The phone-side watch inbox does not exist today, so current Watch taps do not
   mutate phone session state.
-- Watch durability during app termination must be proven before relying on
+- `WATCHCUSTOM-GAP-002`: Watch durability during app termination must be proven before relying on
   disconnected execution for real workouts.
 
 No rollout flag is planned. This is a single-user app, and the correct rollout

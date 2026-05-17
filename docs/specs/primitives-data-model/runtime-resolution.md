@@ -1,6 +1,7 @@
 ---
 title: Runtime resolution — seed, log, and correction time
 status: accepted — spec
+last_reviewed: 2026-05-17
 parent: ../primitives-data-model.md
 purpose: What the app does at three moments. Seed time (pull -> ExecutionPlan, stimulus resolution via hierarchy walk, relative-load resolution to absolute kg). Log time (driver iteration over primitive cells, index assignment, completion vs observation role dispatch). Correction time (same-UUID upsert, autoreg proposal flow).
 ---
@@ -338,6 +339,13 @@ If a slot is swapped after some slot rows have already committed, the earlier ro
 ### Correction vs autoreg
 
 If a user corrects a slot row's weight retroactively, autoreg does not re-propose for subsequent rows — the proposal at the time is what it was. This matches today's "no retroactive re-compute" convention and keeps the history stable.
+
+## Current gaps
+
+- `PDM-GAP-004`: Runtime resolution must preserve offline execution and
+  seed-time parameter pinning. Relative loads resolve once from the local
+  `user_parameters` mirror at seed, execution reads an `ExecutionPlan` snapshot,
+  and mid-session server edits do not rebuild the active workout.
 
 ## runtime-resolution.md open questions
 

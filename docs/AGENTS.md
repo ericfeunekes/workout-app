@@ -22,11 +22,13 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `workout-taxonomy.md` — bootstrap workout-domain and block-archetype taxonomy. Use this before authoring new workout shapes so training intent maps to the right timing/logging primitive.
 - `workout-execution-requirements.md` — athlete-facing timer, transition, logging, and summary requirements for workout archetypes.
 - `workout-execution-design-plan.md` — pass-based plan for aligning the execution docs, then designing each flow before implementation.
-- `features.md` and `features/INDEX.md` — target feature contracts and QA scenarios. Use `feature-gap-map.md` to see the current gaps grouped into implementation phases.
+- `features.md` and `features/INDEX.md` — target feature contracts and QA scenarios. Use `feature-gap-map.md` to see unresolved gap IDs for future planning.
 - `plans/backlog/workout-system-roadmap.md` — pickup map that ties together completed feedback/execution/history work, the future primitives cutover, CloudKit replication, Cloudflare endpoint exploration, WorkoutKit handoff, and downstream custom Watch phases. Start here when asking "what phase are we in?"
-- `plans/backlog/feedback-implementation-phases/` — downstream implementation phase directory for the 2026-04-25 feedback and watch redesign sequence. Start here when selecting the next phase after the feature-docs contract pass.
+- `plans/backlog/feedback-implementation-phases/` — historical source material for completed 2026-04-25 feedback implementation. Do not start future work here.
 - `watch-metrics.md` — target watchOS slot, metric, target-window, and phone/watch lifecycle contract.
 - `features/watch-workoutkit-handoff.md` — shorter Apple Watch delivery path: map eligible Setmark workouts into Apple's Workout app through WorkoutKit before building custom watch-primary execution.
+- `features/in-app-claude.md` — future Claude proposal/review/acceptance workflow; read before planning app-side Claude or chat behavior.
+- `modifier-equipment.md` — modifier/equipment authoring vocabulary and gaps; read before adding structured variant, setup, or equipment behavior.
 - `sync.md` — sync cadence, conflict rules, first-run UX, offline behavior, auth posture.
 - `ARCHITECTURE.md` — one-page system map; routes into the spec and per-package READMEs.
 - `TESTING.md` — proof contract (server, app, cross-stack contract).
@@ -45,7 +47,8 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `workout-execution-design-plan.md` — tracks the alignment and flow-design passes that must happen before build planning.
 - `features.md` — narrative entry point for user-visible feature contracts.
 - `features/INDEX.md` — per-feature target contracts, QA scenario index, and current-gap convention.
-- `feature-gap-map.md` — cross-feature index of target behavior that is not implemented or not yet proven.
+- `feature-gap-map.md` — cross-feature index of unresolved implementation/proof gaps. Owning feature/aspect docs are the source of truth; phase plans cite gap IDs from here.
+- `modifier-equipment.md` — authored modifier/equipment vocabulary and current gaps for variants, setup context, and app-display-only behavior.
 - `watch-metrics.md` — target watchOS contract for the three watch views, persistent HR, target windows, sensor fallbacks, and phone/watch action versioning.
 - `sync.md` — sync cadence, conflict rules, first-run UX, offline behavior, auth posture.
 - `runbooks/closeout.md` — per-change closeout checklist (enforces the complete-cutover philosophy).
@@ -55,12 +58,12 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `architecture/` — the structural contract. Start at `architecture/context.md` (the 9-question answers), then `boundaries.md` (allowed dependency directions), `fitness-functions.md` (every rule → automated check), `hotspots.md` (preemptive risk register), `swift-packages.md` (iOS package graph).
 - `ios-dev-loop.md` — how an agent drives the iOS app (build / launch / screenshot / tap / iterate). Recommends XcodeBuildMCP; documents the ad-hoc fallback (xcrun simctl + debug launch args) that works without it.
 - `decisions/` — ADRs. Current set: `ADR-2026-04-17-ux-scope.md`, `ADR-2026-04-17-rir-autoreg-sync.md`, `ADR-2026-04-17-architecture.md`, `ADR-2026-04-18-shell-package-placement.md`, `ADR-2026-04-18-smart-defaults.md`.
-- `open-questions.md` — the living gap register. Items that surfaced from consistency passes but aren't decided yet, with working assumptions and disposition (decide-next / defer / resolve-in-code / watchlist).
+- `open-questions.md` — unresolved product/design decisions only. Implementation/proof gaps belong in the owning feature/aspect doc and `feature-gap-map.md`.
 - `design/` — Claude Design handoff bundle (HTML/CSS/JSX prototypes, wireframes, rules). Read `design/ORIGIN.md` first, then `design/HANDOFF.md`. Reference, not spec.
 - `plans/active/` — current implementation plans. Start here before continuing an in-flight multi-slice build if any files exist.
 - `plans/archive/` — completed or superseded implementation plans retained for provenance. Do not resume from here unless a current roadmap explicitly points back to one as reference.
 - `plans/backlog/workout-system-roadmap.md` — overall current roadmap across feedback implementation, primitives cutover, CloudKit replication, Cloudflare protected endpoints, WorkoutKit handoff, and custom Watch work.
-- `plans/backlog/feedback-implementation-phases/` — phase-by-phase implementation plans for carrying the 2026-04-25 feedback through schema, execution UX, history, watch authority, watch UI, and future in-app Claude/chat.
+- `plans/backlog/feedback-implementation-phases/` — historical implementation-plan source material for the completed feedback arc. Current requirements live in feature/aspect docs and `feature-gap-map.md`.
 - `plans/backlog/primitives-cutover-phases/` — phase specs for the primitives-data-model cutover. README owns the phase list and deferral notes; per-phase files carry outcome-altitude specs consumed by implementation-planning.
 - `bugs.md` — active QA issue tracker. Closed issues are removed; use git history for past rows.
 

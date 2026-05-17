@@ -1,8 +1,8 @@
 ---
-title: Primitives data model cutover — phase plan
+title: Primitives data model cutover — gap-indexed backlog
 status: backlog
 last_reviewed: 2026-05-17
-purpose: Decompose the primitives-data-model spec into phases, each an outcome-level deliverable that implementation-planning consumes one at a time.
+purpose: Route primitives cutover gaps to the accepted spec; phase plans are refreshed just in time from these gaps.
 spec:
   - docs/specs/primitives-data-model.md
   - docs/specs/primitives-data-model/authoring-shape.md
@@ -15,13 +15,25 @@ supersedes_plans:
   - docs/plans/archive/cluster-rest-pause-architecture.md (cluster becomes a structural multi-slot composition under the new model; that plan's slot/intra-set-rest design is subsumed by Phase 4)
 ---
 
-# Primitives data model cutover — phase plan
+# Primitives Data Model Cutover
 
-This directory decomposes the primitives-data-model spec into phases. The spec itself is accepted; what remains is the delivery sequence.
+The primitives-data-model spec is accepted; implementation has not started.
+Future phase planning should start from the accepted spec and the gap IDs below,
+then refresh the delivery cut against the codebase state at that moment.
 
-Each phase is a deliverable unit at outcome altitude — it names what must be true when the phase is done, not how the code will change to make it true. Implementation-planning takes one phase spec and turns it into a proof-mapped plan at code altitude. A phase spec that needs struct fields, file paths, or method signatures to be readable is at the wrong altitude and should be pushed down.
+The per-phase files in this directory are source material, not standing orders.
+They may be useful when the cutover is selected, but the active plan must point
+at concrete gaps in `docs/specs/primitives-data-model.md` and its aspect files.
 
-This directory is one track in the broader `docs/plans/backlog/workout-system-roadmap.md`. It should be read after the completed feedback execution/history phases, because those phases describe the current app baseline that the primitives cutover must replace without losing user-facing behavior.
+## Gap Index
+
+| gap_id | Owning doc | Gap | Planning note |
+| --- | --- | --- | --- |
+| `PDM-GAP-001` | `docs/specs/primitives-data-model.md` | Accepted primitive hierarchy is not implemented in server, API, schema package, SwiftData, execution, sync, or fixtures. | Start with a fresh storage/API/schema cutover plan. |
+| `PDM-GAP-002` | `docs/specs/primitives-data-model/authoring-shape.md` | Authoring-shape open questions need disposition before code relies on them. | Decide or explicitly defer during implementation planning. |
+| `PDM-GAP-003` | `docs/specs/primitives-data-model/log-shape.md` | Log/result roles must stay query-safe; implementation must not derive competing aggregates from slot rows. | Carry into storage and history proof. |
+| `PDM-GAP-004` | `docs/specs/primitives-data-model/runtime-resolution.md` | Runtime resolution must preserve offline execution and seed-time parameter pinning. | Carry into execution seeding proof. |
+| `PDM-GAP-005` | `docs/specs/primitives-data-model/cutover.md` | Completed local workout logs are the preservation constraint during cutover. | Carry into migration and QA proof. |
 
 ## The feature in one sentence
 
@@ -44,16 +56,9 @@ What has not landed:
 - No compatibility path is intended. The implementation remains a future complete cutover: old-shape prescriptions and result payloads stop being accepted, while completed local workout history is preserved through an explicit migration path.
 - No phase has gone through `scoping:implementation-planning`, implementation, review, or QA yet.
 
-The next operating loop is:
-
-1. Convert Phase 1 into a proof-mapped implementation plan.
-2. Challenge/review that plan before coding.
-3. Implement Phase 1 through storage round-trip proof across server, shared schema, and app persistence.
-4. Run the phase's local test proof and simulator QA before moving to Phase 2.
-5. Repeat the same plan -> review -> implement -> review -> QA loop for Phases 2, 3, and 4.
-6. Re-plan Phases 5 and 6 only after Phase 4 shows the real correction, history, aggregate-row, and docs-drift surface.
-
-The current proof state is documentation-only. The meaningful implementation proof starts with Phase 1.
+The current proof state is documentation-only. When this lane is selected,
+create a fresh active phase plan from `PDM-GAP-*` rows in the owning spec files
+and use these phase files only as source material.
 
 ## Relationship to feedback and watch work
 
@@ -84,16 +89,16 @@ Different phases improve the system for different stakeholders. Naming the stake
 - **Eric as developer / future reader** — the person reading docs and code to change the system later. Improves when docs reflect the model that's actually shipped.
 - **Named downstream phase** — the next phase in the list. A phase whose only stakeholder is a later phase is valid substrate as long as that consumer is named.
 
-## Phase list
+## Reference phase list
 
 | # | Phase | Stakeholder | Status |
 |---|---|---|---|
-| 1 | Primitive workouts round-trip through storage (server + shared schema + app SwiftData — both persistent stores cut over) | Claude as author + Phase 2 | ready for implementation-planning |
-| 2 | Straight-sets block executes end-to-end under primitives (execution layer ports against the already-cut-over storage substrate) | Eric (user, branch build) | ready for implementation-planning |
-| 3 | All twelve current timing modes execute with behavior parity | Eric (user, branch build) | ready for implementation-planning |
-| 4 | Compositional patterns unlocked by primitives become authorable | Eric (user, branch build) | ready for implementation-planning |
-| 5 | Correction + history + aggregate-row persistence work under the new shape | Eric (user, branch build) | **deferred** — re-plan after Phase 4 lands |
-| 6 | Docs reflect the shipped model; cutover merges to main | Eric (dev / future reader) | **deferred** — re-plan after Phase 5 lands |
+| 1 | Primitive workouts round-trip through storage (server + shared schema + app SwiftData — both persistent stores cut over) | Claude as author + Phase 2 | reference only; refresh when selected |
+| 2 | Straight-sets block executes end-to-end under primitives (execution layer ports against the already-cut-over storage substrate) | Eric (user, branch build) | reference only; refresh when selected |
+| 3 | All twelve current timing modes execute with behavior parity | Eric (user, branch build) | reference only; refresh when selected |
+| 4 | Compositional patterns unlocked by primitives become authorable | Eric (user, branch build) | reference only; refresh when selected |
+| 5 | Correction + history + aggregate-row persistence work under the new shape | Eric (user, branch build) | intentionally unscheduled |
+| 6 | Docs reflect the shipped model; cutover merges to main | Eric (dev / future reader) | intentionally unscheduled |
 
 Phases 5 and 6 are deliberately deferred. They depend on ground truth the first four phases haven't established yet: Phase 5's correction + aggregate-row story depends on what the driver ports actually produced in Phase 3; Phase 6's docs sweep and merge-ready state depends on what docs genuinely need rewriting vs. what turned out to still apply. Writing concrete phase specs for 5 and 6 today against a hypothetical branch state would miss the details that matter. When Phase 4 lands, re-enter phase-planning with the real state.
 
@@ -107,16 +112,17 @@ checkpoint. Phase 1 is not a deployable release because execution has not been
 ported yet; it is done only when the storage contract is fully primitive-shaped
 with no legacy adapter in that storage path.
 
-## Sequencing
+## Reference sequencing
 
-Phases run in order. The dependency graph forces this:
+If a future active plan keeps this decomposition, the dependency graph is:
 
 1. Phase 1 establishes the wire format + storage shape. Nothing after Phase 1 has a stable contract to read until Phase 1 closes.
 2. Phase 2 establishes the execution pattern against that contract for one timing mode. The pattern becomes the template Phase 3 applies to the rest.
 3. Phase 3 fans out the Phase 2 pattern to the remaining timing modes. Phase 4 depends on every driver being portable against the new contract.
 4. Phase 4 exercises the primitives' new expressive power. Compositional patterns (cluster, sibling work+rest, compound work targets) exist only after the driver pattern is proven broadly enough to compose cleanly.
 
-Within each phase, the implementing agent produces a proof-mapped plan via `scoping:implementation-planning` and the branch advances only when that phase's proof is green.
+The fresh active plan may keep, merge, or split these slices based on the
+codebase state at pickup time.
 
 ## What each phase spec carries
 
@@ -132,7 +138,9 @@ The per-phase files in this directory follow the outcome-altitude contract from 
 - **Known hazards** — gotchas an implementer needs to know.
 - **Proof commands** — the level of "full suite passes," not specific test names.
 
-Implementation-planning reads one phase spec and produces the proof-mapped code-altitude plan. If a phase spec reads as ambiguous or contradictory to implementation-planning, the route is back here, not down to the code.
+Implementation-planning should not consume these files directly as standing
+orders. It should cite the owning `PDM-GAP-*` rows first, then use these files
+only to recover prior decomposition and hazards.
 
 ## Constraints that cross all phases
 

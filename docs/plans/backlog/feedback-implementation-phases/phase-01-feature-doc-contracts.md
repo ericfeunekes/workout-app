@@ -13,6 +13,10 @@ covers:
 
 # Phase 1 — Feature Docs Contracts
 
+> Historical/source-material note: this completed phase is retained for
+> provenance. Future work must start from current feature/aspect docs and
+> `docs/feature-gap-map.md`, not from this plan's imperative language.
+
 ## Unit Statement
 
 Convert the 2026-04-25 workout feedback into durable target-contract feature
@@ -118,19 +122,19 @@ reverse-engineering the app.
   route.
 - Phase 1 closed in `docs/plans/archive/feature-docs-feedback-contracts.md` with
   docs checks and Codex review complete.
-- Feedback-ripple follow-up, captured after this phase closed, found transition
-  cleanup that should not reopen Phase 1 implementation:
+- Feedback-ripple follow-up, captured after this phase closed, found historical
+  transition cleanup that did not reopen Phase 1 implementation:
   - the `[verify]` sweep remains owed as its own timeboxed session;
   - stale per-side wording must be reframed around exercise-level unilateral
     authoring;
   - feature docs must avoid implying audit-grade edit provenance until that
     structural unit exists.
-  The owning plan is
+  The historical source note is
   `docs/plans/backlog/feedback-implementation-phases/transition-feedback-ripple-alignment.md`.
 
 ## Recovery Context
 
-Resume from `docs/plans/archive/feature-docs-feedback-contracts.md`, then check
-this file for the durable phase contract and downstream phase alignment. If the
-feedback-ripple transition is still open, complete or explicitly defer it before
-Phase 6 or Watch work continues.
+For archaeology, resume from `docs/plans/archive/feature-docs-feedback-contracts.md`,
+then check this file for the completed phase contract and downstream alignment.
+For new work, start from current feature/aspect docs and
+`docs/feature-gap-map.md`.

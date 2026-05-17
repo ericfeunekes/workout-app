@@ -1,6 +1,7 @@
 ---
 title: save-and-done
-status: living
+status: built
+last_reviewed: 2026-05-17
 purpose: Behavioral contract + QA scenarios for save-and-done
 covers:
   - app/Packages/Features/Execution/Sources/FeaturesExecution/CompleteView.swift
@@ -36,7 +37,8 @@ On the `.complete` route the user sees a per-exercise ledger, an optional body-w
 - Does NOT confirm before wiping the session — the tap is immediate.
 - Does NOT await any network or disk write — all side effects are fire-and-forget `Task`s.
 - Does NOT validate that every prescribed set was logged — an early "End" button path can reach `.complete` with partial logs.
-- Does NOT write the note back up to the server yet — it lands on the local-cache workout row only. The server's `Workout.notes` column already exists; the push path will be wired when we revisit the workout-completion sync protocol.
+- Does NOT offer rich note capture or dictation yet. Plain text notes are
+  carried through the completion status push and persisted on `Workout.notes`.
 
 ## Edge cases handled in code
 - Auto-advance path vs explicit End button both route through `saveAndDone` for the server status update (R2.5, `docs/open-questions.md:282`). Before the fix, the auto-advance path left the server's workout row `planned` forever. `complete()` itself no longer enqueues — the terminal push is owned exclusively by `saveAndDone` so force-complete + save-and-done no longer double-pushes (`ExecutionViewModel.swift:393-405`).
@@ -47,11 +49,12 @@ On the `.complete` route the user sees a per-exercise ledger, an optional body-w
 - Push enqueuer (`syncAPI.pushStatus`) is wrapped in `try?` (`AppBootstrap.swift:196`) — network errors are swallowed; the persistent push queue will retry.
 - Local cache writes are wrapped in `try?` (`AppBootstrap.swift:207-208`) — a failed local write just means History waits for the next pull.
 
-## Known issues / gaps
-- **Body-weight capture**: wired on the Complete screen (S11). Client-owned deterministic id (MD5 of `userID|key|observedAt`) + server tenant guard (403 on duplicate id across users) close the replay-idempotency hole (bug-044). Re-entrancy guard on `saveAndDone` collapses double-tap into a single pipeline run.
-- **Workout note server push**: now wired. The `.statusUpdate` push payload carries the trimmed workout note; server persists it on `Workout.notes` (previously pulls overwrote it with the planned-template note). Regression covered by server status-push note-persistence test.
-- **Dictation-mic on the note TextField**: deferred (polish item, documented in the `saveAndDone` TODO comment).
-- SetLog id divergence between per-set push enqueue and batch local-cache write is **closed** — both paths derive the id deterministically from `(itemID, setIndex)` via `setLogID(...)` (R1.3b-v2 / bug-040). Pinned by `ExecutionViewModelTests` § local-cache-deterministic-setLogID assertions.
+## Current gaps
+
+- `SAVE-GAP-001`: Dictation or richer note capture is deferred. The current
+  contract is plain text note entry on completion.
+- `SAVE-GAP-002`: Save-and-done does not validate that every prescribed set was
+  logged before completion. Early End can still save a partial workout.
 
 ## QA scenarios
 

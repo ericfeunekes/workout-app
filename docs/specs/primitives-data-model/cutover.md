@@ -16,6 +16,13 @@ Completed local workout logs are the exception. They are Eric's authoritative wo
 
 A converged 700-line migration plan — covering outbox drain, per-timing-mode backfill rules, 30-day legacy-acceptance windows, orphan policies for pre-V3 denormalization — lives in `scratch/primitives-data-model.md` § "Section 4: Migration Plan". That plan is the right shape for a production-preservation scenario with dual-shape server acceptance. It is **not** the cutover for this spec. This spec only carries the narrower local-history preservation requirement.
 
+## Current gaps
+
+- `PDM-GAP-005`: Completed local workout logs are the preservation constraint
+  during cutover. Future implementation must prove user-observable history
+  survives the SwiftData schema replacement, while old prescriptions,
+  in-flight sessions, and old result payloads remain disposable.
+
 ## What the cutover ships in one PR
 
 A single commit lands:

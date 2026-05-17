@@ -14,6 +14,10 @@ covers:
 
 # Phase 3 — Execution Read-Model Seams
 
+> Historical/source-material note: this completed phase is retained for
+> provenance. Future work must start from current feature/aspect docs and
+> `docs/feature-gap-map.md`, not from this plan's imperative language.
+
 ## Unit Statement
 
 Introduce stable read models for current task, remaining/upcoming work,

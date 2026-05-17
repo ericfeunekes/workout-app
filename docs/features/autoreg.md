@@ -1,7 +1,7 @@
 ---
 title: autoreg
-status: living
-last_reviewed: 2026-04-26
+status: built
+last_reviewed: 2026-05-17
 purpose: Behavioral contract + QA scenarios for autoreg
 covers:
   - app/Packages/Core/Autoreg/Sources/CoreAutoreg/Autoreg.swift
@@ -29,7 +29,8 @@ Client-side load adjustment computed per set-log against **per-item** prescripti
 - No proposal fires on the last set of an item — `hasRemaining` guard in `StraightSetsDriver.swift:167-170` (comment: "mirrors the JSX prototype `hasRemaining = si + 1 < block.sets`").
 - Does not consume `bodyweight_kg` — noted in `docs/open-questions.md` § "Body weight freshness".
 - Does not round loads — "kilogram math is exact for the step sizes documented" (`Autoreg.swift:40-46`).
-- Does not clamp to a floor: `prescribed - step` can go negative. No guard in `Autoreg.propose` (flag: see below).
+- Does clamp downward proposals to a zero-load floor so autoreg never writes a
+  negative load.
 - Does not re-trigger on `editPastSet` by design (`SessionReducer+Handlers.swift:86-101`, comment: "Corrective — does NOT retrigger autoreg").
 
 ## Edge cases handled in code
@@ -42,15 +43,16 @@ Client-side load adjustment computed per set-log against **per-item** prescripti
 - `autoreg` present but `target_rir` missing → parse failure `.missingKey("target_rir", ...)` (`PrescriptionParser+Autoreg.swift:60-62`); driver's parse branch returns `(nil, nil)`, no proposal.
 - Undo's revert-then-hold: reverting sets uses `editPendingSet` which stamps `.manual`. Comment acknowledges the tag is a side-effect made moot by the hold (`ExecutionViewModel.swift:283-291`).
 
-## Known issues / gaps
-- Negative-load floor closed (bug-013): `max(0.0, newLoad)` clamp in `Autoreg.propose`. Regression tests: "clamp · undershoot on prescribed=2.5" + "clamp · hit-failure on prescribed=4.0".
-- Autoreg step defaults per unit: `5.0` for `.lb`, `1.25` for `.kg` (bug-059). The legacy "default 2.5" is gone.
-- `apply_to` parse failure no longer degrades the whole item to `0 kg / 0 reps` — `parseTolerantOfAutoreg` isolates autoreg parse errors from the base prescription, and the server rejects unknown `apply_to` values at ingest (bug-052).
-- `execution.autoreg_proposed` telemetry carries a typed `Encodable` payload with `step_kg` + canonical reason tokens (bug-060).
-- **Settings vs prescription precedence unresolved** (`docs/open-questions.md` § "Autoreg defaults — Settings vs prescription"). Current assumption: per-item wins; Settings are display-only.
-- **Pyramid / tempo ambiguity** — `sets_detail` and tempo-heavy shapes return `(nil, nil)` from `autoregAndTarget` so no proposal fires; top-level cluster is supported as a single composed set and proposes only after the top-level set logs.
-- Undo's `.manual` stamp on reverted sets means a subsequent hold-lift wouldn't re-enable autoreg on those rows. Documented trade-off.
-- No per-item proposal history / audit trail. `currentProposal` clears on advance/accept/undo; prior proposals leave no evidence beyond the `adjust` glyph.
+## Current gaps
+
+- `AUTO-GAP-001`: Settings vs prescription precedence is unresolved. Current
+  assumption is that per-item prescription values win and Settings are
+  display/fallback hints.
+- `AUTO-GAP-002`: `sets_detail` pyramids and tempo-heavy shapes intentionally do
+  not propose autoreg unless their driver promotes a precise contract later.
+- `AUTO-GAP-003`: No per-item proposal history or audit trail exists.
+  `currentProposal` clears on advance/accept/undo; prior proposals leave no
+  durable evidence beyond the adjusted set state and telemetry.
 
 ## QA scenarios
 
@@ -112,7 +114,8 @@ Client-side load adjustment computed per set-log against **per-item** prescripti
 ### S12. Negative load floor (audit)
 - **setup:** prescribed 2.5 kg, `undershoot_step_kg=5.0`, 3 sets.
 - **steps:** log set 1 with 0 reps (undershoot fires).
-- **expected — code behavior:** proposal `newLoadKg = -2.5`. Remaining sets render as "-2.5 kg" with `↓`. No clamp in `Autoreg.swift:124`. **Flag as defect** if product requires non-negative.
+- **expected:** proposal clamps to the zero-load floor. Remaining sets render as
+  "0 kg" with `↓`; autoreg never writes a negative load.
 
 ### S13. Nil autoreg sub-object on item
 - **setup:** prescription has `target_rir` but no `autoreg` object.

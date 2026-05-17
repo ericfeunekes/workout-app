@@ -129,6 +129,14 @@ Proof: migration tests export a pre-cutover local store with representative comp
 - **Node identity rules (preserve vs new id per edit class) are prescriptive.** The authoring-shape aspect pins 13 edit-class rules for when to preserve a slot/set/block id and when to mint a new one. A miscategorized edit silently orphans or binds history incorrectly. Mitigation: the spec names the conservative default (new id) when the edit logic can't classify, and the log-shape aspect denormalizes `workout_id` + `planned_exercise_id` so orphaned rows still answer "what workout" and "which exercise."
 - **The Block > Set > Slot hierarchy is deeper than today's Block > Item.** Authors and drivers both see three levels where they saw two. If this added depth proves too ergonomically heavy for the authoring surface (Claude's conversation output), the spec may need a collapsing helper — e.g., `set` auto-synthesized when only one set is needed per block. Mitigation: the authoring-shape aspect provides worked examples so Claude has direct templates.
 
+## Current gaps
+
+- `PDM-GAP-001`: The accepted primitive hierarchy is not implemented in the
+  server schema, API, shared Swift DTOs, SwiftData models, execution seeding,
+  timing drivers, sync payloads, fixtures, or current feature docs. Future
+  phase planning must start from this accepted contract and cite the aspect
+  gaps below for the specific proof obligations it intends to close.
+
 ## Open questions
 
 These are explicit; implementation-planning should treat them as things to investigate or decide before locking the contract, not as settled.

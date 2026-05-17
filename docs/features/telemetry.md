@@ -1,6 +1,7 @@
 ---
 title: telemetry
-status: living
+status: built
+last_reviewed: 2026-05-17
 purpose: Behavioral contract + QA scenarios for the structured event log.
 covers:
   - app/Packages/Core/Telemetry/
@@ -41,17 +42,18 @@ Why: when Eric reports "something didn't work at the gym," the telemetry event l
 - App kill mid-flight: queue is SwiftData-durable; events survive across relaunch.
 - Empty batch (`events: []`): server accepts as no-op.
 
-## Known issues / gaps
+## Current gaps
 
-- **Emit coverage is partial.** Wired in: `AppBootstrap`, `TodayViewModel.start`, `ExecutionViewModel.session_mutation` (start / logSet / advance / save / complete), `execution.autoreg_proposed / _accepted / _undo`, `execution.past_set_edited` (bug-017), `history.past_set_edited` (bug-015), `execution.exercise_swap`, `execution.tabata_multi_item_collapsed` (bug-055), `execution.swap_sets_override_rejected` (bug-057), `execution.push_item_dead_lettered` (bug-060), `SyncAPI.network.*`. NOT wired in: History tab switches / filter taps, FirstRun events, Settings (when it exists).
-- **Typed payloads.** `autoreg_proposed` carries a typed `Encodable` payload with `step_kg` + canonical reason tokens (`overshoot` / `undershoot` / `hit_failure` / `apply_to_remaining`) — no more hand-built JSON (bug-045 / bug-060).
-- **Emitter attach now awaited by AppBootstrap before first emit** (bug-056). Pre-fix, a fire-and-forget `Task` attached the emitter to `pushQueueStore` and early-launch events could land locally but skip the queue.
-- **Priority-weighted push** (bug-056): `telemetry` is priority 1, `results` is priority 0 — set_log / status / user_parameter always drain before a telemetry backlog.
-- **Z-suffix enforced server-side** (bug-056): `UtcDatetimeIn` rejects any datetime string without `Z`. Invariant is now guarded at ingest, not just documented.
-- **No export / share from Settings.** Deferred to v1.1+.
-- **No debug overlay** — query the server's `event_log` table directly.
-- **Server caps batches at 500 events per POST** (bug-033). 501+ → 422, zero writes. Client drains one event per `PushItem`.
-- **Server-side retention is 90 days by default** (`WORKOUTDB_EVENT_LOG_RETENTION_DAYS`, bug-060). A daily periodic sweep (plus a startup-safe sweep) runs `prune_event_log`. iOS ring-buffer cap (10k) is separate — local events drop oldest-first regardless of server retention. `0` purges on every boot.
+- `TELEM-GAP-001`: Emit coverage is partial. Wired in: bootstrap, Today start,
+  core execution mutations, autoreg events, past-set edits, exercise swap,
+  selected timing-mode events, push dead-lettering, and sync network events.
+  Not wired in: History tab switches/filter taps, FirstRun events, and Settings
+  events.
+- `TELEM-GAP-002`: No export/share surface exists in Settings.
+- `TELEM-GAP-003`: No local debug overlay exists; diagnostics currently query
+  the server `event_log` table directly.
+- `TELEM-GAP-004`: Local event retention is a 10k ring buffer only. Pushed
+  events remain local until ring pruning; there is no acknowledged-delete path.
 
 ## QA scenarios
 

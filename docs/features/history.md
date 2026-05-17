@@ -1,7 +1,7 @@
 ---
 title: history
-status: living
-last_reviewed: 2026-04-26
+status: built
+last_reviewed: 2026-05-17
 purpose: Behavioral contract + QA scenarios for history
 covers:
   - app/Packages/Features/History/Sources/FeaturesHistory/HistoryViewModel.swift
@@ -56,26 +56,17 @@ does not store a field-level edit trail.
 
 ## Current gaps
 
-- Full-field post-workout correction is complete for set-log fields in this
-  phase scope: load/unit, reps, RIR set/clear, duration, distance,
-  skipped/performed state, side round-trip, and notes. Bodyweight correction is
-  a separate `user_parameters` editing problem, not a set-log correction.
-- Unilateral history display should use exercise-level identity unless a later
-  taxonomy phase adds a stronger canonical link between left/right variants.
-  `set_log.side` exists as a shipped/reserved field, not the active history
+- `HISTORY-GAP-001`: Unilateral history display uses exercise-level identity
+  unless a later taxonomy requirement adds a stronger canonical link between
+  left/right variants. `set_log.side` is shipped/reserved, not the active
   grouping model.
-- Post-workout correction is same-row overwrite and is not audit-grade: there is
-  no `set_log.updated_at`, no field-diff telemetry event, no durable History
-  edit log, and event-log retention is not enough to reconstruct corrections
-  indefinitely.
-- Block intent display depends on `block.intent` and should render nothing when
-  intent is null.
-- Set-index render bug (bug-020) closed — `formatSetRow` now uses `setIndex` as-is; runtime pipeline is 1-based throughout.
-- `SessionDetail.bodyweightKg` now hydrates from `WorkoutCache.loadUserParameters(key: "bodyweight_kg")` with a ±2min window around `completedAt` (bug-060). HistoryPreviewSeed includes a bodyweight sample so the chip exercises in previews too.
-- `EditSetSheet` is unit-aware (bug-051): labels per source `weightUnit`, carries the unit through the write path via `formatLoad(weight:unit:)`, caps reps at 999, and exposes RIR clear via an explicit enum state instead of a nil-sentinel. It also supports duration, distance, skipped/performed state, side round-trip, and notes for completed set-log correction.
-- Recent-sessions grouping keys off `workoutID` (the R1.3b-v2 denormalized column on `SetLogModel`) rather than `workoutItemID`, so same-day workouts no longer collapse into one session.
-- By-exercise detail no longer mixes `lb` and `kg` numerically — top-set and trend deltas render in the source unit (bug-051 / bug-059).
-- Post-save refresh is wired end-to-end. The shell's `afterLocalCompletion` closure calls `historyViewModel.load()` after the local cache write + today-loader rerun (ordering: cache write → TodayLoader reload → History reload). Post-pull refresh still relies on `.task` on `HistoryView` re-firing.
+- `HISTORY-GAP-002`: Post-workout correction is same-row overwrite and is not
+  audit-grade. There is no `set_log.updated_at`, field-diff telemetry event, or
+  durable History edit log.
+- `HISTORY-GAP-003`: Block intent display depends on `block.intent`; surfaces
+  should render nothing when intent is null.
+- `SETEDIT-GAP-003`: Bodyweight correction is a separate `user_parameters`
+  editing problem, not a set-log correction.
 
 ## QA scenarios
 

@@ -1,6 +1,7 @@
 ---
 title: exercise-swap
-status: tested
+status: built
+last_reviewed: 2026-05-17
 purpose: Behavioral contract + QA scenarios for exercise-swap
 covers:
   - app/Packages/Core/Session/Sources/CoreSession/SessionReducer+Handlers.swift
@@ -41,14 +42,19 @@ Long-press on the Active screen's card fires a medium haptic + opens `SwapSheet`
 - `CompleteView.swift:102` surfaces `performedExerciseID` in the completion ledger so a swap is visible at session's end.
 - `WorkoutCache+History.swift:93-114` uses `performedExerciseID` for per-exercise history aggregation — swaps count toward the alternative's history, not the planned item's.
 
-## Known issues / gaps
-- No per-set granularity. Swap is item-scoped; a "swap just this set" option is not in the reducer vocabulary.
-- No cross-block swap. Alternatives are attached to a specific `workoutItemID`; moving an exercise between blocks is out of scope.
-- No swap undo. Once the user taps an alternative, the only way back is to swap to the original exercise id via another alternative row (if Claude authored one).
-- `AlternativeOverrides.parse` now reads the full target override key set (`sets`, `reps`, `load_kg`, `weight_unit`, `target_rir`, `autoreg`) and returns `Result<Overrides, ParseError>` — a single malformed value rejects the whole override (all-or-nothing); the swap still proceeds with `overrides == nil`. `parseTolerantOfAutoreg` isolates autoreg parse failures so a bad `autoreg` sub-object doesn't nuke the base overrides (bug-057).
-- `sets` resizes the non-done SetPlan tail (extends with new rows at the override reps/load, or truncates) **only on set-major blocks** (straight_sets, custom, intervals, continuous). Round-robin blocks (superset, circuit, amrap, emom, tabata, for_time) share a `rounds` count across every item, so the reducer drops the `sets` portion on those blocks and emits `execution.swap_sets_override_rejected` (payload: `item_id`, `block_index`, `advancement_mode`). The remaining override keys still apply. `autoreg` lands on `ItemLog.overrides` but is not yet read by the drivers — shape-morphing overrides (S18) remain unvalidated.
-- Superset / Circuit / Custom drivers now read `itemLog.sets[cursor]` for display + log input so swap overrides survive (bug-053). Pre-fix, these drivers re-parsed `prescriptionJSON` and the swap-name flipped but load / reps stayed stale.
-- `docs/open-questions.md:41` — no validator between alternative shape and block timing_mode.
+## Current gaps
+
+- `SWAP-GAP-001`: Swap is item-scoped. A "swap just this set" behavior is not
+  in the reducer vocabulary.
+- `SWAP-GAP-002`: Cross-block swap is not supported. Alternatives are attached
+  to a specific `workoutItemID`; moving work between blocks remains out of
+  scope until a concrete workflow needs it.
+- `SWAP-GAP-003`: Swap has no undo path. The only way back is to swap to the
+  original exercise id through another authored alternative row.
+- `SWAP-GAP-004`: Alternative override shape is not validated against the
+  block's `timing_mode` (`docs/open-questions.md`).
+- `SWAP-GAP-005`: `autoreg` override values land on `ItemLog.overrides`, but
+  drivers do not yet consume step/threshold overrides.
 
 ## QA scenarios
 

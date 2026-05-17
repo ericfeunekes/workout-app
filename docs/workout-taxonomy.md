@@ -1,6 +1,7 @@
 ---
 title: workout-taxonomy
 status: draft
+last_reviewed: 2026-05-17
 purpose: Bootstrap taxonomy for workout domains, block archetypes, and how Claude should map training intent to app timing/logging primitives.
 covers:
   - docs/specs/v2-architecture.md
@@ -16,7 +17,10 @@ This document is the bridge between "Claude builds a workout" and "the app can e
 
 `docs/prescription.md` defines the current authoring vocabulary. `docs/features/timing-modes.md` defines behavior the app currently implements. This document sits one level above both: it names the workout domains and block archetypes we need to support so Claude can choose the right primitive instead of forcing everything into reps x load or a generic timer.
 
-`docs/workout-execution-requirements.md` defines the athlete-facing timer, transition, logging, and summary behavior for these archetypes.
+`docs/workout-execution-requirements.md` defines the athlete-facing timer,
+transition, logging, and summary behavior for these archetypes.
+`docs/modifier-equipment.md` owns the separate modifier/equipment vocabulary so
+taxonomy decisions do not become app-side variant inference.
 
 This is intentionally a bootstrap document. It should grow as we interview real training patterns and QA the app against them.
 

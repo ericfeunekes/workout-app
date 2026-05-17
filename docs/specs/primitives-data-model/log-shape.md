@@ -1,6 +1,7 @@
 ---
 title: Log shape — set_log rows under the primitive model
 status: accepted — spec
+last_reviewed: 2026-05-17
 parent: ../primitives-data-model.md
 purpose: Canonical set_log row shape, three log roles (slot / set_result / block_result), deterministic UUID composition for idempotent upsert, per-stimulus typed columns, overlay columns, write semantics at slot / set / block completion. Ten worked examples showing concrete log rows.
 ---
@@ -361,6 +362,13 @@ Test block: 1 slot row:
 ```
 
 No special "test" handling at log level — a strength slot row.
+
+## Current gaps
+
+- `PDM-GAP-003`: Log/result roles must stay query-safe during implementation.
+  Slot rows, set-result rows, and block-result rows are distinct facts; history
+  and analytics must not derive competing aggregates from slot rows when an
+  aggregate result row is the authored source.
 
 ## log-shape.md open questions
 

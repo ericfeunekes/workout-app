@@ -1,6 +1,7 @@
 ---
 title: bootstrap
-status: living
+status: verified
+last_reviewed: 2026-05-17
 purpose: Behavioral contract + QA scenarios for bootstrap
 covers:
   - app/Packages/Shell/Sources/Shell/AppBootstrap.swift
@@ -38,13 +39,11 @@ On launch (or after FirstRun succeeds), the shell checks `TokenStore.loadConnect
 - `executionVMHolder` captured STRONGLY in the session-mutation binding (`WorkoutDBApp.swift:272-284`, `359-368`) — fixed this session; weak capture silently broke "start workout"
 - `pull.pull` feeds `since: lastSyncAt` on subsequent launches (`AppBootstrap.swift:135-136`) — server returns only changed rows
 
-## Known issues / gaps
-- Closed: server naive datetimes (bug-002) via `UtcDatetime` / `UtcDatetimeIn`.
-- Closed: double-bootstrap race via inert loading view + `didStartBootstrap` guard.
-- Closed: `executionVMHolder` weak capture (bug-003).
-- Closed: `.empty` dead-end (bug-048) — a "change server" route with URL + token pre-fill now lets the user back to FirstRun when the cache pulls empty on a wrong server.
-- Closed: `WorkoutCacheImpl.save` non-atomicity — replaced by subtree reconcile with explicit do/catch/rollback frames and detach-before-delete (bug-046).
-- Open: no manual sync trigger — pull only runs at bootstrap. Settings "sync now" is TODO.
+## Current gaps
+
+- `BOOT-GAP-001`: No manual sync trigger exists on the bootstrap surface. Pull
+  runs at bootstrap and through Today refresh, but Settings has no general
+  "sync now" action.
 
 ## QA scenarios
 

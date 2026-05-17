@@ -11,6 +11,11 @@ spec:
 
 # Phase 3 — All twelve current timing modes execute with behavior parity
 
+> Historical/source-material note: this is not a standing implementation plan.
+> Future work must start from `PDM-GAP-*` rows in the owning primitives spec
+> files and create a fresh active plan against the codebase state at pickup
+> time.
+
 ## Unit statement
 
 After this phase, every timing mode the app supports today — straight-sets, superset, circuit, AMRAP, EMOM, Tabata, intervals, continuous, for-time, accumulate, rest-block, and custom — executes end-to-end under the primitive model with observable behavior matching the pre-cutover build. Any behavior that diverges from the baseline is either an intentional spec change with a documented justification, or a bug to be fixed before the phase closes.
@@ -100,4 +105,6 @@ RC gate: a manual simulator smoke on EMOM, Tabata, AMRAP, and one round-based mo
 
 ## Handoff to implementation-planning
 
-This phase spec is the input to `scoping:implementation-planning`. The implementation plan produced there carries the code-altitude decomposition (which drivers, in what order, against which behavior baselines, with which session-state extensions). An implementation plan that surfaces a contract gap during a driver port routes back to the spec aspect or to phase-planning before proceeding — not to requirements-planning, unless the gap reveals the durable requirement itself is under-specified.
+Do not use this file directly as the implementation-planning input. Use
+`PDM-GAP-*` rows in the owning primitives spec files first, then consult this
+phase only for prior decomposition and hazards.

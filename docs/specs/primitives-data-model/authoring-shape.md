@@ -1,6 +1,7 @@
 ---
 title: Authoring shape — prescription JSON wire format
 status: accepted — spec
+last_reviewed: 2026-05-17
 parent: ../primitives-data-model.md
 purpose: Wire format for workout / block / set / slot under the 7-primitive model. How each primitive serializes in JSON. Merge and override rules. Ten worked examples covering the common prescription patterns.
 ---
@@ -685,6 +686,13 @@ The 15-minute cap lives at `block.timer` (the outer deadline). The inner set is 
 ```
 
 Warm-up ramp is a set with multiple slots (same exercise, ascending load, `is_warmup: true`). Test attempt is a separate block. No "test" primitive.
+
+## Current gaps
+
+- `PDM-GAP-002`: Authoring-shape open questions need explicit disposition
+  before code relies on the ambiguous shape. Current preferences favor
+  structural multi-slot authoring for drop sets and clusters, and seed-time
+  relative-load resolution as pinned in `runtime-resolution.md`.
 
 ## Open questions
 

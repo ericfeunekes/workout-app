@@ -1,8 +1,8 @@
 ---
 title: Transition — feedback ripple alignment
-status: draft
-last_reviewed: 2026-04-26
-purpose: Reconcile feedback-ripple investigation findings before Phase 6 and Watch work continue.
+status: historical source material
+last_reviewed: 2026-05-17
+purpose: Historical record of feedback-ripple planning findings that have been routed into current feature gaps and docs.
 covers:
   - scratch/feedback-ripple-phase-updates.md
   - docs/plans/backlog/feedback-implementation-phases/
@@ -14,16 +14,20 @@ covers:
 
 # Transition — Feedback Ripple Alignment
 
+> Historical/source-material note: this transition is retained for provenance.
+> Future work must start from current feature/aspect docs and
+> `docs/feature-gap-map.md`, not from this plan's imperative language.
+
 ## Unit Statement
 
-Apply the feedback-ripple investigation's planning corrections without adding
-new app behavior: side semantics are exercise-level, audit-grade edit
-provenance is deferred, Phase 1's verify sweep is still owed, and
-workout-tree replacement does not preserve old set logs today.
+Record the feedback-ripple investigation's planning corrections: side semantics
+are exercise-level, audit-grade edit provenance is deferred, Phase 1's verify
+sweep was separated, and workout-tree replacement does not preserve old set logs
+today.
 
-This transition exists because the findings landed after several numbered
-phases had already closed. It updates planning and feature-doc contracts so
-Phase 6 does not accidentally build on stale assumptions.
+This transition existed because the findings landed after several numbered
+phases had already closed. The durable requirements now live in the owning
+feature/aspect docs and `docs/feature-gap-map.md`.
 
 ## Decisions
 
@@ -50,7 +54,9 @@ Phase 6 does not accidentally build on stale assumptions.
 - No migration 009 for `set_log.side`.
 - No audit-trail schema work.
 
-## Steps
+## Historical steps
+
+These were the intended cleanup steps at the time:
 
 1. Update Phase 1 with a transition note: the original docs pass is closed, but
    the `[verify]` sweep and targeted doc narrowings are transition work.
@@ -60,7 +66,7 @@ Phase 6 does not accidentally build on stale assumptions.
    shell/model with mode-specific editor families and per-context persistence.
 4. Update Phase 5 closeout wording so completed work is not reopened, while
    per-side/history parity remains downstream.
-5. Update Phase 6 before further History work: full-field correction is scoped
+5. Update Phase 6 wording: full-field correction is scoped
    to the current same-row overwrite provenance contract.
 6. Update feature docs and registers:
    - `docs/features/workout-preview.md`: app-side workout PUT publisher does

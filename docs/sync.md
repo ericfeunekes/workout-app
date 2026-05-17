@@ -208,7 +208,7 @@ State authority must stay explicit regardless of transport:
 
 Open decisions before implementation:
 
-- Whether CloudKit supplements the home server or replaces it for Apple-device
+- `SYNC-GAP-002`: Whether CloudKit supplements the home server or replaces it for Apple-device
   sync. If the home server is replaced for a flow, the spike must name where
   Claude writes plans, how those plans enter CloudKit, and how history returns
   to Claude for analysis.
@@ -217,7 +217,7 @@ Open decisions before implementation:
 - Whether immediate "start workout now" flows can tolerate CloudKit's
   system-scheduled background sync, or need explicit fetch/send calls or the
   existing REST path.
-- Whether Cloudflare Access identity maps to app users, service capabilities,
+- `SYNC-GAP-003`: Whether Cloudflare Access identity maps to app users, service capabilities,
   or both.
 - Whether the general endpoint should live inside this repo, beside the
   existing OAuth callback service, or as a separate personal gateway.
@@ -257,6 +257,11 @@ The watch face grammar (widget-based faces for set / rest / superset / EMOM / AM
 
 ## Open items
 
+- `SYNC-GAP-001`: **Stale live-session expiry.** A live session is frozen, but
+  the app has no selected behavior for returning to an unfinished workout days
+  later after newer prescriptions may have arrived. Pick explicit expiry,
+  refuse/resume, or never-expire behavior before changing execution/sync around
+  long-lived active sessions.
 - **Sync triggers on the watch.** Currently the phone is the only sync actor. If the watch ever writes set_logs independently (not in v1), we'll need a watch → phone → server reconciliation step.
 - **Set-log deletion scope.** v1 only deletes set_logs through `workout_resets` for same-day accidental workout logs. Arbitrary historical set deletion/edit provenance remains out of scope unless the user asks for audit-grade history later.
 - **Multiple active workouts.** The spec allows a user to mark multiple workouts `active`, but the app UX assumes one active workout at a time. Behavior if a second workout is started before the first is completed is undefined; we'd need to decide whether "start workout" auto-completes the prior one or refuses.

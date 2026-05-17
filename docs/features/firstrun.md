@@ -1,6 +1,7 @@
 ---
 title: firstrun
-status: living
+status: verified
+last_reviewed: 2026-05-17
 purpose: Behavioral contract + QA scenarios for firstrun
 covers:
   - app/Packages/Features/FirstRun/Sources/FeaturesFirstRun/FirstRunViewModel.swift
@@ -40,13 +41,13 @@ Pinned by `testFirstRunHandsOffToBootstrapWithoutSecondPull` (FirstRun target) +
 - `TokenStore.saveConnection` throw → treated as `.unreachable` so user can retry (`:203-208`)
 - Version decode failure → `.decode` — "server responded but the shape didn't match" (proves it's not a workoutdb server at that URL)
 
-## Known issues / gaps
-- Re-entrancy (bug-018) closed via the guard in `connect()` + `.disabled(isConnectInFlight)` on the view. Pinned by `testRapidDoubleTapConnectOnlyInvokesPipelineOnce`.
-- Scope boundary (bug-048) closed: FirstRun only hits `/api/version`; AppBootstrap owns the sole pull. `testFirstRunHandsOffToBootstrapWithoutSecondPull` + `testBootstrapFiresExactlyOnePullPerRun` pin it. `.empty` state gained a "change server" route with URL + token pre-fill so a wrong server URL doesn't trap the user.
-- Double-bootstrap race closed: `FirstRun.onComplete` no longer double-fires bootstrap; shell's `didStartBootstrap` guard + inert `BootstrapLoadingView` (no `.task`).
-- Naive-datetime decode (bug-002) closed server-side via `UtcDatetime` / `UtcDatetimeIn` serializers.
-- UUID-case mismatch (bug-004 / bug-045) closed: every outbound UUID routes through `UUID.wireID` (lowercase).
-- Not built: trailing-slash normalization — `https://host/` vs `https://host` are passed to `URLSessionTransport` as-is.
+## Current gaps
+
+- `FIRST-GAP-001`: Trailing-slash normalization is not built.
+  `https://host/` and `https://host` are passed to `URLSessionTransport` as
+  provided.
+- `FIRST-GAP-002`: QR/unified connection-string setup remains deferred; the
+  shipped FirstRun surface uses separate URL and token fields.
 
 ## QA scenarios
 

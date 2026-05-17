@@ -24,7 +24,10 @@ Feature-doc status is allowed to describe target behavior, not only shipped beha
 | `built` | Implementation exists and is covered by local tests. |
 | `verified` | Implementation is proven with the required external check. See `../QA.md` for accepted proof artifacts. |
 
-Each rewritten feature doc should use `Current gaps` for target-contract pieces that are not implemented or not yet proven. Cross-feature sequencing lives in `../feature-gap-map.md`.
+Each rewritten feature doc should use `Current gaps` for target-contract pieces
+that are not implemented or not yet proven. `../feature-gap-map.md` indexes
+those gaps so future phase plans can cite exact gap IDs; it is not itself a
+phase plan.
 
 ## Reading order for a cold start
 
@@ -40,23 +43,24 @@ Each rewritten feature doc should use `Current gaps` for target-contract pieces 
 
 | Feature | One-line summary | Status |
 |---|---|---|
-| [firstrun](firstrun.md) | URL+token entry, validate, kick off first pull | verified at bug-048 scope boundary |
-| [bootstrap](bootstrap.md) | Pull -> cache -> build VMs -> wire push flusher | verified 2026-04-18 |
-| [today](today.md) | Show the local plan queue, selected workout, preview entry, and refresh | built with current gaps |
-| [workout-preview](workout-preview.md) | Preview a selected workout and make Start explicit before execution | built with current gaps |
-| [execute-loop](execute-loop.md) | Log sets, rest timer, autoreg banner, advance | built with current gaps |
-| [block-transition](block-transition.md) | Between-block setup surface before entering the next block | implemented with current gaps |
-| [timing-modes](timing-modes.md) | 12 declared timing modes drive the Execute loop | built + tested |
-| [autoreg](autoreg.md) | Per-item RIR/rep-driven load adjustments, accept/undo | built + tested |
-| [save-and-done](save-and-done.md) | Finalize workout: note + bodyweight, local cache, status push | built + tested |
-| [history](history.md) | Completed workouts list, session detail, by-exercise view | built with current gaps |
-| [exercise-swap](exercise-swap.md) | Substitute alternative exercise mid-workout | built + tested |
-| [past-set-edit](past-set-edit.md) | Tap past set to correct logged values | built with current gaps |
-| [persistence](persistence.md) | Live session survives backgrounding/relaunch | built + tested |
-| [push-queue](push-queue.md) | Durable queue for set_logs, status, telemetry events | built + tested |
-| [telemetry](telemetry.md) | Structured event log, local-first, lazy sync to server | built + tested |
+| [firstrun](firstrun.md) | URL+token entry, validate, kick off first pull | verified |
+| [bootstrap](bootstrap.md) | Pull -> cache -> build VMs -> wire push flusher | verified |
+| [today](today.md) | Show the local plan queue, selected workout, preview entry, and refresh | built |
+| [workout-preview](workout-preview.md) | Preview a selected workout and make Start explicit before execution | built |
+| [execute-loop](execute-loop.md) | Log sets, rest timer, autoreg banner, advance | built |
+| [block-transition](block-transition.md) | Between-block setup surface before entering the next block | built |
+| [timing-modes](timing-modes.md) | 12 declared timing modes drive the Execute loop | verified |
+| [autoreg](autoreg.md) | Per-item RIR/rep-driven load adjustments, accept/undo | built |
+| [save-and-done](save-and-done.md) | Finalize workout: note + bodyweight, local cache, status push | built |
+| [history](history.md) | Completed workouts list, session detail, by-exercise view | built |
+| [exercise-swap](exercise-swap.md) | Substitute alternative exercise mid-workout | built |
+| [past-set-edit](past-set-edit.md) | Tap past set to correct logged values | built |
+| [persistence](persistence.md) | Live session survives backgrounding/relaunch | built |
+| [push-queue](push-queue.md) | Durable queue for set_logs, status, telemetry events | built |
+| [telemetry](telemetry.md) | Structured event log, local-first, lazy sync to server | built |
+| [in-app-claude](in-app-claude.md) | Future Claude proposal/review/acceptance workflow in the app | planned |
 | [watch-workoutkit-handoff](watch-workoutkit-handoff.md) | Early Apple Watch bridge through WorkoutKit before custom watch-primary execution | planned |
-| [watch-primary-execution](watch-primary-execution.md) | Custom Setmark Watch authority, offline event replay, and watch-native execution | planned / deferred |
+| [watch-primary-execution](watch-primary-execution.md) | Custom Setmark Watch authority, offline event replay, and watch-native execution | planned |
 
 ## How to use these for QA
 
@@ -68,7 +72,9 @@ Each rewritten feature doc should use `Current gaps` for target-contract pieces 
 
 ## Maintenance rules
 
-- If a feature's intended behavior changes, update its doc in the same commit. If implementation lags the target, add or update `Current gaps` and `../feature-gap-map.md`.
+- If a feature's intended behavior changes, update its doc in the same commit.
+  If implementation lags the target, add or update `Current gaps` and
+  `../feature-gap-map.md` with a stable gap ID.
 - Don't split a feature into two files — if the scenario list exceeds ~25, the feature is too broad; split *the feature*, not the doc.
 - When a scenario is proven by a test, add `(tested: <test_name>)` next to its header so future readers know what's backstopped.
 - Keep under ~200 lines per doc. Length is a smell.

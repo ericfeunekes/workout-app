@@ -11,6 +11,10 @@ covers:
 
 # Phase 5 — Active / Rest / Transition Redesign
 
+> Historical/source-material note: this completed phase is retained for
+> provenance. Future work must start from current feature/aspect docs and
+> `docs/feature-gap-map.md`, not from this plan's imperative language.
+
 ## Unit Statement
 
 Redesign the in-workout Active, Rest, and Transition surfaces around clear

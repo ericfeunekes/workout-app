@@ -1,7 +1,7 @@
 ---
 title: today
-status: living
-last_reviewed: 2026-04-26
+status: built
+last_reviewed: 2026-05-17
 purpose: Behavioral contract + QA scenarios for today
 covers:
   - app/Packages/Features/Today/Sources/FeaturesToday/TodayViewModel.swift
@@ -64,15 +64,18 @@ The selected workout remains the default execution target, but any preview for a
 
 ## Current gaps
 
-- Card-body tap opens the current preview/detail sheet; a richer dedicated
-  `WorkoutPreviewView` is still target behavior.
-- Card-level Start has been removed. Start is currently only in the
-  preview/detail sheet when the workout can be started.
-- Preview tap targets and Start affordance need simulator proof before the
-  feature can be marked `verified`.
-- Current-block remaining work is projection-backed on Execution's next-up
-  preview, but not yet rendered in Today's preview/detail sheet.
-- Today does not mutate plans locally. Reorganization remains conversation-owned by design.
+- `TODAY-GAP-001`: Card-body tap opens the current preview/detail sheet; a
+  richer dedicated `WorkoutPreviewView` is still target behavior.
+- `TODAY-GAP-002`: Preview tap targets and Start affordance need simulator
+  proof before the feature can be marked `verified`.
+- `TODAY-GAP-003`: Current-block remaining work is projection-backed on
+  Execution's next-up preview, but not yet rendered in Today's preview/detail
+  sheet.
+
+## Deliberate non-goals
+
+- Today does not mutate plans locally. Reorganization remains conversation-owned
+  by design.
 
 ## QA scenarios
 

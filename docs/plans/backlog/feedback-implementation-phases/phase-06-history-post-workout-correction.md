@@ -13,6 +13,10 @@ covers:
 
 # Phase 6 — History And Post-Workout Correction
 
+> Historical/source-material note: this completed phase is retained for
+> provenance. Future work must start from current feature/aspect docs and
+> `docs/feature-gap-map.md`, not from this plan's imperative language.
+
 ## Unit Statement
 
 Add full-field post-workout correction for logged sets inside the current

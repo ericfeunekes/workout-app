@@ -12,6 +12,11 @@ spec:
 
 # Phase 1 — Primitive workouts round-trip through storage
 
+> Historical/source-material note: this is not a standing implementation plan.
+> Future work must start from `PDM-GAP-*` rows in the owning primitives spec
+> files and create a fresh active plan against the codebase state at pickup
+> time.
+
 ## Unit statement
 
 After this phase, a workout authored in the primitive vocabulary (Block > Set > Slot, with the seven orthogonal primitives attached at their documented levels) can be pushed to the server, persisted in the server's primitive schema, pulled to the app, decoded into the app's Swift DTOs, persisted to the app's on-device SwiftData store at the primitive schema version, and returned to the server unchanged. Both server and app persistent stores speak the primitive vocabulary end-to-end — no parallel legacy storage paths remain on either side. Nothing executes yet — this phase establishes the wire format and persistent storage shape that everything downstream consumes.
@@ -111,4 +116,7 @@ No RC gate for this phase.
 
 ## Handoff to implementation-planning
 
-This phase spec is the input to `scoping:implementation-planning`. The implementation plan produced there carries the code-altitude decomposition (which models, which migrations, which fixture files, which parity test harness extensions). An implementation plan that needs this phase spec to resolve an ambiguity about outcome — what functionality ships, what proof binds it — routes back here before descending further.
+Do not use this file directly as the implementation-planning input. Use
+`PDM-GAP-001`, `PDM-GAP-002`, `PDM-GAP-003`, `PDM-GAP-004`, and `PDM-GAP-005`
+from the owning primitives spec files, then consult this phase only for prior
+decomposition and hazards.

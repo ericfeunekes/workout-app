@@ -1,6 +1,7 @@
 ---
 title: workout-generation
 status: draft
+last_reviewed: 2026-05-17
 purpose: Practical guide for generating executable workouts from WorkoutDB's current workout components, timer modes, prescription shapes, and logging model.
 covers:
   - docs/prescription.md
@@ -40,6 +41,11 @@ Author every workout in this order:
 
 If a workout cannot be represented cleanly with those steps, do not force it into `custom` first. Identify the missing primitive and document the gap in `docs/open-questions.md`.
 
+For modifiers, equipment context, unilateral variants, substitutions, and
+setup-only labels, use `docs/modifier-equipment.md` before inventing new
+prescription keys. The app displays authored context; it does not infer
+programming meaning from equipment or variant names.
+
 ## Data model cheat sheet
 
 Workout generation mostly writes these entities:
@@ -62,6 +68,10 @@ Important constraints:
 - `block.name` matters. It is the athlete-facing boundary: "Easy run", "Strength A", "10 min AMRAP", "Cooldown".
 - `workout_item.prescription_json` is resolved. Exercise defaults are merged on ingest; historical workout items do not retro-update when library defaults change.
 - `set_log` is the current result carrier. Some block-level scores are encoded through set logs plus notes until a dedicated `block_result` entity exists.
+- Modifier and equipment meaning must be authored explicitly. Use distinct
+  exercise/workout-item identity when history should stay distinct; use notes or
+  display metadata for setup-only context; use alternatives for in-workout
+  substitutions.
 
 Work targets:
 

@@ -1,6 +1,6 @@
 ---
 title: SetEditSheet
-status: built with current gaps
+status: built
 last_reviewed: 2026-04-26
 purpose: Shared edit-surface contract for preview, active-session, and history corrections.
 covers:
@@ -79,26 +79,17 @@ the shell/model can express the fields.
 
 ## Current gaps
 
-- `DesignSystem.SetEditSheetModel` now defines the shared edit intent contract
-  for load, reps, RIR, bodyweight, side, distance, duration,
-  skipped/performed state, notes, and carry fields. Side remains a
-  shipped/reserved field, not the active unilateral authoring model.
-- Existing visual edit surfaces are still split across preview/detail, active
-  rest pills, and the History `EditSetSheet`.
-- History's visual sheet now emits the shared intent and is proven for set-log
-  correction fields: load/unit, reps, RIR set/clear, duration, distance,
-  skipped/performed state, and notes. `set_log.side` still round-trips on the
-  stored row but is no longer authored from this sheet.
-- Apply-to-remaining scope for preview/future and active setup edits is not yet
-  implemented or proven.
-- Bodyweight remains contract-level and display-level only for History; editing
-  it is a separate `user_parameters` correction problem.
-- Distance, duration, side, skipped state, notes, and carry/load-plus-distance
-  are contract-tested at the shared model layer and proven in History where they
-  are set-log fields. They do not yet have visual proof across all
-  mode-specific active and preview contexts.
-- Visual proof is required for small-phone layout and disabled/available field
-  contrast.
+- `SETEDIT-GAP-001`: Existing visual edit surfaces are still split across
+  preview/detail, active rest pills, and the History `EditSetSheet`.
+- `SETEDIT-GAP-002`: Apply-to-remaining scope for preview/future and active
+  setup edits is not yet implemented or proven.
+- `SETEDIT-GAP-003`: Bodyweight remains contract-level and display-level only
+  for History; editing it is a separate `user_parameters` correction problem.
+- `SETEDIT-GAP-004`: Distance, duration, side, skipped state, notes, and
+  carry/load-plus-distance are contract-tested at the shared model layer and
+  proven in History where they are set-log fields. They still need visual proof
+  across all mode-specific active and preview contexts, including small-phone
+  layout and disabled/available field contrast.
 
 ## QA scenarios
 

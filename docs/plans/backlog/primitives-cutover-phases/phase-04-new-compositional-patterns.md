@@ -12,6 +12,11 @@ spec:
 
 # Phase 4 — Compositional patterns unlocked by primitives become authorable
 
+> Historical/source-material note: this is not a standing implementation plan.
+> Future work must start from `PDM-GAP-*` rows in the owning primitives spec
+> files and create a fresh active plan against the codebase state at pickup
+> time.
+
 ## Unit statement
 
 After this phase, the workout patterns that motivated the primitives redesign — patterns the old model either could not express or forced into awkward workarounds — are first-class authorable compositions. Cluster sets compose as multi-slot structures with authored intra-slot rest. Work+rest sibling sets replace the Tabata-intrinsic hardcoded cadence. Compound work targets (load + distance on one slot) route correctly through the cardio-and-strength log shape. Zero-slot pure-timer rest sets exist as blocks of their own. Mixed strength and cardio within one AMRAP round is authorable without timing-mode negotiation.
@@ -113,4 +118,6 @@ RC gate: one manual simulator smoke on cluster or custom-cadence work+rest befor
 
 ## Handoff to implementation-planning
 
-This phase spec is the input to `scoping:implementation-planning`. The implementation plan produced there carries the code-altitude decomposition (which drivers grow which capabilities, which session-state extensions land, which fixtures correspond to which worked examples). An implementation plan that surfaces a pattern that cannot be composed from the seven primitives routes back to the spec — not to requirements-planning, unless the gap reveals the durable requirement's expressive promise was under-scoped.
+Do not use this file directly as the implementation-planning input. Use
+`PDM-GAP-*` rows in the owning primitives spec files first, then consult this
+phase only for prior decomposition and hazards.

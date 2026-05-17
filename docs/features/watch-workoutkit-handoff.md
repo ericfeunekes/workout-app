@@ -114,13 +114,13 @@ Completion proof must answer these cases before implementation planning:
 
 ## Current gaps
 
-- Initial allowlist exists; the final per-archetype mapping table still needs
-  to be built and proven.
-- No app package currently wraps WorkoutKit.
-- Real-device WorkoutKit scheduling/opening has not been proven.
-- Completion reconciliation path is unsettled: HealthKit query, WorkoutKit
-  scheduled-plan completion state, or explicit user confirmation may each be
-  viable depending on platform behavior.
+- `WATCHKIT-GAP-001`: Initial allowlist exists; the final per-archetype mapping
+  table still needs to be built and proven.
+- `WATCHKIT-GAP-002`: No app package currently wraps WorkoutKit, and real-device
+  WorkoutKit scheduling/opening has not been proven.
+- `WATCHKIT-GAP-003`: Completion reconciliation path is unsettled. HealthKit
+  query, WorkoutKit scheduled-plan completion state, or explicit user
+  confirmation may each be viable depending on platform behavior.
 
 ## Relationship to custom watch-primary
 

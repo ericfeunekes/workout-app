@@ -1,6 +1,6 @@
 ---
 title: timing-modes
-status: living — current pre-primitives contract
+status: verified
 last_reviewed: 2026-05-17
 purpose: Behavioral contract + QA scenarios for timing-modes
 covers:
@@ -21,7 +21,7 @@ covers:
 > primitive timing/traversal/repeat cells.
 
 ## What it does
-`TimingMode` is a 12-case enum (`CoreDomain/Enums.swift`) on every `Block`. Each mode has (a) a `TimingConfig` variant parsed from `block.timing_config_json` by `PrescriptionParser+TimingConfig.swift`, and (b) a `TimingDriver` looked up from `DriverRegistry` (inline in `ExecutionViewModel.swift`). The driver answers three questions per block: what the Active screen shows, how long rest is after a set, and what mutations (+ autoreg proposal) a set-log produces. Per the authoritative `docs/prescription.md` § "Per-timing-mode prescription shapes", each mode has a defined shape. **All 12 modes are built + tested.** Mode-aware cursor advancement lives on `SessionState.Structure.advancementByBlock` (`.setMajor` vs `.roundRobin` vs `.zeroItem`) — the seeder populates it per-block, the reducer's `nextCursor` branches on it. Time-capped / work-window modes are driven by VM-level `blockEndsAt` / `workEndsAt` timers persisted on `SessionState`. Both `ActiveView` and `RestView` carry a 1-second `Timer.publish(...).autoconnect()` publisher (`.onReceive(tickTimer)`) that calls `viewModel.tickBlockTimer()` every second while a cap/work window is active; `RestView` also ticks when `currentRestShouldAutoAdvance` is true so clock-owned rests move at zero. The VM then dispatches the mode-native timeout behavior when wall-clock elapses. Strength recovery rests are intentionally excluded from auto-advance so over-rest can count up until the next `Set Start`. See bug-042 for the wiring history.
+`TimingMode` is a 12-case enum (`CoreDomain/Enums.swift`) on every `Block`. Each mode has (a) a `TimingConfig` variant parsed from `block.timing_config_json` by `PrescriptionParser+TimingConfig.swift`, and (b) a `TimingDriver` looked up from `DriverRegistry` (inline in `ExecutionViewModel.swift`). The driver answers three questions per block: what the Active screen shows, how long rest is after a set, and what mutations (+ autoreg proposal) a set-log produces. Per the authoritative `docs/prescription.md` § "Per-timing-mode prescription shapes", each mode has a defined shape. All 12 modes are implemented and covered by local tests. Mode-aware cursor advancement lives on `SessionState.Structure.advancementByBlock` (`.setMajor` vs `.roundRobin` vs `.zeroItem`) — the seeder populates it per-block, the reducer's `nextCursor` branches on it. Time-capped / work-window modes are driven by VM-level `blockEndsAt` / `workEndsAt` timers persisted on `SessionState`. Both `ActiveView` and `RestView` carry a 1-second `Timer.publish(...).autoconnect()` publisher (`.onReceive(tickTimer)`) that calls `viewModel.tickBlockTimer()` every second while a cap/work window is active; `RestView` also ticks when `currentRestShouldAutoAdvance` is true so clock-owned rests move at zero. The VM then dispatches the mode-native timeout behavior when wall-clock elapses. Strength recovery rests are intentionally excluded from auto-advance so over-rest can count up until the next `Set Start`. See bug-042 for the wiring history.
 
 ## State surface
 - **Inputs per mode:** `block.timingMode` (enum) + `block.timingConfigJSON` (mode-specific fields); item prescriptions.
@@ -42,16 +42,17 @@ covers:
 - Tabata's timing config is a hard-coded sentinel (`.tabata` case, no fields; see `TimingConfig.swift:62-63`, `PrescriptionParser+TimingConfig.swift:37`). The 20/10 interval + 8-round definition is enforced by `TabataDriver` + VM `workEndsAt` handling.
 - EMOM `interval_sec` + `total_minutes` — parsed as typed fields; the driver renders interval content and the VM uses them for `intervalAnchorAt`, boundary catchup, and block cap timing.
 
-## Known issues / gaps
-- All 12 drivers built + registered + unit-tested. Integration coverage includes `testAMRAPBlockWaitsForResultCaptureAtTimeCap`, `testEMOMCursorRoundRobinsPerInterval`, `EMOMBoundaryTests` (bug-050 minute-boundary via `intervalAnchorAt`), `testCircuitRoundsWalkItemsThenRoundBumps`, `testForTimeRoundSchemeRendersEachRoundReps`, continuous target tests, and `AccumulateDriverTests`.
-- **EMOM minute-boundary advance** (bug-050): `SessionState.intervalAnchorAt` anchors the interval; VM auto-dispatches `.advanceFromRest` when wall-clock elapses past `anchor + interval_sec`. Pre-R2.1 restore backfills the anchor from `blockEndsAt − total_minutes*60`. Rest-ring uses log-time against the anchor, not `interval_sec` from log moment.
-- **EMOM background catchup** (qa-047): iOS suspends `Timer.publish` while the app is backgrounded; on foreground the publisher fires one tick regardless of how many minute boundaries elapsed. `tickBlockTimer` loops `catchUpEMOMBoundaries` — every overdue boundary advances the cursor. If the user was on `.rest`, the prior log is already committed; if the user was still on `.active`, the missed interval advances without creating a fake completed `0 reps` row. The loop terminates on the first boundary still in the future or once the cursor walks past the authored intervals. Block-cap elapse routes to the NEXT block via `routeOutOfCurrentBlock` (cursor jumps to `(nextBlock, 0, 1)`, anchors cleared, block-entry helpers re-run); only a trailing capped block routes to `.complete`. Pre-fix a 90s background on a 2-item EMOM advanced the cursor by one interval and then fired `.complete`, silently dropping every later block in the workout.
-- **qa-046 — view distortion on background/resume (watchlist).** Reports of the Active / Rest views rendering in a visually odd intermediate state during the scenePhase transition back to `.active` (possibly related to the `TimelineView(.periodic(by: 0.25))` in `RestView`'s ring tile). Not reproducible in `swift test` — SwiftUI's scene-phase machinery isn't exercised by the harness. Left as a watchlist item pending either an MCP-driven visual repro or a shift to a reference-typed timer source for the rest ring.
-- **Tabata work-window logging.** The 20s / 10s / 8-round cadence is enforced. Strength-shaped Tabata enters the scheduled 10s rest when the work window expires but leaves the round unlogged rather than fabricating a completed `0 reps` row; cardio-shaped Tabata auto-logs `.logCardioSet(durationSec: 20)` because duration is clock-detectable. Multi-item Tabata collapses to `items[0]` at seed time and emits `execution.tabata_multi_item_collapsed` telemetry (bug-055).
-- **Cardio contract** (bug-049): IntervalsDriver + ContinuousDriver now route logs through `.logCardioSet` which carries `durationSec` / `distanceM` / `hrAvgBpm` / `cadenceAvgSpm` / `startedAt`. Elapsed wins over authored target pace × distance. Time-based intervals auto-log at `work_sec` and clock-owned rests auto-transition at `rest_sec`. Distance-based intervals do not infer work/rest timers from target pace without GPS/sensor support; they show elapsed time and require manual lap/advance. IntervalsDriver suppresses trailing rest on the final interval.
-- **Unit-aware item work targets** (bug-086): Round-based item prescriptions can carry `target.kind/value/unit` for reps, duration, or distance. Duration/distance stations render as cardio-shaped active content with the authored unit (`2 min`, `200 ft`) and log canonical `duration_sec` / `distance_m`; loaded carries and holds preserve `(weight, weight_unit)` on the cardio log. Pinned by `work_target` parser cases and `ExecutionViewModelLogCurrentSetTests.testUnitAwareDistanceTargetRendersAndLogsLoadedCarry` / `testUnitAwareDurationTargetDisplaysAuthoredUnitButLogsElapsedSeconds`.
-- **Superset / Circuit / Custom autoreg** is off in v1 — those drivers now read `itemLog.sets[cursor]` (bug-053) so swap overrides survive, but autoreg proposals for round-robin modes still need "applies to remaining rounds" semantics in the reducer.
-- **AMRAP / EMOM sentinel.** Seeded at 100 rows per item; the VM's time-cap path (`blockEndsAt` + `tickBlockTimer`) terminates the block well before the cursor hits row 100. AMRAP's `totalSets = 0` (bug-037) hides the progress-dot row.
+## Current gaps
+
+- `TIMING-GAP-001`: Superset, circuit, and custom drivers do not propose
+  autoreg. Round-robin autoreg needs explicit "remaining rounds" semantics
+  before it can be enabled.
+- `TIMING-GAP-002`: Distance-based intervals do not infer work/rest timers from
+  target pace without GPS/sensor support; they show elapsed time and require
+  manual lap/advance.
+- `TIMING-GAP-003`: Active/Rest view distortion on background/resume has been
+  observed but is not reproducible in automated tests. Capture visual evidence
+  before changing timer or scene-phase code.
 
 ---
 

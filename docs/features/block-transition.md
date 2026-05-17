@@ -1,7 +1,7 @@
 ---
 title: block-transition
-status: implemented
-last_reviewed: 2026-04-26
+status: built
+last_reviewed: 2026-05-17
 purpose: Target contract and QA scenarios for the between-block setup surface.
 covers:
   - docs/features/execute-loop.md
@@ -46,11 +46,14 @@ athlete prepare for the next block.
 
 ## Current gaps
 
-- Block intent display needs `block.intent` authoring/display cutover before the
-  transition can show intent beyond timing mode and setup lines.
-- Same-setup adjacent blocks currently still show transition when the next work
-  block has item setup. Skipping low-value same-setup transitions remains polish.
-- Route/direction integration is deferred to the later mapping feature.
+- `TRANS-GAP-001`: Block intent display needs `block.intent`
+  authoring/display cutover before the transition can show intent beyond timing
+  mode and setup lines.
+- `TRANS-GAP-002`: Same-setup adjacent blocks currently still show transition
+  when the next work block has item setup. Skipping low-value same-setup
+  transitions remains polish.
+- `TRANS-GAP-003`: Route/direction integration is deferred to the later mapping
+  feature.
 
 ## Proof
 

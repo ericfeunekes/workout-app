@@ -1,6 +1,7 @@
 ---
 title: Watch metrics contract
 status: draft
+last_reviewed: 2026-05-17
 purpose: Slot, metric, target-window, and phone/watch lifecycle contract for the Setmark watchOS workout app.
 covers:
   - app/WorkoutDBWatch/
@@ -597,6 +598,14 @@ Default resolver order:
 Mid-workout slot changes, if needed, happen on the phone. They are display-only
 changes and do not pause the workout. The phone pushes a new versioned display
 payload to the watch.
+
+## Current Gaps
+
+- `WATCHCUSTOM-GAP-003`: The three-view custom Watch renderer, metric resolver,
+  persistent HR slot states, target-window display, and route/directions
+  quadrant are target behavior, not implemented behavior. Route/directions work
+  must prove route package fidelity, GPS ownership, and honest unavailable
+  states before it can claim guidance.
 
 ## Open Platform Decisions
 

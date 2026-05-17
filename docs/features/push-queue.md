@@ -1,6 +1,7 @@
 ---
 title: push-queue
-status: living
+status: built
+last_reviewed: 2026-05-17
 purpose: Behavioral contract + QA scenarios for push-queue
 covers:
   - app/Packages/Sync/Sources/Sync/PushQueue.swift
@@ -46,14 +47,13 @@ Durable SwiftData-backed FIFO queue for outbound writes. Three payload shapes: `
 - `(priority, enqueuedAt)` sort + `fetchLimit: max` (`PushQueueStoreImpl.swift` `peek(max:)`) — server-side order, no whole-queue decode
 - Telemetry events UUID-lowercased at encode time (`PushQueue.swift:243, :245, :249, :250`)
 
-## Known issues / gaps
-- Closed: `/api/sync/results` UUID case mismatch (bug-004 / bug-030 / bug-031 / bug-045). Every outbound UUID routes through `UUID.wireID` (lowercase); server accepts only lowercase on input.
-- Closed: saveAndDone status_update (bug-005 / bug-006) with re-entrancy guard (bug-044).
-- Closed: unbounded retry / no priority ordering / no dedup / no backoff — all shipped in bug-060 + bug-056 + bug-055 + bug-044. See "What it does have now" above.
-- Closed: `peek` decoded the whole queue on every flush and every dedup pass (perf-002). `PushItemModel` V4 persists `priority` + `dedupKey` so `peek` uses a `(priority, enqueuedAt)` sort + `fetchLimit`, and dedup uses `removeMatchingDedupKey` with a scoped predicate.
-- Closed: `.userParameter` idempotency (bug-044) — client-owned deterministic id (MD5 of `userID|key|observedAt`); server enforces tenant guard (403 on duplicate id from different user).
-- Open: `docs/sync.md` § "Offline completion atomicity" — set_logs and status_update are separate items; partial flush can leave server in "logs against active workout" state.
-- Open: no background-push — if user logs a set, locks phone, set never gets pushed until next foreground.
+## Current gaps
+
+- `PUSH-GAP-001`: Offline completion atomicity is not guaranteed. Set logs and
+  status updates are separate queue items, so a partial flush can leave the
+  server with logs against a still-active workout until retry completes.
+- `PUSH-GAP-002`: No background push path exists. If the user logs a set and
+  locks the phone before a foreground flush, push waits until the app resumes.
 
 ## QA scenarios
 

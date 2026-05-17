@@ -40,26 +40,20 @@ section can be `planned`, `building`, `built`, or `verified`.
 tap-target, contrast, and timer-flow behavior need simulator evidence or a
 pinned UI test. `docs/QA.md` defines the accepted proof artifacts.
 
-## Gap Map
+## Gap Index
 
-`docs/feature-gap-map.md` is the cross-feature sequencing view. It mirrors the
-feature docs' `Current gaps` sections and groups gaps into implementation
-phases. The docs pass fills the phase column from feedback priority and obvious
-delivery clusters; implementation planning can reshuffle when a specific unit is
-selected.
+`docs/feature-gap-map.md` is the cross-feature gap index. The owning feature or
+aspect doc remains the source of truth; the map gives each unresolved gap a
+stable ID so a future phase plan can say exactly which gaps it addresses.
 
-Do not use the gap map as an implementation plan. Plans live in
-`docs/plans/active/` only while a scoped unit is actively being worked.
-Completed and superseded plans move to `docs/plans/archive/` for provenance.
+Do not use the gap map as an implementation plan. Plans are just-in-time
+artifacts in `docs/plans/active/` for selected work. Deferred capabilities stay
+as requirements and gaps in their owning docs.
 
-Watch-primary execution is the next planned feature thread. It extends the
-execution loop to Apple Watch without making the Watch a server actor: the
-phone remains responsible for authoring, customization, and server sync, while
-the live workout has one primary authority at a time. The full feature spec is
-`docs/features/watch-primary-execution.md`; the lower-level watch slot and
-metric contract is `docs/watch-metrics.md`.
+## Watch Direction
 
-The watch work depends on the execution, timing-mode, persistence, push-queue,
-telemetry, and sync contracts. Implementation planning should read those feature
-docs first, then read the feature-gap map, the watch-primary spec, and
-`docs/watch-metrics.md`.
+Early Apple Watch delivery starts with
+`docs/features/watch-workoutkit-handoff.md`: map eligible workouts into Apple's
+Workout app through WorkoutKit and prove completion reconciliation. Custom
+Setmark watch-primary execution remains a later capability owned by
+`docs/features/watch-primary-execution.md` and `docs/watch-metrics.md`.

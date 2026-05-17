@@ -1,7 +1,7 @@
 ---
 title: execute-loop
-status: living
-last_reviewed: 2026-04-26
+status: built
+last_reviewed: 2026-05-17
 purpose: Behavioral contract + QA scenarios for execute-loop
 covers:
   - app/Packages/Features/Execution/Sources/FeaturesExecution/ExecutionViewModel.swift
@@ -112,36 +112,24 @@ Do not regress to the old pattern where Active renders `REST 0:00` while a block
 
 ## Current gaps
 
-- Rest no longer has dead "waiting to start" copy; explicit-start active work
-  uses `READY` as the prep timer label.
-- Primary CTA enabled/disabled contrast and tap targets need simulator proof.
-- Bodyweight editability must be proven through the shared edit surface.
-- Skip action/persistence is built for eligible active row-based routes; broader
-  Phase 5 UI work still needs proof that skip placement remains purposeful after
-  the active/rest redesign.
-- Active view now shows bounded whole-block position; remaining Active work is
-  focal hierarchy/scrolling polish across non-straight-set modes.
-- Between-block setup transition is built for work-block handoffs and proven in
-  simulator with `transition_setup`.
-- Superset logging is proven at round rest, not mid-superset.
-- Rest timer continuity requires simulator or pinned UI proof.
-- Unilateral logging remains exercise/workout-item authored. Do not infer
-  unilateral grouping from `set_log.side`; that field is shipped/reserved unless
-  a later phase promotes it. Carry/distance/duration active logging and History
-  correction parity are built; remaining work is preview/active edit
-  unification and broader mode-specific proof.
-- ETA remaining remains later polish.
-- Set-index render (bug-020) closed — `formatSetRow` uses `setIndex` as-is; pipeline is 1-based throughout.
-- `SetPlan.loadKg` is now `Double?` (nil means bodyweight / loadless — bug-053). Drivers, formatters, and CompleteView+Ledger render "BW" on nil; only nil (not 0) is treated as BW so a genuine 0 lb / 0 kg authored row renders with the unit.
-- Default weight unit is `.lb` (bug-059). All 9 drivers render via the centralized `formatLoad(weight:unit:)`; autoreg step defaults per unit (5 lb / 1.25 kg); server prescription merge defaults to `.lb`.
-- Cardio blocks route through `logCurrentSet()` → `.logCardioSet` with elapsed-wins duration (bug-049); IntervalsDriver suppresses trailing rest on the final interval.
-- `holdAutoreg` uses a workaround in `undoAutoreg` — revert path uses `editPendingSet` which tags sets `.manual`. Cosmetic: hold flag makes this moot for the session.
-- `percent_1rm` prescriptions resolve through the app's seed-time user-parameter context when the needed parameter is present. Missing parameters remain `loadKg = nil` rather than being recomputed later; the primitives target keeps this authority at app seed time after pull.
-- Cluster/rest-pause prescriptions (`sub_sets` / `intra_set_rest_sec`) execute as composed sets with intra-set rest, one top-level log row, and final-set RIR. This is supported in straight-set blocks and as stations inside round-based superset/circuit blocks; expanded per-slot actual editing remains deferred.
-- Numeric-entry flashes and log/rest transition flicker have been seen in visual QA but are not currently reproducible as deterministic defects. Treat as watchlist polish: capture simulator video before changing sheet/router code.
-- All 12 timing modes are wired in `DriverRegistry.init` default: `straightSets`, `superset`, `circuit`, `emom`, `amrap`, `forTime`, `intervals`, `tabata`, `continuous`, `accumulate`, `custom`, `rest`. Unknown / unregistered modes fall back to `StraightSetsDriver()`. See `timing-modes.md`.
-- `amrapToken` / `empty` prescriptions seed a single manual-placeholder SetPlan (bug-058) instead of `[]`, so Straight doesn't dead-end and Custom doesn't fabricate a phantom row.
-- `docs/open-questions.md` § "Multiple active workouts" — starting workout B while A is `active` is not handled.
+- `EXEC-GAP-001`: Primary CTA enabled/disabled contrast and tap targets need
+  simulator proof.
+- `EXEC-GAP-002`: Bodyweight editability must be proven through the shared edit
+  surface.
+- `EXEC-GAP-003`: Active/rest focal hierarchy and scrolling polish need proof
+  across non-straight-set modes.
+- `EXEC-GAP-004`: Rest timer continuity requires simulator or pinned UI proof.
+- `EXEC-GAP-005`: Carry/distance/duration active logging exists, and History
+  correction parity exists, but preview/active edit unification and broader
+  mode-specific proof remain open.
+- `EXEC-GAP-006`: ETA remaining remains later polish.
+- `EXEC-GAP-007`: Starting workout B while workout A is active has no selected
+  behavior.
+- `EXEC-GAP-008`: Cluster/rest-pause expanded per-slot actual editing remains
+  deferred; the current app logs one top-level row per composed set.
+- `EXEC-GAP-009`: Numeric-entry flashes and log/rest transition flicker have
+  been seen in visual QA but are not reproducible as deterministic defects.
+  Capture simulator video before changing sheet/router code.
 
 ## QA scenarios
 

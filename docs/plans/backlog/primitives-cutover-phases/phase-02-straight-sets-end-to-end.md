@@ -12,6 +12,11 @@ spec:
 
 # Phase 2 — Straight-sets block executes end-to-end under primitives
 
+> Historical/source-material note: this is not a standing implementation plan.
+> Future work must start from `PDM-GAP-*` rows in the owning primitives spec
+> files and create a fresh active plan against the codebase state at pickup
+> time.
+
 ## Unit statement
 
 After this phase, a straight-sets block authored in the primitive vocabulary can be pulled to the app, driven to completion by the user, logged to local storage, and pushed to the server — end to end under the new model. Other timing modes do not yet execute; the branch intentionally fails or stubs those modes until Phase 3. This phase proves the execution pattern works for one representative mode before Phase 3 fans the pattern out to the remaining eleven.
@@ -96,4 +101,6 @@ RC gate: one manual straight-sets simulator smoke before phase close.
 
 ## Handoff to implementation-planning
 
-This phase spec is the input to `scoping:implementation-planning`. The implementation plan produced there carries the code-altitude decomposition (which execution-state types change, which driver is ported, which view-model responsibilities move, which test fixtures land). An implementation plan that needs this phase spec to resolve an ambiguity about outcome — what functionality ships, what proof binds it — routes back here.
+Do not use this file directly as the implementation-planning input. Use
+`PDM-GAP-*` rows in the owning primitives spec files first, then consult this
+phase only for prior decomposition and hazards.

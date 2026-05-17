@@ -1,6 +1,7 @@
 ---
 title: Architecture
 status: accepted
+last_reviewed: 2026-05-17
 purpose: One-page system map + domain router. Summarizes the shape; routes to the spec and per-package READMEs for detail.
 covers:
   - docs/
@@ -74,9 +75,12 @@ Server tests under `tests/server/`. Contract tests that pin cross-stack schema p
 
 Core principle: **composition with timing**. Everything is blocks; a block has a `timing_mode` and contains exercises or nested blocks.
 
-Entities: `app_user`, `exercise`, `exercise_alternative`, `block`, `workout_item`, `workout`, `set_log`, `user_parameters`. UUIDs everywhere.
+This is the current implemented pre-primitives baseline. Entities: `app_user`,
+`exercise`, `exercise_alternative`, `block`, `workout_item`, `workout`,
+`set_log`, `user_parameters`. UUIDs everywhere.
 
-See spec § "Data model" for field-level definitions.
+See spec § "Data model" for field-level definitions. Target data-model
+planning for new work starts from `docs/specs/primitives-data-model.md`.
 
 ## Sync model
 
@@ -94,6 +98,7 @@ See `docs/sync.md` for the full rules, and the spec § "Persistence architecture
 - Structural contract (boundaries + fitness functions + hotspots + Swift package graph) → `docs/architecture/` (start at `context.md`)
 - Workout generation workflow → `docs/workout-generation.md` (how Claude/humans compose blocks, timing modes, prescriptions, autoreg, alternatives, and result expectations)
 - Prescription authoring vocabulary → `docs/prescription.md` for the current pre-primitives app; `docs/specs/primitives-data-model.md` for the accepted target primitives contract.
+- Modifier/equipment authoring → `docs/modifier-equipment.md`
 - Sync + connectivity + first-run → `docs/sync.md`
 - Early Apple Watch delivery → `docs/features/watch-workoutkit-handoff.md`
 - Later custom Watch execution → `docs/features/watch-primary-execution.md` and `docs/watch-metrics.md`

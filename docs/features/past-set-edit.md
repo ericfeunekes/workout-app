@@ -1,7 +1,7 @@
 ---
 title: past-set-edit
-status: living
-last_reviewed: 2026-04-26
+status: built
+last_reviewed: 2026-05-17
 purpose: Behavioral contract + QA scenarios for past-set-edit
 covers:
   - app/Packages/Features/Execution/Sources/FeaturesExecution/ExecutionViewModel.swift
@@ -51,25 +51,17 @@ Correctively edit a logged set's load, reps, or RIR. **In active session** (Rest
 
 ## Current gaps
 
-- Active-session and History corrections still use different visual surfaces,
-  but History now emits the shared `SetEditIntent` and covers set-log correction
-  fields from Phase 6. The remaining unification work is preview/active visual
+- `PASTEDIT-GAP-001`: Active-session past correction is limited to the
+  last-logged set. There is no active-screen picker for older logged rows.
+- `SETEDIT-GAP-001`: Active-session and History corrections still use different
+  visual surfaces. The remaining unification work is preview/active visual
   parity and apply scope.
-- History correction parity is built for set-log fields: load/unit, reps, RIR
-  set/clear, duration, distance, skipped/performed state, side round-trip, and
-  notes. Bodyweight correction remains a separate `user_parameters` editing
-  problem. Side is only a shipped/reserved round-trip field unless a later phase
-  promotes it; unilateral work is authored at the exercise/workout-item level.
-- Apply-to-remaining/future-set scope is target behavior for selected preview or
-  active setup edits, but it is not part of completed past-log correction.
-- History-screen edit sheet shipped (bug-015), is unit-aware (bug-051), and now covers the Phase 6 set-log correction fields: labels per source `weightUnit`, reps capped at 999, RIR clear via explicit-clear enum state, duration, distance, skipped/performed state, side round-trip, and notes.
-- `completedAt` preservation (bug-054): `enqueueEditedSet` now carries the original `completedAt` instead of stamping edit time. The Active-session and History-tab edit paths now agree on timestamps.
-- Per-set `startedAt` provenance (bug-054): `SessionState.workStartedAt` anchor is stamped on `.start` + `.advanceFromRest`, consumed by the reducer in `.logSet` / `.logCardioSet`, and preserved through completion + edit.
-- Set-index render bug (bug-020) closed — `formatSetRow` uses `setIndex` as-is; pipeline is 1-based throughout.
-- `set_log.updated_at` still not a server column, and there is no field-diff
-  telemetry event or durable History edit log. Past corrections overwrite the
-  existing logical set-log row; the current SetEditSheet `past` mode contract is
-  not audit-grade until that structural unit lands.
+- `SETEDIT-GAP-002`: Apply-to-remaining/future-set scope is target behavior for
+  selected preview or active setup edits, but it is not part of completed
+  past-log correction.
+- `HISTORY-GAP-002`: Past corrections overwrite the existing logical set-log
+  row. `set_log.updated_at`, field-diff telemetry, and durable History edit log
+  are separate future provenance work.
 
 ## QA scenarios
 

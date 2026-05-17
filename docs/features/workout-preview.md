@@ -1,6 +1,6 @@
 ---
 title: workout-preview
-status: built with current gaps
+status: built
 last_reviewed: 2026-05-17
 purpose: Target contract and QA scenarios for opening a planned workout before execution starts.
 covers:
@@ -71,18 +71,21 @@ handoff instead of inventing a local plan mutation.
 
 ## Current gaps
 
-- The core preview-first entry path is built through Today's preview/detail sheet. A richer dedicated `WorkoutPreviewView` remains target behavior.
-- Preview editability is not proven for all target fields.
-- Preview edit persistence is not implemented. Any future publisher must be
+- `TODAY-GAP-001`: The core preview-first entry path is built through Today's
+  preview/detail sheet. A richer dedicated `WorkoutPreviewView` remains target
+  behavior.
+- `PREVIEW-GAP-001`: Preview editability is not proven for all target fields.
+- `PREVIEW-GAP-002`: Preview edit persistence is not implemented. Any future
+  publisher must be
   built against the server's whole-tree replacement contract and must decide how
   to handle stale local previews versus newer server workout trees.
-- Preview still uses Today's read-side block detail instead of directly
+- `PREVIEW-GAP-003`: Preview still uses Today's read-side block detail instead of directly
   importing `ExecutionProjection`; that preserves the feature-package boundary
   that only Shell may compose sibling features. Execution-side preview work now
   exposes a projection-backed work queue for current-block remaining and future
   work.
-- Simulator proof is required before any preview tap target or layout claim is
-  marked `verified`.
+- `TODAY-GAP-002`: Simulator proof is required before any preview tap target or
+  layout claim is marked `verified`.
 
 ## QA scenarios
 

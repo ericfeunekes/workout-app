@@ -1,3 +1,17 @@
+---
+title: Setmark v2 architecture spec
+status: accepted — partially superseded
+date: 2026-04-15
+last_reviewed: 2026-05-17
+purpose: Target architecture for the dumb-app/smart-conversation workout system; data-model section now records the current pre-primitives baseline and is superseded for target planning by the primitives spec.
+covers:
+  - docs/specs/primitives-data-model.md
+  - docs/prescription.md
+  - docs/sync.md
+  - server/
+  - app/
+---
+
 # Setmark v2 — Architecture Spec
 
 **Date:** 2026-04-15 (accepted 2026-04-17)
@@ -23,7 +37,7 @@ The app doesn't need to know what a muscle group is. It doesn't need substitutio
 
 ## Data model
 
-> **Status (2026-04-28):** This section is **superseded by `docs/specs/primitives-data-model.md`**. That spec replaces the per-timing-mode prescription model described below with a 7-primitive composition over a Block > Set > Slot hierarchy. The sections that follow (Persistence architecture, API contract, Sync, What Claude pushes, Watch integration) remain authoritative for everything except the prescription/log data shape.
+> **Status (2026-05-17):** This section records the current implemented pre-primitives data model. It is **superseded for target planning by `docs/specs/primitives-data-model.md`**. That spec replaces the per-timing-mode prescription/log model described below with a 7-primitive composition over a Block > Set > Slot hierarchy. Use this section to understand the current shipped baseline; use the primitives spec for the accepted target data shape and cutover requirements. The sections that follow (Persistence architecture, API contract, Sync, What Claude pushes, Watch integration) remain authoritative except where they name the superseded prescription/log data shape.
 >
 > The content below is retained for historical context until the primitives cutover lands. After cutover, this section will be rewritten to point at the primitives spec as the canonical data model.
 
@@ -144,7 +158,7 @@ An exercise placed inside a block.
 - Cluster sets / rest-pause / myo-reps: `{"sets": 4, "reps": 5, "load_kg": 100, "sub_sets": 4, "intra_set_rest_sec": 15}` — each of the 4 top-level sets = 4 sub-sets of 5 reps with 15s rest between sub-sets; `rest_between_sets_sec` still applies between top-level sets
 - Cluster stations in round-based blocks may omit `sets`; the block `rounds` supplies the top-level count while the station keeps `sub_sets` and `intra_set_rest_sec`.
 
-Keeping this as JSON means new prescription shapes don't require schema changes. **The authoritative catalog of prescription shapes lives in `docs/prescription.md`** — that doc is the source the upstream "planning Claude" will be built against. If a shape appears in code but not in `docs/prescription.md`, the doc is wrong; fix the doc in the same commit that adds the shape.
+Keeping this as JSON means new pre-primitives prescription shapes don't require schema changes. **For the current implemented model, the catalog of prescription shapes lives in `docs/prescription.md`** — that doc is the source the upstream "planning Claude" uses until the primitives cutover lands. For target primitives work, `docs/specs/primitives-data-model.md` and its aspects are authoritative; `docs/prescription.md` must be rewritten during the final docs sweep rather than treated as the target contract.
 
 #### `workout`
 

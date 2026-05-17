@@ -2,6 +2,7 @@
 title: Primitives data model
 status: accepted (target spec) — implementation not yet started
 date: 2026-04-28
+last_reviewed: 2026-05-17
 purpose: Replace today's per-timing-mode prescription/log model with 7 composable primitives serialized under a Block > Set > Slot hierarchy, so every new workout pattern is a composition of existing primitives rather than a new enum case.
 supersedes:
   - docs/specs/v2-architecture.md § Data model (the primitives model replaces that section; sync + philosophy sections of v2 remain authoritative)
@@ -9,7 +10,7 @@ covers:
   - Wire format for prescriptions (authoring-shape aspect)
   - Set log row shape (log-shape aspect)
   - Seed/log/correction-time runtime resolution (runtime-resolution aspect)
-  - Cutover posture for a dev-mode drop-and-rebuild (cutover aspect)
+  - Cutover posture for a complete primitives cutover with local-log preservation (cutover aspect)
 ---
 
 # Primitives data model
@@ -66,7 +67,7 @@ For the concept-level discussion of the primitives and why they were chosen, see
 - **Authoring shape** — the wire format for workout / block / set / slot, how each of the 7 primitives serializes, merge rules for library defaults + alternatives + hierarchy walk. See `primitives-data-model/authoring-shape.md`.
 - **Log shape** — the `set_log` row model, three log roles (`slot`, `set_result`, `block_result`), deterministic UUID composition, per-stimulus typed columns, overlay columns, write semantics. See `primitives-data-model/log-shape.md`.
 - **Runtime resolution** — seed-time transform into `ExecutionPlan`, relative-load resolution against `user_parameters`, driver iteration contract over primitive cells, correction semantics via same-UUID upsert. See `primitives-data-model/runtime-resolution.md`.
-- **Cutover posture** — since the repo is still in single-user dev, the cutover is a drop-and-rebuild. See `primitives-data-model/cutover.md`.
+- **Cutover posture** — complete primitives cutover with no legacy acceptance path and explicit preservation of completed local workout logs. See `primitives-data-model/cutover.md`.
 
 ### Out of scope
 
@@ -75,7 +76,7 @@ For the concept-level discussion of the primitives and why they were chosen, see
 - **New stimulus types.** The spec supports RIR (shipping), RPE (column reserved), and HR-zone as derived-from-telemetry. Adding velocity, bar-speed, or other stimulus types is a followup; each needs its own small schema migration and resolver.
 - **Cross-stimulus autoreg.** Today only RIR has an autoreg rule. The spec accommodates multiple stimuli on a slot but does not specify cross-stimulus rule semantics. Deferred.
 - **Session-level primitives.** Deload multipliers, weekly volume caps, fatigue models — those belong to a layer above the single-workout primitives. Out of scope.
-- **Legacy data migration.** The repo is single-user dev; Eric's local set_logs can be dropped and rebuilt. The converged 700-line migration machinery from the scratch artifact (outbox drain, per-mode backfill, 30-day legacy acceptance) is NOT in this spec — it was designed for a production-data-preservation scenario that doesn't exist here.
+- **Legacy acceptance windows.** The cutover does not accept both old and new workout shapes after it lands. Existing server-side prescriptions can be re-pushed by Claude in the primitive shape. Completed local workout logs are different: they are Eric's authoritative client data and must survive via an explicit export/transform/re-import or archival migration path.
 
 ## Acceptance criteria
 
@@ -96,7 +97,7 @@ Proof: integration tests under `app/Packages/Features/Execution/Tests/` pass for
 
 Proof: fixture file per example under `tests/contract/` or `schema/fixtures/`, plus a round-trip test that asserts each stage's output.
 
-**A3. Seed-time relative-load resolution is deterministic and pinned.** Given `user_parameters` rows with `updated_at` timestamps, a slot with `load: { value: 0.85, unit: "1rm", unit_type: "relative" }` resolves against the latest-by-updated_at row at pull time, caches absolute kg on `ExecutionSlot.load_kg`, and pins `resolved_from_user_param_id` when the sync contract exposes it.
+**A3. App seed-time relative-load resolution is deterministic and pinned.** Given locally mirrored `user_parameters` rows with `updated_at` timestamps, a slot with `load: { value: 0.85, unit: "1rm", unit_type: "relative" }` resolves against the latest-by-updated_at row when the app seeds the pulled workout, caches absolute kg on `ExecutionSlot.load_kg`, and pins `resolved_from_user_param_id` when the sync contract exposes it.
 
 Proof: a unit test with two `user_parameters` updates (bodyweight_kg changes between session A and session B) produces two different cached absolute loads when two sessions are seeded with the same relative-load slot.
 
@@ -104,13 +105,13 @@ Proof: a unit test with two `user_parameters` updates (bodyweight_kg changes bet
 
 Proof: a test that logs a slot, edits it, and asserts the row count on `set_log` is exactly 1 with the edited values.
 
-**A5. The cutover is reversible within dev.** Because the cutover is drop-and-rebuild and acceptance does not depend on preserving old data, rolling back the spec means reverting the server migration + SwiftData version + app code + fixtures in one commit. The repo remains runnable at either the pre-cutover or post-cutover commit.
+**A5. The cutover preserves completed local workout history and remains reversible within dev.** Existing completed local set logs survive the SwiftData schema cutover as user-observable history facts. The preservation path may transform rows into the primitive log shape or archive them into a read-only historical lane, but it must not silently discard completed workout history. Rolling back the spec still means reverting the server migration + SwiftData version + app code + fixtures in one commit; both sides of the cutover remain runnable.
 
-Proof: bisect across the cutover commit; both sides of the bisect let `uv run pytest` and the app integration tests pass against the fixtures appropriate to that side.
+Proof: migration tests export a pre-cutover local store with representative completed logs, migrate it, and assert that the same workout dates, exercises, performed values, notes, and completion status are still visible post-cutover. Bisect across the cutover commit; both sides of the bisect let `uv run pytest` and the app integration tests pass against the fixtures appropriate to that side.
 
 ### Explicitly not in the acceptance bar
 
-- **Migration preserves historical set_logs.** Not required per Eric's dev-mode stance. The cutover aspect is drop-and-rebuild.
+- **Legacy shape remains accepted after cutover.** Not required and explicitly forbidden. Preservation is a one-way migration of completed local history, not a compatibility mode.
 - **The UI looks different.** Pure model-side spec; UI changes are a separate feature.
 - **Every driver is rewritten to be parametric.** Drivers can stay hand-coded per timing mode after the cutover, as long as they read against the new contract. Parametric consolidation is a followup.
 
@@ -118,7 +119,7 @@ Proof: bisect across the cutover commit; both sides of the bisect let `uv run py
 
 ### Assumptions
 
-- **Single-user dev mode persists through this cutover.** If Eric adds another user, or if this spec lands in production with Eric's long-term set_log history as the preservation constraint, the cutover aspect needs the full migration machinery that's currently in `scratch/primitives-data-model.md` (Phase 4pre outbox drain, Phase 4c per-mode backfill, etc.). That machinery converged through dialectic but is intentionally not in this spec.
+- **Single-user dev mode persists through this cutover.** No multi-user or production compatibility window is needed. The preservation constraint is narrower: completed local workout logs must survive because they are Eric's authoritative workout history. Server-side prescriptions and in-flight sessions can be rebuilt or abandoned.
 - **Claude continues to own exercise IDs and prescription composition.** The 7 primitives are authored by Claude in conversation; the app consumes them. If authoring shifts to an in-app editor, the component primitives noted in the concept doc become in-scope.
 - **Stimulus types stay discrete and rare.** The schema uses per-stimulus typed columns (`rir`, `rpe` reserved, raw telemetry columns for derived stimuli). Adding a new stimulus type is a migration. Current count: 2-3 foreseeable.
 
@@ -142,9 +143,9 @@ These are explicit; implementation-planning should treat them as things to inves
 
 ## Cutover posture
 
-Because the repo is single-user dev with no production data preservation constraint, the cutover is a **drop-and-rebuild**: new server migration drops the old prescription-JSON content and rebuilds in the new shape; SwiftData version bump drops old set_logs and seeds fresh from the server on first post-upgrade pull. See `primitives-data-model/cutover.md` for the specific steps and what ships in the cutover commit.
+Because the repo is single-user dev with no production compatibility constraint, the cutover is a **complete replacement of the active contract**: old prescription JSON and timing-mode shapes stop being accepted, and Claude re-pushes active workouts in the new shape. Completed local workout logs are not disposable. The SwiftData version bump must preserve those history facts through an explicit migration path while dropping legacy authoring and in-flight-session state. See `primitives-data-model/cutover.md` for the specific steps and what ships in the cutover commit.
 
-The 700-line coordinated-cutover machinery in `scratch/primitives-data-model.md` (Phase 4pre outbox drain, per-mode backfill, 30-day legacy acceptance at `/api/sync/results`) converged through dialectic for a production-preservation scenario. It is preserved in the scratch artifact as reference for a future migration if the preservation constraint appears, but is not part of this spec's cutover.
+The 700-line coordinated-cutover machinery in `scratch/primitives-data-model.md` (Phase 4pre outbox drain, per-mode backfill, 30-day legacy acceptance at `/api/sync/results`) converged through dialectic for a production-preservation scenario. It is preserved in the scratch artifact as reference, but the active spec only borrows the local-history preservation obligation. It does not inherit a 30-day dual-shape server window or old-payload acceptance path.
 
 ## Handoff to implementation-planning
 

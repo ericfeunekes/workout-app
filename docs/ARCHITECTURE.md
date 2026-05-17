@@ -90,10 +90,10 @@ See `docs/sync.md` for the full rules, and the spec § "Persistence architecture
 
 ## Where to go next
 
-- Target spec (authoritative) → `docs/specs/v2-architecture.md`
+- Target architecture → `docs/specs/v2-architecture.md`. Its data-model section is the current pre-primitives baseline; target primitives work uses `docs/specs/primitives-data-model.md`.
 - Structural contract (boundaries + fitness functions + hotspots + Swift package graph) → `docs/architecture/` (start at `context.md`)
 - Workout generation workflow → `docs/workout-generation.md` (how Claude/humans compose blocks, timing modes, prescriptions, autoreg, alternatives, and result expectations)
-- Prescription authoring vocabulary → `docs/prescription.md` (what Claude puts in a workout; per-mode shapes; autoreg rules)
+- Prescription authoring vocabulary → `docs/prescription.md` for the current pre-primitives app; `docs/specs/primitives-data-model.md` for the accepted target primitives contract.
 - Sync + connectivity + first-run → `docs/sync.md`
 - Proof contract → `docs/TESTING.md`
 - Server specifics → `server/README.md`

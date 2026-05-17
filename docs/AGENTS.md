@@ -18,7 +18,7 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `specs/v2-architecture.md` — **accepted** target architecture. Every non-trivial change is evaluated against this. Read in full before working on schema, sync, or the app. **Note:** the Data model section is superseded by `specs/primitives-data-model.md`; everything else in v2 remains authoritative.
 - `specs/primitives-data-model.md` — **accepted target spec (not yet implemented)** for the prescription + log + runtime-resolution data model. Replaces the 12-timing-mode enum with 7 composable primitives under a Block > Set > Slot hierarchy. Aspect files under `specs/primitives-data-model/` cover authoring shape, log shape, runtime resolution, and cutover posture.
 - `workout-generation.md` — canonical workout authoring guide. Start here when generating plans: data model, safe current timing modes, autoreg, result persistence, examples, and generator checklist.
-- `prescription.md` — authoring vocabulary. What Claude must put in a workout so the app can execute it. Per-timing-mode shapes, RIR + autoregulation rules, parametric shapes.
+- `prescription.md` — current pre-primitives authoring vocabulary. What Claude must put in a workout so the app can execute it today. For target primitives work, use `specs/primitives-data-model.md` instead.
 - `workout-taxonomy.md` — bootstrap workout-domain and block-archetype taxonomy. Use this before authoring new workout shapes so training intent maps to the right timing/logging primitive.
 - `workout-execution-requirements.md` — athlete-facing timer, transition, logging, and summary requirements for workout archetypes.
 - `workout-execution-design-plan.md` — pass-based plan for aligning the execution docs, then designing each flow before implementation.
@@ -38,7 +38,7 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `QA.md` — exploratory/simulator QA recording rules; keeps `docs/bugs.md` as the only active issue tracker and `scratch/qa-runs/` as raw evidence only.
 - `MIGRATIONS.md` — schema migration mechanics for server SQL + SwiftData, the single-user cutover flow, and recovery procedures.
 - `workout-generation.md` — generator-facing authoring guide that composes the data model, taxonomy, timing modes, prescriptions, autoregulation, support boundaries, and examples into one workflow.
-- `prescription.md` — prescription authoring vocabulary. Per-timing-mode shapes, RIR + autoreg rules, parametric shapes, authoring checklist.
+- `prescription.md` — current pre-primitives prescription authoring vocabulary. Per-timing-mode shapes, RIR + autoreg rules, parametric shapes, authoring checklist. Rewrite during the primitives docs sweep.
 - `workout-taxonomy.md` — maps workout domains to mutually-exclusive block archetypes and current timing modes.
 - `workout-execution-requirements.md` — documents how each archetype should execute from the athlete perspective before implementation details are chosen.
 - `workout-execution-design-plan.md` — tracks the alignment and flow-design passes that must happen before build planning.
@@ -56,7 +56,7 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `decisions/` — ADRs. Current set: `ADR-2026-04-17-ux-scope.md`, `ADR-2026-04-17-rir-autoreg-sync.md`, `ADR-2026-04-17-architecture.md`, `ADR-2026-04-18-shell-package-placement.md`, `ADR-2026-04-18-smart-defaults.md`.
 - `open-questions.md` — the living gap register. Items that surfaced from consistency passes but aren't decided yet, with working assumptions and disposition (decide-next / defer / resolve-in-code / watchlist).
 - `design/` — Claude Design handoff bundle (HTML/CSS/JSX prototypes, wireframes, rules). Read `design/ORIGIN.md` first, then `design/HANDOFF.md`. Reference, not spec.
-- `plans/active/` — current implementation plans. Start here before continuing an in-flight multi-slice build.
+- `plans/active/` — current implementation plans. Start here before continuing an in-flight multi-slice build if any files exist.
 - `plans/archive/` — completed or superseded implementation plans retained for provenance. Do not resume from here unless a current roadmap explicitly points back to one as reference.
 - `plans/backlog/workout-system-roadmap.md` — overall current roadmap across feedback implementation, primitives cutover, and Watch work.
 - `plans/backlog/feedback-implementation-phases/` — phase-by-phase implementation plans for carrying the 2026-04-25 feedback through schema, execution UX, history, watch authority, watch UI, and future in-app Claude/chat.

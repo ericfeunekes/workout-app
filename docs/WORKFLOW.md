@@ -2,7 +2,7 @@
 title: Development workflow
 status: stable
 date: 2026-04-17
-last_reviewed: 2026-04-26
+last_reviewed: 2026-05-17
 purpose: "How work progresses in this repo — the lifecycle from idea to deployed code, and the rules that hold across every cycle."
 covers:
   - AGENTS.md
@@ -59,6 +59,13 @@ Apply the plan. A few standing rules:
 - **No legacy paths, no feature flags.** Change fully or don't change at all.
 - **Resolve nitpicks in the moment.** Small inconsistency, off naming, dead code — fix now, don't accumulate a list.
 - **Trust the harness.** If a decision is in `AGENTS.md`, `docs/MIGRATIONS.md`, or a spec, it's load-bearing — don't re-debate it in conversation.
+
+Large complete cutovers may use **branch checkpoints** when one review cycle
+cannot hold the whole change. A branch checkpoint is not a shippable state and
+must not merge to `main`; it exists so implementation-planning, review, and QA
+can prove one coherent outcome before moving to the next. The merge boundary
+still obeys the complete-cutover rule: no legacy path, no unsupported user path,
+and all affected code, tests, schemas, and docs on the new contract.
 
 ### Verify
 
@@ -245,5 +252,5 @@ Resuming work without this conversation's context:
 
 - Re-read `AGENTS.md` and this file.
 - Read the affected spec (`docs/specs/v2-architecture.md`) and any ADRs in `docs/decisions/`.
-- Check `docs/plans/active/` for in-flight work (directory created when first plan lands).
+- Check `docs/plans/active/` for in-flight work if it exists, then read `docs/plans/backlog/workout-system-roadmap.md` for the current pickup map across completed feedback work, primitives cutover, and Watch work.
 - If confused about history or intent, ask Eric — don't guess.

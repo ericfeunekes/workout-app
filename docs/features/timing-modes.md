@@ -1,7 +1,7 @@
 ---
 title: timing-modes
-status: living
-last_reviewed: 2026-04-26
+status: living — current pre-primitives contract
+last_reviewed: 2026-05-17
 purpose: Behavioral contract + QA scenarios for timing-modes
 covers:
   - app/Packages/Core/Prescription/Sources/CorePrescription/TimingConfig.swift
@@ -12,6 +12,13 @@ covers:
 ---
 
 # timing-modes
+
+> **Status (2026-05-17):** This doc describes the current implemented
+> 12-case `TimingMode` execution contract. It remains the baseline for current
+> app behavior and regression proof. It is not the target model for the accepted
+> primitives cutover; target primitives work uses
+> `docs/specs/primitives-data-model.md`, where timing becomes composition over
+> primitive timing/traversal/repeat cells.
 
 ## What it does
 `TimingMode` is a 12-case enum (`CoreDomain/Enums.swift`) on every `Block`. Each mode has (a) a `TimingConfig` variant parsed from `block.timing_config_json` by `PrescriptionParser+TimingConfig.swift`, and (b) a `TimingDriver` looked up from `DriverRegistry` (inline in `ExecutionViewModel.swift`). The driver answers three questions per block: what the Active screen shows, how long rest is after a set, and what mutations (+ autoreg proposal) a set-log produces. Per the authoritative `docs/prescription.md` § "Per-timing-mode prescription shapes", each mode has a defined shape. **All 12 modes are built + tested.** Mode-aware cursor advancement lives on `SessionState.Structure.advancementByBlock` (`.setMajor` vs `.roundRobin` vs `.zeroItem`) — the seeder populates it per-block, the reducer's `nextCursor` branches on it. Time-capped / work-window modes are driven by VM-level `blockEndsAt` / `workEndsAt` timers persisted on `SessionState`. Both `ActiveView` and `RestView` carry a 1-second `Timer.publish(...).autoconnect()` publisher (`.onReceive(tickTimer)`) that calls `viewModel.tickBlockTimer()` every second while a cap/work window is active; `RestView` also ticks when `currentRestShouldAutoAdvance` is true so clock-owned rests move at zero. The VM then dispatches the mode-native timeout behavior when wall-clock elapses. Strength recovery rests are intentionally excluded from auto-advance so over-rest can count up until the next `Set Start`. See bug-042 for the wiring history.

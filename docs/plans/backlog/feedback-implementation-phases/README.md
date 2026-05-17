@@ -33,10 +33,12 @@ correction, shared set editing, and history data-integrity fixes.
 T1 is a transition alignment note that constrains later history/watch work; it
 does not add app behavior by itself.
 
-Phases 7-11 remain backlog. Before starting Phase 7, refresh the watch plan
-against both the completed Phase 1-6 work and the primitives roadmap, because
-watch metric slots should not drift away from the future Block > Set > Slot
-model.
+Phases 7-11 remain **provisional backlog**, not ready implementation plans.
+Before starting Phase 7, rerun requirements/phase planning against the completed
+Phase 1-6 work, `docs/features/watch-primary-execution.md`,
+`docs/watch-metrics.md`, and the primitives roadmap. The existing phase files
+are useful source material, but they still contain requirement-settling work
+inside the phase bodies and must not be handed directly to implementation.
 
 ## Context
 
@@ -75,6 +77,10 @@ future in-app Claude/chat.
 | 9 | [phase-09-watch-metrics-directions-ui.md](phase-09-watch-metrics-directions-ui.md) | Build the three fixed watch views, metric slots, HR slot, target windows, and only proven route/directions states. |
 | 10 | [phase-10-in-app-claude-chat-design.md](phase-10-in-app-claude-chat-design.md) | Design in-app Claude/chat as a separate future surface, not history notes. |
 | 11 | [phase-11-modifier-equipment-modeling.md](phase-11-modifier-equipment-modeling.md) | Define authored modifier/equipment modeling so exercise variants stay explicit without app-side programming logic. |
+
+Phases 7-11 are intentionally listed here so the roadmap has continuity. Their
+current status is provisional: use them to recover intent, then refresh the
+requirements and phase boundaries before moving any of them to `plans/active/`.
 
 ## Shared Done Standard
 

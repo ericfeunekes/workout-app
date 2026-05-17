@@ -2,7 +2,7 @@
 title: Closeout checklist
 status: stable
 date: 2026-04-17
-last_reviewed: 2026-04-26
+last_reviewed: 2026-05-17
 purpose: "What to check before declaring a change done. Enforces the complete-cutover philosophy so nothing partial lands."
 covers:
   - all
@@ -51,6 +51,16 @@ If a route was added, removed, or changed:
 - [ ] SwiftData enum updated.
 - [ ] App timer engine knows how to drive the new mode (or documented as deferred).
 - [ ] Contract test covers the new shape on both sides.
+
+## Primitives data-model cutover
+
+If the change is part of the accepted primitives cutover:
+
+- [ ] `docs/specs/primitives-data-model.md` and affected aspect docs remain the target authority.
+- [ ] Legacy per-timing-mode authoring/result payloads are not accepted in the final merged state.
+- [ ] Completed local workout history preservation is proven by migration test or simulator-visible migrated history.
+- [ ] `docs/prescription.md`, `docs/features/timing-modes.md`, and `docs/specs/v2-architecture.md` are either rewritten to the primitive contract or explicitly marked as current-state legacy references until the final docs sweep lands.
+- [ ] Contract tests assert primitive schema parity, not the old 12-case enum contract.
 
 ## User-parameter key that the app should interpret
 

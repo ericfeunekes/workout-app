@@ -1,6 +1,7 @@
 ---
 title: Testing
 status: accepted
+last_reviewed: 2026-05-17
 purpose: Proof contract — what each test tier covers, how to run it, and what changes require which tier.
 covers:
   - tests/
@@ -13,7 +14,7 @@ covers:
 
 Proof contract for WorkoutDB. Every change should leave its proof surface green before merge.
 
-See also: `docs/MIGRATIONS.md` (schema cutover flow — contract tests run as part of each migration), `docs/prescription.md` (prescription shape contract — when a new shape lands, add a fixture and update the parity tests), `docs/sync.md` (sync protocol contract — offline execution is a load-bearing invariant that needs explicit coverage once the app exists), and `docs/QA.md` (exploratory/simulator QA evidence and issue-recording rules).
+See also: `docs/MIGRATIONS.md` (schema cutover flow — contract tests run as part of each migration), `docs/prescription.md` (current pre-primitives prescription shape contract), `docs/specs/primitives-data-model.md` (accepted target shape that supersedes the per-timing-mode data model once the cutover lands), `docs/sync.md` (sync protocol contract — offline execution is a load-bearing invariant that needs explicit coverage once the app exists), and `docs/QA.md` (exploratory/simulator QA evidence and issue-recording rules).
 
 The system has three testable stacks — each gets its own tier:
 
@@ -36,7 +37,8 @@ Run: `uv pip install -e ".[dev]" && pytest`.
 Scope:
 - Every entity in the spec is present in both server and app schemas.
 - Every field name, type, and nullability matches.
-- `timing_mode` enum and `prescription_json` shapes are identical on both sides.
+- Current pre-primitives state: `timing_mode` enum and `prescription_json` shapes are identical on both sides.
+- Primitives cutover state: Block > Set > Slot schema, timing/traversal/repeat cells, primitive prescription fixtures, and primitive log roles are identical on both sides. The cutover is not done while both contract families are accepted.
 
 Mechanism depends on the `schema/` decision (OpenAPI vs hand-mirrored). Until `schema/` is populated, contract tests live as failing placeholders or spec-referenced assertions.
 
@@ -55,7 +57,8 @@ Scope:
 - **Server schema change** → server test (models) + contract test (parity with app) + migration integration test.
 - **New API endpoint** → server test (route behavior) + update `docs/ARCHITECTURE.md` if it changes sync story.
 - **Sync protocol change** → server test (endpoint) + contract test (both sides agree) + app test (sync manager).
-- **New timing mode** → update spec + server enum + app enum + contract test + app timer test.
+- **New timing mode before primitives cutover** → update spec + server enum + app enum + contract test + app timer test.
+- **Primitives data-model cutover** → update the primitives spec/aspects, server schema, Swift DTOs, SwiftData schema, contract tests, local-history migration proof, and app execution tests in the same cutover branch before merge.
 - **New `user_parameters` key the app interprets** → app test for the resolver.
 - **Pure helper** → unit test in the owning stack.
 

@@ -87,17 +87,17 @@ The result is cached on the slot. Block-scope and set-scope `effective_stimuli` 
 **Decision: relative loads resolve at seed time and cache the absolute kg on `ExecutionSlot.load_kg`. No re-resolution on each read.**
 
 Rationale:
-- **Stability.** A `(0.85, "1rm", relative)` slot seeded at workout pull uses the `user_parameters` row (key: `one_rep_max_<exercise_id>_kg`) with `updated_at` latest-before-pull. If the user tests a new 1RM mid-session, pre-seeded slots keep the pull-time target; newly-seeded workouts use the new 1RM.
-- **Single-read.** Resolve once at pull from the local `user_parameters` mirror and record the pinned `resolved_from_user_param_id` on `ExecutionSlot` for auditing. No repeated DB hits during the session.
+- **Stability.** A `(0.85, "1rm", relative)` slot resolves when the app seeds the pulled workout into an `ExecutionPlan`, using the local `user_parameters` row (key: `one_rep_max_<exercise_id>_kg`) with the latest `updated_at` visible in the local mirror at seed time. If the user tests a new 1RM mid-session, pre-seeded slots keep the seed-time target; newly-seeded workouts use the new 1RM.
+- **Single-read.** Resolve once during app seed from the local `user_parameters` mirror and record the pinned `resolved_from_user_param_id` on `ExecutionSlot` for auditing. No repeated DB hits during the session.
 - **Audit trail.** If a future session asks "what 1RM did this workout use to set my load?", the cached `load_reference.value` and the pinned `resolved_from_user_param_id` answer directly.
 
 **Resolver contract.**
 
-- `unit: "1rm"` → look up `user_parameters` where `key = "one_rep_max_<slot.exercise_id>_kg"` AND `updated_at <= pull_time`, taking the most recent. Multiply `load.value` by the parameter value to get `load_kg`. Pin that parameter row's `id` on `ExecutionSlot.resolved_from_user_param_id`.
+- `unit: "1rm"` → look up `user_parameters` in the app's local mirror where `key = "one_rep_max_<slot.exercise_id>_kg"`, taking the most recent row by `updated_at` at seed time. Multiply `load.value` by the parameter value to get `load_kg`. Pin that parameter row's `id` on `ExecutionSlot.resolved_from_user_param_id`.
 - `unit: "bodyweight"` → look up `key = "bodyweight_kg"` the same way. Multiply `load.value` by the parameter value to get `load_kg`.
 - `unit: "kg"` or `"lb"` with `unit_type: "absolute"` → no resolution. `load_kg` is the raw value converted to kg if authored in lb; `resolved_from_user_param_id` stays nil.
 
-If a required `user_parameter` is missing at pull time, the slot's `load_kg` is left nil and a warning is raised to the sync layer. Execution falls back to the authored absolute if one was given alongside the relative (not currently authored — flagged for future authoring-surface extension).
+If a required `user_parameter` is missing from the local mirror at seed time, the slot's `load_kg` is left nil and a warning is raised to the sync layer. Execution falls back to the authored absolute if one was given alongside the relative (not currently authored — flagged for future authoring-surface extension).
 
 Corrections change this behavior predictably: if history correction on a relative-load slot changes the load, it changes the absolute stored on the log row — the prescription's relative authoring is unchanged, but the logged outcome reflects what actually happened.
 

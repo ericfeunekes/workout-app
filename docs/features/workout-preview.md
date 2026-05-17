@@ -1,7 +1,7 @@
 ---
 title: workout-preview
-status: planned
-last_reviewed: 2026-04-26
+status: built with current gaps
+last_reviewed: 2026-05-17
 purpose: Target contract and QA scenarios for opening a planned workout before execution starts.
 covers:
   - docs/features/today.md
@@ -71,7 +71,7 @@ handoff instead of inventing a local plan mutation.
 
 ## Current gaps
 
-- Today card-body entry is preview-first; Start is an explicit preview action.
+- The core preview-first entry path is built through Today's preview/detail sheet. A richer dedicated `WorkoutPreviewView` remains target behavior.
 - Preview editability is not proven for all target fields.
 - Preview edit persistence is not implemented. Any future publisher must be
   built against the server's whole-tree replacement contract and must decide how

@@ -40,8 +40,8 @@ The primitives track has not produced implementation yet:
 The watch track is still downstream:
 
 - Watch authority, watch-primary offline execution, and watch metrics/directions
-  UI are planned in the feedback phase directory, but they have not been
-  implemented.
+  UI are sketched in the feedback phase directory, but the backlog phases are
+  provisional and have not been implemented.
 - The watch UI should consume the corrected execution/history model and should
   be reconciled with the primitives slot model before implementation planning.
 
@@ -66,8 +66,8 @@ The watch track is still downstream:
 | Feedback execution/history | `docs/plans/backlog/feedback-implementation-phases/` Phases 1-6 | Implemented in current code/docs | Treat as the current app baseline; file new defects in `docs/bugs.md` or a focused follow-up plan. |
 | Transition alignment | `docs/plans/backlog/feedback-implementation-phases/transition-feedback-ripple-alignment.md` | Planning/docs alignment only | Keep its constraints in view when touching history, side semantics, audit trail language, or orphan behavior. |
 | Primitives data model | `docs/plans/backlog/primitives-cutover-phases/` | Spec and phases documented; implementation not started | Start with primitives Phase 1 via `scoping:implementation-planning`, then review/challenge before coding. |
-| Watch authority/offline/UI | `docs/plans/backlog/feedback-implementation-phases/` Phases 7-9 and `docs/watch-metrics.md` | Backlog | Refresh against the completed feedback work and the primitives timing before implementation planning. |
-| In-app Claude/chat and modifier modeling | Feedback Phases 10-11 | Backlog | Do not start until execution/history/watch foundations are stable enough to consume. |
+| Watch authority/offline/UI | `docs/plans/backlog/feedback-implementation-phases/` Phases 7-9 and `docs/watch-metrics.md` | Provisional backlog | Rerun requirements/phase planning against completed feedback work and primitives timing before implementation planning. |
+| In-app Claude/chat and modifier modeling | Feedback Phases 10-11 | Provisional backlog | Rerun requirements/phase planning after execution/history/watch foundations are stable enough to consume. |
 
 ## Pickup rules
 
@@ -79,8 +79,9 @@ The watch track is still downstream:
 - Primitives work starts from
   `docs/plans/backlog/primitives-cutover-phases/README.md` and must not be
   reported as already implemented.
-- Watch work starts from the feedback Phase 7-9 docs, but the implementation
-  plan must decide whether to wait for primitives or explicitly bridge the
-  current model to the future slot contract.
+- Watch work starts from the feedback Phase 7-9 docs as source material, but
+  those docs must be refreshed before implementation planning. The refresh must
+  decide whether to wait for primitives or explicitly bridge the current model
+  to the future slot contract.
 - User-facing app changes still require simulator QA before signoff. Real
   Watch/HealthKit claims require real-device proof.

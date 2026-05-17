@@ -41,7 +41,7 @@ What is now documented:
 What has not landed:
 
 - No server schema, API, OpenAPI, Swift DTO, SwiftData, execution reducer, push-queue, sync, fixture, or simulator-facing implementation has changed for primitives yet.
-- No compatibility path is intended. The implementation remains a future complete cutover, with data preservation out of scope under the accepted single-user posture.
+- No compatibility path is intended. The implementation remains a future complete cutover: old-shape prescriptions and result payloads stop being accepted, while completed local workout history is preserved through an explicit migration path.
 - No phase has gone through `scoping:implementation-planning`, implementation, review, or QA yet.
 
 The next operating loop is:
@@ -138,7 +138,7 @@ Implementation-planning reads one phase spec and produces the proof-mapped code-
 
 These are invariants from `CLAUDE.md` and `docs/MIGRATIONS.md` that every phase must respect:
 
-- **Single-user dev posture.** The cutover drops local set_logs and server-side prescriptions. If this posture changes before the cutover lands, the entire phase plan is invalid and must be rewritten.
+- **Single-user dev posture.** The cutover drops server-side prescriptions and old-shape acceptance. Completed local workout history must survive. If a broader preservation constraint appears before the cutover lands, the entire phase plan is invalid and must be rewritten.
 - **Complete cutover on merge.** The final PR ships the whole cutover at once. No feature flags, no parallel code paths, no legacy acceptance shims. Mid-branch state during phases 1–6 is allowed to be incomplete; the merged state must be whole.
 - **Phase gates are not merge gates.** A phase may close on the branch with later surfaces still unsupported, as long as the phase's owned surfaces do not carry compatibility fallbacks and the next phase has a named consumer relationship.
 - **Claude owns exercise identity.** No phase introduces server-side exercise-name canonicalization.

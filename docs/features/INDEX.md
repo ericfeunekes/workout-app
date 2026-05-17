@@ -1,7 +1,7 @@
 ---
 title: Features — index
 status: living
-last_reviewed: 2026-04-26
+last_reviewed: 2026-05-17
 purpose: Single entry point for per-feature behavioral contracts + QA scenarios.
 covers:
   - docs/features/*.md
@@ -11,7 +11,7 @@ covers:
 
 This directory holds one doc per user-visible feature. Each doc is a **target behavioral contract + QA scenarios**: how the feature is supposed to work, the edge cases that matter, the proof expected from tests or simulator QA, and the current gaps between that target and the implementation.
 
-Authoritative spec content (data model, timing-mode shapes, sync protocol) still lives in `docs/specs/`, `docs/prescription.md`, `docs/sync.md`. These feature docs cross-reference those — they don't duplicate.
+Authoritative spec content lives in `docs/specs/`, `docs/sync.md`, and the current pre-primitives authoring docs. `docs/prescription.md` and `timing-modes.md` describe the implemented 12-mode baseline; `docs/specs/primitives-data-model.md` is the accepted target for the future primitives cutover. Feature docs cross-reference those surfaces — they don't duplicate them.
 
 ## Status model
 
@@ -43,9 +43,9 @@ Each rewritten feature doc should use `Current gaps` for target-contract pieces 
 | [firstrun](firstrun.md) | URL+token entry, validate, kick off first pull | verified at bug-048 scope boundary |
 | [bootstrap](bootstrap.md) | Pull -> cache -> build VMs -> wire push flusher | verified 2026-04-18 |
 | [today](today.md) | Show the local plan queue, selected workout, preview entry, and refresh | built with current gaps |
-| [workout-preview](workout-preview.md) | Preview a selected workout and make Start explicit before execution | planned |
+| [workout-preview](workout-preview.md) | Preview a selected workout and make Start explicit before execution | built with current gaps |
 | [execute-loop](execute-loop.md) | Log sets, rest timer, autoreg banner, advance | built with current gaps |
-| [block-transition](block-transition.md) | Between-block setup surface before entering the next block | planned |
+| [block-transition](block-transition.md) | Between-block setup surface before entering the next block | implemented with current gaps |
 | [timing-modes](timing-modes.md) | 12 declared timing modes drive the Execute loop | built + tested |
 | [autoreg](autoreg.md) | Per-item RIR/rep-driven load adjustments, accept/undo | built + tested |
 | [save-and-done](save-and-done.md) | Finalize workout: note + bodyweight, local cache, status push | built + tested |

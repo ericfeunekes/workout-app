@@ -1,7 +1,7 @@
 ---
 title: Phase 2 — Straight-sets block executes end-to-end under primitives
 status: backlog
-last_reviewed: 2026-04-29
+last_reviewed: 2026-05-17
 purpose: Second phase of the primitives-data-model cutover. After this phase, Eric can run a straight-sets workout on the branch build under the primitive model — the full loop from pull through execution through log through push works for one representative timing mode.
 parent: ./README.md
 spec:
@@ -36,7 +36,7 @@ The stakeholder is Eric as user on the branch build: after this phase, he can ru
 
 5. **Local log rows push to the server.** A logged straight-sets workout's log rows are encoded into the push queue and delivered to the server's sync endpoint. The server's stored rows carry the composite identity (slot, set-repeat, block-repeat, role) that the log-shape aspect specifies. A client-side edit of a past slot re-pushes against the same composite identity and the server replaces the row in place rather than duplicating it.
 
-6. **Other timing modes fail visibly.** A workout authored with any non-straight-sets block (superset, circuit, AMRAP, EMOM, Tabata, intervals, continuous, for-time, accumulate, cluster, or custom) either fails to start with a clear "not yet supported" message or crashes in a way the next implementer can diagnose — it does not silently execute under the wrong semantics. This criterion is a honesty gate: the branch must not pretend to run modes it has not yet ported.
+6. **Other timing modes fail visibly without crashing.** A workout authored with any non-straight-sets block (superset, circuit, AMRAP, EMOM, Tabata, intervals, continuous, for-time, accumulate, cluster, or custom) fails to start with a clear "not yet supported" state that names the mode. It does not crash and it does not silently execute under the wrong semantics. This criterion is an honesty gate: the branch must not pretend to run modes it has not yet ported.
 
 ## QA contract
 
@@ -45,7 +45,7 @@ The stakeholder is Eric as user on the branch build: after this phase, he can ru
 - **AC1, AC2, AC3** are proven by a straight-sets execution test that seeds a known fixture, drives the session through every slot to completion, and asserts the observed rest durations, cursor transitions, and log-row shape match both the authored configuration and the behavior baseline captured from the pre-cutover build. Reverse-patch: changing a rest duration in the driver without updating the authored fixture breaks the test; dropping a log field on commit breaks the log-row shape assertion; regressing rest timing silently breaks the baseline diff.
 - **AC4** is proven by an autoreg-on-straight-sets test that seeds a fixture with an RIR autoreg rule, logs sequences of RIR values that do and do not trigger the rule, and asserts the proposal appears exactly in the expected cases. Reverse-patch: a change that fires autoreg on every commit breaks the non-trigger case; a change that skips autoreg always breaks the trigger case.
 - **AC5** is proven by a push-round-trip test that logs a straight-sets workout, drains the push queue to the server, and asserts the server's stored rows match the client-pushed payload. A follow-on edit test repeats the push with a modified value on one row and asserts the server's row count is unchanged and the values are updated. Reverse-patch: a change that duplicates rows on edit breaks the row-count assertion; a change that drops a composite-identity component breaks the match assertion.
-- **AC6** is proven by a negative test per non-straight-sets timing mode: attempt to start a workout of that mode, assert the app either routes to a "not yet supported" surface or raises a diagnosable error. Reverse-patch: a silent-fallback to the straight-sets driver on an un-ported mode breaks the assertion that the mode fails visibly.
+- **AC6** is proven by a negative test per non-straight-sets timing mode: attempt to start a workout of that mode, assert the app routes to a "not yet supported" state and remains stable. Reverse-patch: a crash or silent fallback to the straight-sets driver on an un-ported mode breaks the assertion that the mode fails visibly and safely.
 
 **RC gate — one manual smoke.** A real straight-sets workout executed on the iOS simulator end-to-end, with rest-ring timings and log rows observed in the local store, is run once before the phase closes. The smoke is not a deterministic phase gate, but it is required before the phase's QA declaration is honest about what "works end-to-end" means for the user.
 

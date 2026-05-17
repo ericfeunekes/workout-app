@@ -13,36 +13,40 @@ Every package is a local SwiftPM package under `app/Packages/`. The shell target
 
 **Rule:** a package may only declare dependencies listed in its Row. Any other dependency is a compile-time error (SwiftPM enforces).
 
-**Rule:** when a package is created, its `Package.swift` has to include `supportedPlatforms: [.iOS(.v17), .watchOS(.v10)]` if it appears in the Watch column. Core packages support both; edge packages vary.
+**Rule:** when a package is created, its `Package.swift` has to include
+`supportedPlatforms` for every product platform it appears on. Packages also
+declare `.macOS(.v14)` where package tests run as command-line Swift tests on
+the developer machine. Core packages support iOS, watchOS, and macOS test
+execution; edge packages vary.
 
 | Package | Dependencies (may import) | Purpose | iOS | watchOS |
 |---|---|---|:---:|:---:|
-| `Core/Domain` | (none) | Plain Swift structs for the domain entities: `Workout`, `Block`, `WorkoutItem`, `SetLog`, `Exercise`, `ExerciseAlternative`, `UserParameter`. No SwiftData, no Foundation-network, no persistence. | ✅ | ✅ |
-| `Core/Prescription` | `Core/Domain` | Per-shape parsers for `prescription_json` and `timing_config_json`. Returns typed `Result` values. No computation — parsers only. See HS-3. | ✅ | ✅ |
-| `Core/Autoreg` | `Core/Domain`, `Core/Prescription` | Pure functions that compute autoreg proposals. `propose(prescribed:, logged:) -> AutoregProposal?`. No state, no I/O. | ✅ | ✅ |
-| `Core/Session` | `Core/Domain`, `Core/Prescription`, `Core/Autoreg` | Live-session state machine. Cursor, route, log, `autoregHeld`, `adjust` field, `rest_ends_at`. An `@Observable` store. | ✅ | ✅ |
+| `Core/Domain` | `Core/Foundation` | Plain Swift structs for the domain entities: `Workout`, `Block`, `WorkoutItem`, `SetLog`, `Exercise`, `ExerciseAlternative`, `UserParameter`. No SwiftData, no Foundation-network, no persistence. | ✅ | ✅ |
+| `Core/Prescription` | `Core/Foundation`, `Core/Domain` | Per-shape parsers for `prescription_json` and `timing_config_json`. Returns typed `Result` values. No computation — parsers only. See HS-3. | ✅ | ✅ |
+| `Core/Autoreg` | `Core/Foundation`, `Core/Domain`, `Core/Prescription` | Pure functions that compute autoreg proposals. `propose(prescribed:, logged:) -> AutoregProposal?`. No state, no I/O. | ✅ | ✅ |
+| `Core/Session` | `Core/Foundation`, `Core/Domain`, `Core/Prescription`, `Core/Autoreg` | Live-session state machine and canonical primitive runtime contract. Owns executable session state, cursor/route/log reducer behavior, primitive `ExecutionPlan`, primitive execution block/set/slot runtime values, log coordinates, and deterministic log identity helpers. No I/O. | ✅ | ✅ |
 | `Core/Foundation` | (none) | Pure utilities shared across Core packages: `Clock` protocol, ID generation, kg↔lb conversion, duration formatting. The **only** shared-utilities package allowed. | ✅ | ✅ |
 | `Core/Telemetry` | (none) | Pure value type `Event` + `TelemetryEmitter` protocol + process-stable `TelemetrySession.id`. Emitters are implemented in `Persistence`; the shape stays in Core so every layer can accept an emitter without pulling in storage. | ✅ | ✅ |
 | `DesignSystem` | `Core/Foundation` (for formatting helpers only) | Visual tokens (colors, type ramp, spacing, motion) and primitives (button, chip, pill, ring, keypad). No routing, no business rules. | ✅ | ✅ |
 | `schema` | (external — already at `schema/`) | Wire DTOs. Consumed only by `Sync`. | ✅ | ✅ |
-| `Persistence` | `Core/Domain`, `Core/Prescription`, `Core/Foundation`, `Core/Telemetry`, `Sync` | SwiftData stack, migrations, keychain bearer-token storage, `UserDefaults` URL storage, and the SwiftData-backed `TelemetryEmitterImpl`. Exposes protocols (`SessionStore`, `WorkoutCache`, `TokenStore`) used by Features and Sync. | ✅ | ✅ |
-| `Sync` | `Core/Domain`, `Core/Foundation`, `Core/Telemetry`, `schema`, `Persistence` | `PullService`, `PushQueue`, `ConnectionManager`. The only package that imports URLSession (enforced by SwiftLint FF-13). Maps DTOs → Domain at the boundary — nothing outside `Sync` imports `schema`. Push queue routes telemetry batches to `/api/telemetry/events`. See HS-1. | ✅ | — |
-| `HealthKitBridge` | `Core/Domain`, `Core/Foundation` | HR, cadence, body-weight queries. Protocols exposed for Features; HealthKit imports confined here (FF-13). | ✅ | ✅ |
+| `Persistence` | `Core/Foundation`, `Core/Domain`, `Core/Prescription`, `Core/Telemetry`, `Sync` | SwiftData stack, migrations, keychain bearer-token storage, `UserDefaults` URL storage, and the SwiftData-backed `TelemetryEmitterImpl`. Exposes protocols (`SessionStore`, `WorkoutCache`, `TokenStore`) used by Features and Sync. | ✅ | ✅ |
+| `Sync` | `Core/Foundation`, `Core/Domain`, `Core/Telemetry`, `schema` | `PullService`, `PushQueue`, `ConnectionManager`. The only package that imports URLSession (enforced by SwiftLint FF-13). Maps DTOs -> Domain at the boundary — nothing outside `Sync` imports `schema`. Push queue routes telemetry batches to `/api/telemetry/events`. See HS-1. | ✅ | — |
+| `HealthKitBridge` | `Core/Foundation`, `Core/Domain` | HR, cadence, body-weight queries. Protocols exposed for Features; HealthKit imports confined here (FF-13). | ✅ | ✅ |
 | `WatchBridge` | `Core/Domain`, `Sync` | iPhone ↔ Watch IPC via WatchConnectivity. Watch taps on "log set" travel through WatchBridge → Sync.PushQueue. | ✅ | ✅ |
-| `Features/Today` | `Core/Domain`, `Core/Session`, `Core/Telemetry`, `DesignSystem`, `Persistence`, `Sync`, `HealthKitBridge` | Today screen: workout card, exercise list, last-session chip, plan sheet, history drawer. | ✅ | — |
-| `Features/Execution` | `Core/Domain`, `Core/Session`, `Core/Prescription`, `Core/Autoreg`, `Core/Telemetry`, `DesignSystem`, `Persistence`, `HealthKitBridge`, `WatchBridge` | Active + rest screens, per-mode TimingDriver strategies (HS-2), RIR picker, numpad sheets, autoreg banner, swap sheet. | ✅ | — |
-| `Features/History` | `Core/Domain`, `DesignSystem`, `Persistence`, `Sync` | History tab: list, session detail, by-exercise view. | ✅ | — |
-| `Features/Settings` | `Core/Foundation`, `DesignSystem`, `Persistence`, `Sync`, `HealthKitBridge`, `WatchBridge` | Settings screen as data-driven sections (HS-4). | ✅ | — |
-| `Features/FirstRun` | `DesignSystem`, `Persistence`, `Sync` | Welcome + connection-string entry + first-sync progress. | ✅ | — |
-| `Features/WatchFaces` | `Core/Domain`, `Core/Session`, `DesignSystem`, `WatchBridge` | The watchOS faces (v1.1+ full grammar; v1 minimal: HR, rest countdown, start/end tap). | — | ✅ |
-| `Shell` | `Core/Domain`, `Core/Session`, `Core/Foundation`, `Core/Telemetry`, `Persistence`, `Sync`, `Features/Today`, `Features/Execution` | Launch-time composition root: builds `SyncAPI`, runs `pullLatest`, writes to `WorkoutCache`, constructs `TodayViewModel` + `ExecutionViewModel`, threads the persisted `TelemetryEmitter` through each of them. The **one** package allowed to see multiple `Features/*` at once (that's its job). Lives at `app/Packages/Shell/` — **not** under `Features/` — because the SwiftLint rule `no_feature_cross_import` only covers the `Features/` directory. Thin: one `AppBootstrap` type, no SwiftUI views. | ✅ | — |
+| `Features/Today` | `Core/Foundation`, `Core/Domain`, `Core/Prescription`, `Core/Session`, `Core/Telemetry`, `DesignSystem`, `Persistence` | Today screen: workout card, exercise list, last-session chip, workout preview/detail surface. Does not import sibling Features; Shell owns cross-feature routing. | ✅ | — |
+| `Features/Execution` | `Core/Foundation`, `Core/Domain`, `Core/Prescription`, `Core/Autoreg`, `Core/Session`, `Core/Telemetry`, `DesignSystem`, `Persistence` | Active + rest screens, per-mode TimingDriver strategies (HS-2), RIR picker, numpad/log sheets, autoreg banner, swap sheet, completion ledger. | ✅ | — |
+| `Features/History` | `Core/Foundation`, `Core/Domain`, `Core/Telemetry`, `DesignSystem`, `Persistence`, `Sync` | History tab: list, session detail, by-exercise view, corrective edit surface. | ✅ | — |
+| `Features/Settings` | `DesignSystem`, `Persistence` | Settings screen as data-driven sections (HS-4): server controls, local reset, units, autoreg defaults, diagnostics entry points. | ✅ | — |
+| `Features/FirstRun` | `Core/Foundation`, `DesignSystem`, `Persistence`, `Sync` | Welcome + connection-string entry + first-sync progress. | ✅ | — |
+| `Features/WatchFaces` | `Core/Session`, `DesignSystem`, `WatchBridge` | The watchOS faces (v1.1+ full grammar; v1 minimal: HR, rest countdown, start/end tap). | — | ✅ |
+| `Shell` | `Core/Foundation`, `Core/Domain`, `Core/Session`, `Core/Telemetry`, `DesignSystem`, `Persistence`, `Sync`, `Features/Today`, `Features/Execution`, `Features/History`, `Features/Settings` | Launch-time and root-navigation composition package: builds `SyncAPI`, runs `pullLatest`, writes to `WorkoutCache`, constructs feature view models, owns `RootTabView`, and routes Today/Execution/History/Settings. The **one** package allowed to see multiple `Features/*` at once. Lives at `app/Packages/Shell/` — **not** under `Features/` — because the SwiftLint rule `no_feature_cross_import` only covers the `Features/` directory. Thin: composition, routing, and bootstrap orchestration only; no feature logic. | ✅ | — |
 
 ## Shell targets
 
 | Target | Dependencies | Purpose |
 |---|---|---|
-| `WorkoutDB` (app) | All `Features/*` (iOS), `Shell`, `Persistence`, `Sync`, `Core/Session`, `DesignSystem`, `HealthKitBridge`, `WatchBridge` | Root view, app lifecycle, navigation router (route enum switch), bootstrap glue via `Shell.AppBootstrap`. Thin. |
-| `WorkoutDBWatch` (watchOS) | `Features/WatchFaces`, `Core/Session`, `DesignSystem`, `WatchBridge` | Watch app lifecycle and face routing. Thin. |
+| `WorkoutDB` (app) | Core packages, `DesignSystem`, `Persistence`, `Sync`, `HealthKitBridge`, `WatchBridge`, iOS `Features/*`, `Shell` | App lifecycle, first-run gate, persistence factory, debug launch routes, and `Shell.RootTabView` hosting. Thin; cross-feature tab routing belongs in Shell. |
+| `WorkoutDBWatch` (watchOS) | Core packages, `DesignSystem`, `Persistence`, `WatchBridge`, `Features/WatchFaces` | Watch app lifecycle and face routing. Thin; phone remains the only server actor. |
 
 ## Forbidden
 
@@ -51,6 +55,9 @@ Every package is a local SwiftPM package under `app/Packages/`. The shell target
 - Any package named `Utils`, `Helpers`, `Common`, `Shared`, or `Misc`.
 - Any package importing `schema` outside `Sync` or `schema` itself.
 - `DesignSystem` importing `Features/*` or edge services.
+- A feature package importing another feature package. Shared display seams move
+  to `DesignSystem` when visual-only, or to `Core/Session` / a named Core
+  package when they are execution state.
 
 ## How to add a new package
 
@@ -69,3 +76,20 @@ Splitting is preferable to letting a package sprawl — see HS-1, HS-2.
 3. Move the relevant types. Update imports in consumer packages.
 4. Update the SwiftPM dependency declarations.
 5. Remove the exceptions register entry in `docs/architecture/boundaries.md` if one was in place.
+
+## Current refactor pressure
+
+Several feature views are intentionally split by file length today but still
+carry multiple interaction families. Before adding richer preview edits,
+pending-set edits, long-press action menus, completion-ledger editing, or large
+History filters, create a small seam first:
+
+- visual-only primitives and accessibility behavior -> `DesignSystem`
+- execution cursor/timer/read-model behavior -> `Core/Session` or
+  `Features/Execution` projection
+- cross-feature route selection -> `Shell`
+- feature-local sheet selection -> one `Identifiable` enum per feature surface,
+  not multiple booleans in the view body
+
+If a change needs a sibling Feature import to share UI or state, stop and move
+the shared contract to the correct package instead.

@@ -43,6 +43,7 @@ gap in the owning docs. Git history is the archive.
 | `PREVIEW-GAP-001` | `docs/features/workout-preview.md` | Preview editability is not proven for every target field. | `proof` |
 | `PREVIEW-GAP-002` | `docs/features/workout-preview.md` | Preview edit persistence is not implemented and must respect whole-tree server replacement semantics. | `implementation` |
 | `PREVIEW-GAP-003` | `docs/features/workout-preview.md` | Preview does not yet directly consume the shared execution projection seam. | `implementation` |
+| `PREVIEW-GAP-004` | `docs/features/workout-preview.md` | Dedicated preview view and preview sheet routing seam are missing before richer edit interactions expand. | `implementation` |
 | `SWAP-GAP-001` | `docs/features/exercise-swap.md` | Exercise swap is item-scoped; there is no per-set swap behavior. | `implementation` |
 | `SWAP-GAP-002` | `docs/features/exercise-swap.md` | Exercise swap cannot move work across blocks. | `implementation` |
 | `SWAP-GAP-003` | `docs/features/exercise-swap.md` | Exercise swap has no undo path. | `implementation` |
@@ -52,6 +53,7 @@ gap in the owning docs. Git history is the archive.
 | `SETEDIT-GAP-002` | `docs/set-edit-sheet.md` | Apply-to-remaining scope for preview/future and active setup edits is not implemented. | `implementation` |
 | `SETEDIT-GAP-003` | `docs/set-edit-sheet.md` | Bodyweight editing is a `user_parameters` correction problem without a selected UI. | `decision` |
 | `SETEDIT-GAP-004` | `docs/set-edit-sheet.md` | Mode-specific field combinations need visual proof across active and preview contexts. | `proof` |
+| `SETEDIT-GAP-005` | `docs/set-edit-sheet.md` | Shared presentation and sheet-routing model is missing across preview, active, complete, and History edit contexts. | `implementation` |
 | `EXEC-GAP-001` | `docs/features/execute-loop.md` | Primary CTA contrast and tap targets need simulator proof. | `proof` |
 | `EXEC-GAP-002` | `docs/features/execute-loop.md` | Bodyweight editability needs proof through the shared edit surface. | `proof` |
 | `EXEC-GAP-003` | `docs/features/execute-loop.md` | Active/rest focal hierarchy and scrolling need proof across non-straight-set modes. | `proof` |
@@ -61,6 +63,9 @@ gap in the owning docs. Git history is the archive.
 | `EXEC-GAP-007` | `docs/features/execute-loop.md` | Starting workout B while workout A is active has no selected behavior; any unresolved product decision belongs in `docs/open-questions.md`. | `decision` |
 | `EXEC-GAP-008` | `docs/features/execute-loop.md` | Cluster/rest-pause expanded per-slot actual editing is deferred; current app logs one top-level row per composed set. | `implementation` |
 | `EXEC-GAP-009` | `docs/features/execute-loop.md` | Numeric-entry flashes and log/rest transition flicker have visual reports but no deterministic repro. | `proof` |
+| `EXEC-GAP-010` | `docs/features/execute-loop.md` | Active, Rest, and Complete need smaller component seams before adding more interactions. | `implementation` |
+| `EXEC-GAP-011` | `docs/features/execute-loop.md` | Active sheet routing needs one identifiable sheet model before pending edit/action-menu/log-sheet variants expand. | `implementation` |
+| `EXEC-GAP-012` | `docs/features/execute-loop.md`, `docs/TESTING.md` | Timer and transition runtime claims need ETTrace-backed timer-gauntlet proof. | `proof` |
 | `AUTO-GAP-001` | `docs/features/autoreg.md` | Settings vs prescription precedence is unresolved. | `decision` |
 | `AUTO-GAP-002` | `docs/features/autoreg.md` | `sets_detail` pyramids and tempo-heavy shapes do not propose autoreg unless a driver later promotes support. | `implementation` |
 | `AUTO-GAP-003` | `docs/features/autoreg.md` | No per-item proposal history or audit trail exists. | `implementation` |
@@ -76,6 +81,9 @@ gap in the owning docs. Git history is the archive.
 | `PUSH-GAP-001` | `docs/features/push-queue.md` | Offline completion atomicity is not guaranteed when set logs and status updates flush separately. | `implementation` |
 | `PUSH-GAP-002` | `docs/features/push-queue.md` | No background push path exists; push waits until app resumes if the user locks the phone before foreground flush. | `implementation` |
 | `BOOT-GAP-001` | `docs/features/bootstrap.md` | No general manual sync trigger exists outside bootstrap and Today refresh. | `implementation` |
+| `SETTINGS-GAP-002` | `docs/features/settings.md` | Sync now, change server, reset, units, telemetry export/debug, token recovery, and autoreg defaults need one visible behavior surface with proof. | `implementation` |
+| `SETTINGS-GAP-003` | `docs/features/settings.md`, `docs/architecture/hotspots.md` | Section-as-type Settings architecture lacks feature-level acceptance and QA proof. | `proof` |
+| `SETTINGS-GAP-004` | `docs/features/settings.md`, `docs/features/telemetry.md` | Diagnostics/export rows remain target behavior only where telemetry gaps call for them. | `implementation` |
 | `FIRST-GAP-001` | `docs/features/firstrun.md` | Trailing-slash normalization is not built. | `implementation` |
 | `FIRST-GAP-002` | `docs/features/firstrun.md` | QR/unified connection-string setup remains deferred. | `implementation` |
 | `TELEM-GAP-001` | `docs/features/telemetry.md` | Emit coverage is partial. | `proof` |
@@ -91,9 +99,20 @@ gap in the owning docs. Git history is the archive.
 | `SYNC-GAP-001` | `docs/sync.md` | Stale live-session expiry remains undecided. | `decision` |
 | `SYNC-GAP-002` | `docs/sync.md` | CloudKit replication needs a record-family spike with authority, account, conflict, and Claude readback proof. | `spike` |
 | `SYNC-GAP-003` | `docs/sync.md` | Cloudflare Access endpoint needs a narrow endpoint spike with identity and capability proof. | `spike` |
+| `SYNC-GAP-004` | `docs/sync.md`, `docs/TESTING.md` | Shell/app-root foreground pull, push flusher restart/stop, background posture, and token-rejected recovery ownership are not specified/proven. | `proof` |
 | `TEST-GAP-001` | `docs/TESTING.md`, `docs/sync.md` | No server/app sync harness runs FastAPI + SQLite locally and drives the Swift Sync boundary through real HTTP. | `proof` |
 | `TEST-GAP-002` | `docs/TESTING.md` | App-hosted Xcode tests are only compile/link smoke; no real launch-time or composition invariant exists. | `proof` |
 | `TEST-GAP-003` | `docs/TESTING.md` | No real-device proof harness exists for Watch, HealthKit, and device-only behavior. | `proof` |
+| `TEST-GAP-004` | `docs/TESTING.md`, `docs/sync.md` | Foreground/background sync lifecycle has no app-root proof path. | `proof` |
+| `TEST-GAP-005` | `docs/TESTING.md`, `docs/QA.md`, `docs/ios-dev-loop.md` | Runtime cost and object-lifetime baselines need ETTrace/memgraph proof lanes. | `proof` |
+| `DS-GAP-001` | `docs/design-system.md` | Semantic/scalable typography and hero/timer Dynamic Type rules are incomplete. | `implementation` |
+| `DS-GAP-002` | `docs/design-system.md` | Interactive primitives do not centrally guarantee accessibility metadata and 44 pt target expectations. | `implementation` |
+| `DS-GAP-003` | `docs/design-system.md`, `docs/QA.md` | Active, Rest, LogSetSheet, SetEditSheet, and History need Dynamic Type and accessibility proof using `snapshot_ui`. | `proof` |
+| `DS-GAP-004` | `docs/design-system.md` | Material/glass usage is not centralized behind approved Shell/DesignSystem wrappers with no-glass defaults for workout surfaces. | `implementation` |
+| `APPINTENT-GAP-001` | `docs/features/app-intents.md` | No accepted Apple system-surface contract exists beyond the planned feature shell. | `requirements` |
+| `APPINTENT-GAP-002` | `docs/features/app-intents.md` | Handoff routes for Today, Active, and History are not specified in app routing or debug launch terms. | `requirements` |
+| `APPINTENT-GAP-003` | `docs/features/app-intents.md` | Mutation intents are deferred until offline, auth, persistence, telemetry, and confirmation semantics are defined. | `requirements` |
+| `APPINTENT-GAP-004` | `docs/features/app-intents.md` | App entity identity for workouts/sessions is not specified. | `requirements` |
 | `WATCHKIT-GAP-001` | `docs/features/watch-workoutkit-handoff.md` | Final per-archetype WorkoutKit mapping table is missing. | `spike` |
 | `WATCHKIT-GAP-002` | `docs/features/watch-workoutkit-handoff.md` | Real-device open/schedule proof is missing. | `spike` |
 | `WATCHKIT-GAP-003` | `docs/features/watch-workoutkit-handoff.md` | Completion reconciliation identity path is unsettled. | `spike` |

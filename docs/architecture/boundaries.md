@@ -52,35 +52,35 @@ Enforced by `import-linter` contracts in `pyproject.toml` (already in place). Th
 
 ---
 
-## iOS app (Swift) — target shape
+## iOS app (Swift) — current shape
 
-The app doesn't exist yet. This matrix is the spec that Package.swift files and SwiftLint rules will enforce when the Xcode project lands.
-
-Top-level Swift packages (local SwiftPM packages inside `app/Packages/`):
-
-| Source \ Target | `Core/Domain` | `Core/Prescription` | `Core/Autoreg` | `Core/Session` | `DesignSystem` | `schema` | `Persistence` | `Sync` | `HealthKitBridge` | `WatchBridge` | `Features/*` |
-|---|---|---|---|---|---|---|---|---|---|---|---|
-| **`Core/Domain`** | · | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| **`Core/Prescription`** | – | · | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| **`Core/Autoreg`** | – | – | · | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| **`Core/Session`** | – | – | – | · | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| **`DesignSystem`** | ✗ | ✗ | ✗ | ✗ | · | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
-| **`schema`** | ✗ | ✗ | ✗ | ✗ | ✗ | · | ✗ | ✗ | ✗ | ✗ | ✗ |
-| **`Persistence`** | – | – | ✗ | ✗ | ✗ | ✗ | · | ✗ | ✗ | ✗ | ✗ |
-| **`Sync`** | – | – | ✗ | ✗ | ✗ | – | – | · | ✗ | ✗ | ✗ |
-| **`HealthKitBridge`** | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | · | ✗ | ✗ |
-| **`WatchBridge`** | – | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | – | ✗ | · | ✗ |
-| **`Features/*`** | – | – | – | – | – | ✗ | – | – | – | – | ✗ |
+The app is implemented as local SwiftPM packages under `app/Packages/`.
+`docs/architecture/swift-packages.md` is the single authority for exact
+per-package dependencies. This file records the boundary principles those rows
+must preserve; do not duplicate the package matrix here.
 
 Notes:
-- `Core/*` packages form a chain: Domain → Prescription → Autoreg → Session. No back-edges. Each `Core` package only imports Domain and `Core` siblings it explicitly declares.
+- `Core/*` packages form a directed graph with no back-edges. Each Core package
+  imports only `Core/Foundation`, `Core/Domain`, and the Core siblings it
+  explicitly declares in `docs/architecture/swift-packages.md`.
 - `Core/*` has zero edge imports (no SwiftData, no URLSession, no HealthKit, no Combine for network work). This is the load-bearing rule for testability.
+- `Core/Session` owns the canonical primitive runtime contract: executable plan state, primitive execution block/set/slot runtime values, log coordinates, and deterministic log identity helpers. Feature packages may adapt that state for UI, but must not define a competing primitive runtime model.
 - `DesignSystem` is pure visual. No Features imports, so a Feature can't sneak a reference to another Feature through DesignSystem.
 - `schema` is the wire package; it ships as a SwiftPM dependency and depends on nothing in `app/`.
-- `Features/*` can depend on `Core/*`, `DesignSystem`, and edge services (Persistence, Sync, HealthKitBridge, WatchBridge) — but never on another `Features/*` package. Cross-feature flows route through `Core/Session` or the app shell's navigator.
+- `Features/*` can depend on `Core/*`, `DesignSystem`, and the edge services
+  explicitly listed for that feature in `docs/architecture/swift-packages.md` —
+  but never on another `Features/*` package. Cross-feature flows route through
+  `Core/Session` or the app shell's navigator.
 - `Features/*` cannot import `schema` directly — DTOs stop at `Sync`, which maps them to Domain types. This keeps wire schema churn from rippling into Features.
-- `Persistence` can import `Core/Domain` and `Core/Prescription` (needs prescription parsing for session state restoration). It does NOT import `Core/Autoreg` or `Core/Session` — those are runtime concerns.
-- `WatchBridge` may import `Sync` so watch actions can push to the server via the phone's push queue.
+- `Persistence` stores local app data and may depend only on the graph row in
+  `swift-packages.md`. It must not import `Core/Session`; session runtime
+  encoding stays in the owning feature layer.
+- `WatchBridge` may import `Sync` only because watch actions route through the
+  phone's push queue; the watch target itself is not a server actor.
+- `Shell` is the composition-root exception. It may import multiple
+  `Features/*` packages and own SwiftUI only for app-level composition
+  (`RootTabView`, bootstrap, cross-feature view model wiring, push flusher
+  lifecycle). It must not absorb feature logic.
 
 ### Rules in prose
 
@@ -89,7 +89,9 @@ Notes:
 3. **Wire types stop at Sync.** `schema` DTOs don't cross the Sync boundary. Sync maps DTOs to Domain types; Features see only Domain types.
 4. **Edge I/O is named.** Disk (Persistence), network (Sync), HealthKit (HealthKitBridge), watch IPC (WatchBridge). If a new effect appears (audio, location, camera), it gets its own named package.
 5. **DesignSystem is visual-only.** Tokens, primitives, animations. No routing logic, no business rules.
-6. **The app shell is thin.** `WorkoutDB.app`'s own target composes the packages and hosts the root view. It is not a place where logic accumulates.
+6. **The app shell is thin.** `WorkoutDB.app` and `Shell` compose packages,
+   host root navigation, and wire cross-feature view models. They are not where
+   feature logic accumulates.
 
 ---
 

@@ -119,7 +119,9 @@ Scope:
 Current gap `TEST-GAP-002`: the `WorkoutDB` scheme currently has only a no-op
 smoke test. This tier proves compile/link/XCTest invocation for the generated
 app scheme; it is not behavioral app-hosted proof until real launch-time or
-composition invariants are added.
+composition invariants are added. The next useful invariant is a debug-fixture
+launch that proves `RootView` / `Shell.RootTabView` composition, dependency
+wiring, and at least one route handoff can render without crashing.
 
 Run directly:
 
@@ -147,6 +149,39 @@ Current gap: there is no single local server/app sync harness yet. Keep this as
 an explicit capability gap when implementation touches real URLSession +
 FastAPI + SQLite behavior. A future harness should be reachable from
 `make pre-qa`, not buried in a one-off script.
+
+## Runtime proof — traces, memory graphs, and lifecycle
+
+Runtime proof is still pre-QA when the claim is about cost, object lifetime, or
+app lifecycle behavior. Simulator video can show a symptom; it cannot prove the
+cause.
+
+Use ETTrace when changing or claiming performance for:
+
+- ticking timer routes, especially Active/Rest flows with `TimelineView` or
+  frequent state updates
+- launch, bootstrap, and first visible render latency
+- scroll-heavy Today and History lists
+- any SwiftUI refactor whose purpose is fewer view updates, less CPU, or less
+  layout churn
+
+Use memgraph/leaks proof when changing or claiming object lifetime for:
+
+- save-and-done, reset/change-server, and next-workout rebuild flows
+- sheet open/dismiss loops
+- History list -> detail -> back navigation
+- foreground/background task lifetime, especially push flusher and sync tasks
+- closures that retain view models, stores, or async pipelines
+
+Store raw runtime artifacts under `scratch/qa-runs/<YYYY-MM-DD>-<slug>/` while
+the run is active. A durable closeout should summarize the focused flow,
+simulator/device, app build, app-owned hot types or leaked types, and whether
+the trace/memgraph actually proves the claim. Do not promote runtime behavior
+to `verified` from source inspection alone.
+
+Run `make qa-runtime-ready` before trace/memgraph work. It verifies the local
+XcodeBuildMCP, `xctrace`, `simctl`, and `leaks` tool surface and creates the
+scratch artifact root. It does not capture traces by itself.
 
 ## Pre-QA Gate
 
@@ -181,6 +216,17 @@ availability. That is QA readiness, not testing proof.
 - **User-visible iOS feature change** → Swift package tests for logic/state,
   app-hosted smoke/integration proof where composition matters, then
   `docs/QA.md` for simulator/device UX evidence.
+- **SwiftUI performance or large-view refactor** → package tests for state and
+  sheet routing, plus ETTrace when the claim is lower CPU, smoother scrolling,
+  faster render, or fewer updates.
+- **Object lifetime, reset, save-and-done, foreground/background, or sheet
+  lifecycle change** → package/app-hosted proof for state ownership, plus
+  memgraph/leaks evidence when the claim is no retained view model, task, store,
+  or sheet model after dismissal/reset.
+- **Foreground/background sync lifecycle change** → Shell lifecycle test or
+  app-hosted composition proof plus simulator QA for background/foreground
+  behavior. Current gap `TEST-GAP-004`: the docs claim foreground pull/retry
+  lifecycle, but the proof suite does not yet pin a `scenePhase`-level path.
 - **Watch, HealthKit, haptics, physical ergonomics, sleep/wake, or real network
   behavior** → package/fake tests for logic plus real-device or dedicated proof
   per `docs/QA.md` before claiming the device behavior verified.
@@ -195,3 +241,11 @@ availability. That is QA readiness, not testing proof.
   no-op app compile/link smoke.
 - `TEST-GAP-003`: real-device proof harnesses for Watch, HealthKit, and
   device-only behavior.
+- `TEST-GAP-004`: foreground/background sync lifecycle proof. The package suite
+  covers bootstrap pull ownership and push queue behavior, but not an app-root
+  lifecycle path proving pull-on-foreground, push flusher restart/stop, or
+  background task posture.
+- `TEST-GAP-005`: runtime proof baselines for timer routes, large Today/History
+  surfaces, save/reset object lifetime, and sheet dismissal loops. ETTrace and
+  memgraph evidence are required before claiming those runtime properties
+  verified.

@@ -53,12 +53,14 @@ is not itself a plan.
 | [autoreg](autoreg.md) | Per-item RIR/rep-driven load adjustments, accept/undo | built |
 | [save-and-done](save-and-done.md) | Finalize workout: note + bodyweight, local cache, status push | built |
 | [history](history.md) | Completed workouts list, session detail, by-exercise view | built |
+| [settings](settings.md) | Server recovery, local reset, units, autoreg defaults, diagnostics | built |
 | [exercise-swap](exercise-swap.md) | Substitute alternative exercise mid-workout | built |
 | [past-set-edit](past-set-edit.md) | Tap past set to correct logged values | built |
 | [persistence](persistence.md) | Live session survives backgrounding/relaunch | built |
 | [push-queue](push-queue.md) | Durable queue for set_logs, status, telemetry events | built |
 | [telemetry](telemetry.md) | Structured event log, local-first, lazy sync to server | built |
 | [in-app-claude](in-app-claude.md) | Future Claude proposal/review/acceptance workflow in the app | planned |
+| [app-intents](app-intents.md) | Future Apple system entry points for opening app surfaces safely | planned |
 | [watch-workoutkit-handoff](watch-workoutkit-handoff.md) | Early Apple Watch bridge through WorkoutKit before custom watch-primary execution | planned |
 | [watch-primary-execution](watch-primary-execution.md) | Custom Setmark Watch authority, offline event replay, and watch-native execution | planned |
 

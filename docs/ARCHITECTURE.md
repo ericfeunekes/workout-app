@@ -65,6 +65,15 @@ Swift + SwiftData. The "dumb" client. Owns:
 
 Runs the 12 timing modes: `straight_sets`, `superset`, `circuit`, `emom`, `amrap`, `for_time`, `intervals`, `tabata`, `continuous`, `accumulate`, `custom`, `rest`. Applies client-side autoregulation based on per-item `target_rir` and `autoreg` rules. See `app/README.md` for the in-app behavior contract, `docs/workout-generation.md` for the end-to-end workout authoring workflow, `docs/prescription.md` for the per-mode prescription shapes, and `docs/sync.md` for sync + first-run behavior.
 
+The app is split into local SwiftPM packages. `Core/*` owns pure domain,
+prescription, autoregulation, session, telemetry, and utility logic.
+`Persistence`, `Sync`, `HealthKitBridge`, and `WatchBridge` own named side
+effects. `Features/*` owns Today, Execution, History, Settings, FirstRun, and
+WatchFaces. `Shell` owns bootstrap, root tab composition, cross-feature view
+model wiring, and push-flusher lifecycle. See
+`docs/architecture/swift-packages.md` for the authoritative package graph and
+allowed dependencies.
+
 ### `schema/` — Shared schema
 Single source of truth for cross-stack data contracts. Committed `openapi.json` is the wire contract; hand-written Swift Codable DTOs under `Sources/WorkoutDBSchema/` mirror the server's Pydantic schemas. Cross-decoded fixtures live in `fixtures/`. See `schema/README.md`.
 
@@ -96,6 +105,7 @@ See `docs/sync.md` for the full rules, and the spec § "Persistence architecture
 
 - Target architecture → `docs/specs/v2-architecture.md`. Its data-model section is the current pre-primitives baseline; target primitives work uses `docs/specs/primitives-data-model.md`.
 - Structural contract (boundaries + fitness functions + hotspots + Swift package graph) → `docs/architecture/` (start at `context.md`)
+- DesignSystem contract → `docs/design-system.md`
 - Workout generation workflow → `docs/workout-generation.md` (how Claude/humans compose blocks, timing modes, prescriptions, autoreg, alternatives, and result expectations)
 - Prescription authoring vocabulary → `docs/prescription.md` for the current pre-primitives app; `docs/specs/primitives-data-model.md` for the accepted target primitives contract.
 - Modifier/equipment authoring → `docs/modifier-equipment.md`

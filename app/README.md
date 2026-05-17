@@ -19,7 +19,13 @@ See also:
 
 ## Status
 
-Xcode project is generated from `app/project.yml` by [XcodeGen](https://github.com/yonaskolb/XcodeGen). The generated `app/WorkoutDB.xcodeproj/` is gitignored — `project.yml` is the source of truth. CI for iOS is deferred until active feature work lands (see `docs/WORKFLOW.md`).
+Xcode project is generated from `app/project.yml` by [XcodeGen](https://github.com/yonaskolb/XcodeGen). The generated `app/WorkoutDB.xcodeproj/` is gitignored — `project.yml` is the source of truth. GitHub CI remains Linux-only; iOS proof is a local macOS/Xcode gate through `make test-app-packages`, `make test-app-xcode`, and `make pre-qa` (see `docs/WORKFLOW.md`).
+
+The app is split into local SwiftPM packages under `app/Packages/`.
+`docs/architecture/swift-packages.md` is authoritative for package ownership
+and allowed dependencies. In short: Core packages stay pure, Persistence/Sync
+and bridges own side effects, Features own user-visible screens, and Shell owns
+bootstrap plus root cross-feature composition.
 
 ## First-time setup
 

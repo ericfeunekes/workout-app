@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "skills": {
+    "ios-app-intents": {
+      "source": "openai/plugins",
+      "sourceType": "github",
+      "skillPath": "plugins/build-ios-apps/skills/ios-app-intents/SKILL.md",
+      "computedHash": "075e4284912ec724e7991dbf7bbf69747937e8cf82edc83e4d565dddb89b90c1"
+    },
+    "ios-debugger-agent": {
+      "source": "openai/plugins",
+      "sourceType": "github",
+      "skillPath": "plugins/build-ios-apps/skills/ios-debugger-agent/SKILL.md",
+      "computedHash": "cc28bb00c138bf1d8c841c5a137185a63d05a4b3197f5d360de0534b5e492c1a"
+    },
+    "ios-ettrace-performance": {
+      "source": "openai/plugins",
+      "sourceType": "github",
+      "skillPath": "plugins/build-ios-apps/skills/ios-ettrace-performance/SKILL.md",
+      "computedHash": "ba15d779e5de2edb07b906384173e2ef219880e4af4ddfb228fd9ace46a3ed6e"
+    },
+    "ios-memgraph-leaks": {
+      "source": "openai/plugins",
+      "sourceType": "github",
+      "skillPath": "plugins/build-ios-apps/skills/ios-memgraph-leaks/SKILL.md",
+      "computedHash": "7ed8f12e16624125ec858b00739cd52cc9bb8661f5b5603a8ad2561bd9d2cf7d"
+    },
+    "swiftui-liquid-glass": {
+      "source": "openai/plugins",
+      "sourceType": "github",
+      "skillPath": "plugins/build-ios-apps/skills/swiftui-liquid-glass/SKILL.md",
+      "computedHash": "55231be46b195bf670980324a806b042cba1604ae5118dbd20ccca60dbc99d31"
+    },
+    "swiftui-performance-audit": {
+      "source": "openai/plugins",
+      "sourceType": "github",
+      "skillPath": "plugins/build-ios-apps/skills/swiftui-performance-audit/SKILL.md",
+      "computedHash": "8f99ca4b21f37ba956469b4792af47415cb1d8ae5bb49501381c9ea4d911e073"
+    },
+    "swiftui-ui-patterns": {
+      "source": "openai/plugins",
+      "sourceType": "github",
+      "skillPath": "plugins/build-ios-apps/skills/swiftui-ui-patterns/SKILL.md",
+      "computedHash": "053bbbb4cc1e554ca6f44a6eb8f7f2943566c3dcff4ff3431d1acd1f36ba528c"
+    },
+    "swiftui-view-refactor": {
+      "source": "openai/plugins",
+      "sourceType": "github",
+      "skillPath": "plugins/build-ios-apps/skills/swiftui-view-refactor/SKILL.md",
+      "computedHash": "71e5e4409443aa9ccd845df6536822dde7df1a566aa4ce3ceb00f82f22731960"
+    }
+  }
+}

@@ -16,7 +16,7 @@ covers:
 
 **What we're shaping.** A three-tier system where Claude (outside the system) authors workouts, a Python FastAPI + SQLite home server stores them, and a SwiftData iOS app (with a WatchKit companion) executes and logs them. The iOS app is an offline-first renderer + logger — no programming logic, no analysis, no exercise selection. The design bundle at `docs/design/` is the UX reference; `docs/specs/v2-architecture.md` is the spec.
 
-**Where we are.** The server exists and is well-layered already — `import-linter` contracts enforce foundation → data → api dependency direction. The schema package exists with OpenAPI + Swift DTOs + contract tests preventing drift. The iOS app does not exist yet (no Xcode project). The `docs/open-questions.md` gap register lists everything that surfaced from consistency passes but isn't decided yet.
+**Where we are.** The server exists and is well-layered already — `import-linter` contracts enforce foundation -> data -> api dependency direction. The schema package exists with OpenAPI + Swift DTOs + contract tests preventing drift. The iOS app exists as a local SwiftPM package graph generated into Xcode by `app/project.yml`; Shell owns bootstrap and root tab composition, while Features own user-visible screens. The `docs/open-questions.md` gap register lists unresolved product/design decisions; implementation and proof gaps live in owning docs plus `docs/feature-gap-map.md`.
 
 **What the developer is trying to achieve.** Build correctly from day one. Decisions captured as written contracts; contracts enforced by automation; hotspots designed against before they exist. A future Claude that sits down at this repo six months from now should be unable to accidentally drift — the harness makes the correct move the easy move.
 
@@ -28,10 +28,10 @@ Serves:
 - Prescription shape vocabulary is documented (`docs/prescription.md`) and marked as the authority.
 
 Fails:
-- No Swift-side enforcement exists — the app will be built against written rules only. Rules not in a linter become suggestions.
+- Swift-side package boundaries exist through SwiftPM and `app/project.yml`; some architectural fitness functions still need stronger automation.
 - No complexity gate on Python — a single file can grow unboundedly without signal.
 - No structural tests for monorepo invariants (ADR index parity, prescription-shape ↔ fixture parity, no-RPE-resurrection after the RIR cutover).
-- No preemptive hotspot register — the Swift app is about to be built and we've identified several modules that will become god objects if unchecked (SyncManager, TimingEngine, SettingsView).
+- The hotspot register is now an active guardrail. Settings, Sync, timer drivers, and DesignSystem seams still need ongoing proof as the app grows.
 
 This doc answers the 9-question sequence that the architecture skill requires. The answers constrain everything downstream.
 

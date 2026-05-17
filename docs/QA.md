@@ -93,6 +93,15 @@ the evidence that matches the claim:
 - **Sync, offline, auth, or telemetry:** use the relevant queue, API, server DB,
   event log, or error surface. A video can show the UI response, not the backend
   truth.
+- **Runtime cost:** symbolicated ETTrace output for one focused flow, with the
+  simulator/device, build, route, and caveats recorded in the run notes. Video
+  can show jank; it does not prove CPU, render, or layout cost.
+- **Object lifetime:** memgraph/leaks summary naming app-owned retained or
+  leaked types, plus the ownership path or grouped evidence. Lower memory after
+  a run is not enough; the proof needs object identity or ownership evidence.
+- **Foreground/background lifecycle:** simulator/device run plus logs,
+  telemetry, queue/store readback, or app-hosted tests. A screenshot after
+  foregrounding only proves the visible surface, not pull/retry/task behavior.
 - **Watch, haptics, HealthKit, physical ergonomics, sleep/wake, or real network
   behavior:** use a real device or a dedicated test path when the claim depends
   on device behavior.
@@ -162,7 +171,7 @@ Include:
 - Simulator/device and app route used.
 - The main gestures and edge states exercised.
 - Whether screenshots, recording, `snapshot-ui`, logs, tests, state readbacks,
-  or real-device checks were used.
+  ETTrace, memgraph/leaks, or real-device checks were used.
 - `img ask` verdict.
 - Bugs filed, questions opened, or reasons no further action was needed.
 

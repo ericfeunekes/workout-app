@@ -90,6 +90,9 @@ the shell/model can express the fields.
   proven in History where they are set-log fields. They still need visual proof
   across all mode-specific active and preview contexts, including small-phone
   layout and disabled/available field contrast.
+- `SETEDIT-GAP-005`: The shared contract is still stronger than the shared
+  presentation. Preview, Active, Complete, and History need one sheet-routing
+  and presentation model so mode-specific editor families do not drift.
 
 ## QA scenarios
 

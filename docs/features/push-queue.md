@@ -54,6 +54,9 @@ Durable SwiftData-backed FIFO queue for outbound writes. Three payload shapes: `
   server with logs against a still-active workout until retry completes.
 - `PUSH-GAP-002`: No background push path exists. If the user logs a set and
   locks the phone before a foreground flush, push waits until the app resumes.
+  This is distinct from `SYNC-GAP-004`: even with foreground-only push accepted,
+  Shell still needs a proven lifecycle owner for flusher start/restart and
+  background stop posture.
 
 ## QA scenarios
 

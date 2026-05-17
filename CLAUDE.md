@@ -30,6 +30,56 @@ the planning flow. Quick pointers:
 - Schema change → follow the seven-step cutover flow in `docs/MIGRATIONS.md`.
 - New API endpoint → route in `server/workoutdb_server/api/`, models updated, test in `tests/server/`, `docs/ARCHITECTURE.md` updated if sync story changes.
 - New timing mode → extend enum in server + SwiftData + spec; app timer engine handles it.
+- iOS or SwiftUI change → load the relevant repo-local skill before planning
+  or editing. Use the smallest matching skill set:
+  - `ios-debugger-agent` when building, launching, UI-driving, screenshotting,
+    log-capturing, or diagnosing the iOS simulator app with XcodeBuildMCP.
+    Use the live tool names discovered in-session; do not commit simulator
+    UUIDs or machine-specific MCP paths.
+  - `swiftui-ui-patterns` when creating or materially changing SwiftUI screens,
+    navigation, sheets, controls, state ownership, async UI state, previews, or
+    component structure.
+  - `swiftui-view-refactor` when splitting large SwiftUI views, removing inline
+    actions or side effects, tightening Observation usage, or standardizing
+    MV-first view composition. This means do not introduce unnecessary new view
+    models; it does not mean deleting existing `TodayViewModel`,
+    `ExecutionViewModel`, `HistoryViewModel`, or other deliberate app patterns.
+  - `swiftui-performance-audit` when a SwiftUI change may affect scroll
+    smoothness, render churn, broad observation, list identity, layout cost, CPU,
+    memory, or battery. Start code-first; require profiling evidence when source
+    inspection cannot prove the cause.
+  - `ios-ettrace-performance` when the task asks for runtime performance proof,
+    startup/render/navigation profiling, CPU-heavy work, timer/rendering stalls,
+    or before/after flamegraph evidence. Capture one focused simulator flow,
+    preserve symbolicated flamegraph JSON, and remove temporary ETTrace app
+    wiring before closeout unless Eric explicitly asks to keep it.
+  - `ios-memgraph-leaks` when investigating memory growth, retain cycles,
+    leaked view/session objects, lingering tasks after navigation, save-and-done
+    cleanup, reset/change-server flows, or proving a leak fix with before/after
+    memgraph evidence. Do not claim a leak fix from lower memory alone; report
+    app-owned leaked types and the ownership path or grouped leak evidence.
+  - `ios-app-intents` when exposing WorkoutDB actions or entities through
+    Apple's AppIntents framework: Shortcuts, Siri, Spotlight, widgets, controls,
+    `AppIntent`, `AppEntity`, `EntityQuery`, or `AppShortcutsProvider`. Do not
+    trigger this for ordinary domain "intent" fields such as block intent copy
+    or `SetEditIntent`. App Intents must stay thin: route into existing app
+    services and never add workout programming, exercise selection, progression,
+    or analysis logic.
+  - `swiftui-liquid-glass` only when adopting, reviewing, or changing iOS 26+
+    Liquid Glass UI. Do not introduce Liquid Glass as incidental polish. Prefer
+    reusable treatment in `DesignSystem` when it becomes a pattern, gate iOS 26
+    APIs with availability checks, and keep non-glass fallbacks aligned with
+    existing design primitives.
+- Repo rules override generic SwiftUI skill defaults: preserve the
+  dumb-app/smart-conversation boundary, package graph boundaries,
+  `DesignSystem` tokens, explicit existing view-model ownership, offline-first
+  execution, and `docs/QA.md` simulator evidence requirements. Do not remove
+  intentional route/tab switches just to satisfy generic "stable view tree"
+  guidance.
+- Performance traces and memgraphs do not replace `make pre-qa` or `docs/QA.md`.
+  They are additional proof when the claim is runtime cost or object lifetime.
+  Store app-facing trace/memgraph artifacts under the active
+  `scratch/qa-runs/<run-id>/`; use temp dirs for narrow investigations.
 - Testing audit is pre-QA. Use it to find automated and realistic-local proof
   gaps — unit, integration, contract, end-to-end, local service, persistence,
   time, concurrency, and device-adjacent harness gaps. Do not collapse it into

@@ -28,10 +28,10 @@ build-backend = "setuptools.build_meta"
 [tool.ruff]
 line-length = 100
 
-# .codex/skills/ holds imported Codex skill bundles — example code, templates,
-# and scripts authored as portable artifacts. They aren't part of this repo's
-# runtime and shouldn't be held to its lint rules.
-extend-exclude = [".codex"]
+# .codex/skills/ and .agents/skills/ hold imported skill bundles — example
+# code, templates, and scripts authored as portable artifacts. They aren't part
+# of this repo's runtime and shouldn't be held to its lint rules.
+extend-exclude = [".agents", ".codex"]
 
 # FF-2 + FF-3 · Lint surface and complexity gate.
 # See docs/architecture/fitness-functions.md.

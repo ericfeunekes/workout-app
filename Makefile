@@ -2,7 +2,7 @@
 # uv / swift so the source of truth stays in pyproject.toml and Package.swift.
 
 .PHONY: help setup dev test test-python test-swift test-core test-app-packages test-app-xcode check-app pre-qa \
-        lint format check regen-schema xcodegen xcode-mcp-tools qa-ready clean \
+        lint format check regen-schema xcodegen xcode-mcp-tools qa-ready qa-runtime-ready clean \
         db-backup db-restore deploy deploy-rollback server-status server-logs
 
 # Deploy / ops targets. Override HOST on the command line (e.g. `make deploy HOST=workoutdb.tail-xyz.ts.net`).
@@ -97,6 +97,12 @@ xcode-mcp-tools:  ## Verify global XcodeBuildMCP exposes tools
 	PATH="$(XCODE_MCP_PATH)" xcodebuildmcp tools
 
 qa-ready: xcode-mcp-tools  ## Verify QA tool availability before simulator/device QA
+
+qa-runtime-ready: qa-ready  ## Verify local tools used by ETTrace/memgraph runtime proof
+	@command -v leaks >/dev/null 2>&1 || { echo "leaks not found"; exit 127; }
+	@xcrun xctrace version >/dev/null
+	@xcrun simctl help >/dev/null
+	@mkdir -p scratch/qa-runs
 
 clean:  ## Remove .pytest_cache, .ruff_cache, schema/.build, app/.build, Xcode DerivedData
 	rm -rf .pytest_cache .ruff_cache schema/.build

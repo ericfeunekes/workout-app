@@ -21,6 +21,7 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `prescription.md` — current pre-primitives authoring vocabulary. What Claude must put in a workout so the app can execute it today. For target primitives work, use `specs/primitives-data-model.md` instead.
 - `workout-taxonomy.md` — bootstrap workout-domain and block-archetype taxonomy. Use this before authoring new workout shapes so training intent maps to the right timing/logging primitive.
 - `workout-execution-requirements.md` — athlete-facing timer, transition, logging, and summary requirements for workout archetypes.
+- `design-system.md` — reusable SwiftUI visual, Dynamic Type, accessibility, hit-target, and material/glass contract.
 - `features.md` and `features/INDEX.md` — target feature contracts and QA scenarios. Use `feature-gap-map.md` to see unresolved gap IDs for future planning.
 - `sdlc.md` — progressive-disclosure workflow from requirements planning to backlog lanes, active work trees, scratch phase/implementation plans, and gap closeout.
 - `backlog.md` — lightweight lane and gap router. Start here when asking "what lane are we working?" or "which gaps does this close?"
@@ -39,6 +40,7 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `sdlc.md` — planning lifecycle: requirements docs, gap index, backlog lanes, active work trees, ephemeral scratch phase plans, implementation plans, and closeout.
 - `TESTING.md` — proof contract; what each test tier covers and how to run it.
 - `QA.md` — UX QA guide for app-facing work; match proof to claim, use XcodeBuildMCP and `img ask` when visible UI changes, keep `docs/bugs.md` as the only active issue tracker, and leave `scratch/qa-runs/` as raw evidence only.
+- `design-system.md` — DesignSystem package contract for reusable primitives, Dynamic Type, accessibility metadata, hit targets, and Liquid Glass/material posture.
 - `MIGRATIONS.md` — schema migration mechanics for server SQL + SwiftData, the single-user cutover flow, and recovery procedures.
 - `workout-generation.md` — generator-facing authoring guide that composes the data model, taxonomy, timing modes, prescriptions, autoregulation, support boundaries, and examples into one workflow.
 - `prescription.md` — current pre-primitives prescription authoring vocabulary. Per-timing-mode shapes, RIR + autoreg rules, parametric shapes, authoring checklist. Rewrite during the primitives docs sweep.

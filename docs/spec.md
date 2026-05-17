@@ -126,7 +126,10 @@ Terse — the detailed architecture lives in `docs/specs/v2-architecture.md`.
 
 - Python FastAPI + SQLite server (home-server deployment over Tailscale). Stores workouts, exercises, set_logs, user_parameters, event_log.
 - iOS app (SwiftUI + SwiftData), offline-first: pull from server → cache → execute → push back when connected.
-- 11 Swift packages, each narrow: `Core/Domain`, `Core/Session`, `Core/Prescription`, `Core/Autoreg`, `Core/Telemetry`, `Core/Foundation`, `Persistence`, `Sync`, `Shell`, `DesignSystem`, feature packages.
+- Local SwiftPM package graph under `app/Packages/`: Core packages,
+  `DesignSystem`, `Persistence`, `Sync`, named bridges, feature packages, and
+  `Shell`. See `docs/architecture/swift-packages.md` for the authoritative
+  package list and allowed dependencies.
 - `Features/*` packages own the view models; `Shell` is the only place allowed to wire Features together.
 - Import-linter (Python) + SwiftLint rules enforce architectural boundaries at CI time.
 

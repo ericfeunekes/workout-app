@@ -84,6 +84,9 @@ handoff instead of inventing a local plan mutation.
   that only Shell may compose sibling features. Execution-side preview work now
   exposes a projection-backed work queue for current-block remaining and future
   work.
+- `PREVIEW-GAP-004`: A dedicated `WorkoutPreviewView` and single preview sheet
+  routing model are not yet extracted. Add this seam before expanding richer
+  preview edits so Today does not absorb preview-specific interaction state.
 - `TODAY-GAP-002`: Simulator proof is required before any preview tap target or
   layout claim is marked `verified`.
 

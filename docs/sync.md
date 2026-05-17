@@ -43,7 +43,10 @@ The app pulls and pushes on three triggers:
 
 1. **App open.** On every foregrounding, the app issues `GET /api/sync/pull?since=<last_server_time>`.
 2. **After a log write.** When the user completes a set (or a workout), the app issues `POST /api/sync/results` with the new rows. Push is fire-and-forget from the UI's perspective — failure is queued silently.
-3. **Gentle retry while foregrounded.** Every ~60s while the app is in foreground, the retry queue is flushed (one attempt per pending batch). No exponential backoff needed at single-user scale.
+3. **Gentle retry while foregrounded.** While the app is in foreground, the
+   retry queue is flushed on a bounded cadence. The current push loop uses
+   backoff after failures; the lifecycle contract is still foreground-owned,
+   not background-owned.
 
 **No aggressive polling.** No WebSocket. Push notifications are not in scope for v1 — the user will have opened the app by the time a new plan matters.
 
@@ -262,6 +265,12 @@ The watch face grammar (widget-based faces for set / rest / superset / EMOM / AM
   later after newer prescriptions may have arrived. Pick explicit expiry,
   refuse/resume, or never-expire behavior before changing execution/sync around
   long-lived active sessions.
+- `SYNC-GAP-004`: **Foreground/background lifecycle ownership.** The target
+  cadence says pull on foreground and retry pushes while foregrounded, but the
+  durable contract does not yet name the single Shell/app-root owner for
+  foreground pull, push flusher start/restart, background stop posture, and
+  token-rejected recovery. Do not claim foreground sync verified until a Shell
+  lifecycle test or app-hosted proof plus simulator QA pins this path.
 - **Sync triggers on the watch.** Currently the phone is the only sync actor. If the watch ever writes set_logs independently (not in v1), we'll need a watch → phone → server reconciliation step.
 - **Set-log deletion scope.** v1 only deletes set_logs through `workout_resets` for same-day accidental workout logs. Arbitrary historical set deletion/edit provenance remains out of scope unless the user asks for audit-grade history later.
 - **Multiple active workouts.** The spec allows a user to mark multiple workouts `active`, but the app UX assumes one active workout at a time. Behavior if a second workout is started before the first is completed is undefined; we'd need to decide whether "start workout" auto-completes the prior one or refuses.

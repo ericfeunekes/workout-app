@@ -167,6 +167,63 @@ The exact tool name format is `mcp__<server>__<workflow>-<tool>` in Claude Code.
 
 The `.xcodebuildmcp/config.yaml` file intentionally stores only portable defaults: relative project path, scheme, configuration, bundle ID, and simulator platform. Pick the simulator per run by name from the live simulator list; never commit a simulator UUID.
 
+## Runtime proof recipes
+
+Use these when `docs/TESTING.md` or a feature doc asks for runtime proof.
+Keep runs focused: one claim, one simulator/device, one artifact directory
+under `scratch/qa-runs/<YYYY-MM-DD>-<slug>/`.
+
+Before starting, run:
+
+```bash
+make qa-runtime-ready
+```
+
+This verifies XcodeBuildMCP plus the local `xctrace`, `simctl`, and `leaks`
+tool surface. It does not capture evidence by itself.
+
+### Timer gauntlet
+
+Use DEBUG routes to reach timer-heavy states quickly:
+
+- `--start-active` for Active route proof
+- `--jump-rest` for Rest route proof
+- `--jump-complete` for completion proof
+
+For simulator QA, capture `snapshot_ui` at each route boundary, screenshots at
+meaningful states, logs/telemetry when state is part of the claim, and a short
+recording for `img ask --video`.
+
+### ETTrace
+
+Use ETTrace for CPU/render/layout claims. Capture one focused flow such as
+launch -> Today, Active set start -> log -> Rest, Rest countdown -> next, or a
+History scroll/filter path. Preserve the processed trace or JSON summary in the
+run directory and summarize:
+
+- app build and simulator/device
+- route and exact user flow
+- before/after comparison if optimizing
+- hottest app-owned symbols or SwiftUI update paths
+- caveats that keep the result from proving more than the focused flow
+
+Do not add temporary trace hooks to production code. If temporary instrumentation
+is unavoidable, remove it before closeout.
+
+### Memgraph / leaks
+
+Use memgraph/leaks proof for object-lifetime claims. Good focused flows:
+
+- open/dismiss edit sheets repeatedly
+- save-and-done, then start the next workout
+- History list -> detail -> back
+- Settings reset/change-server
+- background/foreground with push flusher active
+
+The closeout summary should name app-owned leaked or retained types, ownership
+paths where available, and whether the evidence is a true leak, expected
+lifetime, or inconclusive grouped retention.
+
 ## When the fallback is fine
 
 - You're taking one or two screenshots as a sanity check on a specific change.

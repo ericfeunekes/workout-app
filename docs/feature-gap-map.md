@@ -16,7 +16,8 @@ covers:
 Owning feature, domain, or aspect docs are the source of truth. Their
 `Current gaps` sections describe what target behavior is not implemented or not
 proven. This file is only the index: it gives those gaps stable IDs so future
-phase plans can cite specific gaps and close them cleanly.
+backlog lanes and implementation work can cite specific gaps and close them
+cleanly.
 
 Do not put implementation steps, phase order, proof history, or resolved bugs
 here. When a gap is closed, remove the row and remove or revise the corresponding
@@ -26,7 +27,7 @@ gap in the owning doc. Git history is the archive.
 
 | Field | Meaning |
 | --- | --- |
-| `gap_id` | Stable ID used by phase and implementation plans. |
+| `gap_id` | Stable ID used by backlog lanes and implementation notes. |
 | `owning_doc` | Requirement doc that owns the gap. |
 | `gap` | Short statement of the missing behavior or proof. |
 | `planning_trigger` | The next kind of work that should address it. |
@@ -92,9 +93,9 @@ gap in the owning doc. Git history is the archive.
 | `WATCHKIT-GAP-001` | `docs/features/watch-workoutkit-handoff.md` | Final per-archetype WorkoutKit mapping table is missing. | WorkoutKit handoff spike. |
 | `WATCHKIT-GAP-002` | `docs/features/watch-workoutkit-handoff.md` | Real-device open/schedule proof is missing. | WorkoutKit handoff spike. |
 | `WATCHKIT-GAP-003` | `docs/features/watch-workoutkit-handoff.md` | Completion reconciliation identity path is unsettled. | WorkoutKit/HealthKit completion spike. |
-| `WATCHCUSTOM-GAP-001` | `docs/features/watch-primary-execution.md` | Custom Watch protocol/platform identity, stale-action rejection, and phone inbox need future proof if custom Watch is promoted. | Just-in-time custom Watch phase planning. |
-| `WATCHCUSTOM-GAP-002` | `docs/features/watch-primary-execution.md` | Watch-primary offline event replay and reconnect idempotency are unimplemented. | Just-in-time custom Watch phase planning. |
-| `WATCHCUSTOM-GAP-003` | `docs/watch-metrics.md` | Custom Watch metric slots, HR slot states, target windows, and route/directions UI are unimplemented. | Just-in-time custom Watch phase planning. |
+| `WATCHCUSTOM-GAP-001` | `docs/features/watch-primary-execution.md` | Custom Watch protocol/platform identity, stale-action rejection, and phone inbox need future proof if custom Watch is promoted. | Re-plan custom Watch only if WorkoutKit handoff is insufficient. |
+| `WATCHCUSTOM-GAP-002` | `docs/features/watch-primary-execution.md` | Watch-primary offline event replay and reconnect idempotency are unimplemented. | Re-plan custom Watch only if WorkoutKit handoff is insufficient. |
+| `WATCHCUSTOM-GAP-003` | `docs/watch-metrics.md` | Custom Watch metric slots, HR slot states, target windows, and route/directions UI are unimplemented. | Re-plan custom Watch only if WorkoutKit handoff is insufficient. |
 | `CHAT-GAP-001` | `docs/features/in-app-claude.md` | No accepted in-app Claude workflow exists. | Requirements/design pass. |
 | `CHAT-GAP-002` | `docs/features/in-app-claude.md` | No proposal identity/acceptance contract exists. | Requirements/design pass. |
 | `CHAT-GAP-003` | `docs/features/in-app-claude.md` | No trust boundary exists for app-applied Claude changes. | Requirements/design pass. |

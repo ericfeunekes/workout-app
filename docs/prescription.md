@@ -29,7 +29,6 @@ See also:
 - `docs/specs/v2-architecture.md` for the entity schema.
 - `docs/workout-taxonomy.md` for the target block archetypes and domain lenses.
 - `docs/workout-execution-requirements.md` for target athlete-facing timer, transition, logging, and summary behavior.
-- `docs/workout-execution-design-plan.md` for the pass sequence that aligns target behavior with current implementation.
 - `docs/watch-metrics.md` for the target watchOS slot contract, metric windows, sensor fallbacks, and phone/watch lifecycle.
 - `docs/sync.md` for how prescriptions reach the app and what wins on conflict.
 - `docs/design/RULES.md` (in the design bundle) for the underlying app-behavior rules.

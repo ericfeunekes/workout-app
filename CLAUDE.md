@@ -37,7 +37,7 @@ See `docs/WORKFLOW.md` for the full lifecycle (idea → spec → plan → implem
 
 ### After context loss
 - Re-read this file, `docs/WORKFLOW.md`, and `docs/specs/v2-architecture.md`.
-- Check `docs/plans/active/` (if any) for in-flight work.
+- Read `docs/backlog.md` for current lanes and gap ownership, then check `scratch/` for ephemeral handoff notes if a slice is already in progress.
 
 ## Review workflow — Codex is the investigator/sweeper/reviewer, lead Claude synthesizes
 

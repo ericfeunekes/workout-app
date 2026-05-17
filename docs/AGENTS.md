@@ -21,10 +21,8 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `prescription.md` — current pre-primitives authoring vocabulary. What Claude must put in a workout so the app can execute it today. For target primitives work, use `specs/primitives-data-model.md` instead.
 - `workout-taxonomy.md` — bootstrap workout-domain and block-archetype taxonomy. Use this before authoring new workout shapes so training intent maps to the right timing/logging primitive.
 - `workout-execution-requirements.md` — athlete-facing timer, transition, logging, and summary requirements for workout archetypes.
-- `workout-execution-design-plan.md` — pass-based plan for aligning the execution docs, then designing each flow before implementation.
 - `features.md` and `features/INDEX.md` — target feature contracts and QA scenarios. Use `feature-gap-map.md` to see unresolved gap IDs for future planning.
-- `plans/backlog/workout-system-roadmap.md` — pickup map that ties together completed feedback/execution/history work, the future primitives cutover, CloudKit replication, Cloudflare endpoint exploration, WorkoutKit handoff, and downstream custom Watch phases. Start here when asking "what phase are we in?"
-- `plans/backlog/feedback-implementation-phases/` — historical source material for completed 2026-04-25 feedback implementation. Do not start future work here.
+- `backlog.md` — lightweight lane and gap router. Start here when asking "what lane are we working?" or "which gaps does this close?"
 - `watch-metrics.md` — target watchOS slot, metric, target-window, and phone/watch lifecycle contract.
 - `features/watch-workoutkit-handoff.md` — shorter Apple Watch delivery path: map eligible Setmark workouts into Apple's Workout app through WorkoutKit before building custom watch-primary execution.
 - `features/in-app-claude.md` — future Claude proposal/review/acceptance workflow; read before planning app-side Claude or chat behavior.
@@ -44,10 +42,10 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `prescription.md` — current pre-primitives prescription authoring vocabulary. Per-timing-mode shapes, RIR + autoreg rules, parametric shapes, authoring checklist. Rewrite during the primitives docs sweep.
 - `workout-taxonomy.md` — maps workout domains to mutually-exclusive block archetypes and current timing modes.
 - `workout-execution-requirements.md` — documents how each archetype should execute from the athlete perspective before implementation details are chosen.
-- `workout-execution-design-plan.md` — tracks the alignment and flow-design passes that must happen before build planning.
 - `features.md` — narrative entry point for user-visible feature contracts.
 - `features/INDEX.md` — per-feature target contracts, QA scenario index, and current-gap convention.
-- `feature-gap-map.md` — cross-feature index of unresolved implementation/proof gaps. Owning feature/aspect docs are the source of truth; phase plans cite gap IDs from here.
+- `feature-gap-map.md` — cross-feature index of unresolved implementation/proof gaps. Owning feature/aspect docs are the source of truth; backlog lanes and implementation notes cite gap IDs from here.
+- `backlog.md` — current lane router. It groups gap IDs into work lanes without preserving stale phase order or implementation steps.
 - `modifier-equipment.md` — authored modifier/equipment vocabulary and current gaps for variants, setup context, and app-display-only behavior.
 - `watch-metrics.md` — target watchOS contract for the three watch views, persistent HR, target windows, sensor fallbacks, and phone/watch action versioning.
 - `sync.md` — sync cadence, conflict rules, first-run UX, offline behavior, auth posture.
@@ -60,11 +58,6 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `decisions/` — ADRs. Current set: `ADR-2026-04-17-ux-scope.md`, `ADR-2026-04-17-rir-autoreg-sync.md`, `ADR-2026-04-17-architecture.md`, `ADR-2026-04-18-shell-package-placement.md`, `ADR-2026-04-18-smart-defaults.md`.
 - `open-questions.md` — unresolved product/design decisions only. Implementation/proof gaps belong in the owning feature/aspect doc and `feature-gap-map.md`.
 - `design/` — Claude Design handoff bundle (HTML/CSS/JSX prototypes, wireframes, rules). Read `design/ORIGIN.md` first, then `design/HANDOFF.md`. Reference, not spec.
-- `plans/active/` — current implementation plans. Start here before continuing an in-flight multi-slice build if any files exist.
-- `plans/archive/` — completed or superseded implementation plans retained for provenance. Do not resume from here unless a current roadmap explicitly points back to one as reference.
-- `plans/backlog/workout-system-roadmap.md` — overall current roadmap across feedback implementation, primitives cutover, CloudKit replication, Cloudflare protected endpoints, WorkoutKit handoff, and custom Watch work.
-- `plans/backlog/feedback-implementation-phases/` — historical implementation-plan source material for the completed feedback arc. Current requirements live in feature/aspect docs and `feature-gap-map.md`.
-- `plans/backlog/primitives-cutover-phases/` — phase specs for the primitives-data-model cutover. README owns the phase list and deferral notes; per-phase files carry outcome-altitude specs consumed by implementation-planning.
 - `bugs.md` — active QA issue tracker. Closed issues are removed; use git history for past rows.
 
 See also `schema/README.md` (outside `docs/`) — the shared schema package (OpenAPI + Swift DTOs) and its drift-prevention contract tests. Common dev commands: `make help` at the repo root.
@@ -81,7 +74,7 @@ See also `schema/README.md` (outside `docs/`) — the shared schema package (Ope
 These canonical surfaces haven't been needed yet. Add when:
 
 - `CORE-BELIEFS.md` — when invariants in root `AGENTS.md` outgrow it.
-- `plans/debt/` — when active implementation work starts producing durable non-current follow-ups.
+- Durable plan directories — do not add them. Use `docs/backlog.md` for current lanes and `scratch/` for ephemeral implementation notes.
 
 ## Front matter
 

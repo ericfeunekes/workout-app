@@ -13,7 +13,7 @@ covers:
 
 **Authoritative architecture spec:** `docs/specs/v2-architecture.md`. Read it before touching schema, sync, or the app shell.
 
-**Feature behavior specs:** `docs/features/` (per-feature target behavioral contracts + QA scenarios). Start at `docs/features/INDEX.md`; use `docs/feature-gap-map.md` for current gaps grouped into implementation phases.
+**Feature behavior specs:** `docs/features/` (per-feature target behavioral contracts + QA scenarios). Start at `docs/features/INDEX.md`; use `docs/feature-gap-map.md` for current gaps and `docs/backlog.md` for the lane router.
 
 **Unresolved design questions:** `docs/open-questions.md`.
 

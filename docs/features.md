@@ -44,11 +44,13 @@ pinned UI test. `docs/QA.md` defines the accepted proof artifacts.
 
 `docs/feature-gap-map.md` is the cross-feature gap index. The owning feature or
 aspect doc remains the source of truth; the map gives each unresolved gap a
-stable ID so a future phase plan can say exactly which gaps it addresses.
+stable ID so backlog lanes and implementation work can say exactly which gaps
+they address.
 
-Do not use the gap map as an implementation plan. Plans are just-in-time
-artifacts in `docs/plans/active/` for selected work. Deferred capabilities stay
-as requirements and gaps in their owning docs.
+Do not use the gap map as an implementation plan. `docs/backlog.md` groups gaps
+into current lanes; `scratch/` can hold ephemeral implementation notes for
+selected work. Deferred capabilities stay as requirements and gaps in their
+owning docs.
 
 ## Watch Direction
 

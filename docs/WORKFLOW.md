@@ -252,5 +252,5 @@ Resuming work without this conversation's context:
 
 - Re-read `AGENTS.md` and this file.
 - Read the affected spec (`docs/specs/v2-architecture.md`) and any ADRs in `docs/decisions/`.
-- Check `docs/plans/active/` for in-flight work if it exists, then read `docs/plans/backlog/workout-system-roadmap.md` for the current pickup map across completed feedback work, primitives cutover, and Watch work.
+- Read `docs/backlog.md` for current lanes and gap ownership, then check `scratch/` for ephemeral handoff notes if a slice is already in progress.
 - If confused about history or intent, ask Eric — don't guess.

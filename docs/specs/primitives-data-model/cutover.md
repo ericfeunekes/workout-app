@@ -53,16 +53,14 @@ All of the above lands in one PR. This is the complete-cutover invariant from `C
 
 ## Planning interpretation
 
-The phase specs under `docs/plans/backlog/primitives-cutover-phases/` are
-branch checkpoints, not independently shippable releases. They let review and
-implementation planning reason about one coherent outcome at a time while the
-cutover branch is still incomplete. The only mergeable state is the final state
-described above: storage, API, schema, execution, sync, fixtures, tests, and
-docs all on the primitive contract with no legacy acceptance path.
+The primitive cutover is the active trunk lane in `docs/backlog.md`, but this
+cutover file owns the durable requirement: the only mergeable state is storage,
+API, schema, execution, sync, fixtures, tests, and docs all on the primitive
+contract with no legacy acceptance path.
 
-Within a phase, "no legacy" means no compatibility fallback survives in the
-surfaces that phase owns. It does not mean the partially completed branch can be
-deployed before later phases port the remaining surfaces.
+Use `scratch/` for any temporary decomposition needed while implementing the
+cutover. Do not preserve stale phase files in `docs/`; if implementation
+discovers a requirement gap, update this spec or the relevant aspect file.
 
 ## Reversibility
 

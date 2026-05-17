@@ -134,8 +134,8 @@ Proof: migration tests export a pre-cutover local store with representative comp
 - `PDM-GAP-001`: The accepted primitive hierarchy is not implemented in the
   server schema, API, shared Swift DTOs, SwiftData models, execution seeding,
   timing drivers, sync payloads, fixtures, or current feature docs. Future
-  phase planning must start from this accepted contract and cite the aspect
-  gaps below for the specific proof obligations it intends to close.
+  implementation planning must start from this accepted contract and cite the
+  aspect gaps below for the specific proof obligations it intends to close.
 
 ## Open questions
 

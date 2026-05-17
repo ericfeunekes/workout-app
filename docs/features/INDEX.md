@@ -26,8 +26,8 @@ Feature-doc status is allowed to describe target behavior, not only shipped beha
 
 Each rewritten feature doc should use `Current gaps` for target-contract pieces
 that are not implemented or not yet proven. `../feature-gap-map.md` indexes
-those gaps so future phase plans can cite exact gap IDs; it is not itself a
-phase plan.
+those gaps so backlog lanes and implementation work can cite exact gap IDs; it
+is not itself a plan.
 
 ## Reading order for a cold start
 

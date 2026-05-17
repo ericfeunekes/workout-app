@@ -1,7 +1,7 @@
 ---
 title: docs navigator
 status: accepted
-last_reviewed: 2026-04-26
+last_reviewed: 2026-05-17
 purpose: Index of durable documentation for WorkoutDB. When landing in docs/, start here.
 covers:
   - docs/
@@ -23,6 +23,7 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `workout-execution-requirements.md` — athlete-facing timer, transition, logging, and summary requirements for workout archetypes.
 - `workout-execution-design-plan.md` — pass-based plan for aligning the execution docs, then designing each flow before implementation.
 - `features.md` and `features/INDEX.md` — target feature contracts and QA scenarios. Use `feature-gap-map.md` to see the current gaps grouped into implementation phases.
+- `plans/backlog/workout-system-roadmap.md` — pickup map that ties together completed feedback/execution/history work, the future primitives cutover, and downstream Watch phases. Start here when asking "what phase are we in?"
 - `plans/backlog/feedback-implementation-phases/` — downstream implementation phase directory for the 2026-04-25 feedback and watch redesign sequence. Start here when selecting the next phase after the feature-docs contract pass.
 - `watch-metrics.md` — target watchOS slot, metric, target-window, and phone/watch lifecycle contract.
 - `sync.md` — sync cadence, conflict rules, first-run UX, offline behavior, auth posture.
@@ -56,6 +57,7 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `open-questions.md` — the living gap register. Items that surfaced from consistency passes but aren't decided yet, with working assumptions and disposition (decide-next / defer / resolve-in-code / watchlist).
 - `design/` — Claude Design handoff bundle (HTML/CSS/JSX prototypes, wireframes, rules). Read `design/ORIGIN.md` first, then `design/HANDOFF.md`. Reference, not spec.
 - `plans/active/` — current implementation plans. Start here before continuing an in-flight multi-slice build.
+- `plans/backlog/workout-system-roadmap.md` — overall current roadmap across feedback implementation, primitives cutover, and Watch work.
 - `plans/backlog/feedback-implementation-phases/` — phase-by-phase implementation plans for carrying the 2026-04-25 feedback through schema, execution UX, history, watch authority, watch UI, and future in-app Claude/chat.
 - `plans/backlog/primitives-cutover-phases/` — phase specs for the primitives-data-model cutover. README owns the phase list and deferral notes; per-phase files carry outcome-altitude specs consumed by implementation-planning.
 - `bugs.md` — active QA issue tracker. Closed issues are removed; use git history for past rows.

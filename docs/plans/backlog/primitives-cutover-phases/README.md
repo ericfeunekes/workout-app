@@ -21,6 +21,8 @@ This directory decomposes the primitives-data-model spec into phases. The spec i
 
 Each phase is a deliverable unit at outcome altitude — it names what must be true when the phase is done, not how the code will change to make it true. Implementation-planning takes one phase spec and turns it into a proof-mapped plan at code altitude. A phase spec that needs struct fields, file paths, or method signatures to be readable is at the wrong altitude and should be pushed down.
 
+This directory is one track in the broader `docs/plans/backlog/workout-system-roadmap.md`. It should be read after the completed feedback execution/history phases, because those phases describe the current app baseline that the primitives cutover must replace without losing user-facing behavior.
+
 ## The feature in one sentence
 
 Replace today's 12-case timing-mode coupling (per-mode prescription shape + per-mode driver + per-mode log shape) with a composable primitive hierarchy — Block > Set > Slot — so that every workout pattern Eric authors becomes a composition of existing primitives rather than a new enum case.
@@ -52,6 +54,20 @@ The next operating loop is:
 6. Re-plan Phases 5 and 6 only after Phase 4 shows the real correction, history, aggregate-row, and docs-drift surface.
 
 The current proof state is documentation-only. The meaningful implementation proof starts with Phase 1.
+
+## Relationship to feedback and watch work
+
+The history picker, exercise review, post-workout correction, and set editing
+work belong to the feedback implementation track, where Phases 1-6 are already
+implemented. This primitives directory does not reopen that work; it defines the
+future storage and execution substrate that must preserve those behaviors after
+the cutover.
+
+Watch work is downstream of both tracks. The watch authority and watch-primary
+phases consume the execution baseline from the feedback track. The watch
+metrics/directions UI should be reconciled with the primitives slot model before
+implementation, because fixed watch slots and primitive workout slots need to
+remain conceptually aligned.
 
 ## Why this is phased
 

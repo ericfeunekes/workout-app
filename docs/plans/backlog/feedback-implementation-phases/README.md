@@ -1,7 +1,7 @@
 ---
 title: 2026-04-25 feedback implementation phases
 status: backlog
-last_reviewed: 2026-04-26
+last_reviewed: 2026-05-17
 purpose: Directory of implementation-planning phases for carrying the 2026-04-25 workout feedback from docs alignment through app, watch, and QA.
 covers:
   - FEEDBACK-AND-SPEC-2026-04-25.md
@@ -17,6 +17,26 @@ This directory is the durable implementation-planning map for the workout
 feedback and watch redesign sequence. Each phase is a scoped delivery unit with
 its own proof map and done criteria. A phase moves from backlog to
 `docs/plans/active/` only when selected for implementation.
+
+This directory is one track in the broader
+`docs/plans/backlog/workout-system-roadmap.md`. It owns the feedback-driven
+execution, history, and watch sequence. The primitives cutover is a downstream
+architectural track in that same roadmap, not a competing or unrelated plan.
+
+## Current Landing Status (2026-05-17)
+
+Phases 1-6 have been implemented in the current app/code/docs baseline. That
+includes preview-first workout entry, execution read-model seams, redesigned
+active/rest/transition surfaces, history review, exercise detail, post-workout
+correction, shared set editing, and history data-integrity fixes.
+
+T1 is a transition alignment note that constrains later history/watch work; it
+does not add app behavior by itself.
+
+Phases 7-11 remain backlog. Before starting Phase 7, refresh the watch plan
+against both the completed Phase 1-6 work and the primitives roadmap, because
+watch metric slots should not drift away from the future Block > Set > Slot
+model.
 
 ## Context
 

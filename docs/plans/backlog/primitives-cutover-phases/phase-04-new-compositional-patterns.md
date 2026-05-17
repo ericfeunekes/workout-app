@@ -22,7 +22,7 @@ Phase 3 delivered feature parity with the pre-cutover build: every workout Eric 
 
 Five concrete gaps in today's authoring drove the redesign:
 
-The first is cluster sets. Today, the authoring vocabulary has a `cluster` prescription shape that the execution layer collapses to a plain set at seed time, dropping the intra-slot rest. A cluster-rest-pause architecture plan (`docs/plans/active/cluster-rest-pause-architecture.md`) was in flight to add a new session primitive for slot-level cursor advancement; that plan is superseded by this phase. Under primitives, a cluster is not a new primitive — it is one set with N slots carrying the same exercise, per-slot rep targets, and authored post-slot rest. The composition already exists; what Phase 4 adds is the execution support for authoring and running one.
+The first is cluster sets. Today, the authoring vocabulary has a `cluster` prescription shape that the execution layer collapses to a plain set at seed time, dropping the intra-slot rest. A cluster-rest-pause architecture plan (`docs/plans/archive/cluster-rest-pause-architecture.md`) was in flight to add a new session primitive for slot-level cursor advancement; that plan is superseded by this phase. Under primitives, a cluster is not a new primitive — it is one set with N slots carrying the same exercise, per-slot rep targets, and authored post-slot rest. The composition already exists; what Phase 4 adds is the execution support for authoring and running one.
 
 The second is sibling work+rest structures. Today, Tabata's 20-seconds-of-work then 10-seconds-of-rest cadence is hardcoded in the Tabata driver. Any other work+rest cadence (30s/15s, 40s/20s) is not expressible. Under primitives, work+rest sibling sets inside a block with `block.repeat = 8` compose the Tabata pattern from parts — and the parts generalize to any cadence the author writes.
 
@@ -52,7 +52,7 @@ The stakeholder is Eric as user on the branch build. After this phase, he can au
 
 ## QA contract
 
-**Merge gate — deterministic, fast, blocks merge per-commit.**
+**Phase gate — deterministic, fast, blocks Phase 4 close.**
 
 - **AC1** is proven by a cluster execution test: seed a cluster fixture, drive through every sub-slot to the top-level set commit, assert each sub-slot landed a log row with the authored reps and the inter-slot rest duration. Reverse-patch: a seed-time collapse of the cluster to a single slot breaks the multi-row assertion; a driver that skips intra-slot rest breaks the rest-duration assertion.
 - **AC2** is proven by a work+rest sibling test at two authored cadences — the Tabata 20/10 and one non-Tabata cadence (e.g., 30/15). Both execute to completion with the authored windows, round counts, and log rows per repeat. Reverse-patch: a driver that hardcodes the 20/10 cadence regresses the non-Tabata cadence test; a port that treats the rest set as a zero-duration transition regresses the Tabata test's rest window.
@@ -61,7 +61,7 @@ The stakeholder is Eric as user on the branch build. After this phase, he can au
 - **AC5** is proven by a heterogeneous-AMRAP test: an AMRAP fixture with a rep slot, a distance slot, and a duration slot inside one round executes with each slot committed in its own shape, and the round counter increments after all three slots commit in order. Reverse-patch: a cursor that treats all slots as rep-shaped regresses the distance and duration commits; a round-counting implementation tied to slot count rather than round completion regresses the counter assertion.
 - **AC6** is proven by ten end-to-end round-trip tests, one per worked example, each driving the example to completion and asserting the pushed log rows match the authored configuration. This is the direct A2 proof. Reverse-patch: any single worked example that doesn't round-trip breaks its own test; no shortcut covers all ten.
 
-**RC gate — one manual smoke on a novel pattern.** Before phase close, one manual simulator smoke on a cluster workout or a custom-cadence work+rest workout (whichever pattern is hardest to verify by test alone) is run. The smoke is not a merge gate but exists to catch integration surprises that per-test baselines miss.
+**RC gate — one manual smoke on a novel pattern.** Before phase close, one manual simulator smoke on a cluster workout or a custom-cadence work+rest workout (whichever pattern is hardest to verify by test alone) is run. The smoke is not a deterministic phase gate but exists to catch integration surprises that per-test baselines miss.
 
 ## Scope
 
@@ -107,10 +107,10 @@ The stakeholder is Eric as user on the branch build. After this phase, he can au
 
 ## Proof commands
 
-Per-commit merge gate: the per-mode suites from Phase 3 still pass (no regression), plus the new compositional-pattern suites and the ten worked-example round-trip suite all pass.
+Phase-close gate: the per-mode suites from Phase 3 still pass (no regression), plus the new compositional-pattern suites and the ten worked-example round-trip suite all pass.
 
 RC gate: one manual simulator smoke on cluster or custom-cadence work+rest before phase close.
 
 ## Handoff to implementation-planning
 
-This phase spec is the input to `scoping:implementation-planning`. The implementation plan produced there carries the code-altitude decomposition (which drivers grow which capabilities, which session-state extensions land, which fixtures correspond to which worked examples). An implementation plan that surfaces a pattern that cannot be composed from the seven primitives routes back to the spec — not to feature-planning, unless the gap reveals the feature's expressive promise was under-scoped.
+This phase spec is the input to `scoping:implementation-planning`. The implementation plan produced there carries the code-altitude decomposition (which drivers grow which capabilities, which session-state extensions land, which fixtures correspond to which worked examples). An implementation plan that surfaces a pattern that cannot be composed from the seven primitives routes back to the spec — not to requirements-planning, unless the gap reveals the durable requirement's expressive promise was under-scoped.

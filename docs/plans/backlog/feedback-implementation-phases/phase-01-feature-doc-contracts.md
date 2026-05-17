@@ -4,7 +4,7 @@ status: completed
 last_reviewed: 2026-04-26
 purpose: Convert feedback into target feature contracts, current gaps, proof rules, and downstream implementation phases.
 covers:
-  - docs/plans/active/feature-docs-feedback-contracts.md
+  - docs/plans/archive/feature-docs-feedback-contracts.md
   - docs/features/
   - docs/feature-gap-map.md
   - docs/QA.md
@@ -24,7 +24,7 @@ understand intended behavior, built behavior, and remaining gaps.
 The full implementation plan already exists and has been independently
 reviewed:
 
-- `docs/plans/active/feature-docs-feedback-contracts.md`
+- `docs/plans/archive/feature-docs-feedback-contracts.md`
 
 This file is the durable backlog copy of that phase. If Phase 1 resumes, refresh
 the active plan and this phase together so the phase directory remains
@@ -116,7 +116,7 @@ reverse-engineering the app.
 - Leave the active plan and this phase aligned.
 - Ensure downstream phases own each remaining current gap or future design
   route.
-- Phase 1 closed in `docs/plans/active/feature-docs-feedback-contracts.md` with
+- Phase 1 closed in `docs/plans/archive/feature-docs-feedback-contracts.md` with
   docs checks and Codex review complete.
 - Feedback-ripple follow-up, captured after this phase closed, found transition
   cleanup that should not reopen Phase 1 implementation:
@@ -130,7 +130,7 @@ reverse-engineering the app.
 
 ## Recovery Context
 
-Resume from `docs/plans/active/feature-docs-feedback-contracts.md`, then check
+Resume from `docs/plans/archive/feature-docs-feedback-contracts.md`, then check
 this file for the durable phase contract and downstream phase alignment. If the
 feedback-ripple transition is still open, complete or explicitly defer it before
 Phase 6 or Watch work continues.

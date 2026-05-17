@@ -49,7 +49,8 @@ delivery clusters; implementation planning can reshuffle when a specific unit is
 selected.
 
 Do not use the gap map as an implementation plan. Plans live in
-`docs/plans/active/` only after a scoped unit is selected.
+`docs/plans/active/` only while a scoped unit is actively being worked.
+Completed and superseded plans move to `docs/plans/archive/` for provenance.
 
 Watch-primary execution is the next planned feature thread. It extends the
 execution loop to Apple Watch without making the Watch a server actor: the

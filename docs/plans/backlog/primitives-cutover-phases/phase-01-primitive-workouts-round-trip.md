@@ -22,7 +22,7 @@ Claude today authors workouts in the legacy per-timing-mode vocabulary because t
 
 The pressure here is not an observed user failure; it's a dependency the rest of the cutover cannot begin without. Phase 1's stakeholders are Claude as author (who can start expressing workouts in the new vocabulary once the full pipeline accepts them) and Phase 2 as named downstream consumer (which cannot build an execution path against a storage contract that is still split between old and new shapes).
 
-The repo's complete-cutover philosophy is authoritative and applies to every phase on its own, not just the merged PR. Per `CLAUDE.md` § "Development philosophy": *"Complete cutovers only. When something changes, change it everywhere in one commit — server, app, schema, tests, docs. No feature flags, no legacy paths, no parallel old+new codepaths."* Phase 1 must therefore cut over both server and app persistent storage together. A state where the server has advanced its schema but the app's SwiftData store still reads/writes the legacy shape is a complete-cutover violation, not an allowed mid-cutover state. Phase 1 is big enough to hold both sides of the schema cutover; Phase 2 inherits a fully-cut-over storage substrate and adds execution on top.
+The repo's complete-cutover philosophy is authoritative for the final merge, and it applies within each phase's owned surfaces. Per `CLAUDE.md` § "Development philosophy": *"Complete cutovers only. When something changes, change it everywhere in one commit — server, app, schema, tests, docs. No feature flags, no legacy paths, no parallel old+new codepaths."* Phase 1 must therefore cut over both server and app persistent storage together. A state where the server has advanced its schema but the app's SwiftData store still reads/writes the legacy shape is a storage-surface cutover violation. Phase 1 is big enough to hold both sides of the schema cutover; Phase 2 inherits a fully-cut-over storage substrate and adds execution on top. Phase 1 itself is a branch checkpoint, not a deployable release.
 
 ## Acceptance criteria
 
@@ -40,11 +40,11 @@ The repo's complete-cutover philosophy is authoritative and applies to every pha
 
 7. **App-side persistent storage has cut over to the primitive schema.** The on-device SwiftData schema is bumped to a new version whose persistent model types represent blocks, sets, slots, and alternatives in the primitive shape. The old flattened-workout-item persistent models no longer define the latest schema. Any legacy adapter that flattens a primitive pull into the old storage shape (for example a `MappedWorkout` bridge inside the Sync or Shell packages) is removed. Pulling a primitive workout from the server writes it to the app's local store in the primitive shape; reading it back from the local store returns the same primitive shape.
 
-8. **The complete-cutover invariant holds for storage.** At the close of this phase, the server's reported schema version and the app's latest SwiftData schema version both reflect the primitive cutover. Neither side carries a parallel legacy codepath, adapter, or feature flag to access the pre-cutover shape. The test that would break if a legacy-flattened path were reintroduced exists and runs on the merge gate.
+8. **The complete-cutover invariant holds for storage.** At the close of this phase, the server's reported schema version and the app's latest SwiftData schema version both reflect the primitive cutover. Neither side carries a parallel legacy codepath, adapter, or feature flag to access the pre-cutover shape. The test that would break if a legacy-flattened path were reintroduced exists and runs on the phase gate.
 
 ## QA contract
 
-**Merge gate — deterministic, fast, blocks merge per-commit.**
+**Phase gate — deterministic, fast, blocks Phase 1 close.**
 
 - **AC1, AC2, AC3** are proven by contract tests that exercise the server ingest + storage + pull + app decode + re-encode cycle against both primitive-vocabulary and legacy-vocabulary inputs. The primitive-vocabulary cases pass end-to-end; the legacy-vocabulary cases are rejected at ingest with a validation error whose shape is asserted. Reverse-patch: a change that accidentally re-accepts legacy-shape workouts breaks the rejection assertion; a change that silently drops a primitive field during storage breaks the fidelity assertion on pull.
 - **AC4** is proven by a fixture-decoding test that loads every canonical worked example fixture through both the server's model layer and the app's schema layer and asserts identical decoded structures. Reverse-patch: a fixture that names a primitive the codecs don't handle breaks the test; a codec that drops a field breaks the structure comparison.
@@ -76,7 +76,7 @@ The repo's complete-cutover philosophy is authoritative and applies to every pha
 
 ## Constraints
 
-- **Complete-cutover applies to every phase, including this one.** Per `CLAUDE.md` § "Development philosophy": *"Complete cutovers only. When something changes, change it everywhere in one commit — server, app, schema, tests, docs. No feature flags, no legacy paths, no parallel old+new codepaths."* Phase 1 satisfies this by cutting over server + shared schema + app persistent storage all together. A branch state where only the server has advanced is a Phase 1 failure, not an acceptable intermediate.
+- **Complete-cutover applies to the storage surfaces Phase 1 owns.** Phase 1 satisfies this by cutting over server + shared schema + app persistent storage all together. A branch state where only the server has advanced is a Phase 1 failure, not an acceptable intermediate. Execution remains a later branch checkpoint and the overall branch is not mergeable until the full cutover closes.
 - **Legacy shapes are dropped at every boundary this phase touches.** Server ingest rejects legacy payloads. Shared-schema DTOs speak only primitive. App's CoreDomain + Sync decode only primitive. App's SwiftData persistent schema stores only primitive. No `MappedWorkout`-style adapter survives.
 - **Shared-schema parity is not deferable.** Any structural shape the server produces must decode through the `schema/` Swift layer. A parity break is a phase failure.
 - **The session / execution / log-row surface is NOT touched in this phase.** That scope fence is real: Phase 1 changes what workouts LOOK like and where they're STORED, not how they EXECUTE. Execution stays on the legacy shape until Phase 2 ports it. The `SessionState` reducer, the seeder, the driver layer, the log-row encoder, the push queue's log-row wire format — none of these are touched here. That boundary holds even though it means the app can pull a primitive workout but cannot run it yet; a pre-execution app that can correctly store new-shape workouts is Phase 1's honest deliverable.
@@ -99,7 +99,7 @@ The repo's complete-cutover philosophy is authoritative and applies to every pha
 
 ## Proof commands
 
-Per-commit merge gate: the repo's full contract + schema + parity test suite runs green. The level is "all contract tests pass" — specific test identifiers belong in the implementation plan.
+Phase-close gate: the repo's full contract + schema + parity test suite runs green. The level is "all contract tests pass" — specific test identifiers belong in the implementation plan.
 
 No RC gate for this phase.
 

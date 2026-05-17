@@ -56,12 +56,10 @@ def test_schema_2026_04_26_columns_have_defaults(tmp_engine) -> None:
 
     with Session(tmp_engine) as session:
         set_log_columns = {
-            row[1]: row
-            for row in session.execute(text("PRAGMA table_info(set_log)")).fetchall()
+            row[1]: row for row in session.execute(text("PRAGMA table_info(set_log)")).fetchall()
         }
         block_columns = {
-            row[1]: row
-            for row in session.execute(text("PRAGMA table_info(block)")).fetchall()
+            row[1]: row for row in session.execute(text("PRAGMA table_info(block)")).fetchall()
         }
 
     assert set_log_columns["skipped"][3] == 1

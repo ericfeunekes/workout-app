@@ -29,10 +29,10 @@ RPE_FREE_PATHS = [
 
 # Paths allowed to mention RPE (historical narration, reference bundle, this test).
 ALLOWED_PATHS = {
-    "docs/decisions",          # ADRs narrating why RPE was replaced
-    "docs/design",             # reference-not-spec bundle
+    "docs/decisions",  # ADRs narrating why RPE was replaced
+    "docs/design",  # reference-not-spec bundle
     "docs/specs/data-model-exploration.md",  # pre-decision exploration doc
-    "tests/architecture/test_no_rpe.py",     # this file
+    "tests/architecture/test_no_rpe.py",  # this file
     # Migrations are append-only historical records. 001 created the rpe column;
     # 004 drops it. Both legitimately reference rpe by name and cannot be rewritten.
     "server/db/migrations/001_initial.sql",
@@ -108,12 +108,8 @@ def test_no_rpe_in_production_surfaces() -> None:
         all_hits.extend(_scan(Path(target)))
 
     if all_hits:
-        summary = "\n".join(
-            f"  {f}:{ln}  {line[:120]}" for f, ln, line in all_hits[:30]
-        )
-        overflow = (
-            f"\n  ... and {len(all_hits) - 30} more" if len(all_hits) > 30 else ""
-        )
+        summary = "\n".join(f"  {f}:{ln}  {line[:120]}" for f, ln, line in all_hits[:30])
+        overflow = f"\n  ... and {len(all_hits) - 30} more" if len(all_hits) > 30 else ""
         raise AssertionError(
             "RPE references found outside the allowed historical/reference surfaces. "
             "The system is RIR-only per ADR-2026-04-17-rir-autoreg-sync. "

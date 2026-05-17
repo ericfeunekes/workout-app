@@ -187,17 +187,13 @@ def test_push_set_logs_and_status(client, test_engine, test_user_id) -> None:
     pulled = client.get("/api/sync/pull").json()
     last = next(lp for lp in pulled["last_performed"] if lp["exercise_id"] == exercise_id)
     pushed_log = next(
-        log
-        for log in last["last_set_logs"]
-        if log["id"] == "88888888-8888-8888-8888-888888888888"
+        log for log in last["last_set_logs"] if log["id"] == "88888888-8888-8888-8888-888888888888"
     )
     assert pushed_log["skipped"] is True
     assert pushed_log["side"] == "left"
 
 
-def test_workout_reset_deletes_logs_and_replans_workout(
-    client, test_engine, test_user_id
-) -> None:
+def test_workout_reset_deletes_logs_and_replans_workout(client, test_engine, test_user_id) -> None:
     exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
     future_id = _create_future_workout(client, exercise_id)
     item_id = client.get(f"/api/workouts/{future_id}").json()["blocks"][0]["workout_items"][0]["id"]
@@ -505,9 +501,7 @@ def test_set_log_round_trips_duration_distance_hr_cadence(
     """
     exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
     future_id = _create_future_workout(client, exercise_id)
-    item_id = client.get(f"/api/workouts/{future_id}").json()["blocks"][0][
-        "workout_items"
-    ][0]["id"]
+    item_id = client.get(f"/api/workouts/{future_id}").json()["blocks"][0]["workout_items"][0]["id"]
 
     log_id = "cadec1a0-0000-4000-8000-000000000001"
     response = client.post(
@@ -554,9 +548,7 @@ def test_set_log_round_trips_duration_distance_hr_cadence(
     # dropped anywhere between ORM and wire this test would fail on
     # the Read-side schema.
     body = client.get("/api/sync/pull").json()
-    last = next(
-        lp for lp in body["last_performed"] if lp["exercise_id"] == exercise_id
-    )
+    last = next(lp for lp in body["last_performed"] if lp["exercise_id"] == exercise_id)
     log = next(sl for sl in last["last_set_logs"] if sl["id"] == log_id)
     assert log["duration_sec"] == 96.5
     assert log["distance_m"] == 400.0
@@ -654,9 +646,7 @@ def test_pull_last_performed_covers_alternatives(client, test_engine, test_user_
     )
 
 
-def test_incremental_pull_still_returns_last_performed(
-    client, test_engine, test_user_id
-) -> None:
+def test_incremental_pull_still_returns_last_performed(client, test_engine, test_user_id) -> None:
     """qa-001 regression: an incremental pull with no delta workouts must still include
     `last_performed` for every exercise in the user's catalog.
 

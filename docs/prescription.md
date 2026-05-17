@@ -553,6 +553,11 @@ work across left and right may be 40 kg, but each authored item carries the
 per-implement value. Logs `reps` as the performed count for that authored item, not a
 doubled aggregate.
 
+`per_side: true` is still accepted as a legacy/display hint and may appear in
+fixtures or alternative overrides. It does not make one authored item expand
+into left/right logs. New Claude-authored work should prefer separate
+left/right exercise items when side-specific actuals matter.
+
 `set_log.side` exists as a shipped/reserved round-trip field with values
 `left`, `right`, and `bilateral`; `bilateral` is the default for normal
 both-sides-together work. It is not the active authoring model, and analytics

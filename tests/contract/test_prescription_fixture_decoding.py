@@ -48,12 +48,8 @@ def _load_expected_shapes() -> set[str]:
     `tests/` isn't a Python package, so a plain `from tests.architecture...` import fails.
     Loading the module by file path keeps the two tests synced without a package rearrangement.
     """
-    parity_path = (
-        REPO_ROOT / "tests" / "architecture" / "test_prescription_shape_parity.py"
-    )
-    spec = importlib.util.spec_from_file_location(
-        "_prescription_shape_parity", parity_path
-    )
+    parity_path = REPO_ROOT / "tests" / "architecture" / "test_prescription_shape_parity.py"
+    spec = importlib.util.spec_from_file_location("_prescription_shape_parity", parity_path)
     assert spec is not None and spec.loader is not None, (
         f"Could not load {parity_path} to read EXPECTED_SHAPES."
     )
@@ -255,22 +251,16 @@ def test_fixture_shape(shape: str) -> None:
             f"Fixture '{shape}' has non-dict prescription_json at top level "
             f"(got {type(inner).__name__}). Wrapped fixtures carry inner shapes as dicts."
         )
-        _assert_required_keys(
-            shape, inner, spec["prescription"], where="prescription_json"
-        )
+        _assert_required_keys(shape, inner, spec["prescription"], where="prescription_json")
         tcfg = payload.get("timing_config_json")
         assert isinstance(tcfg, dict), (
             f"Fixture '{shape}' has non-dict timing_config_json at top level "
             f"(got {type(tcfg).__name__})."
         )
     elif shape in _BARE_SHAPES:
-        _assert_required_keys(
-            shape, payload, _BARE_REQUIRED_KEYS[shape], where="top-level"
-        )
+        _assert_required_keys(shape, payload, _BARE_REQUIRED_KEYS[shape], where="top-level")
     elif shape in _ALTERNATIVE_SHAPES:
-        _assert_required_keys(
-            shape, payload, _ALTERNATIVE_REQUIRED_KEYS[shape], where="top-level"
-        )
+        _assert_required_keys(shape, payload, _ALTERNATIVE_REQUIRED_KEYS[shape], where="top-level")
         overrides = payload.get("parameter_overrides_json")
         assert isinstance(overrides, dict), (
             f"Fixture '{shape}' has non-dict parameter_overrides_json "

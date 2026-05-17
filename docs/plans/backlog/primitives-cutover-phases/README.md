@@ -12,7 +12,7 @@ spec:
 covers:
   - docs/plans/backlog/primitives-cutover-phases/phase-*.md
 supersedes_plans:
-  - docs/plans/active/cluster-rest-pause-architecture.md (cluster becomes a structural multi-slot composition under the new model; that plan's slot/intra-set-rest design is subsumed by Phase 4)
+  - docs/plans/archive/cluster-rest-pause-architecture.md (cluster becomes a structural multi-slot composition under the new model; that plan's slot/intra-set-rest design is subsumed by Phase 4)
 ---
 
 # Primitives data model cutover — phase plan
@@ -73,7 +73,7 @@ remain conceptually aligned.
 
 The cutover spans server schema, shared DTOs, the prescription parser, the session seed, all 12 timing drivers, the execution view model, the persistence layer, the push queue, the sync endpoint, and several feature docs. A single review cycle cannot hold that surface area coherently — a reviewer asked to read every change at once will either rubber-stamp or livelock.
 
-Phasing lets each review loop exercise a coherent slice: one phase's outcome becomes the substrate the next phase consumes. The full cutover lands as one PR per the repo's complete-cutover philosophy, but the execution proceeds gate-by-gate on the branch with each phase's outcome exercisable on its own before the next begins.
+Phasing lets each review loop exercise a coherent slice: one phase's outcome becomes the substrate the next phase consumes. The full cutover lands as one PR per the repo's complete-cutover philosophy, but the execution proceeds gate-by-gate on the branch with each phase's outcome exercisable on its own before the next begins. These are branch checkpoints, not deployable releases; the only mergeable state is the complete cutover across storage, API, schema, execution, sync, fixtures, tests, and docs.
 
 ## Stakeholder map
 
@@ -97,9 +97,15 @@ Different phases improve the system for different stakeholders. Naming the stake
 
 Phases 5 and 6 are deliberately deferred. They depend on ground truth the first four phases haven't established yet: Phase 5's correction + aggregate-row story depends on what the driver ports actually produced in Phase 3; Phase 6's docs sweep and merge-ready state depends on what docs genuinely need rewriting vs. what turned out to still apply. Writing concrete phase specs for 5 and 6 today against a hypothetical branch state would miss the details that matter. When Phase 4 lands, re-enter phase-planning with the real state.
 
-### Revision note (2026-04-29, mid-Phase-1)
+### Revision note (2026-04-29, mid-Phase-1; clarified 2026-05-17)
 
-An earlier version of Phase 1 scoped the SwiftData V6 cutover to Phase 2, letting the server's schema advance while the app's persistent store stayed on the legacy shape during Phase 1. The `plan-and-implement` review node correctly flagged this as a complete-cutover violation per `CLAUDE.md` § "Development philosophy". The phase plan was revised to honor complete-cutover at every phase boundary, not only at merge: Phase 1 now includes the SwiftData cutover and the removal of any `MappedWorkout`-style legacy adapter. Phase 2's scope narrows to straight-sets execution on top of an already-cut-over storage substrate. The lesson generalizes — complete-cutover applies to each phase's own deliverable, not only to the merged PR.
+An earlier version of Phase 1 scoped the SwiftData V6 cutover to Phase 2, letting the server's schema advance while the app's persistent store stayed on the legacy shape during Phase 1. The `plan-and-implement` review node correctly flagged this as a storage-surface cutover violation per `CLAUDE.md` § "Development philosophy". The phase plan was revised so Phase 1 includes the SwiftData cutover and the removal of any `MappedWorkout`-style legacy adapter. Phase 2's scope narrows to straight-sets execution on top of an already-cut-over storage substrate.
+
+The 2026-05-17 scoping review narrowed that statement: complete-cutover applies
+to the surfaces each phase owns, while the phase itself remains a branch
+checkpoint. Phase 1 is not a deployable release because execution has not been
+ported yet; it is done only when the storage contract is fully primitive-shaped
+with no legacy adapter in that storage path.
 
 ## Sequencing
 
@@ -134,10 +140,11 @@ These are invariants from `CLAUDE.md` and `docs/MIGRATIONS.md` that every phase 
 
 - **Single-user dev posture.** The cutover drops local set_logs and server-side prescriptions. If this posture changes before the cutover lands, the entire phase plan is invalid and must be rewritten.
 - **Complete cutover on merge.** The final PR ships the whole cutover at once. No feature flags, no parallel code paths, no legacy acceptance shims. Mid-branch state during phases 1–6 is allowed to be incomplete; the merged state must be whole.
+- **Phase gates are not merge gates.** A phase may close on the branch with later surfaces still unsupported, as long as the phase's owned surfaces do not carry compatibility fallbacks and the next phase has a named consumer relationship.
 - **Claude owns exercise identity.** No phase introduces server-side exercise-name canonicalization.
 - **Offline-first execution.** The app must execute a pulled workout with no network calls. A phase that introduces a network dependency inside the execution loop is an invariant violation.
 - **Idempotent upserts.** Log rows keyed on composite identity round-trip without duplication or loss. A phase that breaks this is not done.
 
 ## Supersedes / subsumes
 
-- `docs/plans/active/cluster-rest-pause-architecture.md` — that plan designed cluster/rest-pause as a small new session primitive layered onto the existing timing-mode model. Under the primitives model, cluster is a structural composition (one set with N slots, same exercise, per-slot reps, post-slot rest). Phase 4 delivers the primitive-compositional version; the superseded plan is closed when Phase 4 lands.
+- `docs/plans/archive/cluster-rest-pause-architecture.md` — that plan designed cluster/rest-pause as a small new session primitive layered onto the existing timing-mode model. Under the primitives model, cluster is a structural composition (one set with N slots, same exercise, per-slot reps, post-slot rest). Phase 4 delivers the primitive-compositional version; the superseded plan is retained as reference for intra-slot rest and composite-set risks.

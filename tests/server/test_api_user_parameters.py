@@ -127,9 +127,7 @@ def test_post_user_parameters_upserts_on_duplicate_id(client) -> None:
     assert rows[0]["value"] == "82.5"
 
 
-def test_user_parameters_duplicate_id_other_user_returns_403(
-    client, test_engine
-) -> None:
+def test_user_parameters_duplicate_id_other_user_returns_403(client, test_engine) -> None:
     """Tenant guard on the upsert-by-id branch.
 
     The client derives deterministic ids from `(userID, key, timestamp)`,

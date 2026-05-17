@@ -1,6 +1,7 @@
 ---
 title: Cluster and rest-pause execution architecture
-status: draft
+status: superseded
+last_reviewed: 2026-05-17
 purpose: Define the smallest sound build shape for executing cluster/rest-pause sets without turning them into a new timing mode or leaking slot state into autoreg.
 covers:
   - docs/prescription.md
@@ -11,6 +12,9 @@ covers:
 ---
 
 # Cluster and rest-pause execution architecture
+
+> Superseded by `docs/plans/backlog/primitives-cutover-phases/phase-04-new-compositional-patterns.md`.
+> Keep this file only as provenance for composite-set and intra-slot-rest risks.
 
 ## Context
 

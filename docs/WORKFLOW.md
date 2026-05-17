@@ -42,7 +42,10 @@ A spec is done when someone without this conversation's context could implement 
 
 For any work beyond trivial, write a plan before implementing. Options:
 
-- `scoping:feature-planning` for high-level scope (multi-unit)
+- `scoping:requirements-planning` when the durable application requirement is
+  missing, stale, or too thin to govern implementation
+- `scoping:phase-planning` when settled requirements need decomposition into
+  outcome-level delivery chunks
 - `scoping:implementation-planning` for a single unit of work
 - Inline plan in the conversation for smaller scoped changes — no separate doc
 
@@ -118,15 +121,16 @@ Claude Code exposes named skills for specific phases of work. Use them rather th
 
 | Skill | Use when |
 |---|---|
-| `scoping:feature-planning` | Before writing any code on a non-trivial feature. Clarifies user stories, scope, decomposition, and acceptance criteria. Produces a feature spec. |
-| `scoping:implementation-planning` | After `feature-planning`, when the unit of work is scoped and you want the full plan for building + proving + reviewing + closing out. |
+| `scoping:requirements-planning` | When a durable repo requirement is missing, stale, or too thin. Produces or updates the application contract, acceptance criteria, state/authority notes, and docs routing. |
+| `scoping:phase-planning` | When settled requirements are too large for one implementation loop and need outcome-level delivery chunks with proof of completion. |
+| `scoping:implementation-planning` | When one phase or unit is ready to become a proof-mapped build plan with concrete files, tests, review gates, and closeout. |
 | `code-analysis:architecture` | Any question about where a piece of code belongs, what a new module's dependencies should look like, or whether two concerns should share a file. Three modes: audit (existing), greenfield (new), enforcement (automated checks). |
 | `code-analysis:review` | Multi-perspective review of a change. Lead agent understands the context, subagents attack from distinct angles, lead synthesizes. Uses the implementer/reviewer cycle described above. |
 | `code-analysis:debugging` | Hypothesis-driven bug investigation. If you've done two rounds of guessing and haven't isolated the root cause, invoke this instead of guessing a third time. |
 | `code-analysis:diagnose-problem-pattern` | When several recent bugs or tests point at a shared structural issue — surface the pattern before patching another symptom. |
 | `codex:review` / `codex:second-opinion` | When the main agent's reasoning needs a fresh set of eyes from a different model (Codex). Especially useful after deep-context work where the main agent may have blind spots. |
 
-Skills are composable. A non-trivial change typically goes: `scoping:feature-planning` → `code-analysis:architecture` (if structural) → `scoping:implementation-planning` → implementer subagent → reviewer (via `code-analysis:review`) → fix-it loop → close.
+Skills are composable. A non-trivial change typically goes: `scoping:requirements-planning` when the contract is missing or stale → `scoping:phase-planning` when the unit needs sequencing → `code-analysis:architecture` if structural decisions are still open → `scoping:implementation-planning` → implementer subagent → Codex review → fix-it loop → close.
 
 ## iOS development loop
 

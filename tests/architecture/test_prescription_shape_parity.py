@@ -65,10 +65,7 @@ def _fixture_path(shape: str) -> Path:
 
 
 def _existing_shape_fixtures() -> set[str]:
-    return {
-        p.stem.removeprefix("prescription_")
-        for p in FIXTURES_DIR.glob("prescription_*.json")
-    }
+    return {p.stem.removeprefix("prescription_") for p in FIXTURES_DIR.glob("prescription_*.json")}
 
 
 def test_expected_shapes_match_doc_sections() -> None:
@@ -82,8 +79,7 @@ def test_expected_shapes_match_doc_sections() -> None:
     # or heading in the doc. This catches typos in EXPECTED_SHAPES without being
     # overly strict about heading structure.
     missing_in_doc = sorted(
-        s for s in EXPECTED_SHAPES
-        if s.replace("_", " ") not in doc and s not in doc
+        s for s in EXPECTED_SHAPES if s.replace("_", " ") not in doc and s not in doc
     )
     assert not missing_in_doc, (
         f"EXPECTED_SHAPES lists shapes not mentioned in docs/prescription.md: "

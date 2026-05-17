@@ -40,14 +40,14 @@ The stakeholder is Eric as user on the branch build: after this phase, he can ru
 
 ## QA contract
 
-**Merge gate — deterministic, fast, blocks merge per-commit.**
+**Phase gate — deterministic, fast, blocks Phase 2 close.**
 
 - **AC1, AC2, AC3** are proven by a straight-sets execution test that seeds a known fixture, drives the session through every slot to completion, and asserts the observed rest durations, cursor transitions, and log-row shape match both the authored configuration and the behavior baseline captured from the pre-cutover build. Reverse-patch: changing a rest duration in the driver without updating the authored fixture breaks the test; dropping a log field on commit breaks the log-row shape assertion; regressing rest timing silently breaks the baseline diff.
 - **AC4** is proven by an autoreg-on-straight-sets test that seeds a fixture with an RIR autoreg rule, logs sequences of RIR values that do and do not trigger the rule, and asserts the proposal appears exactly in the expected cases. Reverse-patch: a change that fires autoreg on every commit breaks the non-trigger case; a change that skips autoreg always breaks the trigger case.
 - **AC5** is proven by a push-round-trip test that logs a straight-sets workout, drains the push queue to the server, and asserts the server's stored rows match the client-pushed payload. A follow-on edit test repeats the push with a modified value on one row and asserts the server's row count is unchanged and the values are updated. Reverse-patch: a change that duplicates rows on edit breaks the row-count assertion; a change that drops a composite-identity component breaks the match assertion.
 - **AC6** is proven by a negative test per non-straight-sets timing mode: attempt to start a workout of that mode, assert the app either routes to a "not yet supported" surface or raises a diagnosable error. Reverse-patch: a silent-fallback to the straight-sets driver on an un-ported mode breaks the assertion that the mode fails visibly.
 
-**RC gate — one manual smoke.** A real straight-sets workout executed on the iOS simulator end-to-end, with rest-ring timings and log rows observed in the local store, is run once before the phase closes. The smoke is not a merge gate because simulator observation is not deterministic enough for per-commit gating, but it is required before the phase's QA declaration is honest about what "works end-to-end" means for the user.
+**RC gate — one manual smoke.** A real straight-sets workout executed on the iOS simulator end-to-end, with rest-ring timings and log rows observed in the local store, is run once before the phase closes. The smoke is not a deterministic phase gate, but it is required before the phase's QA declaration is honest about what "works end-to-end" means for the user.
 
 ## Scope
 
@@ -67,7 +67,7 @@ The stakeholder is Eric as user on the branch build: after this phase, he can ru
 
 ## Constraints
 
-- The repo's complete-cutover philosophy still applies at the merge boundary. On the branch mid-phase, un-ported timing modes may fail — that's the honesty gate in AC6. At merge, every timing mode works (that's what Phases 3 and 4 deliver before merge).
+- The repo's complete-cutover philosophy still applies at the merge boundary. On the branch mid-phase, un-ported timing modes may fail — that's the honesty gate in AC6. At merge, every timing mode works and no unsupported-mode scaffold remains (that's what Phases 3 and 4 deliver before merge).
 - The offline-first invariant holds. Execution of a pulled straight-sets workout does not depend on the server being reachable.
 - The idempotent-upsert invariant holds for the one mode this phase ports. A logged-then-edited slot round-trips without duplication.
 - The single-user dev posture holds. No multi-user conflict resolution is introduced.
@@ -90,7 +90,7 @@ The stakeholder is Eric as user on the branch build: after this phase, he can ru
 
 ## Proof commands
 
-Per-commit merge gate: the full contract + schema + straight-sets execution suite runs green, including behavior-baseline diffs.
+Phase-close gate: the full contract + schema + straight-sets execution suite runs green, including behavior-baseline diffs.
 
 RC gate: one manual straight-sets simulator smoke before phase close.
 

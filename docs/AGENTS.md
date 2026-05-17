@@ -57,6 +57,7 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `open-questions.md` — the living gap register. Items that surfaced from consistency passes but aren't decided yet, with working assumptions and disposition (decide-next / defer / resolve-in-code / watchlist).
 - `design/` — Claude Design handoff bundle (HTML/CSS/JSX prototypes, wireframes, rules). Read `design/ORIGIN.md` first, then `design/HANDOFF.md`. Reference, not spec.
 - `plans/active/` — current implementation plans. Start here before continuing an in-flight multi-slice build.
+- `plans/archive/` — completed or superseded implementation plans retained for provenance. Do not resume from here unless a current roadmap explicitly points back to one as reference.
 - `plans/backlog/workout-system-roadmap.md` — overall current roadmap across feedback implementation, primitives cutover, and Watch work.
 - `plans/backlog/feedback-implementation-phases/` — phase-by-phase implementation plans for carrying the 2026-04-25 feedback through schema, execution UX, history, watch authority, watch UI, and future in-app Claude/chat.
 - `plans/backlog/primitives-cutover-phases/` — phase specs for the primitives-data-model cutover. README owns the phase list and deferral notes; per-phase files carry outcome-altitude specs consumed by implementation-planning.

@@ -1,6 +1,7 @@
 ---
 title: Cutover — drop-and-rebuild in one ship unit
 status: accepted — spec
+last_reviewed: 2026-05-17
 parent: ../primitives-data-model.md
 purpose: How the primitives data model lands. Because the repo is single-user dev with no production data preservation constraint, the cutover is a clean drop-and-rebuild in one PR — not a coordinated migration with orphan policies and per-mode backfill.
 ---
@@ -40,6 +41,19 @@ A single commit lands:
 7. **Docs sweep.** Update `docs/prescription.md` (current authoring vocabulary) to reflect the new shape. Update `docs/features/timing-modes.md` to describe timing modes as `(timing, traversal, repeat)` cells rather than a 12-case enum. Update `docs/specs/v2-architecture.md` with a pointer to this spec and a status note on the superseded data model section.
 
 All of the above lands in one PR. This is the complete-cutover invariant from `CLAUDE.md` — no feature flags, no parallel codepaths, no compat shims.
+
+## Planning interpretation
+
+The phase specs under `docs/plans/backlog/primitives-cutover-phases/` are
+branch checkpoints, not independently shippable releases. They let review and
+implementation planning reason about one coherent outcome at a time while the
+cutover branch is still incomplete. The only mergeable state is the final state
+described above: storage, API, schema, execution, sync, fixtures, tests, and
+docs all on the primitive contract with no legacy acceptance path.
+
+Within a phase, "no legacy" means no compatibility fallback survives in the
+surfaces that phase owns. It does not mean the partially completed branch can be
+deployed before later phases port the remaining surfaces.
 
 ## Reversibility
 

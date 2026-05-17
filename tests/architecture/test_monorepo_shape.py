@@ -24,8 +24,8 @@ ALLOWED_TOP_LEVEL_DIRS = {
     "tests",
     "docs",
     "deploy",
-    "scratch",   # gitignored; tolerated if present during local work
-    "planner",   # reserved for the upstream Claude CLI; may not exist yet
+    "scratch",  # gitignored; tolerated if present during local work
+    "planner",  # reserved for the upstream Claude CLI; may not exist yet
 }
 
 MAX_TOP_LEVEL_DIRS = 8
@@ -44,10 +44,7 @@ def _top_level_dirs() -> set[str]:
     Falls back to "include all non-dotfile dirs" if git isn't available,
     so the test still runs in minimal environments.
     """
-    candidates = [
-        p for p in REPO_ROOT.iterdir()
-        if p.is_dir() and not p.name.startswith(".")
-    ]
+    candidates = [p for p in REPO_ROOT.iterdir() if p.is_dir() and not p.name.startswith(".")]
     if not candidates:
         return set()
 

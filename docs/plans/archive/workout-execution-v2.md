@@ -1,6 +1,7 @@
 ---
 title: Workout execution v2 implementation plan
-status: active
+status: completed
+last_reviewed: 2026-05-17
 purpose: Build the accepted workout execution target flows in small, reviewable slices.
 covers:
   - docs/workout-execution-design-plan.md

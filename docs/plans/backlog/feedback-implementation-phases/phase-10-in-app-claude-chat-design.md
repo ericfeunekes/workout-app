@@ -31,8 +31,9 @@ context, proposed edits, accepted/rejected changes, and notes integration.
 
 ## Approach
 
-Run this as design/feature-planning first, then create implementation plans for
-selected slices. Do not sneak chat behavior into history notes.
+Run this as `collaboration:interview` plus `scoping:requirements-planning`
+first, then create phase or implementation plans for selected slices. Do not
+sneak chat behavior into history notes.
 
 ## Steps
 

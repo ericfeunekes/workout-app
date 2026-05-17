@@ -118,9 +118,7 @@ def _build_last_performed(
     # is still interesting) must still produce a non-empty snapshot. The ranked join
     # below already filters set_logs to completed workouts only.
     all_workouts_stmt = (
-        select(Workout)
-        .options(workout_tree_loader())
-        .where(Workout.user_id == user_id)
+        select(Workout).options(workout_tree_loader()).where(Workout.user_id == user_id)
     )
     all_workouts = list(db.execute(all_workouts_stmt).scalars().all())
 
@@ -257,15 +255,19 @@ def _reset_workout(db: DbSession, payload: WorkoutReset, user_id: str) -> None:
             detail=f"Workout {payload.workout_id} not found",
         )
 
-    item_ids = db.execute(
-        select(WorkoutItem.id)
-        .join(Block, Block.id == WorkoutItem.block_id)
-        .where(Block.workout_id == workout.id)
-    ).scalars().all()
+    item_ids = (
+        db.execute(
+            select(WorkoutItem.id)
+            .join(Block, Block.id == WorkoutItem.block_id)
+            .where(Block.workout_id == workout.id)
+        )
+        .scalars()
+        .all()
+    )
     if item_ids:
-        logs = db.execute(
-            select(SetLog).where(SetLog.workout_item_id.in_(item_ids))
-        ).scalars().all()
+        logs = (
+            db.execute(select(SetLog).where(SetLog.workout_item_id.in_(item_ids))).scalars().all()
+        )
         for log in logs:
             db.delete(log)
 

@@ -136,13 +136,13 @@ Same gap as density sets — no timing mode covers fixed-prescription-with-time-
 Farmer's walks, sled pushes, yoke carries, and sandbag carries combine distance + load, often as either "carry X kg for Y meters" or "rounds for time with a loaded carry station." The current item-level shape is `target.kind = "distance"` with an authored display unit plus optional load. The app displays the distance target as primary, keeps load visible, and pushes canonical `distance_m` plus `(weight, weight_unit)`.
 - **Examples:** farmer's walk 2 × 40 m @ 48 kg per hand; 5 rounds for time of 100 m sandbag carry @ 70 kg + burpees; sled push 20 m @ 140 kg.
 - **Assumption:** short-term, author loaded carries as `circuit`, `for_time`, or `accumulate` items using `target: {kind, value, unit}` plus `load_kg` / `weight_unit`. Use notes to say whether load is per-hand, total implement load, sled load, or bodyweight-inclusive.
-- **Disposition:** partially-resolved. The generic distance+load display/log path exists. Still decide later whether carries deserve per-hand load semantics, split rows, or sensor-driven distance completion.
+- **Disposition:** decide-next. The generic distance+load display/log path exists; still decide later whether carries deserve per-hand load semantics, split rows, or sensor-driven distance completion.
 
 ### Weighted holds / max-duration holds
 Static holds split into at least two shapes: fixed-duration holds ("hold 24 kg suitcase carry position for 30s") and max-duration tests ("max dead hang with 20 lb vest"). Fixed-duration holds fit the current item-level shape: `target.kind = "duration"` with an authored display unit plus optional load. The app displays the duration target as primary, keeps load visible, and logs actual elapsed `duration_sec` plus `(weight, weight_unit)`.
 - **Examples:** plank 45s with 20 kg plate; wall sit 60s with sandbag; max hang with 20 lb vest; suitcase hold max time per side.
 - **Assumption:** fixed-duration loaded holds should use `target: { "kind": "duration", "value": N, "unit": "sec|min" }` plus load. Max-duration efforts still need a distinct "until failure / log actual duration" scoring contract.
-- **Disposition:** partially-resolved. Fixed-duration holds are executable; max-duration tests remain decide-next.
+- **Disposition:** decide-next. Fixed-duration holds are executable; max-duration tests still need a max-effort scoring contract.
 
 ### First-class block results
 AMRAP and For Time now have mode-native finish sheets, but the minimal v1 persistence shape records the result through existing `set_log` rows plus a workout note. AMRAP uses station logs during the block and a partial-station row at the end; For Time records elapsed duration against the first item. That is enough to stop presenting strength-shaped per-movement logging, but it is not a first-class block-result table.

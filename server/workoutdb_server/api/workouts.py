@@ -84,9 +84,7 @@ def _build_block(payload: BlockIn, db: Session) -> Block:
     return block
 
 
-def _build_item(
-    payload: WorkoutItemIn, db: Session, *, block_position: int
-) -> WorkoutItem:
+def _build_item(payload: WorkoutItemIn, db: Session, *, block_position: int) -> WorkoutItem:
     """Resolve library defaults into the workout_item's stored prescription.
 
     Looks up the referenced exercise's default_prescription_json / default_

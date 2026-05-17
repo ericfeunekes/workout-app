@@ -39,7 +39,7 @@ This phase is also the place where a hidden gap in the primitive contract (a dri
 
 ## QA contract
 
-**Merge gate — deterministic, fast, blocks merge per-commit.**
+**Phase gate — deterministic, fast, blocks Phase 3 close.**
 
 - **AC1** is proven by a per-mode execution test, one per timing mode, that seeds the mode's representative fixture and drives it to completion. Reverse-patch: a driver that crashes on its own fixture breaks its test; a driver that silently falls through to another mode's behavior breaks the completion-state assertion.
 - **AC2** is proven by a per-mode baseline-diff test that runs the post-cutover execution against the pre-cutover baseline captured for that mode and asserts the diff is empty modulo documented divergences. This is the load-bearing A1 proof. Reverse-patch: a silent regression in any observable axis (rest timing, cursor sequence, autoreg trigger, completion signal) breaks the baseline diff on the affected mode's fixture; a change that adds a "fix" without documenting it in the divergence list breaks the diff by surprise.
@@ -48,7 +48,7 @@ This phase is also the place where a hidden gap in the primitive contract (a dri
 - **AC5** is proven by cardio-shape integration tests for continuous, intervals, and loaded-carry/held cases. Reverse-patch: a rep-shape default on a cardio slot breaks the log-field assertion; a fabricated distance on a sensor-unavailable interval breaks the "does not invent values" assertion.
 - **AC6** is proven by a persistence round-trip test per timing mode: start, suspend, resume, assert state matches pre-suspension across the observable axes. Reverse-patch: a session-state field dropped from the persisted shape breaks resume on the mode that reads it.
 
-**RC gate — manual smoke on the most timer-sensitive modes.** Before phase close, a manual simulator smoke is run on EMOM (minute boundaries under suspension), Tabata (20s/10s cadence across the full 8 rounds), AMRAP (cap expiration mid-log), and one round-based mode (superset or circuit). The smoke is not a merge gate because the behavior under real wall-clock conditions is not deterministic enough for per-commit gating, but the baseline-diff assertions can miss integration-level issues that the smoke catches.
+**RC gate — manual smoke on the most timer-sensitive modes.** Before phase close, a manual simulator smoke is run on EMOM (minute boundaries under suspension), Tabata (20s/10s cadence across the full 8 rounds), AMRAP (cap expiration mid-log), and one round-based mode (superset or circuit). The smoke is not a deterministic phase gate, but the baseline-diff assertions can miss integration-level issues that the smoke catches.
 
 ## Scope
 
@@ -94,10 +94,10 @@ After each driver ports, its behavior baseline diff passes before the next drive
 
 ## Proof commands
 
-Per-commit merge gate: the full per-mode integration suite runs green, including the behavior-baseline diff for every mode. The level is "every timing mode's proof is green," not a specific command.
+Phase-close gate: the full per-mode integration suite runs green, including the behavior-baseline diff for every mode. The level is "every timing mode's proof is green," not a specific command.
 
 RC gate: a manual simulator smoke on EMOM, Tabata, AMRAP, and one round-based mode before phase close.
 
 ## Handoff to implementation-planning
 
-This phase spec is the input to `scoping:implementation-planning`. The implementation plan produced there carries the code-altitude decomposition (which drivers, in what order, against which behavior baselines, with which session-state extensions). An implementation plan that surfaces a contract gap during a driver port routes back to the spec aspect or to phase-planning before proceeding — not to feature-planning, unless the gap reveals the feature itself is under-specified.
+This phase spec is the input to `scoping:implementation-planning`. The implementation plan produced there carries the code-altitude decomposition (which drivers, in what order, against which behavior baselines, with which session-state extensions). An implementation plan that surfaces a contract gap during a driver port routes back to the spec aspect or to phase-planning before proceeding — not to requirements-planning, unless the gap reveals the durable requirement itself is under-specified.

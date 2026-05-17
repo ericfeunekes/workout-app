@@ -587,9 +587,7 @@ def test_post_workouts_unknown_exercise_id_returns_422(client, test_engine) -> N
     assert "not found" in response.text
 
 
-def test_post_workouts_unknown_alternative_exercise_id_returns_422(
-    client, test_engine
-) -> None:
+def test_post_workouts_unknown_alternative_exercise_id_returns_422(client, test_engine) -> None:
     """bug-R2.3 follow-up: a client-supplied alternative pointing at a
     non-existent exercise_id must 422, not 500. Prior behavior: the FK
     constraint on `exercise_alternative.exercise_id` fired at commit time
@@ -751,8 +749,8 @@ def test_post_workout_rejects_apply_to_next(client, test_engine) -> None:
     exercise_id = _seed_exercise(test_engine)
 
     payload = _workout_payload(exercise_id)
-    payload["blocks"][0]["workout_items"][0]["prescription_json"] = (
-        _prescription_with_apply_to("next")
+    payload["blocks"][0]["workout_items"][0]["prescription_json"] = _prescription_with_apply_to(
+        "next"
     )
 
     response = client.post("/api/workouts", json=payload)
@@ -775,8 +773,8 @@ def test_post_workout_accepts_apply_to_remaining(client, test_engine) -> None:
     exercise_id = _seed_exercise(test_engine)
 
     payload = _workout_payload(exercise_id)
-    payload["blocks"][0]["workout_items"][0]["prescription_json"] = (
-        _prescription_with_apply_to("remaining")
+    payload["blocks"][0]["workout_items"][0]["prescription_json"] = _prescription_with_apply_to(
+        "remaining"
     )
 
     response = client.post("/api/workouts", json=payload)
@@ -791,8 +789,8 @@ def test_post_workout_rejects_apply_to_all_future(client, test_engine) -> None:
     exercise_id = _seed_exercise(test_engine)
 
     payload = _workout_payload(exercise_id)
-    payload["blocks"][0]["workout_items"][0]["prescription_json"] = (
-        _prescription_with_apply_to("all-future")
+    payload["blocks"][0]["workout_items"][0]["prescription_json"] = _prescription_with_apply_to(
+        "all-future"
     )
 
     response = client.post("/api/workouts", json=payload)
@@ -806,8 +804,8 @@ def test_post_workout_rejects_apply_to_arbitrary_string(client, test_engine) -> 
     exercise_id = _seed_exercise(test_engine)
 
     payload = _workout_payload(exercise_id)
-    payload["blocks"][0]["workout_items"][0]["prescription_json"] = (
-        _prescription_with_apply_to("everywhere")
+    payload["blocks"][0]["workout_items"][0]["prescription_json"] = _prescription_with_apply_to(
+        "everywhere"
     )
 
     response = client.post("/api/workouts", json=payload)

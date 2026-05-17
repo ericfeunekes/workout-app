@@ -15,7 +15,9 @@ covers:
 # Setmark v2 — Architecture Spec
 
 **Date:** 2026-04-15 (accepted 2026-04-17)
-**Status:** Accepted — this is the target architecture. v1 (current Python CLI + YAML + Google Calendar) is legacy-in-transition.
+**Status:** Accepted — this is the target architecture. The former v1
+Python CLI / YAML / Google Calendar path is gone; this repo is the active v2
+system.
 
 ---
 
@@ -37,7 +39,7 @@ The app doesn't need to know what a muscle group is. It doesn't need substitutio
 
 ## Data model
 
-> **Status (2026-05-17):** This section records the current implemented pre-primitives data model. It is **superseded for target planning by `docs/specs/primitives-data-model.md`**. That spec replaces the per-timing-mode prescription/log model described below with a 7-primitive composition over a Block > Set > Slot hierarchy. Use this section to understand the current shipped baseline; use the primitives spec for the accepted target data shape and cutover requirements. The sections that follow (Persistence architecture, API contract, Sync, What Claude pushes, Watch integration) remain authoritative except where they name the superseded prescription/log data shape.
+> **Status (2026-05-17):** This section records the current implemented pre-primitives data model. It is **superseded for target planning by `docs/specs/primitives-data-model.md`**. That spec replaces the per-timing-mode prescription/log model described below with a 7-primitive composition over a Block > Set > Slot hierarchy. Use this section to understand the current shipped baseline; use the primitives spec for the accepted target data shape and cutover requirements. The sections that follow (Persistence architecture, API contract, Sync, What Claude pushes, Watch integration) remain authoritative except where they name the superseded prescription/log data shape or have been explicitly narrowed by newer feature docs.
 >
 > The content below is retained for historical context until the primitives cutover lands. After cutover, this section will be rewritten to point at the primitives spec as the canonical data model.
 
@@ -387,21 +389,43 @@ GET    /api/sync/pull?since=<timestamp>
 
 ---
 
-## Watch integration (v1 in-scope)
+## Watch integration
 
-The WatchKit companion app is part of `app/` scope for v1.
+Watch delivery now has two separate lanes:
 
-**In-scope for v1:**
-- Start/stop sets from the watch (writes `started_at`, `completed_at`).
-- Haptic buzz on timer transitions (rest end, EMOM tick, interval transitions).
-- Record HR into `set_log` via `HKLiveWorkoutBuilder` (`hr_avg_bpm`, `hr_max_bpm`).
-- Record cadence silently during runs into `cadence_avg_spm` (no live target display in v1).
+1. **Early WorkoutKit handoff.** `docs/features/watch-workoutkit-handoff.md`
+   is the shorter path for getting eligible Setmark workouts onto Apple Watch.
+   The iPhone maps a narrow subset of Setmark workouts into Apple's Workout app
+   through WorkoutKit, then reconciles only the completion/result facts the
+   platform actually exposes. Apple's Workout app owns the live Watch
+   experience in this lane; Setmark remains the authoring, planning, history,
+   and analysis surface.
+2. **Later custom watch-primary execution.**
+   `docs/features/watch-primary-execution.md` and `docs/watch-metrics.md`
+   remain the target for Setmark-owned Watch execution: custom Watch UI,
+   haptics, HR slots, watch-side set logging, offline event replay, and
+   phone/watch authority handoff.
 
-**Deferred to v1.1+:**
-- Pushing cardio workouts to the Apple Fitness app via `WorkoutKit` (native pace/HR alert UX). v1 runs everything in our app.
-- Live cadence / pace target display on Watch.
-- Tempo haptic pulses cueing eccentric/bottom/concentric/top phases during tempo lifts. Feasibility unknown; worth spiking when tempo work is actually being programmed. If it works, it fits the existing `tempo` prescription field — no schema change needed.
-- Raw accelerometer / gyroscope capture during sets (for bar-speed, bar-path, power-graph analysis). Schema reserves `set_log.motion_samples_ref` for when this lands. v1 doesn't capture; when it does, samples can be stored on the server as blobs referenced from that field. "Collect broadly, analyze in conversation" — the app never interprets raw motion.
+The Watch never talks to the server directly in either lane. In the WorkoutKit
+handoff lane, the iPhone performs the export and any later import/reconcile
+work. In the custom watch-primary lane, the Watch talks to the iPhone through a
+versioned WatchBridge protocol and the iPhone pushes results through the
+existing sync queue.
+
+Do not mix these lanes during implementation planning. WorkoutKit handoff is
+not a partial implementation of the custom Watch UI, and the custom Watch docs
+must not be treated as proof that Apple's Workout app can display Setmark's
+metric slots, haptics, double-tap actions, or per-set strength logging.
+
+Deferred custom-watch capabilities include:
+
+- Live Setmark cadence / pace target display on Watch.
+- Tempo haptic pulses cueing eccentric/bottom/concentric/top phases during
+  tempo lifts.
+- Raw accelerometer / gyroscope capture during sets. Schema reserves
+  `set_log.motion_samples_ref` for when this lands. When it does, samples can
+  be stored on the server as blobs referenced from that field. "Collect
+  broadly, analyze in conversation" — the app never interprets raw motion.
 
 ## Build order suggestion
 

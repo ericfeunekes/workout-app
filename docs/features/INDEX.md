@@ -55,6 +55,8 @@ Each rewritten feature doc should use `Current gaps` for target-contract pieces 
 | [persistence](persistence.md) | Live session survives backgrounding/relaunch | built + tested |
 | [push-queue](push-queue.md) | Durable queue for set_logs, status, telemetry events | built + tested |
 | [telemetry](telemetry.md) | Structured event log, local-first, lazy sync to server | built + tested |
+| [watch-workoutkit-handoff](watch-workoutkit-handoff.md) | Early Apple Watch bridge through WorkoutKit before custom watch-primary execution | planned |
+| [watch-primary-execution](watch-primary-execution.md) | Custom Setmark Watch authority, offline event replay, and watch-native execution | planned / deferred |
 
 ## How to use these for QA
 

@@ -15,6 +15,11 @@ This doc defines the target contract for the next watchOS app design. It is
 not the current implementation. It exists so the watch app can be built against
 one reusable metric system instead of one-off workout screens.
 
+This is only for the later custom Setmark Watch app. It does not apply to the
+early WorkoutKit handoff lane in `docs/features/watch-workoutkit-handoff.md`,
+where Apple's Workout app owns the live Watch UI, metric layout, haptics, and
+primary actions.
+
 The watch answers two questions first:
 
 1. What do I do right now?

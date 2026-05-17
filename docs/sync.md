@@ -1,6 +1,7 @@
 ---
 title: Sync, connectivity, and first-run
 status: accepted
+last_reviewed: 2026-05-17
 purpose: How data flows between Claude, the home server, and the app; how the app behaves when the network is unavailable; how a device is connected for the first time. This is the detail layer behind the "Sync model" section of the v2 spec.
 covers:
   - server/workoutdb_server/api/sync.py
@@ -170,9 +171,83 @@ If the configured URL fails DNS or times out, the app stays offline (no crash, n
 
 ---
 
+## Future replication and endpoint directions
+
+The current REST-over-private-network sync path remains the implemented
+contract. Future sync work should investigate two separate lanes rather than
+treating them as one generic replacement:
+
+1. **Apple-device replication lane.** CloudKit is the likely first candidate
+   for iPhone/iPad/Mac/Watch data replication because it syncs app-owned
+   records through the user's iCloud account. This is not just a transport swap:
+   it changes record ownership, conflict behavior, account dependency,
+   background-delivery expectations, and possibly the local data model. A
+   CloudKit path should use app data records, zones, and sync state, not iCloud
+   Drive files as the primary database. iCloud Drive may be useful for explicit
+   import/export artifacts, but file sync should not become the source of truth
+   for workout state unless a spike proves CloudKit cannot cover the required
+   app data.
+2. **External/private service lane.** Cloudflare Tunnel + Cloudflare Access are
+   candidates for exposing selected local endpoints to non-Apple clients,
+   callbacks, or future app families without opening the origin publicly. The
+   local examples in `/Users/ericfeunekes/coding/oauth-callback` and
+   `/Users/ericfeunekes/coding/personal-mcp-gateway` show the intended security
+   posture: loopback-only origins, Cloudflare Access as the external trust
+   boundary, narrow named capabilities, local secrets, and audit logs that avoid
+   sensitive content.
+
+State authority must stay explicit regardless of transport:
+
+- Claude/server remains the plan author unless a later requirement explicitly
+  moves authoring elsewhere.
+- The app remains authoritative for completed workout results it records.
+- CloudKit may become a replication substrate for app-owned records; it should
+  not silently create a second planner or conflict resolver.
+- Cloudflare-protected endpoints may expose narrow APIs or callback receivers;
+  they should not become a broad generic write proxy into personal data.
+
+Open decisions before implementation:
+
+- Whether CloudKit supplements the home server or replaces it for Apple-device
+  sync. If the home server is replaced for a flow, the spike must name where
+  Claude writes plans, how those plans enter CloudKit, and how history returns
+  to Claude for analysis.
+- Which records belong in CloudKit first: planned workouts, exercises, local
+  results, user parameters, or only a small export/import envelope.
+- Whether immediate "start workout now" flows can tolerate CloudKit's
+  system-scheduled background sync, or need explicit fetch/send calls or the
+  existing REST path.
+- Whether Cloudflare Access identity maps to app users, service capabilities,
+  or both.
+- Whether the general endpoint should live inside this repo, beside the
+  existing OAuth callback service, or as a separate personal gateway.
+
+Spike contracts:
+
+- **CloudKit replication spike:** prove one end-to-end record family using
+  explicit zones/change state, account availability handling, offline behavior,
+  conflict rules, and the Claude authoring/readback path. Non-goal: replacing
+  the server before the authority model is proven.
+- **Cloudflare Access endpoint spike:** expose one narrow loopback-only
+  endpoint through Tunnel + Access, prove identity headers/JWT validation,
+  audit logging, and capability boundaries. Non-goal: a broad generic write
+  proxy into workout or personal data.
+
+---
+
 ## Watch sync
 
-The Apple Watch companion is part of the app in v1 for HR, haptics, and start/end-set. It does **not** talk to the server directly. The watch talks to the iPhone via WatchConnectivity; the iPhone is the single point of contact with the server.
+The Watch has two possible execution paths:
+
+- **WorkoutKit handoff:** Apple's Workout app owns the live Watch workout.
+  Setmark does not own HR slots, haptics, start/end-set actions, or event replay
+  in this lane. The iPhone exports eligible workouts and imports only proven
+  completion/result facts.
+- **Custom Setmark Watch app:** the later watch-primary path owns HR, haptics,
+  start/end-set, custom metric views, and offline event replay.
+
+Neither path talks to the server directly from the Watch. The iPhone remains
+the single point of contact with the server.
 
 Pairing the watch is handled by iOS (WatchConnectivity auto-discovers the companion). From the user's perspective, once the watch app is installed on the paired watch, it works. No per-device server configuration.
 

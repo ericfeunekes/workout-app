@@ -1,7 +1,7 @@
 ---
 title: Phase 7 — watch platform and protocol foundation implementation plan
-status: backlog
-last_reviewed: 2026-04-26
+status: provisional backlog / deferred
+last_reviewed: 2026-05-17
 purpose: Prove real Watch platform constraints, then establish versioned, authority-aware phone/watch protocol before watch-primary execution or watch UI redesign.
 covers:
   - docs/plans/backlog/watch-authority-protocol-foundation.md
@@ -12,6 +12,12 @@ covers:
 ---
 
 # Phase 7 — Watch Platform And Protocol Foundation
+
+> **Planning note (2026-05-17):** This is not the next early Apple Watch
+> delivery phase. Start with `docs/features/watch-workoutkit-handoff.md` when
+> the goal is getting eligible workouts onto Apple Watch sooner through
+> WorkoutKit. Refresh this phase only if custom Setmark watch-primary execution
+> is still needed after that handoff lane is spiked.
 
 ## Unit Statement
 

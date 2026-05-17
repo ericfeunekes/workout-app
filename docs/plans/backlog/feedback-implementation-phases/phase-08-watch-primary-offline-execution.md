@@ -1,7 +1,7 @@
 ---
 title: Phase 8 — watch-primary offline execution implementation plan
-status: backlog
-last_reviewed: 2026-04-26
+status: provisional backlog / deferred
+last_reviewed: 2026-05-17
 purpose: Let the Watch start and run a workout as primary from cached executable data, then replay events to the phone.
 covers:
   - app/Packages/WatchBridge/
@@ -13,6 +13,11 @@ covers:
 ---
 
 # Phase 8 — Watch-Primary Offline Execution
+
+> **Planning note (2026-05-17):** This remains later custom Watch work. It
+> should not be moved to active until the WorkoutKit handoff lane has been
+> spiked and Setmark still needs watch-primary offline authority, custom event
+> replay, or watch-side set logging.
 
 ## Unit Statement
 

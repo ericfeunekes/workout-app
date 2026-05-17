@@ -1,7 +1,7 @@
 ---
 title: Phase 9 — watch metrics and proven directions UI implementation plan
-status: backlog
-last_reviewed: 2026-04-26
+status: provisional backlog / deferred
+last_reviewed: 2026-05-17
 purpose: Build the final three-view watch UI, metric slot resolver, target windows, HR slot, and route/directions surface only where route proof exists.
 covers:
   - docs/watch-metrics.md
@@ -11,6 +11,10 @@ covers:
 ---
 
 # Phase 9 — Watch Metrics And Directions UI
+
+> **Planning note (2026-05-17):** This is only for the later custom Setmark
+> Watch app. Apple's Workout app owns the live UI in the WorkoutKit handoff
+> lane, so this phase does not define early delivery requirements.
 
 ## Unit Statement
 

@@ -95,6 +95,8 @@ See `docs/sync.md` for the full rules, and the spec § "Persistence architecture
 - Workout generation workflow → `docs/workout-generation.md` (how Claude/humans compose blocks, timing modes, prescriptions, autoreg, alternatives, and result expectations)
 - Prescription authoring vocabulary → `docs/prescription.md` for the current pre-primitives app; `docs/specs/primitives-data-model.md` for the accepted target primitives contract.
 - Sync + connectivity + first-run → `docs/sync.md`
+- Early Apple Watch delivery → `docs/features/watch-workoutkit-handoff.md`
+- Later custom Watch execution → `docs/features/watch-primary-execution.md` and `docs/watch-metrics.md`
 - Proof contract → `docs/TESTING.md`
 - Server specifics → `server/README.md`
 - App specifics → `app/README.md` (the in-app behavior contract lives here)

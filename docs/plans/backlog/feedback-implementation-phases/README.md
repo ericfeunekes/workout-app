@@ -40,6 +40,12 @@ Phase 1-6 work, `docs/features/watch-primary-execution.md`,
 are useful source material, but they still contain requirement-settling work
 inside the phase bodies and must not be handed directly to implementation.
 
+The new early Watch path is **not** Phase 7. Start with
+`docs/features/watch-workoutkit-handoff.md` if the goal is "get workouts onto
+Apple Watch sooner" by using Apple's Workout app through WorkoutKit. The custom
+watch-primary phases stay deferred until WorkoutKit handoff proves insufficient
+for Setmark-specific logging, offline event replay, or custom metric views.
+
 ## Context
 
 The implementation must not be screen-by-screen. The actual architecture is
@@ -114,3 +120,6 @@ current non-audit-grade provenance contract.
 - No direct Watch-to-server sync.
 - No route/directions work before watch authority and GPS ownership are proven.
 - No in-app Claude/chat implementation until the separate design phase is done.
+- No CloudKit replication or Cloudflare Zero Trust endpoint replacement until
+  `docs/sync.md` future replication and endpoint directions are spiked
+  independently.

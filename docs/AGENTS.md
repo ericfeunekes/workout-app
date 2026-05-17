@@ -23,9 +23,10 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `workout-execution-requirements.md` — athlete-facing timer, transition, logging, and summary requirements for workout archetypes.
 - `workout-execution-design-plan.md` — pass-based plan for aligning the execution docs, then designing each flow before implementation.
 - `features.md` and `features/INDEX.md` — target feature contracts and QA scenarios. Use `feature-gap-map.md` to see the current gaps grouped into implementation phases.
-- `plans/backlog/workout-system-roadmap.md` — pickup map that ties together completed feedback/execution/history work, the future primitives cutover, and downstream Watch phases. Start here when asking "what phase are we in?"
+- `plans/backlog/workout-system-roadmap.md` — pickup map that ties together completed feedback/execution/history work, the future primitives cutover, CloudKit replication, Cloudflare endpoint exploration, WorkoutKit handoff, and downstream custom Watch phases. Start here when asking "what phase are we in?"
 - `plans/backlog/feedback-implementation-phases/` — downstream implementation phase directory for the 2026-04-25 feedback and watch redesign sequence. Start here when selecting the next phase after the feature-docs contract pass.
 - `watch-metrics.md` — target watchOS slot, metric, target-window, and phone/watch lifecycle contract.
+- `features/watch-workoutkit-handoff.md` — shorter Apple Watch delivery path: map eligible Setmark workouts into Apple's Workout app through WorkoutKit before building custom watch-primary execution.
 - `sync.md` — sync cadence, conflict rules, first-run UX, offline behavior, auth posture.
 - `ARCHITECTURE.md` — one-page system map; routes into the spec and per-package READMEs.
 - `TESTING.md` — proof contract (server, app, cross-stack contract).
@@ -58,7 +59,7 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `design/` — Claude Design handoff bundle (HTML/CSS/JSX prototypes, wireframes, rules). Read `design/ORIGIN.md` first, then `design/HANDOFF.md`. Reference, not spec.
 - `plans/active/` — current implementation plans. Start here before continuing an in-flight multi-slice build if any files exist.
 - `plans/archive/` — completed or superseded implementation plans retained for provenance. Do not resume from here unless a current roadmap explicitly points back to one as reference.
-- `plans/backlog/workout-system-roadmap.md` — overall current roadmap across feedback implementation, primitives cutover, and Watch work.
+- `plans/backlog/workout-system-roadmap.md` — overall current roadmap across feedback implementation, primitives cutover, CloudKit replication, Cloudflare protected endpoints, WorkoutKit handoff, and custom Watch work.
 - `plans/backlog/feedback-implementation-phases/` — phase-by-phase implementation plans for carrying the 2026-04-25 feedback through schema, execution UX, history, watch authority, watch UI, and future in-app Claude/chat.
 - `plans/backlog/primitives-cutover-phases/` — phase specs for the primitives-data-model cutover. README owns the phase list and deferral notes; per-phase files carry outcome-altitude specs consumed by implementation-planning.
 - `bugs.md` — active QA issue tracker. Closed issues are removed; use git history for past rows.

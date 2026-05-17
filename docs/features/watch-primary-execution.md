@@ -1,6 +1,7 @@
 ---
 title: Watch-primary execution
-status: planned
+status: planned / deferred
+last_reviewed: 2026-05-17
 purpose: Feature spec for starting, mirroring, handing off, and reconciling Apple Watch workout execution.
 covers:
   - app/WorkoutDBWatch/
@@ -12,6 +13,13 @@ covers:
 ---
 
 # Watch-Primary Execution
+
+> **Planning note (2026-05-17):** The shorter Apple Watch delivery path is now
+> `watch-workoutkit-handoff.md`: map eligible Setmark workouts into Apple's
+> Workout app through WorkoutKit, then reconcile coarse completion back into
+> Setmark. This custom watch-primary spec remains the later path for Setmark
+> watch-native execution: offline event replay, custom metric slots, watch-side
+> set logging, route ownership, and phone/watch authority handoff.
 
 Eric needs the Watch to be able to run the workout when the phone is nearby,
 in a bag, or left behind. The current companion model is too weak for that:
@@ -42,11 +50,11 @@ The feature should make these outcomes possible:
 - When the Watch reconnects, the phone catches up without duplicate logs and
   pushes results through the existing sync queue.
 
-First scope excludes direct Watch-to-server sync, editing watch slot layout on
-the Watch, multi-primary execution, durable route tables, and Apple Fitness /
-WorkoutKit plan integration. GPS pace, route progress, and directions use the
-same authority model later, but they should not block the first authority and
-display cutover.
+The first custom watch-primary scope excludes direct Watch-to-server sync,
+editing watch slot layout on the Watch, multi-primary execution, durable route
+tables, and WorkoutKit handoff behavior. GPS pace, route progress, and
+directions use the same authority model later, but they should not block the
+first authority and display cutover.
 
 The live authority record is session-scoped:
 

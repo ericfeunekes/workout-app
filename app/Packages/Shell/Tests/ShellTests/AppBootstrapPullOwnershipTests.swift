@@ -71,7 +71,9 @@ final class AppBootstrapPullOwnershipTests: XCTestCase {
             now: fixture.scheduledDate,
             transportBuilder: { _ in emptyTransport }
         )
-        XCTAssertEqual(firstResult, .empty)
+        guard case .empty = firstResult else {
+            return XCTFail("expected .empty, got \(firstResult)")
+        }
         let firstPaths = await emptyTransport.store.snapshotGetPaths()
         XCTAssertEqual(firstPaths, ["/api/sync/pull"])
 
@@ -93,5 +95,35 @@ final class AppBootstrapPullOwnershipTests: XCTestCase {
         // Second bootstrap also fires exactly one pull — no residual
         // calls carried over from the first bootstrap's transport.
         XCTAssertEqual(secondPaths, ["/api/sync/pull"])
+    }
+
+    func testBootstrapAfterLocalStateResetPullsWithoutSinceCursor() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: "com.ericfeunekes.WorkoutDB.token.test.\(UUID().uuidString)"
+        )
+        let fixture = Fixtures.sampleWorkoutPayload()
+        await factory.syncMetadataStore.setLastSyncAt(fixture.serverTime)
+        try await factory.workoutCache.save(PulledDataset(
+            workouts: [fixture.domainWorkout],
+            blocks: fixture.domainBlocks,
+            items: fixture.domainItems,
+            alternatives: [],
+            exercises: fixture.domainExercises,
+            userParameters: []
+        ))
+        await AppSyncLocalStateReset.clearCachedServerData(persistence: factory)
+        let transport = ScriptedTransport(getOutcomes: [.ok(fixture.json)])
+        let baseURL = try XCTUnwrap(URL(string: "https://example.test"))
+
+        _ = try await AppBootstrap.bootstrap(
+            connection: (url: baseURL, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in transport }
+        )
+
+        let queries = await transport.store.snapshotGetQueries()
+        XCTAssertEqual(queries.count, 1)
+        XCTAssertTrue(queries[0].isEmpty, "cache reset must force a full pull")
     }
 }

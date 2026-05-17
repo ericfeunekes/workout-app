@@ -92,6 +92,7 @@ enum PushQueuePayloadCoding {
         let weight: Double?
         let weightUnit: String?
         let durationSec: Double?
+        let distanceM: Double?
         let rounds: Int?
         let rir: Int?
         let isWarmup: Bool
@@ -113,6 +114,7 @@ enum PushQueuePayloadCoding {
             weight = log.weight
             weightUnit = log.weightUnit?.rawValue
             durationSec = log.durationSec
+            distanceM = log.distanceM
             rounds = log.rounds
             rir = log.rir
             isWarmup = log.isWarmup
@@ -139,6 +141,7 @@ enum PushQueuePayloadCoding {
                 weight: weight,
                 weightUnit: weightUnit.flatMap { WeightUnit(rawValue: $0) },
                 durationSec: durationSec,
+                distanceM: distanceM,
                 rounds: rounds,
                 rir: rir,
                 isWarmup: isWarmup,

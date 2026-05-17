@@ -1299,13 +1299,19 @@
             "type": "string",
             "enum": [
               "kg",
-              "lb"
+              "lb",
+              "1rm",
+              "bodyweight"
             ],
             "title": "Unit"
           },
           "unit_type": {
             "type": "string",
-            "const": "absolute",
+            "enum": [
+              "absolute",
+              "relative",
+              "implicit_bodyweight"
+            ],
             "title": "Unit Type"
           }
         },
@@ -1513,6 +1519,17 @@
               }
             ],
             "title": "Duration Sec"
+          },
+          "distance_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Distance M"
           },
           "rounds": {
             "anyOf": [

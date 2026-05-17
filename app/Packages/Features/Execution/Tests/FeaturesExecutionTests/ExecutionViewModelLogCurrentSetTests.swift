@@ -469,7 +469,7 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         //     (the cardio-safe routing entry point).
         //   * `ActiveView+LogButton.swift` does NOT contain a strength-only
         //     `viewModel.logSet(` call — the button must not bypass routing.
-        //   * `ActiveView.swift` still has exactly one
+        //   * `ActiveView+Sheets.swift` still has exactly one
         //     `logSet(loadKg:reps:rir:)` call (the strength-only
         //     `LogSetSheet` commit).
         let activeView = try loadSource(
@@ -477,6 +477,9 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         )
         let activeViewLogButton = try loadSource(
             relativePath: "ActiveView+LogButton.swift"
+        )
+        let activeViewSheets = try loadSource(
+            relativePath: "ActiveView+Sheets.swift"
         )
 
         // Count actual call sites (`viewModel.logSet(`) — ignore doc
@@ -503,6 +506,11 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         )
         XCTAssertEqual(
             callSiteCount(activeView),
+            0,
+            "ActiveView should route strength sheet presentation through ActiveView+Sheets"
+        )
+        XCTAssertEqual(
+            callSiteCount(activeViewSheets),
             1,
             "only the LogSetSheet's strength-specific commit may call viewModel.logSet"
         )

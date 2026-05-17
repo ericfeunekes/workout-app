@@ -304,6 +304,7 @@ private struct PrimitiveSetLogCodable: Codable {
     let weight: Double?
     let weightUnit: String?
     let durationSec: Double?
+    let distanceM: Double?
     let rounds: Int?
     let rir: Int?
     let isWarmup: Bool
@@ -325,6 +326,7 @@ private struct PrimitiveSetLogCodable: Codable {
         weight = value.weight
         weightUnit = value.weightUnit?.rawValue
         durationSec = value.durationSec
+        distanceM = value.distanceM
         rounds = value.rounds
         rir = value.rir
         isWarmup = value.isWarmup
@@ -353,6 +355,7 @@ private struct PrimitiveSetLogCodable: Codable {
             weight: weight,
             weightUnit: weightUnit.flatMap { WeightUnit(rawValue: $0) },
             durationSec: durationSec,
+            distanceM: distanceM,
             rounds: rounds,
             rir: rir,
             isWarmup: isWarmup,

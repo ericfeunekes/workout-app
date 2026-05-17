@@ -118,6 +118,7 @@ extension DTOMapping {
             weight: log.weight,
             weightUnit: log.weightUnit.map { WorkoutDBSchema.WeightUnit(rawValue: $0.rawValue)! },
             durationSec: log.durationSec,
+            distanceM: log.distanceM,
             rounds: log.rounds,
             rir: log.rir,
             isWarmup: log.isWarmup,

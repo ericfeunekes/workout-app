@@ -51,6 +51,27 @@ def test_migrations_idempotent(tmp_engine) -> None:
     assert second == []
 
 
+def test_duplicate_column_replay_is_recorded_as_applied(tmp_engine, tmp_path: Path) -> None:
+    custom_dir = tmp_path / "mig"
+    custom_dir.mkdir()
+    (custom_dir / "010_primitive_distance_metric.sql").write_text(
+        "ALTER TABLE primitive_set_log ADD COLUMN distance_m REAL;"
+    )
+
+    with Session(tmp_engine) as session:
+        session.execute(
+            text("CREATE TABLE primitive_set_log (id TEXT PRIMARY KEY, distance_m REAL)")
+        )
+        session.commit()
+
+    applied = apply_migrations(tmp_engine, migrations_dir=custom_dir)
+
+    assert applied == ["010_primitive_distance_metric.sql"]
+    with Session(tmp_engine) as session:
+        rows = session.execute(text("SELECT name FROM schema_migrations")).fetchall()
+    assert rows == [("010_primitive_distance_metric.sql",)]
+
+
 def test_schema_2026_04_26_columns_have_defaults(tmp_engine) -> None:
     apply_migrations(tmp_engine)
 

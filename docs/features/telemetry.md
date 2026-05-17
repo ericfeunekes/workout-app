@@ -77,9 +77,12 @@ most backend regressions are invisible in simulator video.
   the server `event_log` table directly.
 - `TELEM-GAP-004`: Local event retention is a 10k ring buffer only. Pushed
   events remain local until ring pruning; there is no acknowledged-delete path.
-- `TELEM-GAP-005`: Completion proof telemetry is now wired for Save & Done,
-  but other multi-surface flows still need the same explicit stage events when
-  they cross local cache, push queue, and server boundaries.
+- `TELEM-GAP-005`: Completion proof telemetry is now wired for Save & Done, and
+  app-sync lifecycle telemetry now carries basic stage outcomes through
+  `AppSyncCoordinator`. Other multi-surface flows still need the same explicit
+  stage events when they cross local cache, push queue, sync metadata, auth
+  recovery, and server boundaries; app-sync still lacks richer redacted server
+  identity and queue-count payloads.
 
 ## QA scenarios
 

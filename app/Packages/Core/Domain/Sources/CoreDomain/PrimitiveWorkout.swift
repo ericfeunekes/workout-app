@@ -229,6 +229,7 @@ public struct PrimitiveSetLog: Sendable, Hashable {
     public var weight: Double?
     public var weightUnit: WeightUnit?
     public var durationSec: Double?
+    public var distanceM: Double?
     public var rounds: Int?
     public var rir: Int?
     public var isWarmup: Bool
@@ -250,6 +251,7 @@ public struct PrimitiveSetLog: Sendable, Hashable {
         weight: Double? = nil,
         weightUnit: WeightUnit? = nil,
         durationSec: Double? = nil,
+        distanceM: Double? = nil,
         rounds: Int? = nil,
         rir: Int? = nil,
         isWarmup: Bool = false,
@@ -270,6 +272,7 @@ public struct PrimitiveSetLog: Sendable, Hashable {
         self.weight = weight
         self.weightUnit = weightUnit
         self.durationSec = durationSec
+        self.distanceM = distanceM
         self.rounds = rounds
         self.rir = rir
         self.isWarmup = isWarmup

@@ -13,22 +13,23 @@ covers:
 # bootstrap
 
 ## What it does
-On launch (or after FirstRun succeeds), the shell checks `TokenStore.loadConnection()`. If nil → `.firstRun`. If present → `.bootstrapping` + run `AppBootstrap.bootstrap(...)`. Bootstrap: (1) build `SyncAPI` over the saved URL+token, (2) `pullLatest(since: lastSyncAt)`, (3) on success save the `PullResult` into `WorkoutCache` and record `serverTime` as the new `lastSyncAt`, (4) build `TodayContext` via `TodayLoader`, (5) flatten the chosen workout into a `WorkoutContext`, (6) construct `TodayViewModel` + `ExecutionViewModel` + `PushFlusher`, return `.ready`. If pull returns `.tokenRejected` → throws `AppBootstrapError.tokenRejected`, shell clears TokenStore and routes back to FirstRun. Any other pull error is silently swallowed; the shell falls back to whatever the cache holds. If cache is also empty → `.empty`. See `docs/sync.md` § "Pull protocol".
+On launch (or after FirstRun succeeds), the shell checks `TokenStore.loadConnection()`. If nil → `.firstRun`. If present → `.bootstrapping` + run `AppBootstrap.bootstrap(...)`. Bootstrap: (1) build `SyncAPI` over the saved URL+token, (2) `pullLatest(since: lastSyncAt)`, (3) on success save the `PullResult` into `WorkoutCache` and record `serverTime` as the new `lastSyncAt`, (4) build `TodayContext` via `TodayLoader`, (5) flatten the chosen workout into a `WorkoutContext`, (6) construct `TodayViewModel` + `ExecutionViewModel` + `AppSyncCoordinator`, return `.ready` or `.empty(appSync:)`. If pull returns `.tokenRejected` → throws `AppBootstrapError.tokenRejected`, shell clears TokenStore and routes back to FirstRun. Any other pull error is silently swallowed; the shell falls back to whatever the cache holds. If cache is also empty → `.empty`. See `docs/sync.md` § "Pull protocol" and "App sync ownership and foreground lifecycle".
 
 ## State surface
 - **Inputs:** saved `(url, token)` from `TokenStore`, `lastSyncAt` from `SyncMetadataStore`, current `Date`
 - **Outputs / side effects:** `WorkoutCache.save(PulledDataset)`, `SyncMetadataStore.setLastSyncAt(result.serverTime)`, telemetry events (`bootstrap.start`, `bootstrap.empty`, `bootstrap.ready`, `bootstrap.token_rejected`), `ConnectionManager` state transitions via `SyncAPI.pullLatest`
-- **State transitions:** shell `ShellPhase`: `.firstRun | .bootstrapping | .ready(todayVM, executionVM, pushFlusher) | .empty | .debugSeed(...)` (DEBUG only)
+- **State transitions:** shell `ShellPhase`: `.firstRun | .bootstrapping | .ready(todayVM, executionVM, appSync) | .empty(appSync?) | .debugSeed(...)` (DEBUG only)
 
 ## What it deliberately doesn't do
-- Does not retry pulls — single attempt per bootstrap (`AppBootstrap.swift:129-151`). The `PushFlusher`'s 60s cadence is orthogonal; it pushes, not pulls.
+- Does not retry pulls — single attempt per bootstrap. The `PushFlusher`'s 60s cadence is orthogonal; it pushes, not pulls.
 - Does not distinguish decode/network/server errors to the user — all non-401 errors fall through to cache (`AppBootstrap.swift:146-150`, comment: "Transport / decode / server errors: fall through silently")
 - Does not guard `WorkoutCache.save` against mid-loop throws — known issue in `open-questions.md` § "WorkoutCacheImpl.save non-atomicity"
 - Does not provide Settings entry — TODO in `WorkoutDBApp.swift:37-41`
-- Does not auto-refresh after first render — subsequent pulls are Settings-driven or Execution-driven
+- Does not own foreground/manual refresh after first render — those pulls are
+  coordinated by `AppSyncCoordinator`.
 
 ## Edge cases handled in code
-- `tokenRejected` rethrown as `AppBootstrapError.tokenRejected` (`AppBootstrap.swift:139-145`); shell handles by clearing TokenStore and routing to FirstRun (via FirstRun path — verify the exact clear path in the shell)
+- `tokenRejected` rethrown as `AppBootstrapError.tokenRejected`; shell handles by clearing TokenStore and routing to FirstRun.
 - Empty cache + failed pull → `.empty` (`AppBootstrap.swift:102`)
 - `performLaunchCheck` gated by `didPerformLaunchCheck` so `.onAppear` re-firing doesn't re-run launch (`WorkoutDBApp.swift:185-190`)
 - `runBootstrap` gated by `didStartBootstrap` early-return (`WorkoutDBApp.swift:251-252`) — fixes the double-bootstrap race
@@ -124,4 +125,4 @@ On launch (or after FirstRun succeeds), the shell checks `TokenStore.loadConnect
 ### S15. Token rejected during push (not pull)
 - **setup:** `.ready`, PushFlusher running, token rotates server-side mid-session
 - **steps:** log a set, wait for flush
-- **expected:** 401 during push → `PushFlusher` stops its loop (`PushFlusher.swift:66-71`). Shell does NOT auto-route to FirstRun from push failures; see `push-queue.md` S7.
+- **expected:** 401 during push → `PushFlusher` stops its loop and reports `tokenRejected`; `AppSyncCoordinator` emits the token-rejected lifecycle event, stops foreground flushing, and Shell routes to FirstRun. Queued writes remain durable for re-auth.

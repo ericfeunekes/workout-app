@@ -12,10 +12,9 @@
 //     seconds rather than within the next minute. The kick also resets the
 //     consecutive-failure counter so a fresh log doesn't inherit the
 //     previous burst's penalty.
-//   * On `SyncError.tokenRejected`, the flusher stops itself — the app is
-//     unauthenticated, repeat flushes would hammer the server for no gain.
-//     The shell surface then notices (via `ConnectionManager.states()` or
-//     the next explicit pull) and routes the user back to FirstRun.
+//   * On `SyncError.tokenRejected`, the flusher stops itself and notifies
+//     Shell's app-sync owner. Auth recovery is an app-level concern; the
+//     flusher only reports the terminal outcome.
 //
 // Cadence table lives in `PushBackoff.schedule` so `PushQueue`'s dead-
 // letter policy and this loop agree on what "an attempt" means. The
@@ -32,11 +31,17 @@ import Foundation
 import Sync
 import WorkoutCoreFoundation
 
+public enum PushFlushOutcome: Sendable, Equatable {
+    case completed
+    case tokenRejected
+}
+
 /// Periodic flusher for the push queue. Instantiate once from
 /// `AppBootstrap`, call `start()` after bootstrap lands, call `stop()`
 /// from the shell when the app backgrounds or the connection is wiped.
 public actor PushFlusher {
     private let api: SyncAPI
+    private let onTokenRejected: (@Sendable () async -> Void)?
     /// Baseline delay used only when the backoff schedule's first slot
     /// is overridden (tests pass a tiny interval so the loop advances
     /// quickly). Production uses `PushBackoff.schedule` directly.
@@ -52,10 +57,12 @@ public actor PushFlusher {
 
     public init(
         api: SyncAPI,
-        interval: TimeInterval? = nil
+        interval: TimeInterval? = nil,
+        onTokenRejected: (@Sendable () async -> Void)? = nil
     ) {
         self.api = api
         self.baseInterval = interval
+        self.onTokenRejected = onTokenRejected
     }
 
     /// Start the periodic flush loop. Idempotent — calling twice is a
@@ -89,7 +96,7 @@ public actor PushFlusher {
         do {
             let result = try await api.flushPushQueue()
             if result.tokenRejected {
-                task = nil
+                await handleTokenRejected(notify: true)
                 return false
             }
             if result.networkFailed {
@@ -103,7 +110,7 @@ public actor PushFlusher {
         } catch SyncError.tokenRejected {
             // 401 — stop the loop; the shell reauth flow replaces us
             // with a fresh flusher on next connect.
-            task = nil
+            await handleTokenRejected(notify: true)
             return false
         } catch {
             // Transient failure — loop continues on a longer sleep.
@@ -135,19 +142,29 @@ public actor PushFlusher {
     /// quickly. Errors are swallowed — the caller never awaits this for
     /// correctness. Also resets the consecutive-failure counter: a fresh
     /// user-driven enqueue deserves a fast next retry.
-    public func flushNow() async {
+    @discardableResult
+    public func flushNow() async -> PushFlushOutcome {
         consecutiveFailures = 0
         do {
             let result = try await api.flushPushQueue()
+            if result.tokenRejected {
+                await handleTokenRejected(notify: false)
+                return .tokenRejected
+            }
             // A kick that itself fails should not sit on zero — the
             // background loop needs the right delay before its next tick.
             if result.networkFailed {
                 consecutiveFailures = 1
             }
+            return .completed
+        } catch SyncError.tokenRejected {
+            await handleTokenRejected(notify: false)
+            return .tokenRejected
         } catch {
             // Same posture as the loop — transient errors stay in the
-            // queue; a 401 parks the tick loop but callers of
-            // `flushNow` don't need to react.
+            // queue. Auth failures are handled above because Shell must
+            // route them through the same recovery path as pull 401s.
+            return .completed
         }
     }
 
@@ -155,5 +172,13 @@ public actor PushFlusher {
     public func stop() {
         task?.cancel()
         task = nil
+    }
+
+    private func handleTokenRejected(notify: Bool) async {
+        task?.cancel()
+        task = nil
+        if notify {
+            await onTokenRejected?()
+        }
     }
 }

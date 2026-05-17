@@ -62,7 +62,7 @@ extension ActiveView {
                 style: .primary,
                 action: {
                     if !viewModel.logAMRAPStation(reps: content.reps) {
-                        showMetconResultSheet = true
+                        activeSheet = .metconResult
                     }
                 }
             )
@@ -80,13 +80,13 @@ extension ActiveView {
             DSButton(
                 title: strengthLogTitle(content: content),
                 style: .primary,
-                action: { showLogSheet = true }
+                action: { activeSheet = .logSet }
             )
         } else {
             DSButton(
                 title: strengthLogTitle(content: content),
                 style: .primary,
-                action: { showLogSheet = true }
+                action: { activeSheet = .logSet }
             )
         }
     }

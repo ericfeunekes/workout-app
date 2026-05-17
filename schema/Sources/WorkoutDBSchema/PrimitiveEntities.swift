@@ -61,10 +61,14 @@ public struct PrimitiveWorkTarget: Codable, Sendable, Equatable {
 public enum PrimitiveLoadUnit: String, Codable, Sendable, CaseIterable {
     case kg
     case lb
+    case oneRepMax = "1rm"
+    case bodyweight
 }
 
 public enum PrimitiveLoadUnitType: String, Codable, Sendable, CaseIterable {
     case absolute
+    case relative
+    case implicitBodyweight = "implicit_bodyweight"
 }
 
 public struct PrimitiveLoad: Codable, Sendable, Equatable {
@@ -267,6 +271,7 @@ public struct PrimitiveSetLog: Codable, Sendable, Equatable {
     public let weight: Double?
     public let weightUnit: WeightUnit?
     public let durationSec: Double?
+    public let distanceM: Double?
     public let rounds: Int?
     public let rir: Int?
     public let isWarmup: Bool
@@ -288,6 +293,7 @@ public struct PrimitiveSetLog: Codable, Sendable, Equatable {
         case weight
         case weightUnit = "weight_unit"
         case durationSec = "duration_sec"
+        case distanceM = "distance_m"
         case rounds
         case rir
         case isWarmup = "is_warmup"
@@ -310,6 +316,7 @@ public struct PrimitiveSetLog: Codable, Sendable, Equatable {
         weight: Double? = nil,
         weightUnit: WeightUnit? = nil,
         durationSec: Double? = nil,
+        distanceM: Double? = nil,
         rounds: Int? = nil,
         rir: Int? = nil,
         isWarmup: Bool = false,
@@ -330,6 +337,7 @@ public struct PrimitiveSetLog: Codable, Sendable, Equatable {
         self.weight = weight
         self.weightUnit = weightUnit
         self.durationSec = durationSec
+        self.distanceM = distanceM
         self.rounds = rounds
         self.rir = rir
         self.isWarmup = isWarmup

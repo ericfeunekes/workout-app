@@ -140,6 +140,7 @@ private struct PreviewSyncMetadataStore: Persistence.SyncMetadataStore {
     let lastSyncAt: Date?
     func getLastSyncAt() async -> Date? { lastSyncAt }
     func setLastSyncAt(_ date: Date) async {}
+    func clearLastSyncAt() async {}
 }
 
 // Previews import Persistence implicitly via the TokenStore protocol;

@@ -59,8 +59,8 @@ public struct SetPlan: Equatable, Sendable, Hashable {
     /// Core/Session reducer handlers, mutations, drivers, codable shims,
     /// and tests — all of which read the same Double either way. The
     /// `unit` companion is the source of truth for what scale the number
-    /// is in; the `loadKg` name is a semantic compromise flagged in
-    /// scratch/codex-reviews session context as a known lie.
+    /// is in; the `loadKg` name is a semantic compromise from the R2.10
+    /// units cutover.
     public let loadKg: Double?
 
     /// Unit the `loadKg` scalar is in. Determines display suffix, autoreg

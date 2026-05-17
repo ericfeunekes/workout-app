@@ -282,6 +282,7 @@ class PrimitiveSetLog(Base):
     weight: Mapped[float | None] = mapped_column(Float)
     weight_unit: Mapped[str | None] = mapped_column(String)
     duration_sec: Mapped[float | None] = mapped_column(Float)
+    distance_m: Mapped[float | None] = mapped_column(Float)
     rounds: Mapped[int | None] = mapped_column(Integer)
     rir: Mapped[int | None] = mapped_column(Integer)
     is_warmup: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

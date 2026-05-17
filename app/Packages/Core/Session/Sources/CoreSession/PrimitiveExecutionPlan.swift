@@ -21,6 +21,26 @@ public struct ExecutionPlan: Equatable, Sendable {
         self.workoutID = workout.id
         self.blocks = workout.blocks.map { ExecutionBlock(block: $0) }
     }
+
+    public init(
+        workout: PrimitiveWorkout,
+        loadResolver: @Sendable (PrimitiveSlot) -> ResolvedPrimitiveLoad?
+    ) {
+        self.workoutID = workout.id
+        self.blocks = workout.blocks.map { ExecutionBlock(block: $0, loadResolver: loadResolver) }
+    }
+}
+
+public struct ResolvedPrimitiveLoad: Equatable, Sendable {
+    public var loadKg: Double?
+    public var loadUnit: WeightUnit?
+    public var loadDisplayValue: Double?
+
+    public init(loadKg: Double?, loadUnit: WeightUnit?, loadDisplayValue: Double?) {
+        self.loadKg = loadKg
+        self.loadUnit = loadUnit
+        self.loadDisplayValue = loadDisplayValue
+    }
 }
 
 public struct ExecutionBlock: Equatable, Sendable {
@@ -41,6 +61,18 @@ public struct ExecutionBlock: Equatable, Sendable {
         self.blockRepeat = block.repeatCount
         self.workTargets = block.workTargets
         self.sets = block.sets.map { ExecutionSet(set: $0, blockID: block.id) }
+    }
+
+    public init(
+        block: PrimitiveBlock,
+        loadResolver: @Sendable (PrimitiveSlot) -> ResolvedPrimitiveLoad?
+    ) {
+        self.blockID = block.id
+        self.blockRepeat = block.repeatCount
+        self.workTargets = block.workTargets
+        self.sets = block.sets.map {
+            ExecutionSet(set: $0, blockID: block.id, loadResolver: loadResolver)
+        }
     }
 
     public func blockResultLog(
@@ -102,6 +134,22 @@ public struct ExecutionSet: Equatable, Sendable {
         self.traversal = set.traversal
         self.workTargets = set.workTargets
         self.slots = set.slots.map { ExecutionSlot(slot: $0, setID: set.id, blockID: blockID) }
+    }
+
+    public init(
+        set: PrimitiveSet,
+        blockID: BlockID,
+        loadResolver: @Sendable (PrimitiveSlot) -> ResolvedPrimitiveLoad?
+    ) {
+        self.setID = set.id
+        self.blockID = blockID
+        self.setRepeat = set.repeatCount
+        self.timing = set.timing
+        self.traversal = set.traversal
+        self.workTargets = set.workTargets
+        self.slots = set.slots.map {
+            ExecutionSlot(slot: $0, setID: set.id, blockID: blockID, loadResolver: loadResolver)
+        }
     }
 
     public func setResultLog(
@@ -185,23 +233,52 @@ public struct ExecutionSlot: Equatable, Sendable {
             exerciseID: slot.exerciseID,
             workTargets: slot.workTargets,
             loadKg: resolved.loadKg,
-            loadUnit: resolved.unit,
-            loadDisplayValue: slot.load?.value,
+            loadUnit: resolved.loadUnit,
+            loadDisplayValue: resolved.loadDisplayValue,
             stimuli: slot.stimuli,
             postRestSec: slot.postRestSec,
             isWarmup: slot.isWarmup
         )
     }
 
-    private static func resolve(load: PrimitiveLoad?) -> (loadKg: Double?, unit: WeightUnit?) {
-        guard let load, let value = load.value else { return (nil, nil) }
+    public init(
+        slot: PrimitiveSlot,
+        setID: PrimitiveSetID,
+        blockID: BlockID,
+        loadResolver: @Sendable (PrimitiveSlot) -> ResolvedPrimitiveLoad?
+    ) {
+        let resolved = loadResolver(slot) ?? Self.resolve(load: slot.load)
+        self.init(
+            slotID: slot.id,
+            setID: setID,
+            blockID: blockID,
+            exerciseID: slot.exerciseID,
+            workTargets: slot.workTargets,
+            loadKg: resolved.loadKg,
+            loadUnit: resolved.loadUnit,
+            loadDisplayValue: resolved.loadDisplayValue,
+            stimuli: slot.stimuli,
+            postRestSec: slot.postRestSec,
+            isWarmup: slot.isWarmup
+        )
+    }
+
+    private static func resolve(load: PrimitiveLoad?) -> ResolvedPrimitiveLoad {
+        guard let load else {
+            return ResolvedPrimitiveLoad(loadKg: nil, loadUnit: nil, loadDisplayValue: nil)
+        }
+        guard let value = load.value else {
+            return ResolvedPrimitiveLoad(loadKg: nil, loadUnit: nil, loadDisplayValue: nil)
+        }
         switch (load.unit, load.unitType) {
         case (.kg, .absolute):
-            return (value, .kg)
+            return ResolvedPrimitiveLoad(loadKg: value, loadUnit: .kg, loadDisplayValue: value)
         case (.lb, .absolute):
-            return (value * 0.45359237, .lb)
+            return ResolvedPrimitiveLoad(loadKg: value * 0.45359237, loadUnit: .lb, loadDisplayValue: value)
+        case (.bodyweight, .implicitBodyweight):
+            return ResolvedPrimitiveLoad(loadKg: nil, loadUnit: nil, loadDisplayValue: nil)
         default:
-            return (nil, nil)
+            return ResolvedPrimitiveLoad(loadKg: nil, loadUnit: nil, loadDisplayValue: value)
         }
     }
 }
@@ -272,6 +349,8 @@ public extension ExecutionSlot {
         setRepeatIndex: Int,
         setIndex: Int,
         reps: Int?,
+        durationSec: Double? = nil,
+        distanceM: Double? = nil,
         rir: Int?,
         completedAt: Date
     ) -> PrimitiveSetLog {
@@ -284,6 +363,15 @@ public extension ExecutionSlot {
             setRepeatIndex: setRepeatIndex,
             setIndex: setIndex
         )
+        let loggedWeight: Double?
+        switch loadUnit {
+        case .lb:
+            loggedWeight = loadDisplayValue ?? loadKg
+        case .kg:
+            loggedWeight = loadKg
+        case nil:
+            loggedWeight = nil
+        }
         return PrimitiveSetLog(
             id: coordinate.deterministicLogID,
             role: .slot,
@@ -296,8 +384,10 @@ public extension ExecutionSlot {
             setRepeatIndex: setRepeatIndex,
             blockRepeatIndex: blockRepeatIndex,
             reps: reps,
-            weight: loadKg,
+            weight: loggedWeight,
             weightUnit: loadUnit,
+            durationSec: durationSec,
+            distanceM: distanceM,
             rir: rir,
             isWarmup: isWarmup,
             completedAt: completedAt

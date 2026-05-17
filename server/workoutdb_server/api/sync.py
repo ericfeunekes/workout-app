@@ -382,6 +382,7 @@ def _upsert_primitive_set_log(db: DbSession, payload: PrimitiveSetLogIn) -> Prim
         "weight",
         "weight_unit",
         "duration_sec",
+        "distance_m",
         "rounds",
         "rir",
         "is_warmup",

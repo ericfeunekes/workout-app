@@ -47,17 +47,18 @@ public enum BootstrapResult: Sendable {
     /// the initial `ExecutionViewModel` and the post-save completion
     /// writer reassigns `holder.vm` to a freshly-built VM per-workout.
     /// `RootTabView` observes the holder so the swap takes effect
-    /// without a relaunch. The `pushFlusher` owns the periodic push
-    /// cadence; the shell should `await pushFlusher.start()` on ready
-    /// and `stop()` when the connection is wiped.
+    /// without a relaunch. `appSync` owns foreground sync policy and
+    /// push-flusher lifecycle.
     case ready(
         todayVM: TodayViewModel,
         executionHolder: ExecutionVMHolder,
-        pushFlusher: PushFlusher
+        appSync: AppSyncCoordinator
     )
     /// Pull failed AND nothing is cached. The shell renders a "no
-    /// workouts yet" empty state.
-    case empty
+    /// workouts yet" empty state while retaining the authenticated sync
+    /// owner for retry / foreground lifecycle until the user changes
+    /// server or reconnects.
+    case empty(appSync: AppSyncCoordinator)
 }
 
 /// Errors the shell acts on. Everything else the bootstrap eats and
@@ -106,14 +107,20 @@ public enum AppBootstrap {
             tokenProvider: { connection.token },
             telemetry: telemetryEmitter
         )
+        let appSync = AppSyncCoordinator(
+            syncAPI: syncAPI,
+            persistence: persistence,
+            telemetry: telemetryEmitter,
+            onTokenRejected: onManualRefreshTokenRejected
+        )
 
         wireHistoryEditHook(historyViewModel, syncAPI: syncAPI)
 
-        try await runPull(
-            syncAPI: syncAPI,
-            persistence: persistence,
-            telemetry: telemetryEmitter
-        )
+        let refreshResult = await appSync.refresh(trigger: .bootstrap)
+        if refreshResult == .tokenRejected {
+            emitBootstrap(telemetryEmitter, name: "bootstrap.token_rejected")
+            throw AppBootstrapError.tokenRejected
+        }
 
         let loader = TodayLoader(
             cache: persistence.workoutCache,
@@ -124,11 +131,12 @@ public enum AppBootstrap {
             sessionStateBinding: sessionStateBinding
         ) else {
             return try await resolveNoPlannedWorkout(
-                persistence: persistence, syncAPI: syncAPI,
+                persistence: persistence,
                 telemetry: telemetryEmitter,
                 sessionStateBinding: sessionStateBinding,
                 executionHolder: executionHolder,
-                onEmptyTodayRefresh: onEmptyTodayRefresh
+                onEmptyTodayRefresh: onEmptyTodayRefresh,
+                appSync: appSync
             )
         }
         return try await assembleReady(AssembleInputs(
@@ -139,7 +147,8 @@ public enum AppBootstrap {
             telemetry: telemetryEmitter,
             afterLocalCompletion: afterLocalCompletion,
             onManualRefreshTokenRejected: onManualRefreshTokenRejected,
-            executionHolder: executionHolder
+            executionHolder: executionHolder,
+            appSync: appSync
         ))
     }
 
@@ -154,6 +163,7 @@ public enum AppBootstrap {
         let afterLocalCompletion: (@Sendable () async -> Void)?
         let onManualRefreshTokenRejected: (@Sendable @MainActor () async -> Void)?
         let executionHolder: ExecutionVMHolder?
+        let appSync: AppSyncCoordinator
     }
 
     /// Post-load assembly. Extracted so `bootstrap(...)` stays under
@@ -179,63 +189,14 @@ public enum AppBootstrap {
             todayLoader: inputs.todayLoader,
             sessionStore: inputs.persistence.sessionStore,
             workoutCache: inputs.persistence.workoutCache,
-            syncMetadataStore: inputs.persistence.syncMetadataStore,
             lastPerformedStore: inputs.persistence.lastPerformedStore,
             syncAPI: inputs.syncAPI,
             telemetry: inputs.telemetry,
             afterLocalCompletion: inputs.afterLocalCompletion,
             onManualRefreshTokenRejected: inputs.onManualRefreshTokenRejected,
+            appSync: inputs.appSync,
             executionHolder: inputs.executionHolder ?? ExecutionVMHolder()
         ))
-    }
-
-    /// Pull-once helper. Any failure falls through to the cache *except*
-    /// tokenRejected, which we rethrow so the shell can route back to
-    /// FirstRun. Extracted so `bootstrap` stays under
-    /// `function_body_length`.
-    private static func runPull(
-        syncAPI: SyncAPI,
-        persistence: PersistenceFactory,
-        telemetry: TelemetryEmitter
-    ) async throws {
-        do {
-            let lastSyncAt = await persistence.syncMetadataStore.getLastSyncAt()
-            let result = try await syncAPI.pullLatest(since: lastSyncAt)
-            try await savePull(result, into: persistence.workoutCache)
-            // Persist the per-exercise "LAST · …" chip map alongside the
-            // workout rows (qa-001 + qa-020). The server's contract is a
-            // full snapshot over all exercises referenced by the user's
-            // non-completed workouts (see `api/sync.py::_build_last_performed`),
-            // so a non-empty response is authoritative — we rewrite.
-            //
-            // An EMPTY `result.lastPerformed`, however, can also legitimately
-            // mean "no completed history yet for any visible exercise" on a
-            // fresh account. To tell the two apart we'd need a richer
-            // contract; instead we take the conservative route and keep
-            // whatever's already stored when the server sent nothing. That
-            // way a transient server regression (or an old server that
-            // still scopes by delta) can't wipe the chips. The cost is a
-            // stale chip after all completed history is server-deleted,
-            // which is acceptable — the next real pull rewrites.
-            if !result.lastPerformed.isEmpty {
-                let lastPerformedMap = LastPerformedFormatter.buildMap(
-                    from: result.lastPerformed
-                )
-                await persistence.lastPerformedStore.save(lastPerformedMap)
-            }
-            await persistence.syncMetadataStore.setLastSyncAt(result.serverTime)
-        } catch SyncError.tokenRejected {
-            telemetry.emit(Event(
-                sessionID: TelemetrySession.id,
-                kind: "error",
-                name: "bootstrap.token_rejected"
-            ))
-            throw AppBootstrapError.tokenRejected
-        } catch {
-            // Transport / decode / server errors: fall through silently.
-            // Cached data (if any) is still usable — that's the offline
-            // contract from `docs/specs/v2-architecture.md` § "Sync model".
-        }
     }
 
     /// Wire the History edit hook onto the shell-owned
@@ -360,7 +321,7 @@ public enum AppBootstrap {
         let primitiveWorkout = try await cache.loadPrimitiveWorkouts()
             .first { $0.id == workout.id }
         let primitivePlan = try primitiveWorkout.map {
-            try PrimitiveSessionSeeder.seed(workout: $0)
+            try PrimitiveSessionSeeder.seed(workout: $0, userParameters: numericParams)
         }
         return WorkoutContext(
             workout: workout,

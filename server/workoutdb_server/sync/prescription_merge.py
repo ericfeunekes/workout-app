@@ -44,8 +44,7 @@ def _dumps(value: Any) -> str:
 
 #: R2.10 default for ``weight_unit`` when neither library nor item
 #: specify one. Eric trains primarily in pounds, so pound-first is the
-#: new default (see ``docs/prescription.md`` § "Units" and
-#: ``scratch/codex-reviews/fix-briefs/r2-10-lb-default.md``).
+#: new default (see ``docs/prescription.md`` § "Units").
 DEFAULT_WEIGHT_UNIT = "lb"
 
 

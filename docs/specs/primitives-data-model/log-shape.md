@@ -370,6 +370,17 @@ No special "test" handling at log level — a strength slot row.
   and analytics must not derive competing aggregates from slot rows when an
   aggregate result row is the authored source.
 
+- `PDM-GAP-006`: Metric-driven partial-result capture and completion summaries
+  are not complete for non-rep slots. Simulator QA on 2026-05-17 showed a
+  cap-bounded AMRAP ending on a 1000 m run station, but the aggregate result
+  sheet captured the partial as `Run 1 reps` instead of a distance value. A
+  follow-up primitive stress pass showed the same class of gap across distance,
+  duration, and carried-load work: a for-time row summary preserved elapsed
+  time but not the prescribed distance, and a loaded carry completion preserved
+  distance but not carried load. The cutover must drive aggregate,
+  partial-result, and completion-summary controls from each slot's
+  work_target metrics, not from a reps-only or single-primary-metric default.
+
 ## log-shape.md open questions
 
 **Q-I. Seed-time expansion of work_target metric roles into driver hooks.** Resolved in runtime-resolution.md: driver reads role flag at seed time; set-end gates on `completion` metrics only.

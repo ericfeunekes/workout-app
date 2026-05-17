@@ -53,6 +53,129 @@ The app pulls and pushes on three triggers:
 
 ---
 
+## App sync ownership and foreground lifecycle
+
+Sync is now a domain behavior, not just a transport helper. The app needs one
+app-level owner for "make local data current and keep outbound writes moving"
+so foreground sync, manual refresh, token recovery, and any later background
+sync path do not grow separate policies.
+
+### Ownership boundary
+
+The boundary is:
+
+- `Sync` owns transport mechanics: `PullService`, `PushQueue`,
+  `ConnectionManager`, DTO mapping, HTTP requests, queue flushing, backoff,
+  idempotent enqueue, and connection-state events.
+- `Persistence` owns durable local stores: workout cache, push queue storage,
+  token store, sync metadata, telemetry storage, and session snapshots.
+- The app-sync owner coordinates app policy across those packages: when to pull,
+  where pulled data is written, when to start or stop push flushing, how token
+  rejection routes back to connection recovery, and which telemetry marks the
+  lifecycle.
+- Feature view models request refresh or enqueue domain writes. They do not own
+  foreground/background sync policy.
+- `Shell` owns app lifecycle and cross-feature composition. The current
+  implementation lives in `Shell` as `AppSyncCoordinator` because Shell
+  already composes `Sync` and `Persistence`. If the coordinator becomes a stable
+  domain with enough surface to justify its own package, promote it later to a
+  named app-sync package. Do not create an empty package before the boundary
+  proves itself.
+
+This keeps `Sync` transport-focused. It must not import `Persistence` just to
+become the app's lifecycle coordinator.
+
+### Foreground lifecycle contract
+
+When the app becomes active with a saved connection, the app-sync owner must:
+
+1. Run `GET /api/sync/pull?since=<last_server_time>` through `SyncAPI`.
+2. Save successful pull results into `WorkoutCache` and related read models.
+3. Persist the returned `server_time` as the next `lastSyncAt`.
+4. Start or restart the foreground push flusher idempotently.
+5. Leave any in-flight live workout frozen: pulled prescription changes update
+   the local cache for future sessions, not the active `ExecutionViewModel`.
+6. Preserve offline-first behavior: transport failures fall back to cached data
+   and queued writes remain durable.
+
+On background, the app-sync owner must define one explicit posture for the
+foreground push flusher. The current target is foreground-owned sync: stop or
+park the foreground flusher on background, then restart it on the next
+foreground transition. Background delivery is a separate capability, not an
+implicit side effect of this foreground lifecycle work.
+
+### Token rejection contract
+
+A 401 from pull or push is auth rejection, not offline. The app-sync owner must
+surface one recovery path:
+
+- Pull 401 clears or invalidates the saved connection and routes back to
+  FirstRun / connection entry.
+- Push 401 stops push flushing and leaves queued writes durable. The next
+  recovery action must route through the same connection entry path rather than
+  silently retrying forever.
+- No sync path should continue normal network attempts while
+  `ConnectionManager` is in token-rejected state.
+
+### Telemetry requirements
+
+Foreground sync must be observable enough to answer "did the app try, what did
+it do, and where did it stop?" without replaying a simulator video. The
+app-sync owner should emit stage-level telemetry for:
+
+- foreground sync requested
+- pull started, succeeded, failed offline/server/decode, or token-rejected
+- cache/writeback started and succeeded or failed
+- push flusher started, stopped, restarted, token-rejected, or manually kicked
+- lifecycle transition handled: active, background, inactive if needed
+- manual refresh started and completed
+
+Telemetry must avoid sensitive payload content. Current app-sync lifecycle
+events include the trigger, final outcome, error class/description when present,
+`since` presence, and pulled workout count when the event follows a pull.
+Server identity and queued item counts are still part of `TELEM-GAP-005` until
+the app has a cheap redacted server label and queue-count read path.
+
+### Acceptance criteria
+
+`APP-SYNC-A1. Single app-sync owner.` A third party can identify one app-level
+owner for foreground pull, cache writeback, push flusher lifecycle, and token
+rejection routing. `RootView` / app target code remains a thin lifecycle caller;
+feature view models do not directly decide foreground/background sync policy.
+
+`APP-SYNC-A2. Foreground refresh is deterministic.` On foreground with a saved
+connection, the app runs a pull using stored `lastSyncAt`, saves successful
+results, updates `lastSyncAt`, refreshes visible Today state while preserving
+an active workout session, and starts/restarts push flushing idempotently.
+Proof follows `docs/TESTING.md` foreground/background lifecycle expectations:
+package or app-hosted tests for the app-root path, plus simulator QA for the
+visible foreground behavior.
+
+`APP-SYNC-A3. Background posture is explicit.` Backgrounding stops or parks the
+foreground-owned flusher according to the selected posture, and foregrounding
+restarts it without duplicate loops or lost queued writes. This criterion does
+not require true iOS background delivery.
+
+`APP-SYNC-A4. Token rejection has one recovery route.` Pull and push 401s stop
+normal sync attempts, preserve queued outbound writes, and route to the
+connection recovery surface. Silent retry loops after 401 fail this criterion.
+
+`APP-SYNC-A5. Lifecycle telemetry is sufficient for proof.` The sync lifecycle
+emits the stage events above so tests, logs, or local event readbacks can prove
+where a foreground sync attempt stopped. Simulator video is not accepted as the
+only proof for cache, queue, token, or server-side claims.
+
+### Non-goals
+
+- No true background upload/download capability in this slice.
+- No CloudKit or Cloudflare transport change.
+- No new conflict-resolution model.
+- No change to the directionality rule: plans flow server → app; results flow
+  app → server.
+- No feature-owned sync policy hidden in Today, Execution, History, or Settings.
+
+---
+
 ## Pull protocol
 
 ```
@@ -268,12 +391,6 @@ The watch face grammar (widget-based faces for set / rest / superset / EMOM / AM
   later after newer prescriptions may have arrived. Pick explicit expiry,
   refuse/resume, or never-expire behavior before changing execution/sync around
   long-lived active sessions.
-- `SYNC-GAP-004`: **Foreground/background lifecycle ownership.** The target
-  cadence says pull on foreground and retry pushes while foregrounded, but the
-  durable contract does not yet name the single Shell/app-root owner for
-  foreground pull, push flusher start/restart, background stop posture, and
-  token-rejected recovery. Do not claim foreground sync verified until a Shell
-  lifecycle test or app-hosted proof plus simulator QA pins this path.
 - **Sync triggers on the watch.** Currently the phone is the only sync actor. If the watch ever writes set_logs independently (not in v1), we'll need a watch → phone → server reconciliation step.
 - **Set-log deletion scope.** v1 only deletes set_logs through `workout_resets` for same-day accidental workout logs. Arbitrary historical set deletion/edit provenance remains out of scope unless the user asks for audit-grade history later.
 - **Multiple active workouts.** The spec allows a user to mark multiple workouts `active`, but the app UX assumes one active workout at a time. Behavior if a second workout is started before the first is completed is undefined; we'd need to decide whether "start workout" auto-completes the prior one or refuses.

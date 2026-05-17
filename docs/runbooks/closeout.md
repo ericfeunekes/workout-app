@@ -117,6 +117,7 @@ If the change closes, narrows, discovers, or reprioritizes a backlog gap:
 - [ ] `docs/feature-gap-map.md` rows were removed, narrowed, or added to match the owning docs.
 - [ ] `docs/backlog.md` was updated only if lane ownership, posture, or next planning move changed.
 - [ ] Scratch phase or implementation plans that no longer describe active work were deleted. If rationale must survive, its durable conclusion was promoted to the owning docs or an ADR.
+- [ ] Raw `scratch/qa-runs/` artifacts for completed QA runs were removed, and any still-open bug row now carries a reproducible behavior/date instead of depending on a scratch path.
 - [ ] No durable phase-plan directory or stale plan doc was added under `docs/`.
 
 ## After context loss

@@ -520,7 +520,7 @@ extension ExecutionViewModel {
     }
 
     private func usesUnboundedSetCount(_ block: Block) -> Bool {
-        block.timingMode == .amrap || block.timingMode == .accumulate
+        block.timingMode == .amrap || block.timingMode == .emom || block.timingMode == .accumulate
     }
 
     private func isZeroItemBlock(at blockIndex: Int) -> Bool {

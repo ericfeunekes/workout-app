@@ -13,7 +13,7 @@ import CoreDomain
 extension ActiveView {
 
     /// View-builder for the active swap sheet. Called from
-    /// `.sheet(isPresented: $showSwapSheet)` in `ActiveView.body`.
+    /// `activeSheetContent(for:)` in `ActiveView+Sheets.swift`.
     @ViewBuilder
     var swapSheet: some View {
         if let swapContext = currentSwapContext() {
@@ -26,10 +26,10 @@ extension ActiveView {
                 },
                 lastPerformed: { id in viewModel.context.lastPerformed[id] },
                 onPick: { altID in
-                    showSwapSheet = false
+                    activeSheet = nil
                     viewModel.swap(itemID: swapContext.itemID, alternativeID: altID)
                 },
-                onCancel: { showSwapSheet = false }
+                onCancel: { activeSheet = nil }
             )
         } else {
             // Defensive: the cursor is out of range — render a minimal
@@ -40,8 +40,8 @@ extension ActiveView {
                 alternatives: [],
                 exerciseName: { _ in "" },
                 lastPerformed: { _ in nil },
-                onPick: { _ in showSwapSheet = false },
-                onCancel: { showSwapSheet = false }
+                onPick: { _ in activeSheet = nil },
+                onCancel: { activeSheet = nil }
             )
         }
     }
@@ -80,6 +80,6 @@ extension ActiveView {
         #if canImport(UIKit) && !os(watchOS)
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         #endif
-        showSwapSheet = true
+        activeSheet = .swap
     }
 }

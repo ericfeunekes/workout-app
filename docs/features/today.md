@@ -34,17 +34,17 @@ Plan surface at the start of a session. `TodayLoader.loadPlan()` pulls `.planned
 
 The selected workout remains the default execution target, but any preview for a visible planned card can be started when Shell has injected a specific-workout start action. Starting the selected workout uses the existing session binding. Starting a missed/future workout asks Shell to rebuild the `ExecutionViewModel` for that workout ID, then starts it. This does not reschedule, reorder, or mutate the plan; it is a one-session execution choice. Both paths emit `today.start_tap`.
 
-**Refresh.** Shell injects a refresh action into `TodayViewModel` after bootstrap. Pull-to-refresh or the header `REFRESH` action calls `SyncAPI.pullLatest(since: lastSyncAt)`, saves the result into `WorkoutCache`, updates `LastPerformedStore` and `SyncMetadataStore`, reloads the existing `TodayViewModel`, and rebuilds the `ExecutionViewModel` for the newly selected planned workout. Pull failures leave the local cache-rendered plan intact and show a small failure caption.
+**Refresh.** Shell injects a refresh action into `TodayViewModel` after bootstrap. Pull-to-refresh or the header `REFRESH` action goes through `AppSyncCoordinator`, which calls `SyncAPI.pullLatest(since: lastSyncAt)`, saves the result into `WorkoutCache`, updates `LastPerformedStore` and `SyncMetadataStore`, reloads the existing `TodayViewModel`, and rebuilds the `ExecutionViewModel` for the newly selected planned workout when no workout is active. Pull failures leave the local cache-rendered plan intact and show a small failure caption.
 
 **Reload after save & done (bug-036).** The VM's derived fields are mutable (`internal(set) var`), and `reload(using: TodayLoader)` re-runs `loadPlan()` and replaces them in place. The shell's `AppBootstrap.makeCompletionWriter` calls `todayVM.reload(using: loader)` after the completed workout lands in `WorkoutCache` (status = `.completed`) and before the History refresh. The loader's `.planned` filter skips the just-finished workout, so Today advances the selected workout and queue with zero network round-trip. When no `.planned` workout remains, `reload` flips `isEmpty = true` and blanks the fields; the shell renders the existing S8 empty glance until the next pull brings in a new plan.
 
 ## State surface
 - **Inputs:** `WorkoutCache.loadWorkouts(status: .planned, since: nil)`, `loadBlocks`, `loadItems`, `loadExercises`; clock; optional `lastPerformed: [UUID: String]`, `lastSessionSummary: String?`, `programTags: [String]`, `sessionStateBinding`; optional shell-injected refresh and start-workout actions.
-- **Outputs / side effects:** read-only render; on start, dispatches `.start` or asks Shell to rebuild execution for a specific planned workout, then emits one telemetry Event (`kind: "interaction"`, `name: "today.start_tap"`); on refresh, Shell runs sync pull/cache-save/reload/rebuild; on adjustment request, copies a structured text prompt for Claude.
+- **Outputs / side effects:** read-only render; on start, dispatches `.start` or asks Shell to rebuild execution for a specific planned workout, then emits one telemetry Event (`kind: "interaction"`, `name: "today.start_tap"`); on refresh, Shell runs coordinator-owned sync pull/cache-save/reload and only rebuilds execution when no session is active; on adjustment request, copies a structured text prompt for Claude.
 - **State transitions:** none owned here; start → session becomes `.active` via the shell.
 
 ## What it deliberately doesn't do
-- No network calls inside `TodayLoader`; refresh network ownership stays in Shell/AppBootstrap.
+- No network calls inside `TodayLoader`; refresh network ownership stays in Shell's `AppSyncCoordinator`.
 - No history query from the feature package. `TodayLoader` reads the Shell-populated `LastPerformedStore` snapshot; `lastSessionSummary` remains caller-supplied.
 - No plan mutation, reschedule, drag/drop, or delete. Plans flow server → app; app-side reorganization is out of scope.
 - No AI infrastructure. The adjustment affordance copies a structured request for Claude; it does not call Claude from the app.
@@ -64,8 +64,6 @@ The selected workout remains the default execution target, but any preview for a
 
 ## Current gaps
 
-- `TODAY-GAP-001`: Card-body tap opens the current preview/detail sheet; a
-  richer dedicated `WorkoutPreviewView` is still target behavior.
 - `TODAY-GAP-002`: Preview tap targets and Start affordance need simulator
   proof before the feature can be marked `verified`.
 - `TODAY-GAP-003`: Current-block remaining work is projection-backed on

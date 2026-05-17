@@ -45,23 +45,60 @@ extension AppBootstrap {
     /// `bootstrap(...)` can call it across the extension boundary.
     static func resolveNoPlannedWorkout(
         persistence: PersistenceFactory,
-        syncAPI: SyncAPI,
         telemetry: TelemetryEmitter,
         sessionStateBinding: (@Sendable (SessionMutation) -> Void)?,
         executionHolder: ExecutionVMHolder?,
-        onEmptyTodayRefresh: (@Sendable @MainActor () async -> Bool)? = nil
+        onEmptyTodayRefresh: (@Sendable @MainActor () async -> Bool)? = nil,
+        appSync: AppSyncCoordinator
     ) async throws -> BootstrapResult {
         let completed = try await persistence.workoutCache.loadWorkouts(
             status: .completed, since: nil
         )
         if completed.isEmpty {
             emitBootstrap(telemetry, name: "bootstrap.empty")
-            return .empty
+            return .empty(appSync: appSync)
         }
         emitBootstrap(telemetry, name: "bootstrap.ready_empty_today")
         let todayVM = TodayViewModel.empty(
             telemetry: telemetry,
             sessionStateBinding: sessionStateBinding
+        )
+        let holder = executionHolder ?? ExecutionVMHolder()
+        let todayLoader = TodayLoader(
+            cache: persistence.workoutCache,
+            lastPerformedStore: persistence.lastPerformedStore,
+            clock: { Date() }
+        )
+        let hooks = makePushHooks(
+            syncAPI: appSync.syncAPI,
+            workoutCache: persistence.workoutCache,
+            appSync: appSync
+        )
+        let rebuildVM = makeRebuildVM(
+            hooks: hooks,
+            sessionStore: persistence.sessionStore,
+            telemetry: telemetry
+        )
+        rebuildVM.writerBox.value = makeCompletionWriter(
+            inputs: CompletionWriterInputs(
+                workoutCache: persistence.workoutCache,
+                lastPerformedStore: persistence.lastPerformedStore,
+                todayViewModel: todayVM,
+                todayLoader: todayLoader,
+                afterLocalCompletion: nil,
+                executionHolder: holder,
+                rebuild: rebuildVM.factory,
+                telemetry: telemetry
+            )
+        )
+        wireForegroundVisibleRefresh(
+            appSync: appSync,
+            todayViewModel: todayVM,
+            todayLoader: todayLoader,
+            workoutCache: persistence.workoutCache,
+            lastPerformedStore: persistence.lastPerformedStore,
+            executionHolder: holder,
+            rebuild: rebuildVM.factory
         )
         if let onEmptyTodayRefresh {
             todayVM.setRefreshAction {
@@ -75,8 +112,8 @@ extension AppBootstrap {
         // time the user pulls or restarts the app with a planned row.
         return .ready(
             todayVM: todayVM,
-            executionHolder: executionHolder ?? ExecutionVMHolder(),
-            pushFlusher: PushFlusher(api: syncAPI)
+            executionHolder: holder,
+            appSync: appSync
         )
     }
 }
@@ -95,7 +132,6 @@ extension AppBootstrap {
         let todayLoader: TodayLoader
         let sessionStore: SessionStore
         let workoutCache: WorkoutCache
-        let syncMetadataStore: SyncMetadataStore
         /// "LAST · …" chip map store. Threaded through to the per-
         /// workout rebuild path (qa-001 + qa-020) so the next workout's
         /// `WorkoutContext.lastPerformed` carries the same pulled
@@ -105,6 +141,7 @@ extension AppBootstrap {
         let telemetry: TelemetryEmitter
         let afterLocalCompletion: (@Sendable () async -> Void)?
         let onManualRefreshTokenRejected: (@Sendable @MainActor () async -> Void)?
+        let appSync: AppSyncCoordinator
         /// Observable holder the shell uses to both (a) route the Today
         /// start binding to the current VM and (b) drive RootTabView's
         /// routing against `holder.vm.state.route`. The completion
@@ -157,11 +194,10 @@ extension AppBootstrap {
             planContext: inputs.todayPlanContext,
             telemetry: inputs.telemetry
         )
-        let pushFlusher = PushFlusher(api: inputs.syncAPI)
         let hooks = makePushHooks(
             syncAPI: inputs.syncAPI,
             workoutCache: inputs.workoutCache,
-            pushFlusher: pushFlusher
+            appSync: inputs.appSync
         )
         let rebuildVM = makeRebuildVM(
             hooks: hooks,
@@ -181,31 +217,38 @@ extension AppBootstrap {
             )
         )
         let refreshDeps = TodayRefreshDependencies(
-            syncAPI: inputs.syncAPI,
             workoutCache: inputs.workoutCache,
-            syncMetadataStore: inputs.syncMetadataStore,
             lastPerformedStore: inputs.lastPerformedStore,
             todayLoader: inputs.todayLoader,
             executionHolder: inputs.executionHolder,
             rebuild: rebuildVM.factory,
             telemetry: inputs.telemetry,
-            onTokenRejected: inputs.onManualRefreshTokenRejected
+            onTokenRejected: inputs.onManualRefreshTokenRejected,
+            appSync: inputs.appSync
         )
         todayVM.setRefreshAction { [weak todayVM, refreshDeps] in
             guard let todayVM else { return false }
             return await refreshTodayPlan(inputs: TodayRefreshInputs(
-                syncAPI: refreshDeps.syncAPI,
                 workoutCache: refreshDeps.workoutCache,
-                syncMetadataStore: refreshDeps.syncMetadataStore,
                 lastPerformedStore: refreshDeps.lastPerformedStore,
                 todayViewModel: todayVM,
                 todayLoader: refreshDeps.todayLoader,
                 executionHolder: refreshDeps.executionHolder,
                 rebuild: refreshDeps.rebuild,
                 telemetry: refreshDeps.telemetry,
-                onTokenRejected: refreshDeps.onTokenRejected
+                onTokenRejected: refreshDeps.onTokenRejected,
+                appSync: refreshDeps.appSync
             ))
         }
+        wireForegroundVisibleRefresh(
+            appSync: inputs.appSync,
+            todayViewModel: todayVM,
+            todayLoader: inputs.todayLoader,
+            workoutCache: inputs.workoutCache,
+            lastPerformedStore: inputs.lastPerformedStore,
+            executionHolder: inputs.executionHolder,
+            rebuild: rebuildVM.factory
+        )
         todayVM.setStartWorkoutAction { [startDeps = refreshDeps] workoutID in
             await startWorkoutFromPlan(
                 workoutID: workoutID,
@@ -227,26 +270,23 @@ extension AppBootstrap {
         return .ready(
             todayVM: todayVM,
             executionHolder: inputs.executionHolder,
-            pushFlusher: pushFlusher
+            appSync: inputs.appSync
         )
     }
 
     struct TodayRefreshDependencies: Sendable {
-        let syncAPI: SyncAPI
         let workoutCache: WorkoutCache
-        let syncMetadataStore: SyncMetadataStore
         let lastPerformedStore: LastPerformedStore?
         let todayLoader: TodayLoader
         let executionHolder: ExecutionVMHolder
         let rebuild: @Sendable @MainActor (WorkoutContext) -> ExecutionViewModel
         let telemetry: TelemetryEmitter
         let onTokenRejected: (@Sendable @MainActor () async -> Void)?
+        let appSync: AppSyncCoordinator
     }
 
     struct TodayRefreshInputs: Sendable {
-        let syncAPI: SyncAPI
         let workoutCache: WorkoutCache
-        let syncMetadataStore: SyncMetadataStore
         let lastPerformedStore: LastPerformedStore?
         let todayViewModel: TodayViewModel
         let todayLoader: TodayLoader
@@ -254,20 +294,13 @@ extension AppBootstrap {
         let rebuild: @Sendable @MainActor (WorkoutContext) -> ExecutionViewModel
         let telemetry: TelemetryEmitter
         let onTokenRejected: (@Sendable @MainActor () async -> Void)?
+        let appSync: AppSyncCoordinator
     }
 
     static func refreshTodayPlan(inputs: TodayRefreshInputs) async -> Bool {
-        do {
-            let lastSyncAt = await inputs.syncMetadataStore.getLastSyncAt()
-            let result = try await inputs.syncAPI.pullLatest(since: lastSyncAt)
-            try await savePull(result, into: inputs.workoutCache)
-            if !result.lastPerformed.isEmpty, let store = inputs.lastPerformedStore {
-                let lastPerformedMap = LastPerformedFormatter.buildMap(
-                    from: result.lastPerformed
-                )
-                await store.save(lastPerformedMap)
-            }
-            await inputs.syncMetadataStore.setLastSyncAt(result.serverTime)
+        let result = await inputs.appSync.refresh(trigger: .manualTodayRefresh)
+        switch result {
+        case .pulled:
             await inputs.todayViewModel.reload(using: inputs.todayLoader)
             await rebuildExecutionVMForNextWorkout(
                 workoutCache: inputs.workoutCache,
@@ -277,7 +310,9 @@ extension AppBootstrap {
                 rebuild: inputs.rebuild
             )
             return true
-        } catch SyncError.tokenRejected {
+        case .fallback:
+            return false
+        case .tokenRejected:
             inputs.telemetry.emit(Event(
                 sessionID: TelemetrySession.id,
                 kind: "error",
@@ -285,8 +320,35 @@ extension AppBootstrap {
             ))
             await inputs.onTokenRejected?()
             return false
-        } catch {
-            return false
+        }
+    }
+
+    static func wireForegroundVisibleRefresh(
+        appSync: AppSyncCoordinator,
+        todayViewModel: TodayViewModel,
+        todayLoader: TodayLoader,
+        workoutCache: WorkoutCache,
+        lastPerformedStore: LastPerformedStore?,
+        executionHolder: ExecutionVMHolder,
+        rebuild: @escaping @Sendable @MainActor (WorkoutContext) -> ExecutionViewModel
+    ) {
+        appSync.setForegroundRefreshHandler {
+            [todayViewModel, todayLoader, workoutCache, lastPerformedStore, executionHolder, rebuild]
+            trigger,
+            result in
+            guard trigger == .foreground else { return }
+            guard case .pulled = result else { return }
+            let shouldRebuildExecution = executionHolder.vm?.state.route == .today
+                || executionHolder.vm == nil
+            await todayViewModel.reload(using: todayLoader)
+            guard shouldRebuildExecution else { return }
+            await rebuildExecutionVMForNextWorkout(
+                workoutCache: workoutCache,
+                lastPerformedStore: lastPerformedStore,
+                todayLoader: todayLoader,
+                executionHolder: executionHolder,
+                rebuild: rebuild
+            )
         }
     }
 
@@ -376,7 +438,7 @@ extension AppBootstrap {
     static func makePushHooks(
         syncAPI: SyncAPI,
         workoutCache: WorkoutCache,
-        pushFlusher: PushFlusher
+        appSync: AppSyncCoordinator
     ) -> ExecutionPushHooks {
         ExecutionPushHooks(
             onSetLogged: { [syncAPI] log in
@@ -385,8 +447,8 @@ extension AppBootstrap {
             onWorkoutCompleted: { [syncAPI] record in
                 try await syncAPI.pushCompletion(record)
             },
-            onPushKick: { [pushFlusher] in
-                await pushFlusher.flushNow()
+            onPushKick: { [appSync] in
+                await appSync.flushNow()
             },
             onUserParameterChanged: { [syncAPI, workoutCache] param in
                 try? await workoutCache.saveUserParameter(param)

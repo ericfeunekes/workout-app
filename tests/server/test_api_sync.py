@@ -289,6 +289,49 @@ def test_push_accepts_primitive_set_result_shape(client, test_engine, test_user_
         assert row.rounds == 7
 
 
+def test_push_accepts_primitive_slot_distance_and_carried_load(
+    client, test_engine, test_user_id
+) -> None:
+    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
+    workout_id = _create_future_workout(client, exercise_id)
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                {
+                    "id": "99999999-9999-4999-8999-999999999997",
+                    "role": "slot",
+                    "slot_id": "40000000-0000-4000-8000-000000000002",
+                    "set_id": "30000000-0000-4000-8000-000000000002",
+                    "block_id": "20000000-0000-4000-8000-000000000002",
+                    "workout_id": workout_id,
+                    "planned_exercise_id": exercise_id,
+                    "set_index": 0,
+                    "set_repeat_index": 0,
+                    "block_repeat_index": 0,
+                    "weight": 27.2155422,
+                    "weight_unit": "kg",
+                    "duration_sec": 360,
+                    "distance_m": 1000,
+                    "completed_at": "2026-04-20T07:30:00Z",
+                }
+            ],
+            "status_updates": [],
+            "workout_resets": [],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["primitive_set_logs_received"] == 1
+
+    with Session(test_engine) as session:
+        row = session.get(PrimitiveSetLog, "99999999-9999-4999-8999-999999999997")
+        assert row is not None
+        assert row.workout_id == workout_id
+        assert row.distance_m == 1000
+        assert row.duration_sec == 360
+        assert row.weight == 27.2155422
+
+
 def test_push_rejects_malformed_primitive_log_role_scope(client, test_engine, test_user_id) -> None:
     response = client.post(
         "/api/sync/results",

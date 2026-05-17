@@ -329,8 +329,25 @@ class PrimitiveWorkTargetIn(BaseModel):
 
 class PrimitiveLoadIn(BaseModel):
     value: float | None = None
-    unit: Literal["kg", "lb"]
-    unit_type: Literal["absolute"]
+    unit: Literal["kg", "lb", "1rm", "bodyweight"]
+    unit_type: Literal["absolute", "relative", "implicit_bodyweight"]
+
+    @model_validator(mode="after")
+    def _load_shape_matches_unit_type(self) -> "PrimitiveLoadIn":
+        if self.unit_type == "absolute" and self.unit not in {"kg", "lb"}:
+            raise ValueError("absolute primitive loads require kg or lb units")
+        if self.unit_type == "absolute" and self.value is None:
+            raise ValueError("absolute primitive loads require a number")
+        if self.unit_type == "relative" and self.unit not in {"1rm", "bodyweight"}:
+            raise ValueError("relative primitive loads require 1rm or bodyweight units")
+        if self.unit_type == "relative" and self.value is None:
+            raise ValueError("relative primitive loads require a number")
+        if self.unit_type == "implicit_bodyweight":
+            if self.unit != "bodyweight" or self.value is not None:
+                raise ValueError(
+                    "implicit_bodyweight primitive loads require bodyweight and null value"
+                )
+        return self
 
 
 class PrimitiveStimulusIn(BaseModel):
@@ -382,10 +399,15 @@ class PrimitiveSetIn(_UuidInputBase):
             has_rounds = any(target.metric == "rounds" for target in self.work_target)
             if not has_rounds:
                 raise ValueError("cap_bounded x amrap requires a set-level rounds work_target")
-        if self.repeat != 1 and self.has_aggregate_observation():
-            raise ValueError(
-                "primitive aggregate-result sets cannot repeat in the phase-one runtime"
+        if self.timing.mode == "cap_bounded" and self.traversal != "amrap" and self.slots:
+            has_duration = any(
+                target.role == "observation" and target.metric == "duration"
+                for target in self.work_target
             )
+            if not has_duration:
+                raise ValueError(
+                    "cap_bounded x sequential/round_robin requires a set-level duration work_target"
+                )
         return self
 
     def has_aggregate_observation(self) -> bool:
@@ -401,23 +423,6 @@ class PrimitiveBlockIn(_UuidInputBase):
     repeat: int = Field(default=1, ge=1)
     work_target: list[PrimitiveWorkTargetIn] = Field(default_factory=list)
     sets: list[PrimitiveSetIn]
-
-    @model_validator(mode="after")
-    def _phase_one_aggregate_shape(self) -> "PrimitiveBlockIn":
-        has_block_duration = any(
-            target.role == "observation" and target.metric == "duration"
-            for target in self.work_target
-        )
-        aggregate_sets = [item for item in self.sets if item.has_aggregate_observation()]
-        if self.repeat != 1 and (has_block_duration or aggregate_sets):
-            raise ValueError(
-                "primitive aggregate-result blocks cannot repeat in the phase-one runtime"
-            )
-        if len(aggregate_sets) > 1:
-            raise ValueError(
-                "primitive aggregate-result blocks support one aggregate set in phase one"
-            )
-        return self
 
 
 class WorkoutCreate(_UuidInputBase):
@@ -513,6 +518,7 @@ class PrimitiveSetLogIn(_UuidInputBase):
     weight: float | None = None
     weight_unit: Literal["kg", "lb"] | None = None
     duration_sec: float | None = None
+    distance_m: float | None = None
     rounds: int | None = None
     rir: int | None = Field(default=None, ge=0, le=5)
     is_warmup: bool = False

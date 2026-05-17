@@ -139,6 +139,55 @@ final class AppBootstrapTests: XCTestCase {
         XCTAssertEqual(paths, ["/api/sync/pull", "/api/sync/pull"])
     }
 
+    func testForegroundPullReloadsTodayWithoutReplacingActiveExecution() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let fixture = Fixtures.sampleWorkoutPayload()
+        let transport = ScriptedTransport(
+            getOutcomes: [.ok(fixture.json), .ok(emptyPullJSON(serverTime: fixture.serverTime))]
+        )
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in transport }
+        )
+        guard case let .ready(todayVM, holder, appSync) = result else {
+            return XCTFail("expected .ready, got \(result)")
+        }
+        let initialVM = try XCTUnwrap(holder.vm)
+        initialVM.start()
+        XCTAssertEqual(initialVM.state.route, .active)
+        let updatedWorkout = Workout(
+            id: fixture.domainWorkout.id,
+            userID: fixture.domainWorkout.userID,
+            name: "Push A Reloaded",
+            scheduledDate: fixture.domainWorkout.scheduledDate,
+            status: fixture.domainWorkout.status,
+            source: fixture.domainWorkout.source,
+            notes: fixture.domainWorkout.notes,
+            createdAt: fixture.domainWorkout.createdAt,
+            updatedAt: fixture.domainWorkout.updatedAt,
+            completedAt: fixture.domainWorkout.completedAt,
+            tagsJSON: fixture.domainWorkout.tagsJSON
+        )
+        try await factory.workoutCache.save(PulledDataset(
+            workouts: [updatedWorkout],
+            blocks: fixture.domainBlocks,
+            items: fixture.domainItems,
+            alternatives: [],
+            exercises: fixture.domainExercises,
+            userParameters: []
+        ))
+
+        _ = await appSync.enterForeground()
+
+        XCTAssertEqual(todayVM.programName, "Push A Reloaded")
+        XCTAssertTrue(holder.vm === initialVM)
+        XCTAssertEqual(holder.vm?.state.route, .active)
+    }
+
     // MARK: - 401 → shell must send user back to FirstRun
 
     func testBootstrapRaisesTokenRejected() async throws {
@@ -178,7 +227,7 @@ final class AppBootstrapTests: XCTestCase {
             now: Date(),
             transportBuilder: { _ in transport }
         )
-        XCTAssertEqual(result, .empty)
+        assertEmpty(result)
     }
 
     /// Regression guard for qa-027: the same `.empty` path above still
@@ -200,7 +249,7 @@ final class AppBootstrapTests: XCTestCase {
             now: Date(),
             transportBuilder: { _ in transport }
         )
-        XCTAssertEqual(result, .empty)
+        assertEmpty(result)
 
         // Belt + braces: confirm the cache really had nothing in it at the
         // time of the decision. If this starts failing, a seed leaked in.
@@ -250,8 +299,8 @@ final class AppBootstrapTests: XCTestCase {
             now: Date(),
             transportBuilder: { _ in transport }
         )
-        XCTAssertEqual(
-            result, .empty,
+        assertEmpty(
+            result,
             "fresh install + empty successful pull must land on .empty " +
             "so the shell renders the change-server escape hatch"
         )
@@ -322,8 +371,8 @@ final class AppBootstrapTests: XCTestCase {
             now: Date(),
             transportBuilder: { _ in transport }
         )
-        XCTAssertEqual(
-            result, .empty,
+        assertEmpty(
+            result,
             "catalog-only pull (no workouts) must still land on .empty — " +
             "the WorkoutModel table is what drives the anyCached check"
         )
@@ -367,6 +416,13 @@ final class AppBootstrapTests: XCTestCase {
                         id: setID,
                         timing: PrimitiveTiming(mode: .capBounded, capSec: 300),
                         traversal: .amrap,
+                        workTargets: [
+                            PrimitiveWorkTarget(
+                                metric: .rounds,
+                                valueForm: .open,
+                                role: .observation
+                            ),
+                        ],
                         slots: [
                             PrimitiveSlot(
                                 id: slotID,
@@ -1054,7 +1110,7 @@ final class AppBootstrapTests: XCTestCase {
             transportBuilder: { _ in transport },
             telemetryEmitter: factory.telemetryEmitter()
         )
-        XCTAssertEqual(result, .empty)
+        assertEmpty(result)
 
         // Emit is fire-and-forget from the caller's perspective — the
         // TelemetryEmitterImpl hops onto its actor via Task.detached.
@@ -1552,6 +1608,28 @@ final class AppBootstrapTests: XCTestCase {
         "com.ericfeunekes.WorkoutDB.token.test.\(UUID().uuidString)"
     }
 
+    private func emptyPullJSON(serverTime: Date) -> Data {
+        let serverTimeString = ISO8601DateFormatter().string(from: serverTime)
+        return """
+        {
+          "workouts": [],
+          "exercises": [],
+          "user_parameters": [],
+          "last_performed": [],
+          "server_time": "\(serverTimeString)"
+        }
+        """.data(using: .utf8)!
+    }
+
+    private func assertEmpty(
+        _ result: BootstrapResult,
+        _ message: String = "expected .empty"
+    ) {
+        guard case .empty = result else {
+            return XCTFail("\(message), got \(result)")
+        }
+    }
+
     private static func decodeTelemetryPayload(
         _ event: Event
     ) throws -> [String: Any] {
@@ -1562,7 +1640,7 @@ final class AppBootstrapTests: XCTestCase {
     }
 }
 
-private final class ShellTelemetryRecorder: TelemetryEmitter, @unchecked Sendable {
+final class ShellTelemetryRecorder: TelemetryEmitter, @unchecked Sendable {
     private let lock = NSLock()
     private var buffer: [Event] = []
 

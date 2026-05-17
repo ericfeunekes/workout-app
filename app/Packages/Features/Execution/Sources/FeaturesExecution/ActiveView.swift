@@ -24,15 +24,9 @@ import WorkoutCoreFoundation
 struct ActiveView: View {
     @Bindable var viewModel: ExecutionViewModel
 
-    // `internal` so the log-button helper in `ActiveView+LogButton.swift`
-    // can toggle the binding on the strength path (tapping the primary
-    // log button opens this sheet).
-    @State var showLogSheet = false
-    // `internal` so the swap-sheet helpers in `ActiveView+Swap.swift`
-    // can toggle the binding.
-    @State var showSwapSheet = false
-    @State var showMetconResultSheet = false
-    @State private var showNextUpSheet = false
+    // `internal` so ActiveView extensions can open the small set of modal
+    // routes from their owning controls while the body keeps one sheet seam.
+    @State var activeSheet: ActiveSheet?
 
     // qa-028: End confirmation alert. Tapping the nav-bar End button
     // surfaces the alert instead of firing `complete()` directly so a
@@ -107,70 +101,21 @@ struct ActiveView: View {
                 timingMode: currentTimingMode,
                 blockEndsAt: viewModel.state.blockEndsAt,
                 now: timerNow,
-                isMetconResultSheetPresented: showMetconResultSheet
+                isMetconResultSheetPresented: isMetconResultSheetPresented
             ) {
-                showMetconResultSheet = true
+                activeSheet = .metconResult
                 return
             }
             if ActiveView.shouldTickBlockTimer(
                 blockEndsAt: viewModel.state.blockEndsAt,
                 workEndsAt: viewModel.state.workEndsAt,
-                isMetconResultSheetPresented: showMetconResultSheet
+                isMetconResultSheetPresented: isMetconResultSheetPresented
             ) {
                 viewModel.tickBlockTimer()
             }
         }
-        .sheet(isPresented: $showLogSheet) {
-            // Combined reps + RIR entry — single sheet, one commit
-            // (bug-023 fix). Prescribed reps pre-fill the numpad; RIR
-            // is untouched = nil on commit, matching the prior "skip"
-            // semantics. The NumPad + Rir individual sheets still ship
-            // for past-set edits on the Rest screen where only one
-            // field changes at a time.
-            //
-            // Sheet is strength-only — cardio blocks never present it
-            // (they dispatch `logCurrentSet` directly from the button
-            // tap). So the sheet's commit fires the strength-specific
-            // `logSet(reps:rir:)` rather than the mode-branching
-            // `logCurrentSet(...)`.
-            if let content = viewModel.activeContent {
-                LogSetSheet(
-                    title: logSheetTitle(content: content),
-                    initialLoad: viewModel.activeSetPlan?.loadKg,
-                    loadUnit: viewModel.activeSetPlan?.unit.rawValue,
-                    initialReps: content.reps,
-                    onCommit: { loadKg, reps, rir in
-                        showLogSheet = false
-                        viewModel.logSet(loadKg: loadKg, reps: reps, rir: rir)
-                    }
-                )
-            }
-        }
-        .sheet(isPresented: $showSwapSheet) {
-            swapSheet
-        }
-        .sheet(isPresented: $showMetconResultSheet) {
-            MetconResultSheet(
-                timingMode: currentTimingMode,
-                elapsed: currentWorkElapsedSeconds,
-                amrapItems: viewModel.amrapPartialResultItems(),
-                onAMRAPCommit: { extraReps in
-                    showMetconResultSheet = false
-                    viewModel.logAMRAPPartialResult(extraReps: extraReps)
-                },
-                onForTimeCommit: {
-                    showMetconResultSheet = false
-                    viewModel.logForTimeResult()
-                }
-            )
-        }
-        .sheet(isPresented: $showNextUpSheet) {
-            if let nextUp = viewModel.nextUpPresentation {
-                NextUpSheet(
-                    nextUp: nextUp,
-                    workQueue: viewModel.executionProjection(now: Date()).workQueue
-                )
-            }
+        .sheet(item: $activeSheet) { sheet in
+            activeSheetContent(for: sheet)
         }
         // qa-028: confirm before force-completing. Ending mid-workout is
         // destructive (unlogged sets vanish), so a stray tap or sweaty
@@ -199,7 +144,7 @@ struct ActiveView: View {
             Spacer()
             Button {
                 if currentTimingMode == .amrap {
-                    showMetconResultSheet = true
+                    activeSheet = .metconResult
                 } else {
                     showEndConfirm = true
                 }
@@ -328,12 +273,16 @@ struct ActiveView: View {
         return now >= blockEndsAt
     }
 
-    private var currentTimingMode: TimingMode {
+    var isMetconResultSheetPresented: Bool {
+        activeSheet == .metconResult
+    }
+
+    var currentTimingMode: TimingMode {
         let bi = viewModel.state.cursor.blockIndex
         return viewModel.context.block(at: bi)?.timingMode ?? .straightSets
     }
 
-    private var currentWorkElapsedSeconds: TimeInterval {
+    var currentWorkElapsedSeconds: TimeInterval {
         guard let startedAt = viewModel.state.workStartedAt else { return 0 }
         return max(0, Date().timeIntervalSince(startedAt))
     }
@@ -441,7 +390,7 @@ struct ActiveView: View {
 
     private func nextUpCard(_ nextUp: ExecutionNextUpPresentation) -> some View {
         Button {
-            showNextUpSheet = true
+            activeSheet = .nextUp
         } label: {
             VStack(alignment: .leading, spacing: DSSpacing.xs) {
                 HStack(alignment: .firstTextBaseline) {

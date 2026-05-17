@@ -134,9 +134,6 @@ Do not regress to the old pattern where Active renders `REST 0:00` while a block
   seams before adding more interactions. The seams must preserve
   `ExecutionProjection` ownership, timer ownership, and the no-app-programming
   invariant.
-- `EXEC-GAP-011`: Active sheet routing still needs a single identifiable sheet
-  model before adding pending-set edit, long-press action menu, and log-sheet
-  variants. Do not add another group of independent boolean sheet states.
 - `EXEC-GAP-012`: Timer and transition runtime claims need ETTrace-backed proof
   for the timer gauntlet before performance or smoothness is marked verified.
 

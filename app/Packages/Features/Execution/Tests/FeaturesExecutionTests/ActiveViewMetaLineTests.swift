@@ -211,6 +211,22 @@ final class ActiveViewMetaLineTests: XCTestCase {
         ))
     }
 
+    func testTimerProgressionIsNotPausedByUnrelatedPresentation() {
+        let now = Date()
+
+        XCTAssertTrue(ActiveView.shouldTickBlockTimer(
+            blockEndsAt: now.addingTimeInterval(-1),
+            workEndsAt: nil,
+            isMetconResultSheetPresented: false
+        ))
+        XCTAssertTrue(ActiveView.shouldPresentAMRAPResultSheet(
+            timingMode: .amrap,
+            blockEndsAt: now.addingTimeInterval(-1),
+            now: now,
+            isMetconResultSheetPresented: false
+        ))
+    }
+
     func testAMRAPCapPresentsResultSheetInsteadOfAutoCompleting() {
         let now = Date()
 

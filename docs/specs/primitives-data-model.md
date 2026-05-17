@@ -1,6 +1,6 @@
 ---
 title: Primitives data model
-status: accepted (target spec) — implementation not yet started
+status: accepted (target spec) — implementation in progress
 date: 2026-04-28
 last_reviewed: 2026-05-17
 purpose: Replace today's per-timing-mode prescription/log model with 7 composable primitives serialized under a Block > Set > Slot hierarchy, so every new workout pattern is a composition of existing primitives rather than a new enum case.
@@ -118,6 +118,51 @@ Proof: reset/cutover tests start from a pre-cutover store with representative QA
 - **The UI looks different.** Pure model-side spec; UI changes are a separate feature.
 - **Every driver is rewritten to be parametric.** Drivers can stay hand-coded per timing mode after the cutover, as long as they read against the new contract. Parametric consolidation is a followup.
 
+## Remaining proof matrix
+
+Primitive cutover closeout is not "debug fixtures run." The remaining proof
+must cover the seven primitives and their important compositions before
+simulator QA is used as confirmation.
+
+The cutover implementation must add deterministic proof for:
+
+- **Timing x traversal:** legal `set_bounded`, `time_bounded`, `cap_bounded`,
+  and `target_bounded` compositions across sequential, round-robin, and AMRAP
+  traversal, plus explicit rejection of illegal cells such as uncapped AMRAP.
+- **Work targets:** `reps`, `duration`, `distance`, `rounds`, `completion`,
+  and `load_carried` across single, range, and open value forms, with
+  completion metrics driving done conditions and observation metrics recorded
+  without ending work.
+- **Load:** absolute kg/lb, relative 1RM, relative bodyweight, implicit
+  bodyweight, and carried-load mapping at seed/log time.
+- **Stimulus and autoreg:** nearest-wins hierarchy resolution, RIR logging,
+  telemetry preservation, and observable future-state proposals.
+- **Structure and overlays:** block repeat, set repeat, slot traversal indices,
+  alternatives, performed-exercise identity, skipped rows, warmups, notes,
+  side, manual overlays, deterministic IDs, and same-UUID correction upsert.
+- **Sync and cutover:** primitive authoring fixture decode, server ingest,
+  pull payloads, Swift decode/cache write, execution seeding, completion
+  record grouping, result push payloads, server readback, and explicit
+  destructive reset of old QA workout/log data.
+
+The expected named test families are:
+
+1. `PrimitiveRuntimeMatrixTests`
+2. `PrimitiveMetricRoleTests`
+3. `PrimitiveLoadResolutionTests`
+4. `PrimitiveStimulusAutoregTests`
+5. `PrimitiveResultIdentityTests`
+6. `PrimitiveSyncContractTests`
+7. `ExecutionProjectionSentinelTests`
+8. Hosted execution lifecycle proof for modal/timer route changes
+
+Simulator fixture breadth should stay bounded to named primitive cells:
+cap-bounded mixed AMRAP, for-time/chipper mixed metric flow,
+intervals/rest-boundary flow, loaded-carry/multi-metric circuit, and
+EMOM/density sentinel-boundary flow. Add a new QA fixture only when it proves a
+named primitive composition or invariant that the deterministic matrix does not
+already cover.
+
 ## Assumptions and risks
 
 ### Assumptions
@@ -139,6 +184,11 @@ Proof: reset/cutover tests start from a pre-cutover store with representative QA
   timing drivers, sync payloads, fixtures, or current feature docs. Future
   implementation planning must start from this accepted contract and cite the
   aspect gaps below for the specific proof obligations it intends to close.
+
+- The current implementation phase has proved the visible primitive execution
+  slice through automated gates and simulator QA, but it does not close the
+  cutover. Remaining material items are `PDM-GAP-006`, `bug-089`, and
+  `bug-090`, plus the full proof matrix above.
 
 ## Open questions
 

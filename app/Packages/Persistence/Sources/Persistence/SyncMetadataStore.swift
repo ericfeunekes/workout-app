@@ -27,6 +27,9 @@ public protocol SyncMetadataStore: Sendable {
 
     /// Record the `serverTime` from a successful pull.
     func setLastSyncAt(_ date: Date) async
+
+    /// Clear the sync cursor. The next pull must be a full pull.
+    func clearLastSyncAt() async
 }
 
 /// UserDefaults-backed implementation. Thread-safety comes from
@@ -52,5 +55,9 @@ public struct SyncMetadataStoreImpl: SyncMetadataStore {
 
     public func setLastSyncAt(_ date: Date) async {
         defaults.set(date, forKey: key)
+    }
+
+    public func clearLastSyncAt() async {
+        defaults.removeObject(forKey: key)
     }
 }

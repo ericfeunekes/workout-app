@@ -22,9 +22,9 @@ QA evidence can be broad; issue tracking must stay narrow.
 
 - **Active issues:** `docs/bugs.md`.
 - **Closed issues:** git history for `docs/bugs.md`, plus the regression test or invariant added by the fix.
-- **Raw evidence:** `scratch/qa-runs/` while the run is active. This directory is gitignored and must not become a second bug tracker.
+- **Raw evidence:** `scratch/qa-runs/` while the run is active. This directory is gitignored, temporary, and must not become a second bug tracker or durable evidence store.
 
-Do not keep durable issue lists in `scratch/`. A QA run can write temporary notes, screenshots, recordings, JSONL observations, and per-run reports there, but every still-open finding is migrated to `docs/bugs.md` before closeout. Once migration is done, scratch summaries that duplicate the bug list should be deleted or ignored.
+Do not keep durable issue lists in `scratch/`. A QA run can write temporary notes, screenshots, recordings, JSONL observations, and per-run reports there, but every still-open finding is migrated to `docs/bugs.md` before closeout. Once migration is done, delete the run artifacts unless Eric explicitly asks to keep a local artifact. Durable bug rows should carry the reproducible behavior and date, not a dependency on a scratch path that will be removed.
 
 ## When QA Is Required
 
@@ -179,8 +179,10 @@ Include:
 - `img ask` verdict.
 - Bugs filed, questions opened, or reasons no further action was needed.
 
-Raw local artifacts can stay in `scratch/qa-runs/`. Keep the durable repo docs
-focused on decisions, open bugs, and feature status.
+Raw local artifacts live only while the QA run is active. Before closeout,
+promote the durable conclusion to the owning feature/spec/bug doc, then remove
+the scratch artifacts unless Eric explicitly asks to keep a local artifact.
+Keep durable repo docs focused on decisions, open bugs, and feature status.
 
 ## What Counts As A QA Issue
 

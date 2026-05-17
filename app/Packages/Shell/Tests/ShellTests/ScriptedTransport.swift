@@ -21,6 +21,7 @@ actor ScriptedTransportStore {
     /// e.g. AppBootstrap fires exactly one `/api/sync/pull` per run —
     /// the invariant that FirstRun's scope-boundary fix preserves.
     private(set) var getPaths: [String] = []
+    private(set) var getQueries: [[(String, String)]] = []
     private(set) var postPaths: [String] = []
     private(set) var postBodies: [Data] = []
 
@@ -29,8 +30,9 @@ actor ScriptedTransportStore {
         self.postOutcomes = postOutcomes
     }
 
-    func nextGet(path: String) -> ScriptedOutcome {
+    func nextGet(path: String, query: [(String, String)]) -> ScriptedOutcome {
         getPaths.append(path)
+        getQueries.append(query)
         guard !getOutcomes.isEmpty else { return .ok(Data()) }
         return getOutcomes.removeFirst()
     }
@@ -43,6 +45,7 @@ actor ScriptedTransportStore {
     }
 
     func snapshotGetPaths() -> [String] { getPaths }
+    func snapshotGetQueries() -> [[(String, String)]] { getQueries }
     func snapshotPostPaths() -> [String] { postPaths }
     func snapshotPostBodies() -> [Data] { postBodies }
 }
@@ -62,7 +65,7 @@ struct ScriptedTransport: HTTPTransport {
         query: [(String, String)],
         bearerToken: String
     ) async throws -> HTTPResponse {
-        try resolve(await store.nextGet(path: path))
+        try resolve(await store.nextGet(path: path, query: query))
     }
 
     func post(

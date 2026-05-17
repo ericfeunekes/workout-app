@@ -147,7 +147,7 @@ def test_create_rejects_illegal_primitive_runtime_cell(client, test_engine) -> N
     assert response.status_code == 422
 
 
-def test_create_rejects_unsupported_primitive_relative_load(client, test_engine) -> None:
+def test_create_accepts_primitive_relative_load(client, test_engine) -> None:
     exercise_id = _seed_exercise(test_engine)
     payload = _workout_payload(exercise_id)
     payload["primitive_blocks"] = [
@@ -169,10 +169,12 @@ def test_create_rejects_unsupported_primitive_relative_load(client, test_engine)
         }
     ]
     response = client.post("/api/workouts", json=payload)
-    assert response.status_code == 422
+    assert response.status_code == 200
+    stored = response.json()["primitive_blocks"][0]["sets"][0]["slots"][0]["load"]
+    assert stored == {"value": 0.8, "unit": "1rm", "unit_type": "relative"}
 
 
-def test_create_rejects_unsupported_primitive_bodyweight_load(client, test_engine) -> None:
+def test_create_accepts_primitive_implicit_bodyweight_load(client, test_engine) -> None:
     exercise_id = _seed_exercise(test_engine)
     payload = _workout_payload(exercise_id)
     payload["primitive_blocks"] = [
@@ -198,10 +200,94 @@ def test_create_rejects_unsupported_primitive_bodyweight_load(client, test_engin
         }
     ]
     response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 200
+    stored = response.json()["primitive_blocks"][0]["sets"][0]["slots"][0]["load"]
+    assert stored == {"value": None, "unit": "bodyweight", "unit_type": "implicit_bodyweight"}
+
+
+def test_create_rejects_primitive_load_unit_type_mismatch(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(exercise_id)
+    payload["primitive_blocks"] = [
+        {
+            "id": "20000000-0000-4000-8000-000000000007",
+            "sets": [
+                {
+                    "id": "30000000-0000-4000-8000-000000000008",
+                    "timing": {"mode": "set_bounded"},
+                    "slots": [
+                        {
+                            "id": "40000000-0000-4000-8000-000000000008",
+                            "exercise_id": exercise_id,
+                            "load": {"value": 0.8, "unit": "kg", "unit_type": "relative"},
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    response = client.post("/api/workouts", json=payload)
     assert response.status_code == 422
 
 
-def test_create_rejects_repeated_primitive_aggregate_result(client, test_engine) -> None:
+def test_create_rejects_primitive_load_missing_required_value(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    for index, load in enumerate(
+        [
+            {"value": None, "unit": "kg", "unit_type": "absolute"},
+            {"value": None, "unit": "1rm", "unit_type": "relative"},
+        ],
+        start=1,
+    ):
+        payload = _workout_payload(exercise_id)
+        payload["primitive_blocks"] = [
+            {
+                "id": f"20000000-0000-4000-8000-00000000001{index}",
+                "sets": [
+                    {
+                        "id": f"30000000-0000-4000-8000-00000000001{index}",
+                        "timing": {"mode": "set_bounded"},
+                        "slots": [
+                            {
+                                "id": f"40000000-0000-4000-8000-00000000001{index}",
+                                "exercise_id": exercise_id,
+                                "load": load,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+        response = client.post("/api/workouts", json=payload)
+        assert response.status_code == 422
+
+
+def test_create_rejects_cap_bounded_without_duration_observation(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(exercise_id)
+    payload["primitive_blocks"] = [
+        {
+            "id": "20000000-0000-4000-8000-000000000009",
+            "sets": [
+                {
+                    "id": "30000000-0000-4000-8000-000000000009",
+                    "timing": {"mode": "cap_bounded", "cap_sec": 300},
+                    "traversal": "sequential",
+                    "slots": [
+                        {
+                            "id": "40000000-0000-4000-8000-000000000009",
+                            "exercise_id": exercise_id,
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422
+
+
+def test_create_accepts_repeated_primitive_aggregate_result(client, test_engine) -> None:
     exercise_id = _seed_exercise(test_engine)
     payload = _workout_payload(exercise_id)
     payload["primitive_blocks"] = [
@@ -232,10 +318,10 @@ def test_create_rejects_repeated_primitive_aggregate_result(client, test_engine)
         }
     ]
     response = client.post("/api/workouts", json=payload)
-    assert response.status_code == 422
+    assert response.status_code == 200
 
 
-def test_create_rejects_repeated_primitive_block_duration_aggregate(client, test_engine) -> None:
+def test_create_accepts_repeated_primitive_block_duration_aggregate(client, test_engine) -> None:
     exercise_id = _seed_exercise(test_engine)
     payload = _workout_payload(exercise_id)
     payload["primitive_blocks"] = [
@@ -265,10 +351,10 @@ def test_create_rejects_repeated_primitive_block_duration_aggregate(client, test
         }
     ]
     response = client.post("/api/workouts", json=payload)
-    assert response.status_code == 422
+    assert response.status_code == 200
 
 
-def test_create_rejects_multiple_primitive_aggregate_sets(client, test_engine) -> None:
+def test_create_accepts_multiple_primitive_aggregate_sets(client, test_engine) -> None:
     exercise_id = _seed_exercise(test_engine)
     payload = _workout_payload(exercise_id)
     payload["primitive_blocks"] = [
@@ -305,7 +391,7 @@ def test_create_rejects_multiple_primitive_aggregate_sets(client, test_engine) -
         }
     ]
     response = client.post("/api/workouts", json=payload)
-    assert response.status_code == 422
+    assert response.status_code == 200
 
 
 def test_list_filters_by_status(client, test_engine) -> None:

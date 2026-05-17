@@ -452,6 +452,14 @@ final class ExecutionViewModelTickBlockTimerTests: XCTestCase {
             source.contains("currentRestShouldAutoAdvance"),
             "RestView must also tick clock-owned rest transitions without waking strength over-rest"
         )
+        XCTAssertFalse(
+            source.contains("activeSheet == nil"),
+            "RestView must not pause clock-owned rest for read-only sheets such as next-up preview"
+        )
+        XCTAssertFalse(
+            source.contains("guard !showEndConfirm else { return }"),
+            "RestView must not pause clock-owned timers while the End confirmation is visible"
+        )
     }
 
     func testActiveViewScopesSwapLongPressAwayFromTimerHero() throws {
@@ -534,6 +542,7 @@ final class ExecutionViewModelTickBlockTimerTests: XCTestCase {
 
     func testNextUpCardsOpenReadOnlyPreviewSheet() throws {
         let activeSource = try loadFeatureSource(named: "ActiveView.swift")
+        let activeSheetsSource = try loadFeatureSource(named: "ActiveView+Sheets.swift")
         let restSource = try loadFeatureSource(named: "RestView.swift")
         let restSheetsSource = try loadFeatureSource(named: "RestView+Sheets.swift")
         let sheetSource = try loadFeatureSource(named: "Sheets/NextUpSheet.swift")
@@ -543,8 +552,14 @@ final class ExecutionViewModelTickBlockTimerTests: XCTestCase {
             "Active next-up card should expose its tap affordance"
         )
         XCTAssertTrue(
-            activeSource.contains("showNextUpSheet = true"),
-            "Active next-up card should open the preview sheet"
+            activeSource.contains("activeSheet = .nextUp"),
+            "Active next-up card should open through the active sheet router"
+        )
+        XCTAssertTrue(
+            activeSheetsSource.contains("NextUpSheet(")
+                && activeSheetsSource.contains("nextUp: nextUp")
+                && activeSheetsSource.contains("workQueue: viewModel.executionProjection"),
+            "Active sheet router should render the shared preview sheet"
         )
         XCTAssertTrue(
             restSource.contains("activeSheet = .nextUp"),

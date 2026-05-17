@@ -7,6 +7,7 @@ and idempotent; the runner tracks applied files in a `schema_migrations` table.
 """
 
 import logging
+import sqlite3
 from pathlib import Path
 
 from sqlalchemy import Engine
@@ -41,7 +42,15 @@ def apply_migrations(
             if path.name in already_applied:
                 continue
             sql = path.read_text()
-            cursor.executescript(sql)
+            try:
+                cursor.executescript(sql)
+            except sqlite3.OperationalError as exc:
+                message = str(exc).lower()
+                if (
+                    path.name != "010_primitive_distance_metric.sql"
+                    or "duplicate column name: distance_m" not in message
+                ):
+                    raise
             cursor.execute(
                 "INSERT INTO schema_migrations (name, applied_at) VALUES (?, datetime('now'))",
                 (path.name,),

@@ -44,7 +44,8 @@ Durable SwiftData-backed FIFO queue for outbound writes. Result payloads are `se
 - Idempotent server: same `SetLog.id` upserts — safe to re-push (per `docs/sync.md` § "Push protocol")
 - `PushFlusher.start()` is idempotent — second call no-ops if task exists (`PushFlusher.swift:46-47`)
 - `PushFlusher.stop()` is safe to call multiple times (`:97-100`)
-- `flushNow()` swallows all errors — UI callers never await for correctness (`:86-94`)
+- `flushNow()` returns `tokenRejected` for 401s so Shell can route auth
+  recovery; transient failures remain non-blocking for UI callers.
 - `(priority, enqueuedAt)` sort + `fetchLimit: max` (`PushQueueStoreImpl.swift` `peek(max:)`) — server-side order, no whole-queue decode
 - Telemetry events UUID-lowercased at encode time (`PushQueue.swift:243, :245, :249, :250`)
 
@@ -52,9 +53,9 @@ Durable SwiftData-backed FIFO queue for outbound writes. Result payloads are `se
 
 - `PUSH-GAP-002`: No background push path exists. If the user logs a set and
   locks the phone before a foreground flush, push waits until the app resumes.
-  This is distinct from `SYNC-GAP-004`: even with foreground-only push accepted,
-  Shell still needs a proven lifecycle owner for flusher start/restart and
-  background stop posture.
+  Foreground flusher start/restart, background stop posture, and push-token
+  recovery now belong to `AppSyncCoordinator`; this gap is only true background
+  delivery.
 
 ## QA scenarios
 
@@ -93,8 +94,8 @@ Durable SwiftData-backed FIFO queue for outbound writes. Result payloads are `se
 ### S7. 401 during push → loop stops
 - **setup:** `.ready`, server rotates token mid-session
 - **steps:** log a set, wait for flush
-- **expected:** flush returns `tokenRejected`, `ConnectionManager` emits `.tokenRejected`, `PushFlusher` loop exits and clears its `task` (`PushFlusher.swift:66-71`). Queue items stay on disk. Shell does not auto-route to FirstRun from push 401 — waits for next explicit pull or Settings action.
-- **notes:** verify the shell's behavior separately; push 401 does NOT itself trigger FirstRun routing
+- **expected:** flush returns `tokenRejected`, `ConnectionManager` emits `.tokenRejected`, `PushFlusher` loop exits and clears its `task`, and `AppSyncCoordinator` routes Shell through the same FirstRun recovery path used for pull 401. Queue items stay on disk.
+- **notes:** app-root routing is owned by the Shell coordinator; `PushFlusher` only reports the terminal outcome.
 
 ### S8. UUID case regression
 - **setup:** server running pre-fix code
@@ -126,8 +127,8 @@ Durable SwiftData-backed FIFO queue for outbound writes. Result payloads are `se
 ### S13. Background during flush
 - **setup:** flush loop running
 - **steps:** background the app
-- **expected:** `Task.sleep` eventually throws on suspension or task is cancelled by iOS. No explicit backgroundTask handling in `PushFlusher`. On foreground return, `start()` may need to be re-invoked by the shell — unclear from code whether shell does this.
-- **notes:** unclear — no explicit `scenePhase` wiring visible in `WorkoutDBApp.swift`; review Shell wiring
+- **expected:** Shell tells `AppSyncCoordinator` to stop the foreground flusher on background. On foreground return, the coordinator refreshes, preserves any active workout session, and restarts the flusher idempotently.
+- **notes:** package tests pin the coordinator behavior; `TEST-GAP-004` remains for simulator/app-root proof that the running `scenePhase` path invokes it.
 
 ### S14. Priority FIFO ordering with mixed payloads
 - **setup:** queue empty, enqueue: telemetry event (t=0), set_logA (t=1), completionResults (t=2), event (t=3)

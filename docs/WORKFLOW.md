@@ -109,54 +109,45 @@ The pre-push git hook enforces the Python checks automatically. Full app
 pre-QA remains an explicit local gate because it needs macOS/Xcode; see
 `.pre-commit-config.yaml` and `docs/TESTING.md`.
 
-## The implementer / reviewer cycle — **Codex reviews, not same-model subagents**
+## The implementer / reviewer cycle — **independent review, not same-context review**
 
-Implementation subagents are Claude. **Reviews are Codex (a different model).** This is load-bearing — a sibling Claude subagent shares too many blind spots with the lead Claude agent to catch real bugs. The durable rule is:
+Implementation and review must not happen in the same reasoning context. A sibling same-model subagent can share too many blind spots with the lead implementer to catch real bugs. The durable rule is:
 
-> **A review is only trustworthy when it comes from a different model than the one that wrote the code.**
+> **A review is only trustworthy when it is independent from the context that wrote the code.**
 
 ### The cycle
 
 For any non-trivial unit of work, the three roles are:
 
 - **Implementation = Claude subagent.** Dispatched from the main thread with a tight brief.
-- **Review = Codex** (via `cxd task`). A different model, reading the same repo cold.
-- **Synthesis = the lead agent** (the human-facing Claude in the main conversation). Synthesis is **not** delegated to a spawned subagent — the lead reads Codex findings directly, filters false-positives, and dispatches the next fix-it round from the main thread.
+- **Review = code-analysis review, critic, or another available independent reviewer.** The reviewer reads the same repo cold and attacks the claim from a different stance.
+- **Synthesis = the lead agent** (the human-facing Claude in the main conversation). Synthesis is **not** delegated to a spawned subagent — the lead reads reviewer findings directly, filters false-positives, and dispatches the next fix-it round from the main thread.
 
 The loop:
 
 1. **Dispatch a Claude implementer subagent** with a tight brief: what to build, which files to touch, what stop conditions (tests pass, build succeeds, specific gates green), and any conventions to follow. Attach full-path reading lists — don't make the implementer discover context.
 2. **Implementer returns a self-report** including files changed, design decisions, gate outputs, and any deviations or judgment calls.
-3. **Dispatch a Codex review via `cxd task`** — Codex is a different model, reading the same repo. One-shot form:
-   ```bash
-   cxd task --sandbox read-only --detach --cwd $PWD \
-     --service-name review-<domain> --effort medium \
-     -f path/to/review-prompt.md
-   ```
-   The review prompt cites: what the implementer claims they did, the files to
-   focus on, the questions to answer, the specific hazards to probe, and the
-   gates Codex should re-run. Write prompts under `scratch/codex-reviews/` on
-   demand; if the directory is absent, there is no active review handoff.
-4. **Lead synthesizes in the main thread.** Codex verdict = ship / needs-another-round. If needs-another-round, the lead dispatches another Claude implementer with Codex's findings inline. Loop until Codex signs off.
+3. **Run an independent review** using `code-analysis:review`, the critic, or another currently available review path. The review brief cites what the implementer claims they did, the files to focus on, the questions to answer, the specific hazards to probe, and the gates the reviewer should inspect or re-run. Write temporary prompts under `scratch/reviews/` on demand; if the directory is absent, there is no active review handoff.
+4. **Lead synthesizes in the main thread.** Reviewer verdict = ship / needs-another-round. If needs-another-round, the lead dispatches another implementer with reviewer findings inline. Loop until the independent review signs off.
 
-**Sweeps and investigations also use Codex.** Codebase-state sweeps ("what might be broken?"), hypothesis-driven bug investigations, and adversarial reviews all run via `cxd task --sandbox read-only --detach` in separate lanes. Read-only sandbox keeps them safe; the different-model constraint keeps them productive.
+**Sweeps and investigations also use an independent path.** Codebase-state sweeps ("what might be broken?"), hypothesis-driven bug investigations, and adversarial reviews should run outside the implementer context when scope is non-trivial.
 
-Same-model Claude-subagent reviews are acceptable only for: trivial scoped fixes, pure doc edits, or config tweaks already guarded by automated checks. Every other change goes through Codex.
+Same-context reviews are acceptable only for: trivial scoped fixes, pure doc edits, or config tweaks already guarded by automated checks. Every other change gets independent review.
 
-### Why Codex and not another Claude
+### Why independence matters
 
-Codex sees the codebase cold. It doesn't carry the rationalizations the implementing agent built up. Historically this project has caught real bugs through Codex review that Claude self-review missed: silent `compactMap` drop on `advancementByBlock` restore, fire-and-forget `Task` snapshot race in session persistence, non-idempotent `.userParameter` push path. None of these were visible to Claude implementers or Claude reviewers.
+An independent reviewer sees the codebase cold. It doesn't carry the rationalizations the implementing agent built up. Historically this project has caught real bugs through independent review that self-review missed: silent `compactMap` drop on `advancementByBlock` restore, fire-and-forget `Task` snapshot race in session persistence, non-idempotent `.userParameter` push path.
 
-### Parallel Codex reviews
+### Parallel reviews
 
 For multi-domain work (e.g. a feature cutover touching drivers + sync + UI),
-fire parallel Codex reviews — one per domain. Keep prompt files and monitor
-notes in `scratch/codex-reviews/` while the review is active, then delete them
+run parallel reviews — one per domain. Keep prompt files and monitor
+notes in `scratch/reviews/` while the review is active, then delete them
 after findings are resolved or promoted into durable docs.
 
-### Lightweight Codex reviews
+### Lightweight reviews
 
-A Codex review prompt doesn't have to be long. 100–150 lines is typical: 3–5 files of focus, 5–8 domain-specific questions, 3–5 hazards to probe, plus the shared `_template-header.md` + `_session-context.md`. The value is the independent reading, not the prompt length.
+A review prompt doesn't have to be long. 100–150 lines is typical: 3–5 files of focus, 5–8 domain-specific questions, and 3–5 hazards to probe. The value is the independent reading, not the prompt length.
 
 ## Skills — when to invoke which
 
@@ -172,9 +163,9 @@ Claude Code exposes named skills for specific phases of work. Use them rather th
 | `code-analysis:testing-audit` | When a change needs pre-QA proof-bar discovery: identify missing realistic-local, contract, integration, end-to-end, persistence, time, concurrency, or device-adjacent harnesses before simulator/device QA. |
 | `code-analysis:investigate` | Hypothesis-driven problem investigation. If you've done two rounds of guessing and haven't isolated the root cause, invoke this instead of guessing a third time. |
 | `code-analysis:diagnose-problem-pattern` | When several recent bugs or tests point at a shared structural issue — surface the pattern before patching another symptom. |
-| Codex review via `cxd task` | When non-trivial implementation needs a different-model review. Use the implementer/reviewer cycle above. |
+| Independent review | When non-trivial implementation needs fresh review context. Use the implementer/reviewer cycle above. |
 
-Skills are composable. A non-trivial change typically goes: `scoping:requirements-planning` when the contract is missing or stale → update `docs/feature-gap-map.md` and `docs/backlog.md` → select the active work tree → `scoping:phase-planning` when the selected lane or unit needs sequencing → `code-analysis:architecture` if structural decisions are still open → `scoping:implementation-planning` → implementer subagent → Codex review → fix-it loop → close gaps via `docs/runbooks/closeout.md`.
+Skills are composable. A non-trivial change typically goes: `scoping:requirements-planning` when the contract is missing or stale → update `docs/feature-gap-map.md` and `docs/backlog.md` → select the active work tree → `scoping:phase-planning` when the selected lane or unit needs sequencing → `code-analysis:architecture` if structural decisions are still open → `scoping:implementation-planning` → implementer subagent → independent review → fix-it loop → close gaps via `docs/runbooks/closeout.md`.
 
 ## iOS development loop
 

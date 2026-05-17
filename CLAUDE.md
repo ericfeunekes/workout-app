@@ -95,29 +95,28 @@ the planning flow. Quick pointers:
 - Re-read this file, `docs/WORKFLOW.md`, and `docs/specs/v2-architecture.md`.
 - Read `docs/sdlc.md` for the planning flow, then `docs/backlog.md` for current lanes and gap ownership. Check `scratch/` for ephemeral handoff notes if a slice is already in progress.
 
-## Review workflow — Codex is the investigator/sweeper/reviewer, lead Claude synthesizes
+## Review workflow — independent review, lead synthesizes
 
-**Reviews, sweeps, and investigations are done by Codex (a different model), not by another Claude subagent.** The three roles are fixed:
+**Reviews, sweeps, and investigations must use an independent review path, not the same implementer context.** The three roles are fixed:
 
 - **Implementation = Claude subagent** (dispatched from the main thread).
-- **Review / sweep / investigation = Codex** (via `cxd task --sandbox read-only --detach`).
-- **Synthesis = the lead Claude agent in the main conversation.** Synthesis is NOT delegated to a spawned subagent — the lead reads Codex findings directly, filters false-positives, and dispatches the next fix-it round from the main thread.
+- **Review / sweep / investigation = code-analysis review, critic, or another available independent reviewer.**
+- **Synthesis = the lead Claude agent in the main conversation.** Synthesis is NOT delegated to a spawned subagent — the lead reads review findings directly, filters false-positives, and dispatches the next fix-it round from the main thread.
 
 Same-model review misses the same blind spots that produced the bug. That's the load-bearing reason for the split.
 
 The loop for every non-trivial unit of work:
 
 1. Claude implementer subagent writes the fix.
-2. Codex review fires via `cxd task --sandbox read-only --detach --cwd $PWD --service-name review-<domain> --effort medium -f <prompt-file>`.
-3. **Lead Claude synthesizes in the main thread** — reads Codex findings, filters false-positives, dispatches a Claude fix-it subagent with the real findings inline.
-4. Repeat step 2. Loop until Codex returns clean.
+2. Independent review runs through the available review tool or skill for the domain.
+3. **Lead Claude synthesizes in the main thread** — reads reviewer findings, filters false-positives, dispatches a Claude fix-it subagent with the real findings inline.
+4. Repeat step 2. Loop until the independent review returns clean.
 
-**Sweeping the codebase state to find new issues uses Codex, not Claude subagents.** Same goes for hypothesis-driven bug investigations and adversarial reviews — different-model + read-only sandbox is the pattern. Synthesis of Codex findings always happens in the main conversation.
+**Sweeping the codebase state to find new issues uses an independent review or investigation path, not the implementer context.** Same goes for hypothesis-driven bug investigations and adversarial reviews. Synthesis of findings always happens in the main conversation.
 
-Write review prompts under `scratch/codex-reviews/` on demand. If that
+Write temporary review prompts under `scratch/reviews/` on demand. If that
 directory does not exist, there is no active review handoff. Per-domain prompts
-cite focus files, questions, hazards, and gates. Pull findings via
-`cxd thread read <id> --include-turns --json`.
+cite focus files, questions, hazards, and gates.
 
 Same-model Claude-reviews are acceptable only for trivial scoped fixes, pure doc edits, or config tweaks already guarded by automated checks.
 

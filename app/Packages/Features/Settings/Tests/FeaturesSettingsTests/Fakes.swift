@@ -91,4 +91,8 @@ final class FakeSyncMetadataStore: @unchecked Sendable, SyncMetadataStore {
         setCount += 1
         lastSyncAt = date
     }
+
+    func clearLastSyncAt() async {
+        lastSyncAt = nil
+    }
 }

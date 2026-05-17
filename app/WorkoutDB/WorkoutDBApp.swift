@@ -68,9 +68,8 @@ private enum ShellPhase {
     case firstRun(prefill: FirstRunPrefill?)
     /// Saved connection, bootstrap not yet run (or running).
     case bootstrapping
-    /// Bootstrap produced view models. `pushFlusher` is the periodic
-    /// foreground push cadence — the shell retains it so it survives
-    /// view re-renders and can be stopped on server-change.
+    /// Bootstrap produced view models. `appSync` owns foreground pull
+    /// policy and the periodic push cadence.
     ///
     /// `executionHolder` is an observable wrapper whose `vm` swaps
     /// per-workout after save-and-done (qa-002 / qa-003 fix). The shell
@@ -80,11 +79,11 @@ private enum ShellPhase {
     case ready(
         todayVM: TodayViewModel,
         executionHolder: ExecutionVMHolder,
-        pushFlusher: PushFlusher
+        appSync: AppSyncCoordinator
     )
     /// Bootstrap completed but nothing is cached and the server was
     /// unreachable — "no workouts yet" empty state.
-    case empty
+    case empty(appSync: AppSyncCoordinator?)
     #if DEBUG
     /// DEBUG launch-arg fast-path. Uses the preview seed directly.
     ///
@@ -135,6 +134,9 @@ struct RootView: View {
     @State private var phase: ShellPhase = .firstRun(prefill: nil)
     @State private var didPerformLaunchCheck: Bool = false
     @State private var didStartBootstrap: Bool = false
+    @State private var lifecycleGeneration: Int = 0
+    @State private var scenePhaseTask: Task<Void, Never>?
+    @Environment(\.scenePhase) private var scenePhase
 
     /// HistoryViewModel is hoisted to RootView so it survives body
     /// rebuilds. Previously it was constructed inline in `tabbedView`,
@@ -215,7 +217,7 @@ struct RootView: View {
                 // bootstrap race note on `RootView`.
                 BootstrapLoadingView()
 
-            case .empty:
+            case .empty(let appSync):
                 EmptyStateView(
                     onRetry: {
                         // User-initiated retry must be able to re-enter
@@ -230,6 +232,9 @@ struct RootView: View {
                         // always happen.
                         didStartBootstrap = false
                         phase = .bootstrapping
+                        lifecycleGeneration += 1
+                        scenePhaseTask?.cancel()
+                        await appSync?.retire(trigger: .emptyRetry)
                         await runBootstrap()
                     },
                     onChangeServer: {
@@ -250,6 +255,13 @@ struct RootView: View {
             guard !didPerformLaunchCheck else { return }
             didPerformLaunchCheck = true
             performLaunchCheck()
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            scenePhaseTask?.cancel()
+            let generation = lifecycleGeneration
+            scenePhaseTask = Task { @MainActor in
+                await handleScenePhase(newPhase, generation: generation)
+            }
         }
     }
 
@@ -406,26 +418,30 @@ struct RootView: View {
                 executionHolder: executionHolder
             )
             switch result {
-            case .ready(let todayVM, let holder, let pushFlusher):
+            case .ready(let todayVM, let holder, let appSync):
                 // The holder returned from bootstrap IS the one we passed
                 // in — AppBootstrap populated `holder.vm` and wired the
-                // post-save rebuild path. Kick off the periodic foreground
-                // flusher — per `docs/sync.md` § "Cadence", every ~60s
-                // while foregrounded.
-                await pushFlusher.start()
+                // post-save rebuild path. Kick off foreground flushing
+                // without re-pulling; later scene-phase foreground entries
+                // go through the full app-sync lifecycle.
+                await appSync.startForegroundFlushing(trigger: .bootstrap)
                 phase = .ready(
                     todayVM: todayVM,
                     executionHolder: holder,
-                    pushFlusher: pushFlusher
+                    appSync: appSync
                 )
-            case .empty:
-                phase = .empty
+            case .empty(let appSync):
+                await appSync.startForegroundFlushing(trigger: .bootstrap)
+                phase = .empty(appSync: appSync)
             }
         } catch AppBootstrapError.tokenRejected {
-            // Server rejected our saved credentials. Wipe the connection
-            // and drop back to FirstRun. Clear the bootstrap guard so the
-            // FirstRun success callback can re-enter.
-            try? persistence.tokenStore.clear()
+            // Server rejected our saved credentials. A new FirstRun can
+            // point at a different server, so clear both the connection and
+            // local server-derived state before accepting new credentials.
+            await AppSyncLocalStateReset.clearConnectionAndCachedServerData(
+                persistence: persistence
+            )
+            await historyVM.load()
             didStartBootstrap = false
             phase = .firstRun(prefill: nil)
         } catch {
@@ -434,34 +450,91 @@ struct RootView: View {
             // empty so the user at least sees *something* and can try
             // relaunching. Leave `didStartBootstrap` set; the retry
             // button on EmptyStateView clears it before re-entering.
-            phase = .empty
+            phase = .empty(appSync: nil)
         }
     }
 
     private func routeBackToFirstRunForTokenRejected() async {
-        if case .ready(_, _, let pushFlusher) = phase {
-            await pushFlusher.stop()
-        }
-        try? persistence.tokenStore.clear()
+        lifecycleGeneration += 1
+        scenePhaseTask?.cancel()
+        await currentAppSync()?.retire(trigger: .manualTodayRefresh)
+        await AppSyncLocalStateReset.clearConnectionAndCachedServerData(
+            persistence: persistence
+        )
+        await historyVM.load()
         didStartBootstrap = false
         phase = .firstRun(prefill: nil)
     }
 
     private func rerunBootstrapFromReady() async {
-        if case .ready(_, _, let pushFlusher) = phase {
-            await pushFlusher.stop()
-        }
+        lifecycleGeneration += 1
+        scenePhaseTask?.cancel()
+        await currentAppSync()?.retire()
         didStartBootstrap = false
         phase = .bootstrapping
         await runBootstrap()
     }
 
     private func resetLocalDataFromSettings() async {
-        if case .ready(_, _, let pushFlusher) = phase {
-            await pushFlusher.stop()
-        }
-        try? await persistence.workoutCache.clear()
+        lifecycleGeneration += 1
+        scenePhaseTask?.cancel()
+        await currentAppSync()?.retire()
+        await AppSyncLocalStateReset.clearCachedServerData(persistence: persistence)
         await historyVM.load()
+        didStartBootstrap = false
+        phase = .bootstrapping
+        await runBootstrap()
+    }
+
+    private func currentAppSync() -> AppSyncCoordinator? {
+        switch phase {
+        case .ready(_, _, let appSync):
+            return appSync
+        case .empty(let appSync):
+            return appSync
+        case .firstRun, .bootstrapping:
+            return nil
+        #if DEBUG
+        case .debugSeed:
+            return nil
+        #endif
+        }
+    }
+
+    private func handleScenePhase(_ newPhase: ScenePhase, generation: Int) async {
+        guard let appSync = currentAppSync() else { return }
+        guard generation == lifecycleGeneration else { return }
+        let startedFromEmpty: Bool
+        if case .empty = phase {
+            startedFromEmpty = true
+        } else {
+            startedFromEmpty = false
+        }
+        switch newPhase {
+        case .active:
+            let result = await appSync.enterForeground()
+            guard generation == lifecycleGeneration else { return }
+            if case .foreground(refresh: .tokenRejected) = result {
+                await routeBackToFirstRunForTokenRejected()
+                return
+            }
+            if startedFromEmpty,
+               case .foreground(refresh: .pulled) = result {
+                await promoteEmptyAfterForegroundPull(generation: generation)
+            }
+        case .background:
+            _ = await appSync.enterBackground()
+        case .inactive:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    private func promoteEmptyAfterForegroundPull(generation: Int) async {
+        guard generation == lifecycleGeneration else { return }
+        lifecycleGeneration += 1
+        await currentAppSync()?.retire(trigger: .foreground)
         didStartBootstrap = false
         phase = .bootstrapping
         await runBootstrap()
@@ -515,16 +588,9 @@ extension RootView {
     ///   5. Flip phase. The new FirstRun VM sees `prefill` and pre-fills
     ///      both fields.
     ///
-    /// Known gap: `lastSyncAt` on the shared `UserDefaults`-backed
-    /// `SyncMetadataStore` is not reset here (that API has no `clear()`).
-    /// If the user picks a *different* server, the stale `lastSyncAt`
-    /// causes the next pull to fetch only deltas after that timestamp.
-    /// Acceptable for the `.empty → change server` recovery path where
-    /// the empty state typically means `lastSyncAt` is nil anyway (no
-    /// successful pull ever produced a serverTime). Full "change server"
-    /// handling (settings surface + dated warning) is the open-question
-    /// item already in `docs/open-questions.md` § "Empty-cache state
-    /// dead end".
+    /// The sync cursor is cleared with the workout cache. A stale
+    /// `lastSyncAt` after cache wipe would ask the next server for a
+    /// delta into an empty local database.
     func changeServer() async {
         let prefill: FirstRunPrefill
         if let existing = try? persistence.tokenStore.loadConnection() {
@@ -535,8 +601,13 @@ extension RootView {
         } else {
             prefill = FirstRunPrefill(url: "", token: "")
         }
-        try? persistence.tokenStore.clear()
-        try? await persistence.workoutCache.clear()
+        lifecycleGeneration += 1
+        scenePhaseTask?.cancel()
+        await currentAppSync()?.retire()
+        await AppSyncLocalStateReset.clearConnectionAndCachedServerData(
+            persistence: persistence
+        )
+        await historyVM.load()
         didStartBootstrap = false
         phase = .firstRun(prefill: prefill)
     }
@@ -566,7 +637,8 @@ private struct BootstrapLoadingView: View {
 /// `RootView.body`); the ghost "change server" button routes back to
 /// FirstRun so the user can point at a different server or fix a typo
 /// without force-quitting (closes `open-questions.md` § "Empty-cache
-/// state dead end" partially — Settings remains TODO).
+/// state dead end" partially; broader Settings recovery remains tracked in
+/// `SETTINGS-GAP-002`).
 ///
 /// `isRetrying` locally disables both buttons while either async closure
 /// is running so rapid taps cannot enqueue parallel bootstraps / change-

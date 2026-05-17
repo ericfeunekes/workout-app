@@ -223,10 +223,14 @@ availability. That is QA readiness, not testing proof.
   lifecycle change** → package/app-hosted proof for state ownership, plus
   memgraph/leaks evidence when the claim is no retained view model, task, store,
   or sheet model after dismissal/reset.
-- **Foreground/background sync lifecycle change** → Shell lifecycle test or
-  app-hosted composition proof plus simulator QA for background/foreground
-  behavior. Current gap `TEST-GAP-004`: the docs claim foreground pull/retry
-  lifecycle, but the proof suite does not yet pin a `scenePhase`-level path.
+- **Foreground/background sync lifecycle change** → package or app-hosted proof
+  for the app-sync owner named in `docs/sync.md`, plus simulator QA for
+  background/foreground behavior. The deterministic proof must cover
+  foreground pull, cache writeback, `lastSyncAt`, push flusher
+  start/restart/stop posture, token rejection, and lifecycle telemetry.
+  Current gap `TEST-GAP-004`: package tests now pin the Shell coordinator,
+  but simulator/app-root evidence does not yet prove the `scenePhase` path in
+  a running app.
 - **Watch, HealthKit, haptics, physical ergonomics, sleep/wake, or real network
   behavior** → package/fake tests for logic plus real-device or dedicated proof
   per `docs/QA.md` before claiming the device behavior verified.
@@ -242,9 +246,11 @@ availability. That is QA readiness, not testing proof.
 - `TEST-GAP-003`: real-device proof harnesses for Watch, HealthKit, and
   device-only behavior.
 - `TEST-GAP-004`: foreground/background sync lifecycle proof. The package suite
-  covers bootstrap pull ownership and push queue behavior, but not an app-root
-  lifecycle path proving pull-on-foreground, push flusher restart/stop, or
-  background task posture.
+  now covers the Shell app-sync coordinator's foreground pull, cache writeback,
+  `lastSyncAt`, flusher start/restart/stop posture, token rejection, offline
+  fallback, and lifecycle telemetry. Remaining proof gap: simulator/app-root
+  evidence that the running app's `scenePhase` path invokes that coordinator
+  correctly.
 - `TEST-GAP-005`: runtime proof baselines for timer routes, large Today/History
   surfaces, save/reset object lifetime, and sheet dismissal loops. ETTrace and
   memgraph evidence are required before claiming those runtime properties

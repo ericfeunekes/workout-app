@@ -714,6 +714,10 @@ runAsyncCase("PushQueue — primitive_set_logs route to sync results and encode 
         blockID: uuid("20000000-0000-4000-8000-000000000002"),
         workoutID: uuid("10000000-0000-4000-8000-000000000002"),
         setIndex: 0,
+        weight: 27.2155422,
+        weightUnit: .kg,
+        durationSec: 360,
+        distanceM: 1000,
         rounds: 7,
         completedAt: iso8601("2026-04-20T07:30:00Z")
     )
@@ -733,6 +737,7 @@ runAsyncCase("PushQueue — primitive_set_logs route to sync results and encode 
     try expectEqual(payload.primitiveSetLogs.count, 1)
     try expectEqual(payload.primitiveSetLogs[0].role, .setResult)
     try expectEqual(payload.primitiveSetLogs[0].rounds, 7)
+    try expectEqual(payload.primitiveSetLogs[0].distanceM, 1000)
 }
 
 // MARK: - User parameter push routing

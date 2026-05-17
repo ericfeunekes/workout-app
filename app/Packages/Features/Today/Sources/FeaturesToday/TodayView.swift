@@ -19,7 +19,7 @@ import AppKit
 
 public struct TodayView: View {
     @State private var viewModel: TodayViewModel
-    @State private var selectedDetail: TodayViewModel.WorkoutDetail?
+    @State private var activeSheet: TodaySheet?
     @State private var copiedAdjustmentID: UUID?
     @State private var visibleWorkoutIDs: Set<UUID> = []
     @State private var measuredWorkoutIDs: Set<UUID> = []
@@ -74,8 +74,8 @@ public struct TodayView: View {
                 }
             }
         }
-        .sheet(item: $selectedDetail) { detail in
-            workoutDetailSheet(detail)
+        .sheet(item: $activeSheet) { sheet in
+            sheetContent(for: sheet)
         }
     }
 
@@ -161,7 +161,9 @@ public struct TodayView: View {
         return DSCard {
             VStack(alignment: .leading, spacing: DSSpacing.lg) {
                 Button {
-                    selectedDetail = viewModel.detail(for: workout.id)
+                    if let detail = viewModel.detail(for: workout.id) {
+                        activeSheet = .workoutPreview(detail)
+                    }
                 } label: {
                     VStack(alignment: .leading, spacing: DSSpacing.md) {
                         workoutCardHeader(workout)
@@ -222,7 +224,7 @@ public struct TodayView: View {
                 VStack(alignment: .leading, spacing: DSSpacing.xs) {
                     HStack(alignment: .center, spacing: DSSpacing.sm) {
                         DSExerciseIconView(
-                            icon: blockIcon(for: block.timingLabel),
+                            icon: todayBlockIcon(for: block.timingLabel),
                             size: 30,
                             showsTile: true
                         )
@@ -283,161 +285,27 @@ public struct TodayView: View {
         }
     }
 
-    private func workoutDetailSheet(_ detail: TodayViewModel.WorkoutDetail) -> some View {
-        ZStack {
-            DSColors.background.ignoresSafeArea()
-
-            ScrollView {
-                VStack(alignment: .leading, spacing: DSSpacing.xl) {
-                    HStack {
-                        Spacer()
-                        Button("done") {
-                            selectedDetail = nil
-                        }
-                        .font(DSTypography.body)
-                        .foregroundStyle(DSColors.accentInk)
-                    }
-
-                    detailHeader(detail)
-
-                    ForEach(detail.blocks) { block in
-                        blockDetailCard(block)
-                    }
-
-                    adjustmentCard(detail)
-                }
-                .padding(.horizontal, DSSpacing.xl)
-                .padding(.top, DSSpacing.xl)
-                .padding(.bottom, DSSpacing.xxl)
-            }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            if viewModel.canStart(workoutID: detail.id) {
-                DSButton(title: "start", style: .primary) {
-                    selectedDetail = nil
+    @ViewBuilder
+    private func sheetContent(for sheet: TodaySheet) -> some View {
+        switch sheet {
+        case .workoutPreview(let detail):
+            WorkoutPreviewView(
+                detail: detail,
+                adjustmentDraft: viewModel.adjustmentDraft(for: detail),
+                isCopied: copiedAdjustmentID == detail.id,
+                isStartable: viewModel.canStart(workoutID: detail.id),
+                onClose: { activeSheet = nil },
+                onCopyAdjustment: { body in
+                    copyToClipboard(body)
+                    copiedAdjustmentID = detail.id
+                },
+                onStart: {
+                    activeSheet = nil
                     Task {
                         await viewModel.start(workoutID: detail.id)
                     }
                 }
-                .accessibilityIdentifier("today.preview.start.\(detail.id.uuidString)")
-                .padding(.horizontal, DSSpacing.xl)
-                .padding(.bottom, DSSpacing.xl)
-                .padding(.top, DSSpacing.md)
-                .background(DSColors.background)
-            }
-        }
-        .preferredColorScheme(.dark)
-    }
-
-    private func detailHeader(_ detail: TodayViewModel.WorkoutDetail) -> some View {
-        VStack(alignment: .leading, spacing: DSSpacing.sm) {
-            Text(detail.sectionTitle)
-                .font(DSTypography.caption)
-                .tracking(1.5)
-                .foregroundStyle(DSColors.foregroundDim)
-
-            Text(detail.name)
-                .font(DSTypography.display)
-                .foregroundStyle(DSColors.foreground)
-
-            if let tagLine = detail.tagLine {
-                Text(tagLine)
-                    .font(DSTypography.caption)
-                    .foregroundStyle(DSColors.foregroundMuted)
-            }
-
-            if let notes = detail.notes, !notes.isEmpty {
-                Text(notes)
-                    .font(DSTypography.body)
-                    .foregroundStyle(DSColors.foregroundMuted)
-                    .padding(.top, DSSpacing.sm)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    private func adjustmentCard(_ detail: TodayViewModel.WorkoutDetail) -> some View {
-        let draft = viewModel.adjustmentDraft(for: detail)
-        return DSCard {
-            VStack(alignment: .leading, spacing: DSSpacing.md) {
-                Text("Need to change this?")
-                    .font(DSTypography.subtitle)
-                    .foregroundStyle(DSColors.foreground)
-
-                Text("Copy a structured request for Claude. The app does not reorder, swap, or delete planned work locally.")
-                    .font(DSTypography.caption)
-                    .foregroundStyle(DSColors.foregroundMuted)
-
-                DSButton(
-                    title: copiedAdjustmentID == detail.id
-                        ? "copied"
-                        : "copy adjustment request",
-                    style: .ghost
-                ) {
-                    copyToClipboard(draft.body)
-                    copiedAdjustmentID = detail.id
-                }
-
-                if copiedAdjustmentID == detail.id {
-                    Text("Copied. Paste it into Claude to request changes.")
-                        .font(DSTypography.caption)
-                        .foregroundStyle(DSColors.accentInk)
-                        .accessibilityIdentifier("today.adjustment.copied")
-                }
-            }
-        }
-    }
-
-    private func blockDetailCard(_ block: TodayViewModel.BlockDetail) -> some View {
-        DSCard {
-            VStack(alignment: .leading, spacing: DSSpacing.md) {
-                HStack(alignment: .top, spacing: DSSpacing.md) {
-                    DSExerciseIconView(
-                        icon: blockIcon(for: block.timingLabel),
-                        size: 44,
-                        showsTile: true
-                    )
-
-                    VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                        Text(block.timingLabel.uppercased())
-                            .font(DSTypography.caption)
-                            .tracking(1.2)
-                            .foregroundStyle(DSColors.accentInk)
-
-                        Text(block.title)
-                            .font(DSTypography.title)
-                            .foregroundStyle(DSColors.foreground)
-
-                        if let timingDetail = block.timingDetail {
-                            Text(timingDetail)
-                                .font(DSTypography.caption)
-                                .foregroundStyle(DSColors.foregroundMuted)
-                        }
-
-                        if let notes = block.notes, !notes.isEmpty {
-                            Text(notes)
-                                .font(DSTypography.caption)
-                                .foregroundStyle(DSColors.foregroundDim)
-                        }
-                    }
-                }
-
-                if !block.exercises.isEmpty {
-                    DSDivider()
-                    VStack(alignment: .leading, spacing: DSSpacing.sm) {
-                        ForEach(block.exercises) { row in
-                            VStack(alignment: .leading, spacing: DSSpacing.xs) {
-                                exerciseRow(row, muted: false)
-                                if let lastTime = row.lastTime {
-                                    Text("last time \(lastTime)")
-                                        .font(DSTypography.caption)
-                                        .foregroundStyle(DSColors.foregroundDim)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+            )
         }
     }
 
@@ -472,19 +340,6 @@ public struct TodayView: View {
         switch workout.sectionKind {
         case .missed: return DSColors.warn.opacity(0.12)
         case .today, .upcoming, .unscheduled: return DSColors.success.opacity(0.12)
-        }
-    }
-
-    private func blockIcon(for timingLabel: String) -> DSExerciseIcon {
-        switch timingLabel {
-        case "straight sets":
-            return .strength
-        case "amrap", "for time", "circuit", "superset":
-            return .conditioning
-        case "emom", "tabata", "intervals", "custom", "accumulate", "continuous":
-            return .timer
-        default:
-            return .timer
         }
     }
 

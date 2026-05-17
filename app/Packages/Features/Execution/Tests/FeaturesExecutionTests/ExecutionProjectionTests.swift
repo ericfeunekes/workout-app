@@ -584,6 +584,46 @@ final class ExecutionProjectionTests: XCTestCase {
         XCTAssertEqual(projection.timer?.direction, .countdown)
     }
 
+    func testEMOMProjectionHidesSentinelSetCountButKeepsIntervalHeader() {
+        let swingItem = UUID()
+        let swing = UUID()
+        let (context, _) = Self.context(
+            timingMode: .emom,
+            blockName: "Density",
+            blockIntent: "Crisp reps at the top of each minute",
+            timingConfigJSON: #"{"interval_sec":60,"total_minutes":3}"#,
+            items: [
+                Self.item(
+                    id: swingItem,
+                    blockID: Self.blockID,
+                    exerciseID: swing,
+                    position: 0,
+                    prescriptionJSON: #"{"reps":12,"load_kg":24,"weight_unit":"kg"}"#
+                )
+            ],
+            exercises: [
+                swing: "KB Swing",
+            ]
+        )
+        let vm = ExecutionViewModel(context: context, clock: FixedClock(now: now))
+        vm.start()
+
+        let projection = vm.executionProjection(now: now)
+
+        XCTAssertEqual(projection.currentTask.title, "KB Swing")
+        XCTAssertEqual(projection.currentTask.detail, "Interval 1 of 3")
+        XCTAssertEqual(projection.currentTask.primaryMetric, "24 kg")
+        XCTAssertEqual(projection.currentTask.secondaryMetric, "12 reps")
+        XCTAssertEqual(projection.remainingWork.totalSets, 0)
+        XCTAssertEqual(projection.remainingWork.remainingSets, 0)
+        XCTAssertEqual(projection.blockProgress?.totalSets, 0)
+        XCTAssertEqual(projection.blockProgress?.remainingSets, 0)
+        XCTAssertFalse(
+            projection.workQueue.contains { $0.detail?.contains("sets left") == true },
+            "EMOM interval sentinels must not leak as block-progress set counts"
+        )
+    }
+
     func testRestBlockProjectionHandlesZeroItemBlocks() {
         let context = Self.zeroItemRestContext()
         let vm = ExecutionViewModel(context: context, clock: FixedClock(now: now))

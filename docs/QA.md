@@ -93,6 +93,10 @@ the evidence that matches the claim:
 - **Sync, offline, auth, or telemetry:** use the relevant queue, API, server DB,
   event log, or error surface. A video can show the UI response, not the backend
   truth.
+- **Backend mutations or invisible side effects:** inspect the changed server
+  rows, `event_log`, push queue, API response, or local SwiftData table named
+  by the implementation plan. If no readback surface exists, add telemetry or
+  route the missing proof as a gap before claiming QA coverage.
 - **Runtime cost:** symbolicated ETTrace output for one focused flow, with the
   simulator/device, build, route, and caveats recorded in the run notes. Video
   can show jank; it does not prove CPU, render, or layout cost.

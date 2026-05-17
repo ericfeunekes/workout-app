@@ -22,6 +22,7 @@ actor ScriptedTransportStore {
     /// the invariant that FirstRun's scope-boundary fix preserves.
     private(set) var getPaths: [String] = []
     private(set) var postPaths: [String] = []
+    private(set) var postBodies: [Data] = []
 
     init(getOutcomes: [ScriptedOutcome], postOutcomes: [ScriptedOutcome]) {
         self.getOutcomes = getOutcomes
@@ -34,13 +35,16 @@ actor ScriptedTransportStore {
         return getOutcomes.removeFirst()
     }
 
-    func nextPost(path: String) -> ScriptedOutcome {
+    func nextPost(path: String, body: Data) -> ScriptedOutcome {
         postPaths.append(path)
+        postBodies.append(body)
         guard !postOutcomes.isEmpty else { return .ok(Data()) }
         return postOutcomes.removeFirst()
     }
 
     func snapshotGetPaths() -> [String] { getPaths }
+    func snapshotPostPaths() -> [String] { postPaths }
+    func snapshotPostBodies() -> [Data] { postBodies }
 }
 
 struct ScriptedTransport: HTTPTransport {
@@ -66,7 +70,7 @@ struct ScriptedTransport: HTTPTransport {
         body: Data,
         bearerToken: String
     ) async throws -> HTTPResponse {
-        try resolve(await store.nextPost(path: path))
+        try resolve(await store.nextPost(path: path, body: body))
     }
 
     private func resolve(_ outcome: ScriptedOutcome) throws -> HTTPResponse {

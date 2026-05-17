@@ -143,6 +143,8 @@ make check                # lint/import contracts + Python tests + schema Swift 
 uv run ruff check .       # lint
 uv run ruff format .      # format
 uv run uvicorn workoutdb_server.main:app --reload   # run locally
+# Python validation/error messages still need to stay under ruff's
+# 100-character line limit; wrap long strings at edit time.
 
 # App
 make test-core           # fast Core + Sync package subset
@@ -177,14 +179,14 @@ This repo has one user (Eric) and one prod deployment (also Eric). There is no "
 - **Complete cutovers only.** When something changes, change it everywhere in one commit — server, app, schema, tests, docs. No feature flags, no legacy paths, no parallel old+new codepaths, no "one sprint to deprecate X" periods. If you find yourself writing an adapter between old-shape and new-shape code, you're doing it wrong.
 - **Resolve nitpicks at the time.** Naming is off → rename it now. Tiny inconsistency → fix it now. We do not carry a "small stuff to clean up later" list. Technical debt accumulated here will outlive the short-term pain of resolving it immediately.
 - **No legacy fallback code.** v1 (Python CLI, YAML, Google Calendar, intents, muscle/movement/equipment tables) is gone. Don't resurrect any of it. If you see a code path "in case the old thing is still around," delete it.
-- **Local data is the only preservation constraint.** Workout logs on Eric's phone are the one thing that must survive schema changes. Everything else (plans, exercises, alternatives, user_parameters on the server) can be re-pushed by Claude. Migrations may export + transform + re-import local data, but must not lose it.
+- **Local data preservation is explicit per cutover.** Workout logs on Eric's phone are normally the only data worth preserving through schema changes; everything else can be re-pushed by Claude. For the primitives cutover, current local/server workouts are QA data and may be reset instead of migrated. Do not assume preservation or deletion silently — the owning spec must say which applies.
 - **Schema changes are always cutovers.** Server migration + SwiftData version bump + API update + contract test + spec update all ship together. App and server schema versions are always identical in the running system — see `docs/MIGRATIONS.md` for the flow.
 
 ### Migrations
 
 - **Migrations are append-only and idempotent.** `server/db/migrations/NNN_*.sql` — never edit a merged migration.
 - **Every schema change is a coordinated cutover** across server migration, SwiftData versioned schema, API models, contract test, and the spec. See `docs/MIGRATIONS.md` for the detailed flow.
-- **Local set_logs are the only authoritative client data.** SwiftData migrations use lightweight stages where possible; when a stage can't be lightweight, export → transform → re-import is explicit and documented in the migration.
+- **Local set_logs need an explicit migration decision.** SwiftData migrations use lightweight stages where possible. When a stage can't be lightweight, either export → transform → re-import is explicit and documented, or the owning cutover spec explicitly permits resetting QA data.
 
 ### Architectural enforcement
 

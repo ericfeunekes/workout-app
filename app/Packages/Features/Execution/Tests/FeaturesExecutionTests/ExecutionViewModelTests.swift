@@ -533,8 +533,8 @@ final class ExecutionViewModelTests: XCTestCase {
         let vm = ExecutionViewModel(
             context: ctx,
             clock: fixed,
-            localCompletionWriter: { [recorder] workout, setLogs in
-                await recorder.record(workout: workout, setLogs: setLogs)
+            localCompletionWriter: { [recorder] record in
+                await recorder.record(record)
             }
         )
         vm.start()
@@ -588,8 +588,8 @@ final class ExecutionViewModelTests: XCTestCase {
         let vm = ExecutionViewModel(
             context: ctx,
             clock: fixed,
-            localCompletionWriter: { [recorder] workout, setLogs in
-                await recorder.record(workout: workout, setLogs: setLogs)
+            localCompletionWriter: { [recorder] record in
+                await recorder.record(record)
             }
         )
         vm.start()
@@ -628,8 +628,8 @@ final class ExecutionViewModelTests: XCTestCase {
         let vm = ExecutionViewModel(
             context: ctx,
             clock: fixed,
-            localCompletionWriter: { [recorder] workout, setLogs in
-                await recorder.record(workout: workout, setLogs: setLogs)
+            localCompletionWriter: { [recorder] record in
+                await recorder.record(record)
             }
         )
         vm.start()
@@ -685,8 +685,8 @@ final class ExecutionViewModelTests: XCTestCase {
         let vm = ExecutionViewModel(
             context: ctx,
             clock: clock,
-            localCompletionWriter: { [recorder] workout, setLogs in
-                await recorder.record(workout: workout, setLogs: setLogs)
+            localCompletionWriter: { [recorder] record in
+                await recorder.record(record)
             }
         )
         // `start()` stamps workStartedAt = t0. Set 1 logs at t0 → its
@@ -773,8 +773,8 @@ final class ExecutionViewModelTests: XCTestCase {
         let vm = ExecutionViewModel(
             context: ctx,
             clock: clock,
-            localCompletionWriter: { [recorder] workout, setLogs in
-                await recorder.record(workout: workout, setLogs: setLogs)
+            localCompletionWriter: { [recorder] record in
+                await recorder.record(record)
             }
         )
         // Set Start stamps workStartedAt = t0. Advance clock, then log
@@ -832,8 +832,8 @@ final class ExecutionViewModelTests: XCTestCase {
         let vm = ExecutionViewModel(
             context: ctx,
             clock: clock,
-            localCompletionWriter: { [recorder] workout, setLogs in
-                await recorder.record(workout: workout, setLogs: setLogs)
+            localCompletionWriter: { [recorder] record in
+                await recorder.record(record)
             }
         )
         // Set Start stamps workStartedAt = t0. User logs at t0+15.
@@ -873,8 +873,8 @@ final class ExecutionViewModelTests: XCTestCase {
         let vm = ExecutionViewModel(
             context: ctx,
             clock: fixed,
-            localCompletionWriter: { [recorder] workout, setLogs in
-                await recorder.record(workout: workout, setLogs: setLogs)
+            localCompletionWriter: { [recorder] record in
+                await recorder.record(record)
             }
         )
         vm.start()
@@ -905,8 +905,8 @@ final class ExecutionViewModelTests: XCTestCase {
         let vm = ExecutionViewModel(
             context: ctx,
             clock: fixed,
-            localCompletionWriter: { [recorder] workout, setLogs in
-                await recorder.record(workout: workout, setLogs: setLogs)
+            localCompletionWriter: { [recorder] record in
+                await recorder.record(record)
             }
         )
         vm.start()
@@ -1691,10 +1691,15 @@ private actor CompletionRecorder {
     struct Call {
         let workout: Workout
         let setLogs: [SetLog]
+        let record: WorkoutCompletionRecord
     }
     private(set) var calls: [Call] = []
 
-    func record(workout: Workout, setLogs: [SetLog]) {
-        calls.append(Call(workout: workout, setLogs: setLogs))
+    func record(_ record: WorkoutCompletionRecord) {
+        calls.append(Call(
+            workout: record.workout,
+            setLogs: record.setLogs,
+            record: record
+        ))
     }
 }

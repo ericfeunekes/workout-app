@@ -47,21 +47,25 @@ public struct WorkoutReset: Codable, Sendable, Equatable {
 
 public struct SyncResultsPayload: Codable, Sendable, Equatable {
     public let setLogs: [SetLog]
+    public let primitiveSetLogs: [PrimitiveSetLog]
     public let statusUpdates: [WorkoutStatusUpdate]
     public let workoutResets: [WorkoutReset]
 
     enum CodingKeys: String, CodingKey {
         case setLogs = "set_logs"
+        case primitiveSetLogs = "primitive_set_logs"
         case statusUpdates = "status_updates"
         case workoutResets = "workout_resets"
     }
 
     public init(
         setLogs: [SetLog] = [],
+        primitiveSetLogs: [PrimitiveSetLog] = [],
         statusUpdates: [WorkoutStatusUpdate] = [],
         workoutResets: [WorkoutReset] = []
     ) {
         self.setLogs = setLogs
+        self.primitiveSetLogs = primitiveSetLogs
         self.statusUpdates = statusUpdates
         self.workoutResets = workoutResets
     }

@@ -175,6 +175,8 @@ private final class FakeCache: WorkoutCache, @unchecked Sendable {
         return workouts.filter { $0.status == status }
     }
 
+    func loadPrimitiveWorkouts() async throws -> [PrimitiveWorkout] { [] }
+
     func loadBlocks(workoutID: WorkoutID) async throws -> [Block] {
         blocksByWorkout[workoutID] ?? []
     }
@@ -223,6 +225,8 @@ private final class FakeCache: WorkoutCache, @unchecked Sendable {
         []
     }
 
+    func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [PrimitiveSetLog] { [] }
+
     func loadSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [SetLog] {
         []
     }
@@ -230,6 +234,8 @@ private final class FakeCache: WorkoutCache, @unchecked Sendable {
     func loadOrphanedSetLogs() async throws -> [SetLog] { [] }
 
     func saveSetLogs(_ setLogs: [SetLog], workoutID: WorkoutID) async throws {}
+
+    func savePrimitiveSetLogs(_ setLogs: [PrimitiveSetLog], workoutID: WorkoutID) async throws {}
 
     func resetWorkout(workoutID: WorkoutID) async throws {}
 

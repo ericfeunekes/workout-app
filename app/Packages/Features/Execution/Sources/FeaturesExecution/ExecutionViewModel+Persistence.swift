@@ -60,6 +60,7 @@ extension ExecutionViewModel {
             }
             guard restored.state.workoutID == context.workout.id else { return }
             self.state = restored.state
+            self.primitiveSetLogs = restored.primitiveSetLogs
             normalizeRestoredState(explicitSetStartAware: restored.explicitSetStartAware)
         } catch {
             // Silent — a failed load means "no saved state", not "crash".
@@ -220,7 +221,7 @@ extension ExecutionViewModel {
     /// sweep.
     func persist() {
         guard let pipeline = persistencePipelineHandle() else { return }
-        let snapshot = SessionStateCodable(state: state)
+        let snapshot = SessionStateCodable(state: state, primitiveSetLogs: primitiveSetLogs)
         let revision = nextPersistenceRevision()
         // swiftlint:disable:next no_direct_task_unstructured
         Task { [pipeline, snapshot, revision] in

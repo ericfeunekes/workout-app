@@ -12,6 +12,7 @@ from workoutdb_server.api.deps import CurrentUserId, DbSession
 from workoutdb_server.api.schemas import (
     BlockIn,
     ExerciseAlternativeIn,
+    PrimitiveBlockIn,
     WorkoutCreate,
     WorkoutItemIn,
     WorkoutRead,
@@ -60,6 +61,7 @@ def _build_workout_tree(payload: WorkoutCreate, user_id: str, db: Session) -> Wo
         source=payload.source,
         notes=payload.notes,
         tags_json=payload.tags_json,
+        primitive_blocks_json=_primitive_blocks_to_json(payload.primitive_blocks),
     )
     workout.blocks = [_build_block(b, db) for b in payload.blocks]
     return workout
@@ -199,6 +201,7 @@ def create_workout(payload: WorkoutCreate, db: DbSession, user_id: CurrentUserId
                 completed_at=None,
                 blocks_payload=payload.blocks,
                 db=db,
+                primitive_blocks_payload=payload.primitive_blocks,
             )
             db.commit()
             db.refresh(existing)
@@ -229,6 +232,7 @@ def update_workout(
         completed_at=payload.completed_at,
         blocks_payload=payload.blocks,
         db=db,
+        primitive_blocks_payload=payload.primitive_blocks,
     )
 
     db.commit()
@@ -247,6 +251,7 @@ def _apply_workout_update(
     completed_at: datetime | None,
     blocks_payload: list[BlockIn] | None,
     db: Session,
+    primitive_blocks_payload: list[PrimitiveBlockIn] | None = None,
 ) -> None:
     """Apply a partial update to an existing Workout. Shared by PUT and the
     upsert path in POST (bug-041).
@@ -285,10 +290,19 @@ def _apply_workout_update(
         workout.blocks = []
         db.flush()
         workout.blocks = [_build_block(b, db) for b in blocks_payload]
+    if primitive_blocks_payload is not None:
+        workout.primitive_blocks_json = _primitive_blocks_to_json(primitive_blocks_payload)
 
     # Force updated_at to bump even when only nested blocks changed — SQLAlchemy's
     # onupdate fires on column changes, not relationship replacements.
     workout.updated_at = datetime.now(UTC)
+
+
+def _primitive_blocks_to_json(blocks: list[PrimitiveBlockIn]) -> str:
+    return json.dumps(
+        [block.model_dump(mode="json", exclude_none=True) for block in blocks],
+        separators=(",", ":"),
+    )
 
 
 @router.get("", response_model=list[WorkoutRead])

@@ -19,11 +19,34 @@ Every significant app action (start, logSet, autoreg proposal, save, network req
 
 Why: when Eric reports "something didn't work at the gym," the telemetry event log answers "what actually happened, in order." Before this, diagnostics meant rooting through SwiftData containers and server access logs.
 
+Telemetry is also a QA surface. Any implementation plan that changes behavior
+which is hard to prove through the UI must name the event, local-store row,
+push-queue item, server table, or log line that will prove it happened. If no
+such signal exists, adding or tightening telemetry is part of the work rather
+than a follow-up.
+
 ## State surface
 
 - **Inputs:** `Event` value — `id`, `timestamp`, `sessionID` (stable per app launch), `kind` (`"state" | "network" | "timer" | "error"`), `name` (e.g. `"execution.logSet"`), optional `data_json`, optional `workoutID` / `setLogID`.
 - **Outputs:** `EventModel` rows in SwiftData; `PushItem.Payload.events([Event])` queue entries; `POST /api/telemetry/events` server-side; `event_log` table rows keyed by user_id.
 - **State transitions:** Emit → local insert (+ ring-buffer trim if > 10k) → enqueue → flush (every ~60s foreground or on kick). 2xx → remove from queue. 5xx/network fail → retry next flush. 401 → same auth path as set_log push.
+
+## Planning requirements
+
+Every non-trivial implementation plan must include a telemetry/proof entry when
+the change touches persistence, sync, auth, background work, server-side state,
+or a workflow where the UI can only show the final result. The entry should say:
+
+- which event names or data rows should exist after the action
+- which correlation IDs tie those rows together (`workoutID`, `setLogID`, push item dedup key, server row id)
+- where QA should read the proof: `ZEVENTMODEL`, `ZPUSHITEMMODEL`,
+  `ZSESSIONSNAPSHOTMODEL`, feature-owned cache tables, server `event_log`,
+  API response, server DB table, or simulator logs
+- what absence is meaningful, such as "no standalone status-only push item remains"
+
+Backend changes need the same treatment. If a route mutates data, a plan should
+name the server row and event/log evidence that proves the mutation, because
+most backend regressions are invisible in simulator video.
 
 ## What it deliberately doesn't do
 
@@ -54,6 +77,9 @@ Why: when Eric reports "something didn't work at the gym," the telemetry event l
   the server `event_log` table directly.
 - `TELEM-GAP-004`: Local event retention is a 10k ring buffer only. Pushed
   events remain local until ring pruning; there is no acknowledged-delete path.
+- `TELEM-GAP-005`: Completion proof telemetry is now wired for Save & Done,
+  but other multi-surface flows still need the same explicit stage events when
+  they cross local cache, push queue, and server boundaries.
 
 ## QA scenarios
 
@@ -102,3 +128,20 @@ Why: when Eric reports "something didn't work at the gym," the telemetry event l
 - **setup:** run a committed or freshly authored persona scenario end-to-end
 - **steps:** capture telemetry during the run; compare to the persona's expected event stream
 - **expected:** the event log is a replayable script of what the persona did. Any anomaly (missing event, duplicated event, out-of-order event) = a bug.
+
+### S10. Save & Done completion proof events
+- **setup:** simulator run on a completed workout
+- **steps:** tap save & done → inspect `ZEVENTMODEL` and the local cache
+- **expected:** event rows include:
+  - `execution.completion_record_built`
+  - `execution.completion_publish_finished` with `publisher_installed=true` in production shell wiring, or `publisher_installed=false` in a DEBUG path with no publisher installed
+  - `execution.completion_local_writer_completed`
+  - `execution.completion_local_cache_write_succeeded` or `execution.completion_local_cache_write_failed`
+  - existing `execution.session_mutation {"mutation":"save"}`
+- **notes:** The expected payload includes `workout_id`, `set_log_count`,
+  `primitive_set_log_count`, and `has_note`. QA should also read
+  `ZWORKOUTMODEL`, `ZSETLOGMODEL`, `ZPUSHITEMMODEL`, and
+  `ZSESSIONSNAPSHOTMODEL` so the event trail is matched to actual cache,
+  queue, and session state. After the settled Save & Done path there should be
+  no active session snapshot for that workout; crash-window probes may see only
+  a post-save `.today` snapshot.

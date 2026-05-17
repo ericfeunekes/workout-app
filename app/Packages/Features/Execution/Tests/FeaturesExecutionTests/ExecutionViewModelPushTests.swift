@@ -5,13 +5,14 @@
 //   - logSet invokes the SetLogEnqueuer exactly once with the correct
 //     SetLog shape (UUID, workoutItemID, setIndex, reps, weight, rir,
 //     isWarmup=false, completedAt=now).
-//   - complete invokes the StatusEnqueuer exactly once with
-//     .completed + completedAt, and the kick runs once.
+//   - saveAndDone invokes the CompletionEnqueuer exactly once with
+//     the app-owned completion record, and the kick runs once.
 //   - no-op when enqueuers are nil — the existing offline-first tests
 //     still pass because the fire-and-forget Task has nothing to do.
 
 import XCTest
 import CoreDomain
+import CoreTelemetry
 import WorkoutCoreFoundation
 @testable import FeaturesExecution
 
@@ -113,12 +114,12 @@ final class ExecutionViewModelPushTests: XCTestCase {
         XCTAssertEqual(log.completedAt, fixed.now)
     }
 
-    func testCompleteAloneDoesNotEnqueueStatus() async throws {
+    func testCompleteAloneDoesNotPublishCompletion() async throws {
         // `complete()` is the "force-complete" affordance. It transitions
-        // route but does NOT enqueue the status_update — that's the
+        // route but does NOT publish the completion record — that's the
         // terminal action's responsibility (`saveAndDone`). Previously
-        // complete() enqueued and so did saveAndDone() when reached via
-        // the explicit End → save & done path — producing a double push.
+        // complete() must not enqueue by itself or the explicit End →
+        // save & done path would produce a double publication.
         let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_042))
         let (ctx, _) = PushTestFixtures.context(sets: 1, reps: 5, loadKg: 100)
         let recorder = EnqueueRecorder()
@@ -127,10 +128,8 @@ final class ExecutionViewModelPushTests: XCTestCase {
             onSetLogged: { [recorder] log in
                 await recorder.appendSet(log)
             },
-            onStatusChanged: { [recorder] id, status, completedAt, notes in
-                await recorder.appendStatus(
-                    workoutID: id, status: status, at: completedAt, notes: notes
-                )
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
             },
             onPushKick: { [kickRecorder] in
                 await kickRecorder.bump()
@@ -148,26 +147,22 @@ final class ExecutionViewModelPushTests: XCTestCase {
 
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let statuses = await recorder.statusUpdates
-        XCTAssertEqual(statuses.count, 0, "complete() must not enqueue status_update")
+        let completions = await recorder.completions
+        XCTAssertEqual(completions.count, 0, "complete() must not publish completion")
         XCTAssertEqual(vm.state.route, .complete)
         let kicks = await kickRecorder.count
         XCTAssertEqual(kicks, 0, "complete() must not kick the push flusher")
     }
 
-    func testSaveAndDoneNotesRideOnStatusPush() async throws {
-        // The terminal status_update carries the user's post-workout
-        // note so the server is authoritative for the value — without
-        // this the next `sync/pull` overwrote the local cache's
-        // freshly-typed note with the server's stale value.
+    func testSaveAndDoneNotesRideOnCompletionRecord() async throws {
+        // The terminal completion record carries the user's post-workout
+        // note so every publisher sees the same app-owned value.
         let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_042))
         let (ctx, _) = PushTestFixtures.context(sets: 1, reps: 5, loadKg: 100)
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onStatusChanged: { [recorder] id, status, completedAt, notes in
-                await recorder.appendStatus(
-                    workoutID: id, status: status, at: completedAt, notes: notes
-                )
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
             }
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
@@ -178,16 +173,16 @@ final class ExecutionViewModelPushTests: XCTestCase {
 
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let statuses = await recorder.statusUpdates
-        XCTAssertEqual(statuses.count, 1)
-        let status = try XCTUnwrap(statuses.first)
+        let completions = await recorder.completions
+        XCTAssertEqual(completions.count, 1)
+        let completion = try XCTUnwrap(completions.first)
         XCTAssertEqual(
-            status.notes, "leg day PR!",
-            "whitespace-trimmed note must ride on the status push"
+            completion.workout.notes, "leg day PR!",
+            "whitespace-trimmed note must ride on the completion record"
         )
     }
 
-    func testSaveAndDoneEmptyNoteSendsNilOnStatusPush() async throws {
+    func testSaveAndDoneEmptyNoteSendsNilOnCompletionRecord() async throws {
         // `normalizeNote` collapses whitespace-only strings to nil —
         // sending nil leaves the existing server-side notes untouched
         // instead of wiping them.
@@ -195,10 +190,8 @@ final class ExecutionViewModelPushTests: XCTestCase {
         let (ctx, _) = PushTestFixtures.context(sets: 1, reps: 5, loadKg: 100)
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onStatusChanged: { [recorder] id, status, completedAt, notes in
-                await recorder.appendStatus(
-                    workoutID: id, status: status, at: completedAt, notes: notes
-                )
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
             }
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
@@ -209,12 +202,12 @@ final class ExecutionViewModelPushTests: XCTestCase {
 
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let statuses = await recorder.statusUpdates
-        let status = try XCTUnwrap(statuses.first)
-        XCTAssertNil(status.notes, "whitespace-only → nil on the wire")
+        let completions = await recorder.completions
+        let completion = try XCTUnwrap(completions.first)
+        XCTAssertNil(completion.workout.notes, "whitespace-only → nil on the completion record")
     }
 
-    func testSaveAndDoneEnqueuesStatusExactlyOnce() async throws {
+    func testSaveAndDoneEnqueuesCompletionExactlyOnce() async throws {
         // `saveAndDone` is the sole terminal enqueue path. It must fire
         // for both routes into `.complete` — auto-advance from last set
         // AND explicit End — so the test here covers both paths.
@@ -223,10 +216,8 @@ final class ExecutionViewModelPushTests: XCTestCase {
         let recorder = EnqueueRecorder()
         let kickRecorder = KickRecorder()
         let hooks = ExecutionPushHooks(
-            onStatusChanged: { [recorder] id, status, completedAt, notes in
-                await recorder.appendStatus(
-                    workoutID: id, status: status, at: completedAt, notes: notes
-                )
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
             },
             onPushKick: { [kickRecorder] in
                 await kickRecorder.bump()
@@ -240,14 +231,98 @@ final class ExecutionViewModelPushTests: XCTestCase {
 
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let statuses = await recorder.statusUpdates
-        XCTAssertEqual(statuses.count, 1, "explicit End → saveAndDone must enqueue exactly once")
-        let status = try XCTUnwrap(statuses.first)
-        XCTAssertEqual(status.workoutID, vm.state.workoutID)
-        XCTAssertEqual(status.status, .completed)
-        XCTAssertEqual(status.completedAt, fixed.now)
+        let completions = await recorder.completions
+        XCTAssertEqual(completions.count, 1, "explicit End → saveAndDone must enqueue exactly once")
+        let completion = try XCTUnwrap(completions.first)
+        XCTAssertEqual(completion.workout.id, vm.state.workoutID)
+        XCTAssertEqual(completion.workout.status, .completed)
+        XCTAssertEqual(completion.workout.completedAt, fixed.now)
+        XCTAssertEqual(completion.setLogs.count, 0, "no set was logged on explicit End path")
         let kicks = await kickRecorder.count
         XCTAssertEqual(kicks, 1, "one kick per terminal push, not two")
+    }
+
+    func testSaveAndDoneEmitsCompletionProofTelemetry() async throws {
+        let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_042))
+        let (ctx, _) = PushTestFixtures.context(sets: 1, reps: 5, loadKg: 100)
+        let recorder = EnqueueRecorder()
+        let telemetry = TelemetryRecorder()
+        let hooks = ExecutionPushHooks(
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
+            }
+        )
+        let vm = ExecutionViewModel(
+            context: ctx,
+            clock: fixed,
+            push: hooks,
+            localCompletionWriter: { _ in },
+            telemetry: telemetry
+        )
+        vm.start()
+        vm.startCurrentSet()
+        vm.complete()
+        vm.saveAndDone(note: "done", bodyweightKg: nil)
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let completionEvents = telemetry.events.filter {
+            $0.name.hasPrefix("execution.completion_")
+        }
+        XCTAssertEqual(
+            completionEvents.map(\.name),
+            [
+                "execution.completion_record_built",
+                "execution.completion_publish_finished",
+                "execution.completion_local_writer_completed",
+            ]
+        )
+        XCTAssertTrue(
+            completionEvents.allSatisfy { $0.workoutID == ctx.workout.id },
+            "every completion proof event must be correlated to the workout"
+        )
+        let builtPayload = try XCTUnwrap(completionEvents.first?.dataJSON)
+        XCTAssertTrue(builtPayload.contains(#""set_log_count":0"#))
+        XCTAssertTrue(builtPayload.contains(#""primitive_set_log_count":0"#))
+        XCTAssertTrue(builtPayload.contains(#""has_note":true"#))
+        let publishPayload = try XCTUnwrap(completionEvents.dropFirst().first?.dataJSON)
+        XCTAssertTrue(publishPayload.contains(#""publisher_installed":true"#))
+    }
+
+    func testSaveAndDoneCarriesRecordedPrimitiveResults() async throws {
+        let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_042))
+        let ctx = PushTestFixtures.primitiveContext()
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
+            }
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
+
+        vm.recordPrimitiveSetResult(
+            blockIndex: 0,
+            setIndexInBlock: 0,
+            reps: 4,
+            rounds: 7,
+            durationSec: 300
+        )
+        vm.complete()
+        vm.saveAndDone()
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let completions = await recorder.completions
+        let completion = try XCTUnwrap(completions.first)
+        XCTAssertEqual(completion.primitiveSetLogs.count, 1)
+        let log = try XCTUnwrap(completion.primitiveSetLogs.first)
+        XCTAssertEqual(log.role, .setResult)
+        XCTAssertEqual(log.workoutID, ctx.workout.id)
+        XCTAssertEqual(log.setIndex, 0)
+        XCTAssertEqual(log.reps, 4)
+        XCTAssertEqual(log.rounds, 7)
+        XCTAssertEqual(log.durationSec, 300)
+        XCTAssertEqual(log.completedAt, fixed.now)
     }
 
     func testNilEnqueuersPreserveExistingBehavior() async throws {
@@ -340,6 +415,73 @@ private enum PushTestFixtures {
         )
         return (ctx, itemID)
     }
+
+    static func primitiveContext() -> WorkoutContext {
+        let userID = UUID(uuidString: "01000000-0000-4000-8000-000000000001")!
+        let workoutID = UUID(uuidString: "10000000-0000-4000-8000-000000000051")!
+        let legacyBlockID = UUID(uuidString: "20000000-0000-4000-8000-000000000050")!
+        let primitiveBlockID = UUID(uuidString: "20000000-0000-4000-8000-000000000051")!
+        let primitiveSetID = UUID(uuidString: "30000000-0000-4000-8000-000000000051")!
+        let slotID = UUID(uuidString: "40000000-0000-4000-8000-000000000051")!
+        let exerciseID = UUID(uuidString: "50000000-0000-4000-8000-000000000051")!
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let workout = Workout(
+            id: workoutID,
+            userID: userID,
+            name: "Primitive Push Test",
+            scheduledDate: now,
+            status: .planned,
+            source: .claude,
+            createdAt: now,
+            updatedAt: now
+        )
+        let block = Block(
+            id: legacyBlockID,
+            workoutID: workoutID,
+            position: 0,
+            timingMode: .straightSets,
+            timingConfigJSON: #"{"rest_between_sets_sec":60,"rest_between_exercises_sec":60}"#
+        )
+        let primitive = PrimitiveWorkout(
+            id: workoutID,
+            name: "Primitive Push Test",
+            blocks: [
+                PrimitiveBlock(id: primitiveBlockID, sets: [
+                    PrimitiveSet(
+                        id: primitiveSetID,
+                        timing: PrimitiveTiming(mode: .capBounded, capSec: 300),
+                        traversal: .amrap,
+                        workTargets: [
+                            PrimitiveWorkTarget(metric: .rounds, valueForm: .open, role: .observation),
+                        ],
+                        slots: [
+                            PrimitiveSlot(
+                                id: slotID,
+                                exerciseID: exerciseID,
+                                workTargets: [
+                                    PrimitiveWorkTarget(
+                                        metric: .reps,
+                                        valueForm: .single,
+                                        value: 10,
+                                        role: .completion
+                                    ),
+                                ]
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        let plan = try! PrimitiveSessionSeeder.seed(workout: primitive)
+        return WorkoutContext(
+            workout: workout,
+            primitiveWorkout: primitive,
+            primitiveExecutionPlan: plan,
+            blocks: [block],
+            itemsByBlock: [[]],
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Push-up")]
+        )
+    }
 }
 
 /// Records the set_logs, status updates, and user-parameter rows routed
@@ -355,6 +497,7 @@ actor EnqueueRecorder {
 
     private(set) var setLogs: [SetLog] = []
     private(set) var statusUpdates: [StatusObservation] = []
+    private(set) var completions: [WorkoutCompletionRecord] = []
     private(set) var userParameters: [UserParameter] = []
 
     func appendSet(_ log: SetLog) {
@@ -372,6 +515,10 @@ actor EnqueueRecorder {
                 workoutID: workoutID, status: status, completedAt: at, notes: notes
             )
         )
+    }
+
+    func appendCompletion(_ record: WorkoutCompletionRecord) {
+        completions.append(record)
     }
 
     func appendUserParameter(_ param: UserParameter) {

@@ -23,7 +23,9 @@ enum PushQueuePayloadCoding {
     /// Tag discriminator for the `Envelope` payload.
     enum EnvelopeKind: String, Codable {
         case setLogs
+        case primitiveSetLogs
         case statusUpdate
+        case completionResults
         case workoutReset
         case events
         case userParameter
@@ -37,6 +39,7 @@ enum PushQueuePayloadCoding {
     struct Envelope: Codable {
         let kind: EnvelopeKind
         var setLogs: [CodableSetLog]?
+        var primitiveSetLogs: [CodablePrimitiveSetLog]?
         var statusWorkoutID: UUID?
         var statusRaw: String?
         var statusCompletedAt: Date?
@@ -45,6 +48,10 @@ enum PushQueuePayloadCoding {
         /// this field landed still decode cleanly (they default to nil,
         /// which is the pre-bug behavior).
         var statusNotes: String?
+        var completionWorkoutID: UUID?
+        var completionCompletedAt: Date?
+        var completionNotes: String?
+        var completionPrimitiveSetLogs: [CodablePrimitiveSetLog]?
         var resetWorkoutID: UUID?
         var events: [CodableEvent]?
         var userParameter: CodableUserParameter?
@@ -53,13 +60,89 @@ enum PushQueuePayloadCoding {
             Envelope(
                 kind: kind,
                 setLogs: nil,
+                primitiveSetLogs: nil,
                 statusWorkoutID: nil,
                 statusRaw: nil,
                 statusCompletedAt: nil,
                 statusNotes: nil,
+                completionWorkoutID: nil,
+                completionCompletedAt: nil,
+                completionNotes: nil,
+                completionPrimitiveSetLogs: nil,
                 resetWorkoutID: nil,
                 events: nil,
                 userParameter: nil
+            )
+        }
+    }
+
+    struct CodablePrimitiveSetLog: Codable {
+        let id: UUID
+        let role: String
+        let slotID: UUID?
+        let setID: UUID?
+        let blockID: UUID?
+        let workoutID: UUID?
+        let plannedExerciseID: UUID?
+        let performedExerciseID: UUID?
+        let setIndex: Int
+        let setRepeatIndex: Int
+        let blockRepeatIndex: Int
+        let reps: Int?
+        let weight: Double?
+        let weightUnit: String?
+        let durationSec: Double?
+        let rounds: Int?
+        let rir: Int?
+        let isWarmup: Bool
+        let completedAt: Date
+
+        init(_ log: PrimitiveSetLog) {
+            id = log.id
+            role = log.role.rawValue
+            slotID = log.slotID
+            setID = log.setID
+            blockID = log.blockID
+            workoutID = log.workoutID
+            plannedExerciseID = log.plannedExerciseID
+            performedExerciseID = log.performedExerciseID
+            setIndex = log.setIndex
+            setRepeatIndex = log.setRepeatIndex
+            blockRepeatIndex = log.blockRepeatIndex
+            reps = log.reps
+            weight = log.weight
+            weightUnit = log.weightUnit?.rawValue
+            durationSec = log.durationSec
+            rounds = log.rounds
+            rir = log.rir
+            isWarmup = log.isWarmup
+            completedAt = log.completedAt
+        }
+
+        func toDomain() throws -> PrimitiveSetLog {
+            guard let role = PrimitiveLogRole(rawValue: role) else {
+                throw PersistenceError.decode("invalid primitiveSetLog role")
+            }
+            return PrimitiveSetLog(
+                id: id,
+                role: role,
+                slotID: slotID,
+                setID: setID,
+                blockID: blockID,
+                workoutID: workoutID,
+                plannedExerciseID: plannedExerciseID,
+                performedExerciseID: performedExerciseID,
+                setIndex: setIndex,
+                setRepeatIndex: setRepeatIndex,
+                blockRepeatIndex: blockRepeatIndex,
+                reps: reps,
+                weight: weight,
+                weightUnit: weightUnit.flatMap { WeightUnit(rawValue: $0) },
+                durationSec: durationSec,
+                rounds: rounds,
+                rir: rir,
+                isWarmup: isWarmup,
+                completedAt: completedAt
             )
         }
     }
@@ -178,12 +261,22 @@ enum PushQueuePayloadCoding {
         case .setLogs(let logs):
             envelope = .empty(kind: .setLogs)
             envelope.setLogs = logs.map(CodableSetLog.init)
+        case .primitiveSetLogs(let logs):
+            envelope = .empty(kind: .primitiveSetLogs)
+            envelope.primitiveSetLogs = logs.map(CodablePrimitiveSetLog.init)
         case .statusUpdate(let workoutID, let status, let completedAt, let notes):
             envelope = .empty(kind: .statusUpdate)
             envelope.statusWorkoutID = workoutID
             envelope.statusRaw = status.rawValue
             envelope.statusCompletedAt = completedAt
             envelope.statusNotes = notes
+        case .completionResults(let workoutID, let completedAt, let notes, let logs, let primitiveLogs):
+            envelope = .empty(kind: .completionResults)
+            envelope.completionWorkoutID = workoutID
+            envelope.completionCompletedAt = completedAt
+            envelope.completionNotes = notes
+            envelope.setLogs = logs.map(CodableSetLog.init)
+            envelope.completionPrimitiveSetLogs = primitiveLogs.map(CodablePrimitiveSetLog.init)
         case .workoutReset(let workoutID):
             envelope = .empty(kind: .workoutReset)
             envelope.resetWorkoutID = workoutID
@@ -207,6 +300,9 @@ enum PushQueuePayloadCoding {
         case .setLogs:
             let logs = (envelope.setLogs ?? []).map { $0.toDomain() }
             return .setLogs(logs)
+        case .primitiveSetLogs:
+            let logs = try (envelope.primitiveSetLogs ?? []).map { try $0.toDomain() }
+            return .primitiveSetLogs(logs)
         case .statusUpdate:
             guard let workoutID = envelope.statusWorkoutID,
                   let raw = envelope.statusRaw,
@@ -218,6 +314,17 @@ enum PushQueuePayloadCoding {
                 status: status,
                 completedAt: envelope.statusCompletedAt,
                 notes: envelope.statusNotes
+            )
+        case .completionResults:
+            guard let workoutID = envelope.completionWorkoutID else {
+                throw PersistenceError.decode("invalid completionResults envelope")
+            }
+            return .completionResults(
+                workoutID: workoutID,
+                completedAt: envelope.completionCompletedAt,
+                notes: envelope.completionNotes,
+                setLogs: (envelope.setLogs ?? []).map { $0.toDomain() },
+                primitiveSetLogs: try (envelope.completionPrimitiveSetLogs ?? []).map { try $0.toDomain() }
             )
         case .workoutReset:
             guard let workoutID = envelope.resetWorkoutID else {

@@ -123,6 +123,10 @@ Implementation planning binds the durable requirements and phase outcome to:
 - concrete code surfaces
 - proof map entries tied to `docs/TESTING.md`, `docs/QA.md`, and the
   claim being made
+- telemetry and readback requirements for behavior that is hard to prove in
+  the UI, especially persistence, sync, auth, background work, and backend
+  mutations. If the current event/log/store surface cannot prove the claim,
+  adding that proof surface is part of the implementation plan.
 - app-facing QA expectations: simulator, video, screenshot, `snapshot-ui`,
   state readback, log, test, or real-device proof as appropriate
 - review gates
@@ -151,9 +155,9 @@ Verification must match the touched surfaces and the claim being made:
 - app-facing iOS work then follows `docs/QA.md`: use XcodeBuildMCP, exercise
   real user gestures, record visible UI when relevant, inspect screenshots or
   `snapshot-ui`, ask `img ask --video`, and route findings
-- state, persistence, sync, offline, auth, and telemetry claims need tests,
-  logs, queues, DB/API readbacks, or local-store readbacks in addition to any
-  video
+- state, persistence, sync, offline, auth, telemetry, and backend claims need
+  tests, logs, queues, DB/API readbacks, event-log inspection, or local-store
+  readbacks in addition to any video
 - Watch, HealthKit, haptics, physical ergonomics, sleep/wake, or real network
   behavior require real-device or dedicated proof
 - targeted docs validation for documentation-only changes

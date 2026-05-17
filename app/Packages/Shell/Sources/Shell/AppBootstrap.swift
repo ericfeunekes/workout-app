@@ -301,6 +301,8 @@ public enum AppBootstrap {
         try await cache.save(
             PulledDataset(
                 workouts: workouts,
+                primitiveWorkouts: result.primitiveWorkouts,
+                primitiveWorkoutIDsToDelete: result.primitiveWorkoutIDsToDelete,
                 blocks: blocks,
                 items: items,
                 alternatives: alternatives,
@@ -355,8 +357,15 @@ public enum AppBootstrap {
                 numericParams[key] = value
             }
         }
+        let primitiveWorkout = try await cache.loadPrimitiveWorkouts()
+            .first { $0.id == workout.id }
+        let primitivePlan = try primitiveWorkout.map {
+            try PrimitiveSessionSeeder.seed(workout: $0)
+        }
         return WorkoutContext(
             workout: workout,
+            primitiveWorkout: primitiveWorkout,
+            primitiveExecutionPlan: primitivePlan,
             blocks: blocks,
             itemsByBlock: loaded.itemsByBlock,
             exercises: exercises,

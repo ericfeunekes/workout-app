@@ -24,6 +24,7 @@ public typealias PushItemID = UUID
 public struct PushItem: Sendable, Equatable {
     public enum Payload: Sendable, Equatable {
         case setLogs([CoreDomain.SetLog])
+        case primitiveSetLogs([CoreDomain.PrimitiveSetLog])
         /// `notes` rides on the terminal status push so the server is
         /// authoritative for the user-authored post-workout note. `nil`
         /// leaves the existing server-side notes alone; a non-nil value
@@ -34,6 +35,17 @@ public struct PushItem: Sendable, Equatable {
             status: CoreDomain.WorkoutStatus,
             completedAt: Date?,
             notes: String?
+        )
+        /// Terminal workout completion published as one `/api/sync/results`
+        /// body containing all final set_logs plus the completed status.
+        /// This is a REST publication detail over the app-owned
+        /// `WorkoutCompletionRecord`, not the domain authority itself.
+        case completionResults(
+            workoutID: WorkoutID,
+            completedAt: Date?,
+            notes: String?,
+            setLogs: [CoreDomain.SetLog],
+            primitiveSetLogs: [CoreDomain.PrimitiveSetLog]
         )
         case workoutReset(workoutID: WorkoutID)
         case events([CoreTelemetry.Event])
@@ -48,7 +60,7 @@ public struct PushItem: Sendable, Equatable {
         /// two tables.
         public var priority: Int {
             switch self {
-            case .setLogs, .statusUpdate, .workoutReset, .userParameter:
+            case .setLogs, .primitiveSetLogs, .statusUpdate, .completionResults, .workoutReset, .userParameter:
                 return 0
             case .events:
                 return 1
@@ -73,8 +85,13 @@ public struct PushItem: Sendable, Equatable {
                 // `PushQueue+Dedup.dropExistingSetLog`.
                 guard logs.count == 1 else { return nil }
                 return "setLog:\(logs[0].id.uuidString.lowercased())"
+            case .primitiveSetLogs(let logs):
+                guard logs.count == 1 else { return nil }
+                return "primitiveSetLog:\(logs[0].id.uuidString.lowercased())"
             case .statusUpdate(let workoutID, let status, _, _):
                 return "status:\(workoutID.uuidString.lowercased()):\(status.rawValue)"
+            case .completionResults(let workoutID, _, _, _, _):
+                return "completion:\(workoutID.uuidString.lowercased())"
             case .workoutReset(let workoutID):
                 return "reset:\(workoutID.uuidString.lowercased())"
             case .userParameter(let param):
@@ -150,6 +167,12 @@ public protocol PushQueueStore: Sendable {
     /// builds the key via `PushItem.Payload.dedupKey` and calls this;
     /// callers never parse the string themselves.
     func removeMatchingDedupKey(_ key: String) async throws -> Int
+
+    /// Atomically remove every queued row whose persisted dedup key is in
+    /// `keys`, then enqueue `item`. Production stores must commit the
+    /// delete+insert as one durable mutation so a crash cannot strand the
+    /// queue between stale-row removal and replacement insertion.
+    func enqueue(_ item: PushItem, replacingDedupKeys keys: Set<String>) async throws
 
     /// Whether the queue has zero items pending.
     func isEmpty() async throws -> Bool

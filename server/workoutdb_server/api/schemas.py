@@ -312,6 +312,114 @@ class BlockRead(_UuidReadBase):
     workout_items: list[WorkoutItemRead]
 
 
+class PrimitiveWorkTargetIn(BaseModel):
+    metric: Literal["reps", "duration", "distance", "rounds", "completion", "load_carried"]
+    value_form: Literal["single", "range", "open"]
+    value: float | None = None
+    role: Literal["completion", "observation"]
+
+    @model_validator(mode="after")
+    def _value_matches_form(self) -> "PrimitiveWorkTargetIn":
+        if self.value_form == "open" and self.value is not None:
+            raise ValueError("open work_target values must be null")
+        if self.value_form == "single" and self.value is None:
+            raise ValueError("single work_target values require a number")
+        return self
+
+
+class PrimitiveLoadIn(BaseModel):
+    value: float | None = None
+    unit: Literal["kg", "lb"]
+    unit_type: Literal["absolute"]
+
+
+class PrimitiveStimulusIn(BaseModel):
+    type: Literal["rir", "hr_zone"]
+    target: float | None = None
+
+
+class PrimitiveTimingIn(BaseModel):
+    mode: Literal["set_bounded", "time_bounded", "cap_bounded", "target_bounded"]
+    interval_sec: int | None = None
+    rounds: int | None = None
+    cap_sec: int | None = None
+
+    @model_validator(mode="after")
+    def _required_params(self) -> "PrimitiveTimingIn":
+        if self.mode == "time_bounded" and (self.interval_sec is None or self.rounds is None):
+            raise ValueError("time_bounded timing requires interval_sec and rounds")
+        if self.mode == "cap_bounded" and self.cap_sec is None:
+            raise ValueError("cap_bounded timing requires cap_sec")
+        return self
+
+
+class PrimitiveSlotIn(_UuidInputBase):
+    id: str
+    exercise_id: str
+    work_target: list[PrimitiveWorkTargetIn] = Field(default_factory=list)
+    load: PrimitiveLoadIn | None = None
+    stimuli: list[PrimitiveStimulusIn] = Field(default_factory=list)
+    post_rest_sec: int = 0
+    is_warmup: bool = False
+
+
+class PrimitiveSetIn(_UuidInputBase):
+    id: str
+    title: str | None = None
+    timing: PrimitiveTimingIn
+    traversal: Literal["sequential", "round_robin", "amrap"] = "sequential"
+    repeat: int = Field(default=1, ge=1)
+    work_target: list[PrimitiveWorkTargetIn] = Field(default_factory=list)
+    slots: list[PrimitiveSlotIn] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _legal_runtime_cell(self) -> "PrimitiveSetIn":
+        if self.traversal == "amrap" and self.timing.mode in {"set_bounded", "target_bounded"}:
+            raise ValueError(f"{self.timing.mode} x amrap is not a legal primitive runtime cell")
+        if not self.slots and self.timing.mode not in {"time_bounded", "cap_bounded"}:
+            raise ValueError("zero-slot primitive sets require time_bounded or cap_bounded timing")
+        if self.timing.mode == "cap_bounded" and self.traversal == "amrap":
+            has_rounds = any(target.metric == "rounds" for target in self.work_target)
+            if not has_rounds:
+                raise ValueError("cap_bounded x amrap requires a set-level rounds work_target")
+        if self.repeat != 1 and self.has_aggregate_observation():
+            raise ValueError(
+                "primitive aggregate-result sets cannot repeat in the phase-one runtime"
+            )
+        return self
+
+    def has_aggregate_observation(self) -> bool:
+        return any(
+            target.role == "observation" and target.metric in {"rounds", "duration"}
+            for target in self.work_target
+        )
+
+
+class PrimitiveBlockIn(_UuidInputBase):
+    id: str
+    title: str | None = None
+    repeat: int = Field(default=1, ge=1)
+    work_target: list[PrimitiveWorkTargetIn] = Field(default_factory=list)
+    sets: list[PrimitiveSetIn]
+
+    @model_validator(mode="after")
+    def _phase_one_aggregate_shape(self) -> "PrimitiveBlockIn":
+        has_block_duration = any(
+            target.role == "observation" and target.metric == "duration"
+            for target in self.work_target
+        )
+        aggregate_sets = [item for item in self.sets if item.has_aggregate_observation()]
+        if self.repeat != 1 and (has_block_duration or aggregate_sets):
+            raise ValueError(
+                "primitive aggregate-result blocks cannot repeat in the phase-one runtime"
+            )
+        if len(aggregate_sets) > 1:
+            raise ValueError(
+                "primitive aggregate-result blocks support one aggregate set in phase one"
+            )
+        return self
+
+
 class WorkoutCreate(_UuidInputBase):
     """Accepts a full workout tree (blocks → items → alternatives) in one request.
 
@@ -326,6 +434,7 @@ class WorkoutCreate(_UuidInputBase):
     notes: str | None = None
     tags_json: str | None = None
     blocks: list[BlockIn] = Field(default_factory=list)
+    primitive_blocks: list[PrimitiveBlockIn] = Field(default_factory=list)
 
 
 class WorkoutUpdate(_UuidInputBase):
@@ -338,6 +447,7 @@ class WorkoutUpdate(_UuidInputBase):
     tags_json: str | None = None
     completed_at: UtcDatetimeIn | None = None
     blocks: list[BlockIn] | None = None
+    primitive_blocks: list[PrimitiveBlockIn] | None = None
 
 
 class WorkoutRead(_UuidReadBase):
@@ -355,6 +465,7 @@ class WorkoutRead(_UuidReadBase):
     updated_at: UtcDatetime
     completed_at: UtcDatetime | None
     blocks: list[BlockRead]
+    primitive_blocks: list[PrimitiveBlockIn] = Field(default_factory=list)
 
 
 # ---------- Set logs (app pushes these back) ----------
@@ -384,6 +495,43 @@ class SetLogIn(_UuidInputBase):
     cadence_avg_spm: int | None = None
     motion_samples_ref: str | None = None
     notes: str | None = None
+
+
+class PrimitiveSetLogIn(_UuidInputBase):
+    id: str
+    role: Literal["slot", "set_result", "block_result"] = "slot"
+    slot_id: str | None = None
+    set_id: str | None = None
+    block_id: str | None = None
+    workout_id: str
+    planned_exercise_id: str | None = None
+    performed_exercise_id: str | None = None
+    set_index: int = Field(ge=0)
+    set_repeat_index: int = Field(default=0, ge=0)
+    block_repeat_index: int = Field(default=0, ge=0)
+    reps: int | None = None
+    weight: float | None = None
+    weight_unit: Literal["kg", "lb"] | None = None
+    duration_sec: float | None = None
+    rounds: int | None = None
+    rir: int | None = Field(default=None, ge=0, le=5)
+    is_warmup: bool = False
+    completed_at: UtcDatetimeIn
+
+    @model_validator(mode="after")
+    def _role_scope_is_valid(self) -> "PrimitiveSetLogIn":
+        if self.workout_id is None:
+            raise ValueError("primitive log rows require workout_id")
+        if self.role == "slot":
+            if self.slot_id is None or self.set_id is None:
+                raise ValueError("slot primitive log rows require slot_id and set_id")
+        elif self.role == "set_result":
+            if self.slot_id is not None or self.set_id is None or self.block_id is None:
+                raise ValueError("set_result rows require set_id and block_id and no slot_id")
+        elif self.role == "block_result":
+            if self.slot_id is not None or self.set_id is not None or self.block_id is None:
+                raise ValueError("block_result rows require block_id only")
+        return self
 
 
 class SetLogRead(_UuidReadBase):
@@ -481,6 +629,7 @@ class SyncResultsIn(_UuidInputBase):
     """App pushes this when a workout finishes (or on next connectivity)."""
 
     set_logs: list[SetLogIn] = Field(default_factory=list)
+    primitive_set_logs: list[PrimitiveSetLogIn] = Field(default_factory=list)
     status_updates: list[WorkoutStatusUpdate] = Field(default_factory=list)
     workout_resets: list[WorkoutReset] = Field(default_factory=list)
 

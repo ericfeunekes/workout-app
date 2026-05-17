@@ -3,7 +3,7 @@
 // Houses the public `saveAndDone` entry point and its re-entrancy guard,
 // split out of `ExecutionViewModel.swift` so the class body stays under
 // SwiftLint's `type_body_length` cap AND so this guard lands adjacent to
-// the function it protects. The actual work (enqueue status update,
+// the function it protects. The actual work (publish completion record,
 // write local cache, enqueue bodyweight, dispatch `.save`) still lives
 // in `performSaveAndDone` on the `+Push.swift` extension — this file is
 // strictly the guard layer.
@@ -11,7 +11,7 @@
 // Bug fix: a fast double-tap on the "save & done" button (or a SwiftUI
 // re-render that fires the tap action twice before the reducer's `.save`
 // collapses the Complete screen) previously invoked `saveAndDone` twice,
-// which enqueued two terminal `status_update` pushes AND two bodyweight
+// which enqueued two terminal completion pushes AND two bodyweight
 // `UserParameter` rows. With `UserParameters` being append-only on the
 // server, the duplicate bodyweight would live forever. The guard drops
 // the second (and any further) invocation once the first has fired.
@@ -52,13 +52,11 @@ extension ExecutionViewModel {
     /// Save & done. Clears the persisted session and returns to Today.
     ///
     /// Before the reducer's `.save` wipes the in-memory log, we hand the
-    /// completed workout + set_logs to `localCompletionWriter` (if wired).
-    /// That writes them into the local `WorkoutCache` so the History tab
-    /// sees them immediately — the push queue is the authoritative
-    /// server-side path, but the user shouldn't have to wait for a pull
-    /// to see their own just-completed workout. See
-    /// `docs/open-questions.md` § "Execution `save & done` doesn't persist
-    /// the completed workout to local cache".
+    /// completed workout record to the completion publisher and
+    /// `localCompletionWriter` (if wired). The publisher gets first
+    /// chance to durably enqueue the record, then the local cache writer
+    /// makes History reflect the just-completed workout before the live
+    /// session is cleared.
     ///
     /// Capture inputs from the Complete screen (bug-011 / bug-012):
     ///   - `note`: workout-level note. Trimmed + empty-collapsed; when
@@ -73,12 +71,12 @@ extension ExecutionViewModel {
     /// Re-entrancy: the first call flips `saveAndDoneInFlightStorage`
     /// `true` and runs the full committed path; a concurrent second call
     /// (double-tap, SwiftUI re-render firing the tap action twice) sees
-    /// the flag already set and returns silently. The flag is NOT cleared
-    /// on the happy path — by the time `performSaveAndDone` returns, the
-    /// reducer has flipped the route to `.today` and the Complete screen
-    /// is unmounted. For the next workout the shell constructs a FRESH
-    /// VM (see `AppBootstrap.buildExecutionViewModel(for:)`) so the flag
-    /// starts `false` there.
+    /// the flag already set and returns silently. The happy path finishes
+    /// asynchronously; after the completion publisher succeeds it routes
+    /// to `.today`, clears the persisted session, and leaves the flag set
+    /// because that VM is unmounted. For the next workout the shell
+    /// constructs a FRESH VM (see `AppBootstrap.buildExecutionViewModel(for:)`)
+    /// so the flag starts `false` there.
     ///
     /// Defaulted parameters preserve the existing call-sites in tests
     /// that predate the capture inputs.

@@ -1,7 +1,7 @@
 // SchemaVersions.swift
 //
 // Versioned SwiftData schema. The runtime uses the LATEST version
-// (`WorkoutDBSchemaV5`). Older versions are preserved here so SwiftData
+// (`WorkoutDBSchemaV6`). Older versions are preserved here so SwiftData
 // can migrate a store that was written by a previous app build — without
 // the version enum for the old shape, SwiftData has nothing to compare
 // the on-disk store's metadata against and will fail (or, worse, corrupt)
@@ -47,6 +47,10 @@
 // V4 → V5 is lightweight: adds nullable `Block.intent`, plus
 // `SetLog.skipped` and `SetLog.sideRaw` with defaults matching the
 // server migration (`false` / `bilateral`).
+//
+// V5 → V6 is lightweight: adds `PrimitiveWorkoutModel`, the intact pulled
+// Block > Set > Slot payload used by the primitive execution runtime and
+// its local primitive completion rows.
 //
 // Shadow @Model types for V1 / V2 / V3 / V4 live in their dedicated
 // `SchemaVersionsV{N}Models.swift` files so the version enum bodies
@@ -137,6 +141,29 @@ public enum WorkoutDBSchemaV5: VersionedSchema {
     }
 }
 
+// MARK: - V6 (current, primitive cutover checkpoint 1) — primitive workout payload cache
+
+public enum WorkoutDBSchemaV6: VersionedSchema {
+    public static var versionIdentifier: Schema.Version { Schema.Version(6, 0, 0) }
+
+    public static var models: [any PersistentModel.Type] {
+        [
+            WorkoutModel.self,
+            PrimitiveWorkoutModel.self,
+            BlockModel.self,
+            WorkoutItemModel.self,
+            ExerciseModel.self,
+            ExerciseAlternativeModel.self,
+            SetLogModel.self,
+            UserParameterModel.self,
+            AppUserModel.self,
+            SessionSnapshotModel.self,
+            PushItemModel.self,
+            EventModel.self,
+        ]
+    }
+}
+
 // MARK: - Migration plan
 
 public enum WorkoutDBMigrationPlan: SchemaMigrationPlan {
@@ -147,6 +174,7 @@ public enum WorkoutDBMigrationPlan: SchemaMigrationPlan {
             WorkoutDBSchemaV3.self,
             WorkoutDBSchemaV4.self,
             WorkoutDBSchemaV5.self,
+            WorkoutDBSchemaV6.self,
         ]
     }
 
@@ -184,6 +212,10 @@ public enum WorkoutDBMigrationPlan: SchemaMigrationPlan {
             .lightweight(
                 fromVersion: WorkoutDBSchemaV4.self,
                 toVersion: WorkoutDBSchemaV5.self
+            ),
+            .lightweight(
+                fromVersion: WorkoutDBSchemaV5.self,
+                toVersion: WorkoutDBSchemaV6.self
             ),
         ]
     }

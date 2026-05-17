@@ -10,6 +10,7 @@ is responsible for validating shape against the spec's documented structures.
 
 from __future__ import annotations
 
+import json
 import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -94,6 +95,7 @@ class Workout(Base):
     source: Mapped[str] = mapped_column(String, nullable=False)
     notes: Mapped[str | None] = mapped_column(String)
     tags_json: Mapped[str | None] = mapped_column(String)
+    primitive_blocks_json: Mapped[str] = mapped_column(String, nullable=False, default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
@@ -106,6 +108,10 @@ class Workout(Base):
         cascade="all, delete-orphan",
         order_by="Block.position",
     )
+
+    @property
+    def primitive_blocks(self) -> list[dict]:
+        return json.loads(self.primitive_blocks_json or "[]")
 
     __table_args__ = (
         CheckConstraint(
@@ -253,6 +259,41 @@ class SetLog(Base):
             "performed_exercise_id",
             sqlite_where=text("performed_exercise_id IS NOT NULL"),
         ),
+    )
+
+
+class PrimitiveSetLog(Base):
+    __tablename__ = "primitive_set_log"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    role: Mapped[str] = mapped_column(String, nullable=False)
+    slot_id: Mapped[str | None] = mapped_column(String)
+    set_id: Mapped[str | None] = mapped_column(String)
+    block_id: Mapped[str | None] = mapped_column(String)
+    workout_id: Mapped[str] = mapped_column(
+        String, ForeignKey("workout.id", ondelete="CASCADE"), nullable=False
+    )
+    planned_exercise_id: Mapped[str | None] = mapped_column(String, ForeignKey("exercise.id"))
+    performed_exercise_id: Mapped[str | None] = mapped_column(String, ForeignKey("exercise.id"))
+    set_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    set_repeat_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    block_repeat_index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reps: Mapped[int | None] = mapped_column(Integer)
+    weight: Mapped[float | None] = mapped_column(Float)
+    weight_unit: Mapped[str | None] = mapped_column(String)
+    duration_sec: Mapped[float | None] = mapped_column(Float)
+    rounds: Mapped[int | None] = mapped_column(Integer)
+    rir: Mapped[int | None] = mapped_column(Integer)
+    is_warmup: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    __table_args__ = (
+        CheckConstraint("role IN ('slot', 'set_result', 'block_result')"),
+        CheckConstraint("weight_unit IN ('kg', 'lb') OR weight_unit IS NULL"),
+        CheckConstraint("rir IS NULL OR (rir >= 0 AND rir <= 5)"),
+        Index("idx_primitive_set_log_workout", "workout_id"),
+        Index("idx_primitive_set_log_set", "set_id"),
+        Index("idx_primitive_set_log_slot", "slot_id"),
     )
 
 

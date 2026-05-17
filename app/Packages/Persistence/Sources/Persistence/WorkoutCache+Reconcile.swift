@@ -73,6 +73,18 @@ extension WorkoutCacheImpl {
         }
     }
 
+    func reconcilePrimitiveWorkoutTombstones(
+        dataset: PulledDataset,
+        preload: PullPreload
+    ) throws {
+        for workoutID in dataset.primitiveWorkoutIDsToDelete {
+            guard let row = preload.primitiveWorkoutsByID.removeValue(forKey: workoutID) else {
+                continue
+            }
+            modelContext.delete(row)
+        }
+    }
+
     private func reconcileBlocks(
         existingBlocks: [BlockModel],
         incomingBlockIDs: Set<UUID>,

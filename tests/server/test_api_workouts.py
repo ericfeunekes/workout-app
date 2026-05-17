@@ -72,6 +72,242 @@ def test_create_nested_workout(client, test_engine, test_user_id) -> None:
     assert len(body["blocks"][0]["workout_items"][0]["alternatives"]) == 1
 
 
+def test_create_validates_primitive_blocks_at_ingest_boundary(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(exercise_id)
+    payload["primitive_blocks"] = [
+        {
+            "id": "20000000-0000-4000-8000-000000000002",
+            "repeat": 1,
+            "work_target": [],
+            "sets": [
+                {
+                    "id": "30000000-0000-4000-8000-000000000002",
+                    "timing": {"mode": "cap_bounded", "cap_sec": 300},
+                    "traversal": "amrap",
+                    "repeat": 1,
+                    "work_target": [
+                        {
+                            "metric": "rounds",
+                            "value_form": "open",
+                            "value": None,
+                            "role": "observation",
+                        }
+                    ],
+                    "slots": [
+                        {
+                            "id": "40000000-0000-4000-8000-000000000002",
+                            "exercise_id": exercise_id,
+                            "work_target": [
+                                {
+                                    "metric": "reps",
+                                    "value_form": "single",
+                                    "value": 10,
+                                    "role": "completion",
+                                }
+                            ],
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["primitive_blocks"][0]["sets"][0]["traversal"] == "amrap"
+
+    readback = client.get(f"/api/workouts/{body['id']}")
+    assert readback.status_code == 200
+    assert readback.json()["primitive_blocks"] == body["primitive_blocks"]
+
+
+def test_create_rejects_illegal_primitive_runtime_cell(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(exercise_id)
+    payload["primitive_blocks"] = [
+        {
+            "id": "20000000-0000-4000-8000-000000000002",
+            "sets": [
+                {
+                    "id": "30000000-0000-4000-8000-000000000002",
+                    "timing": {"mode": "set_bounded"},
+                    "traversal": "amrap",
+                    "slots": [
+                        {
+                            "id": "40000000-0000-4000-8000-000000000002",
+                            "exercise_id": exercise_id,
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422
+
+
+def test_create_rejects_unsupported_primitive_relative_load(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(exercise_id)
+    payload["primitive_blocks"] = [
+        {
+            "id": "20000000-0000-4000-8000-000000000003",
+            "sets": [
+                {
+                    "id": "30000000-0000-4000-8000-000000000003",
+                    "timing": {"mode": "set_bounded"},
+                    "slots": [
+                        {
+                            "id": "40000000-0000-4000-8000-000000000003",
+                            "exercise_id": exercise_id,
+                            "load": {"value": 0.8, "unit": "1rm", "unit_type": "relative"},
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422
+
+
+def test_create_rejects_unsupported_primitive_bodyweight_load(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(exercise_id)
+    payload["primitive_blocks"] = [
+        {
+            "id": "20000000-0000-4000-8000-000000000007",
+            "sets": [
+                {
+                    "id": "30000000-0000-4000-8000-000000000008",
+                    "timing": {"mode": "set_bounded"},
+                    "slots": [
+                        {
+                            "id": "40000000-0000-4000-8000-000000000008",
+                            "exercise_id": exercise_id,
+                            "load": {
+                                "value": None,
+                                "unit": "bodyweight",
+                                "unit_type": "implicit_bodyweight",
+                            },
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422
+
+
+def test_create_rejects_repeated_primitive_aggregate_result(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(exercise_id)
+    payload["primitive_blocks"] = [
+        {
+            "id": "20000000-0000-4000-8000-000000000004",
+            "sets": [
+                {
+                    "id": "30000000-0000-4000-8000-000000000004",
+                    "timing": {"mode": "cap_bounded", "cap_sec": 300},
+                    "traversal": "amrap",
+                    "repeat": 2,
+                    "work_target": [
+                        {
+                            "metric": "rounds",
+                            "value_form": "open",
+                            "value": None,
+                            "role": "observation",
+                        }
+                    ],
+                    "slots": [
+                        {
+                            "id": "40000000-0000-4000-8000-000000000004",
+                            "exercise_id": exercise_id,
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422
+
+
+def test_create_rejects_repeated_primitive_block_duration_aggregate(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(exercise_id)
+    payload["primitive_blocks"] = [
+        {
+            "id": "20000000-0000-4000-8000-000000000005",
+            "repeat": 2,
+            "work_target": [
+                {
+                    "metric": "duration",
+                    "value_form": "open",
+                    "value": None,
+                    "role": "observation",
+                }
+            ],
+            "sets": [
+                {
+                    "id": "30000000-0000-4000-8000-000000000005",
+                    "timing": {"mode": "set_bounded"},
+                    "slots": [
+                        {
+                            "id": "40000000-0000-4000-8000-000000000005",
+                            "exercise_id": exercise_id,
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422
+
+
+def test_create_rejects_multiple_primitive_aggregate_sets(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(exercise_id)
+    payload["primitive_blocks"] = [
+        {
+            "id": "20000000-0000-4000-8000-000000000006",
+            "sets": [
+                {
+                    "id": "30000000-0000-4000-8000-000000000006",
+                    "timing": {"mode": "cap_bounded", "cap_sec": 300},
+                    "traversal": "amrap",
+                    "work_target": [
+                        {
+                            "metric": "rounds",
+                            "value_form": "open",
+                            "value": None,
+                            "role": "observation",
+                        }
+                    ],
+                },
+                {
+                    "id": "30000000-0000-4000-8000-000000000007",
+                    "timing": {"mode": "cap_bounded", "cap_sec": 300},
+                    "traversal": "amrap",
+                    "work_target": [
+                        {
+                            "metric": "rounds",
+                            "value_form": "open",
+                            "value": None,
+                            "role": "observation",
+                        }
+                    ],
+                },
+            ],
+        }
+    ]
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422
+
+
 def test_list_filters_by_status(client, test_engine) -> None:
     exercise_id = _seed_exercise(test_engine)
     client.post("/api/workouts", json=_workout_payload(exercise_id))

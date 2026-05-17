@@ -26,7 +26,11 @@ One user (Eric) uses this system. No legacy data to migrate from a previous user
 - **No backwards-compatible DB layouts.** The server and the phone in Eric's pocket run the exact same schema version at all times.
 - **No parallel old+new code paths.** When a field is renamed, both sides rename in the same commit.
 - **No multi-phase rollouts.** Migrations land complete; the app is rebuilt; the server is restarted. Downtime is acceptable (Eric isn't working out during the deploy).
-- **Data preservation is scoped to local set_logs.** Plans, exercises, alternatives, and `user_parameters` are all re-pushable by Claude. Only the logged results on Eric's phone are irreplaceable.
+- **Data preservation is explicit per cutover.** Plans, exercises,
+  alternatives, and `user_parameters` are re-pushable by Claude. Local
+  set_logs are normally the only data worth preserving, but a cutover may
+  explicitly treat current local/server workouts as disposable QA data. Do not
+  silently choose either preservation or deletion; the owning spec must say.
 
 ## Server migrations
 
@@ -79,14 +83,18 @@ enum WorkoutMigrationPlan: SchemaMigrationPlan {
 - **Lightweight** — add/remove optional properties, rename with `@Attribute(originalName:)`, add relationships. No data touched. Use these whenever possible.
 - **Custom** — data needs transforming, required properties added, enum values changed. Implement with a `MigrationStage.custom` closure that reads, transforms, and writes model instances. Slower, riskier, but unavoidable for some changes.
 
-**Set_log preservation is the hard constraint.** If a custom stage can't cleanly transform existing set_logs, the migration must:
+**Set_log preservation or reset is the hard decision.** If the owning spec
+requires preserving existing set_logs and a custom stage can't cleanly transform
+them, the migration must:
 
 1. Export set_logs to a JSON file on device before the stage runs.
 2. Apply the stage.
 3. Re-import transformed set_logs.
 4. On success, delete the backup. On failure, restore from it.
 
-The app should refuse to launch if migration fails — don't silently drop data.
+The app should refuse to launch if a preservation migration fails — don't
+silently drop data. If the owning spec permits a reset, the migration or
+operator runbook must make the destructive reset explicit.
 
 ## The cutover flow (every schema change)
 
@@ -114,7 +122,7 @@ No "graceful degradation" or "partial-schema sync." Single-user means we can aff
 
 ## Recovering when things go sideways
 
-If a migration lands broken and set_logs are at risk:
+If a preservation migration lands broken and set_logs are at risk:
 
 1. **Stop the app** from syncing (airplane mode works).
 2. **Find the SwiftData store** in the app container and copy it off device.

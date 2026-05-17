@@ -176,7 +176,8 @@ extension AppBootstrap {
                 todayLoader: inputs.todayLoader,
                 afterLocalCompletion: inputs.afterLocalCompletion,
                 executionHolder: inputs.executionHolder,
-                rebuild: rebuildVM.factory
+                rebuild: rebuildVM.factory,
+                telemetry: inputs.telemetry
             )
         )
         let refreshDeps = TodayRefreshDependencies(
@@ -364,8 +365,8 @@ extension AppBootstrap {
     /// Build the push-hook bundle handed to `ExecutionViewModel`.
     ///
     /// - `onSetLogged` routes each logged set to `SyncAPI.pushLog`.
-    /// - `onStatusChanged` routes status flips (active / completed) to
-    ///   `SyncAPI.pushStatus`.
+    /// - `onWorkoutCompleted` routes the app-owned completion record to
+    ///   one grouped REST results payload.
     /// - `onPushKick` drains the push queue as soon as `saveAndDone`
     ///   fires so the user doesn't wait for the ~60s foreground tick.
     /// - `onUserParameterChanged` lands a just-captured user_parameter
@@ -381,13 +382,8 @@ extension AppBootstrap {
             onSetLogged: { [syncAPI] log in
                 try? await syncAPI.pushLog([log])
             },
-            onStatusChanged: { [syncAPI] id, status, at, notes in
-                try? await syncAPI.pushStatus(
-                    workoutID: id,
-                    status: status,
-                    completedAt: at,
-                    notes: notes
-                )
+            onWorkoutCompleted: { [syncAPI] record in
+                try await syncAPI.pushCompletion(record)
             },
             onPushKick: { [pushFlusher] in
                 await pushFlusher.flushNow()
@@ -400,10 +396,10 @@ extension AppBootstrap {
     }
 
     /// Build the completion writer injected into `ExecutionViewModel`.
-    /// Writes the just-completed workout + its set_logs to the local
-    /// cache (so History sees them without a server round-trip), re-runs
-    /// `TodayLoader` so the Today tab advances to the NEXT planned
-    /// workout (bug-036), runs the optional shell-supplied
+    /// Attempts to write the just-completed workout + result logs to the
+    /// local cache (so History can see them without a server round-trip),
+    /// re-runs `TodayLoader` so the Today tab advances to the NEXT
+    /// planned workout (bug-036), runs the optional shell-supplied
     /// `afterLocalCompletion` hook (History `load()`), and — qa-002 /
     /// qa-003 fix — builds a FRESH `ExecutionViewModel` for the next
     /// workout and installs it on `executionHolder.vm` so RootTabView's
@@ -417,8 +413,9 @@ extension AppBootstrap {
     /// = new VM". See `scratch/qa-runs/_investigations/qa-002-crash.md`.
     ///
     /// Ordering is load-bearing:
-    ///   1. Cache write → so the Today loader sees the just-completed
-    ///      workout as `.completed` and skips it.
+    ///   1. Best-effort cache write attempt → so the Today loader sees
+    ///      the just-completed workout as `.completed` and skips it when
+    ///      local persistence succeeds.
     ///   2. Today reload → populates the Today tab with the NEXT planned
     ///      workout (or empty state if none).
     ///   3. `afterLocalCompletion` → History refresh.
@@ -428,19 +425,39 @@ extension AppBootstrap {
     ///      to `nil` — Today's isEmpty state gates the start button so
     ///      the nil VM is never dispatched to (qa-008).
     ///
-    /// All steps are local + fire-and-forget — no network I/O blocks
-    /// the UI's route flip back to `.today`.
+    /// These steps are local and awaited by Save & Done before the live
+    /// session is cleared. Cache writes are best-effort; the durable
+    /// completion artifact is the push queue item, and network flush still
+    /// happens outside this writer via the push queue.
     static func makeCompletionWriter(
         inputs: CompletionWriterInputs
     ) -> LocalCompletionWriter {
-        { [inputs] workout, setLogs in
-            try? await inputs.workoutCache.saveWorkout(workout)
-            // `workoutID` stamps each log's denormalized column so
-            // History's `loadSetLogs(workoutID:)` resolves via a direct
-            // predicate even after a future reconcile removes the
-            // parent WorkoutItem (R1.4 SetLog denormalization). The
-            // completed workout we just wrote carries the id.
-            try? await inputs.workoutCache.saveSetLogs(setLogs, workoutID: workout.id)
+        { [inputs] record in
+            let workout = record.workout
+            do {
+                try await inputs.workoutCache.saveWorkout(workout)
+                // `workoutID` stamps each log's denormalized column so
+                // History's `loadSetLogs(workoutID:)` resolves via a direct
+                // predicate even after a future reconcile removes the
+                // parent WorkoutItem (R1.4 SetLog denormalization). The
+                // completed workout we just wrote carries the id.
+                try await inputs.workoutCache.saveSetLogs(record.setLogs, workoutID: workout.id)
+                try await inputs.workoutCache.savePrimitiveSetLogs(
+                    record.primitiveSetLogs,
+                    workoutID: workout.id
+                )
+                emitCompletionLocalCacheWrite(
+                    record,
+                    telemetry: inputs.telemetry,
+                    errorDescription: nil
+                )
+            } catch {
+                emitCompletionLocalCacheWrite(
+                    record,
+                    telemetry: inputs.telemetry,
+                    errorDescription: String(describing: error)
+                )
+            }
             await inputs.todayViewModel.reload(using: inputs.todayLoader)
             await inputs.afterLocalCompletion?()
             await rebuildExecutionVMForNextWorkout(
@@ -463,6 +480,41 @@ extension AppBootstrap {
         let afterLocalCompletion: (@Sendable () async -> Void)?
         let executionHolder: ExecutionVMHolder
         let rebuild: @Sendable @MainActor (WorkoutContext) -> ExecutionViewModel
+        let telemetry: TelemetryEmitter
+    }
+
+    private nonisolated static func emitCompletionLocalCacheWrite(
+        _ record: WorkoutCompletionRecord,
+        telemetry: TelemetryEmitter,
+        errorDescription: String?
+    ) {
+        let payload = CompletionLocalCacheWriteEventPayload(
+            workoutID: record.workoutID.wireID,
+            setLogCount: record.setLogs.count,
+            primitiveSetLogCount: record.primitiveSetLogs.count,
+            hasNote: record.notes != nil,
+            error: errorDescription.map { String($0.prefix(240)) }
+        )
+        telemetry.emit(Event(
+            sessionID: TelemetrySession.id,
+            kind: errorDescription == nil ? "state" : "error",
+            name: errorDescription == nil
+                ? "execution.completion_local_cache_write_succeeded"
+                : "execution.completion_local_cache_write_failed",
+            dataJSON: encodeTelemetryPayload(payload),
+            workoutID: record.workoutID
+        ))
+    }
+
+    private nonisolated static func encodeTelemetryPayload<Payload: Encodable>(
+        _ payload: Payload
+    ) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        // swiftlint:disable:next force_try
+        let data = try! encoder.encode(payload)
+        // swiftlint:disable:next force_unwrapping
+        return String(data: data, encoding: .utf8)!
     }
 
     /// Load the next planned workout's context and install a fresh
@@ -506,5 +558,21 @@ extension AppBootstrap {
         await MainActor.run {
             executionHolder.vm = rebuild(workoutContext)
         }
+    }
+}
+
+private struct CompletionLocalCacheWriteEventPayload: Encodable {
+    let workoutID: String
+    let setLogCount: Int
+    let primitiveSetLogCount: Int
+    let hasNote: Bool
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case workoutID = "workout_id"
+        case setLogCount = "set_log_count"
+        case primitiveSetLogCount = "primitive_set_log_count"
+        case hasNote = "has_note"
+        case error
     }
 }

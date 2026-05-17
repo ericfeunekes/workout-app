@@ -64,6 +64,7 @@ extension ExecutionViewModel {
             : "partial: no extra reps"
         let note = "AMRAP result: \(score). \(partial)"
         let now = clock.now
+        let completedAt = boundedBlockCompletionAt(now: now)
 
         if safeExtra > 0, let item = currentItem {
             apply([
@@ -76,6 +77,11 @@ extension ExecutionViewModel {
             apply([.appendNote(note)])
         }
 
+        recordPrimitiveAMRAPResult(
+            cursor: cursor,
+            partialReps: safeExtra,
+            completedAt: completedAt
+        )
         finishCurrentTimedBlockFromResult()
     }
 
@@ -103,7 +109,69 @@ extension ExecutionViewModel {
         ])
         emitSessionMutation("logCardioSet")
         enqueueLoggedCardioSet(item: item, setIndex: 1, input: input)
+        recordPrimitiveForTimeResult(
+            blockIndex: cursor.blockIndex,
+            durationSec: elapsed,
+            completedAt: now
+        )
         finishCurrentTimedBlockFromResult()
+    }
+
+    private func recordPrimitiveAMRAPResult(
+        cursor: SessionState.Cursor,
+        partialReps: Int,
+        completedAt: Date
+    ) {
+        guard let plan = context.primitiveExecutionPlan,
+              cursor.blockIndex >= 0,
+              cursor.blockIndex < plan.blocks.count else {
+            return
+        }
+        let block = plan.blocks[cursor.blockIndex]
+        guard let setIndex = block.sets.firstIndex(where: { set in
+            set.traversal == .amrap && set.hasObservationTarget(.rounds)
+        }) else {
+            return
+        }
+        let primitiveSet = block.sets[setIndex]
+        let duration = state.workStartedAt.map { max(0, completedAt.timeIntervalSince($0)) }
+            ?? primitiveSet.timing.capSec.map(Double.init)
+        recordPrimitiveSetResult(
+            blockIndex: cursor.blockIndex,
+            setIndexInBlock: setIndex,
+            reps: partialReps,
+            rounds: max(0, cursor.setIndex - 1),
+            durationSec: duration,
+            completedAt: completedAt
+        )
+    }
+
+    private func recordPrimitiveForTimeResult(
+        blockIndex: Int,
+        durationSec: Double,
+        completedAt: Date
+    ) {
+        guard let plan = context.primitiveExecutionPlan,
+              blockIndex >= 0,
+              blockIndex < plan.blocks.count else {
+            return
+        }
+        let block = plan.blocks[blockIndex]
+        if block.hasObservationTarget(.duration) {
+            recordPrimitiveBlockResult(
+                blockIndex: blockIndex,
+                durationSec: durationSec,
+                completedAt: completedAt
+            )
+        }
+        for (setIndex, set) in block.sets.enumerated() where set.hasObservationTarget(.duration) {
+            recordPrimitiveSetResult(
+                blockIndex: blockIndex,
+                setIndexInBlock: setIndex,
+                durationSec: durationSec,
+                completedAt: completedAt
+            )
+        }
     }
 
     private func amrapPrescriptionSummary(
@@ -135,6 +203,13 @@ extension ExecutionViewModel {
         return clock.now >= blockEndsAt
     }
 
+    private func boundedBlockCompletionAt(now: Date) -> Date {
+        guard let blockEndsAt = state.blockEndsAt, now > blockEndsAt else {
+            return now
+        }
+        return blockEndsAt
+    }
+
     private func amrapScoreSummary(
         cursor: SessionState.Cursor,
         currentExtraReps: Int
@@ -160,5 +235,17 @@ extension ExecutionViewModel {
                 let (reps, _, _) = SessionSeeder.itemRepsAndLoad(for: item, parser: parser)
                 return total + max(0, reps)
             }
+    }
+}
+
+private extension ExecutionBlock {
+    func hasObservationTarget(_ metric: PrimitiveMetric) -> Bool {
+        workTargets.contains { $0.metric == metric && $0.role == .observation }
+    }
+}
+
+private extension ExecutionSet {
+    func hasObservationTarget(_ metric: PrimitiveMetric) -> Bool {
+        workTargets.contains { $0.metric == metric && $0.role == .observation }
     }
 }

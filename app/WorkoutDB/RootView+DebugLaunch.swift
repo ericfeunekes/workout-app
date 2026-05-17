@@ -9,6 +9,7 @@
 import SwiftUI
 import CoreDomain
 import CoreSession
+import CoreTelemetry
 import FeaturesExecution
 import FeaturesToday
 import Persistence
@@ -64,9 +65,11 @@ extension RootView {
         let todayLoader = TodayLoader(cache: cache)
         let executionVM = ExecutionViewModel(
             context: context,
-            localCompletionWriter: { [cache, historyVM, todayVM, todayLoader] workout, setLogs in
-                try? await cache.saveWorkout(workout)
-                try? await cache.saveSetLogs(setLogs, workoutID: workout.id)
+            localCompletionWriter: { [cache, historyVM, todayVM, todayLoader] record in
+                await emitDebugCompletionCacheWrite(record, telemetry: telemetry) {
+                    try await cache.saveWorkout(record.workout)
+                    try await cache.saveSetLogs(record.setLogs, workoutID: record.workoutID)
+                }
                 await todayVM.reload(using: todayLoader)
                 await historyVM.load()
             },
@@ -105,9 +108,11 @@ extension RootView {
         let todayVM = TodayViewModel(planContext: planContext, telemetry: telemetry)
         let todayLoader = TodayLoader(cache: cache)
         let makeCompletionWriter: @MainActor () -> LocalCompletionWriter = {
-            { [cache, historyVM, todayVM, todayLoader] workout, setLogs in
-                try? await cache.saveWorkout(workout)
-                try? await cache.saveSetLogs(setLogs, workoutID: workout.id)
+            { [cache, historyVM, todayVM, todayLoader, telemetry] record in
+                await emitDebugCompletionCacheWrite(record, telemetry: telemetry) {
+                    try await cache.saveWorkout(record.workout)
+                    try await cache.saveSetLogs(record.setLogs, workoutID: record.workoutID)
+                }
                 await todayVM.reload(using: todayLoader)
                 await historyVM.load()
             }
@@ -308,6 +313,71 @@ extension RootView {
             return nil
         }
         return args[args.index(after: idx)]
+    }
+}
+
+private func emitDebugCompletionCacheWrite(
+    _ record: WorkoutCompletionRecord,
+    telemetry: TelemetryEmitter,
+    write: @Sendable () async throws -> Void
+) async {
+    do {
+        try await write()
+        emitDebugCompletionCacheWriteEvent(record, telemetry: telemetry, errorDescription: nil)
+    } catch {
+        emitDebugCompletionCacheWriteEvent(
+            record,
+            telemetry: telemetry,
+            errorDescription: String(describing: error)
+        )
+    }
+}
+
+private func emitDebugCompletionCacheWriteEvent(
+    _ record: WorkoutCompletionRecord,
+    telemetry: TelemetryEmitter,
+    errorDescription: String?
+) {
+    let payload = DebugCompletionCacheWriteEventPayload(
+        workoutID: record.workoutID.wireID,
+        setLogCount: record.setLogs.count,
+        primitiveSetLogCount: record.primitiveSetLogs.count,
+        hasNote: record.notes != nil,
+        error: errorDescription.map { String($0.prefix(240)) }
+    )
+    telemetry.emit(Event(
+        sessionID: TelemetrySession.id,
+        kind: errorDescription == nil ? "state" : "error",
+        name: errorDescription == nil
+            ? "execution.completion_local_cache_write_succeeded"
+            : "execution.completion_local_cache_write_failed",
+        dataJSON: encodeDebugTelemetryPayload(payload),
+        workoutID: record.workoutID
+    ))
+}
+
+private func encodeDebugTelemetryPayload<Payload: Encodable>(_ payload: Payload) -> String {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.sortedKeys]
+    // swiftlint:disable:next force_try
+    let data = try! encoder.encode(payload)
+    // swiftlint:disable:next force_unwrapping
+    return String(data: data, encoding: .utf8)!
+}
+
+private struct DebugCompletionCacheWriteEventPayload: Encodable {
+    let workoutID: String
+    let setLogCount: Int
+    let primitiveSetLogCount: Int
+    let hasNote: Bool
+    let error: String?
+
+    enum CodingKeys: String, CodingKey {
+        case workoutID = "workout_id"
+        case setLogCount = "set_log_count"
+        case primitiveSetLogCount = "primitive_set_log_count"
+        case hasNote = "has_note"
+        case error
     }
 }
 

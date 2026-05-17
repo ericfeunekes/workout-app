@@ -17,6 +17,10 @@ Run through this before any commit that represents "done." It's short on purpose
 
 - [ ] `make check` passes (green locally before pushing — pre-push also enforces the Python/import subset).
 - [ ] `make pre-qa` was run for cross-stack, app-logic, or visible iOS changes; if a required realistic-local harness is missing, the gap is routed before closeout.
+- [ ] Telemetry/proof requirements in the implementation plan were satisfied:
+      event names, queue rows, local-store rows, server rows, logs, or API
+      readbacks exist for behavior the UI cannot prove. If no telemetry was
+      needed, the closeout says why.
 - [ ] No TODOs, FIXMEs, or "temporary" code introduced. If a nitpick was noticed during the work, it was resolved as part of the commit (see `AGENTS.md` invariants).
 - [ ] No legacy / v1 references resurrected (YAML, Google Calendar, intent taxonomy, muscle/movement/equipment tables, the `workoutdb` CLI).
 - [ ] Commit message explains *why*, not just *what*.
@@ -33,7 +37,7 @@ If server models, SwiftData models, or the spec's entity definitions changed:
 - [ ] Contract tests under `tests/contract/` pass (`test_openapi_drift`, `test_swift_schema_parity`).
 - [ ] `docs/specs/v2-architecture.md` entity table reflects the change.
 - [ ] Server and app schema versions are equal (see `docs/MIGRATIONS.md` version handshake).
-- [ ] Local set_log preservation plan confirmed — either the SwiftData stage is lightweight, or the custom stage has an export+reimport path.
+- [ ] Local set_log preservation/reset decision confirmed — either the SwiftData stage is lightweight, the custom stage has an export+reimport path, or the owning cutover spec explicitly permits a destructive QA-data reset.
 
 ## API change
 
@@ -58,7 +62,7 @@ If the change is part of the accepted primitives cutover:
 
 - [ ] `docs/specs/primitives-data-model.md` and affected aspect docs remain the target authority.
 - [ ] Legacy per-timing-mode authoring/result payloads are not accepted in the final merged state.
-- [ ] Completed local workout history preservation is proven by migration test or simulator-visible migrated history.
+- [ ] Primitive cutover data handling matches the owning spec: either completed local workout history preservation is proven, or the destructive QA-data reset is explicit and tested.
 - [ ] `docs/prescription.md`, `docs/features/timing-modes.md`, and `docs/specs/v2-architecture.md` are either rewritten to the primitive contract or explicitly marked as current-state legacy references until the final docs sweep lands.
 - [ ] Contract tests assert primitive schema parity, not the old 12-case enum contract.
 
@@ -96,6 +100,9 @@ If the change affects user-visible iOS behavior:
 - [ ] `make check-app` passes, or any current pre-QA failure is named and scoped before QA starts.
 - [ ] `make qa-ready` passes before simulator/device QA starts.
 - [ ] The relevant feature/spec/bug note was read, and the QA run covered the user expectation changed by this work.
+- [ ] For persistence, sync, offline, auth, telemetry, or backend behavior, QA
+      included the matching readback surface from `docs/observability-map.md`
+      in addition to screenshots or video.
 - [ ] XcodeBuildMCP was used for the simulator build/run and for the useful interaction tools: taps, swipes, long presses, dismissals, inputs, screenshots, recording, and `snapshot-ui`.
 - [ ] The proof matched the claim: visual changes used visual evidence, state/persistence/sync claims used tests or state readbacks, and device-only behavior used a real-device path when needed.
 - [ ] Simulator video and screenshots were captured when the change had a visible iPhone UI surface.

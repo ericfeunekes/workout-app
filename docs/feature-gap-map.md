@@ -78,7 +78,6 @@ gap in the owning docs. Git history is the archive.
 | `PERSIST-GAP-001` | `docs/features/persistence.md` | SwiftData transaction rollback caveat is documented and tested but not lint-enforced. | `proof` |
 | `PERSIST-GAP-002` | `docs/features/persistence.md` | Live session snapshot bytes have no explicit schema version. | `implementation` |
 | `PERSIST-GAP-003` | `docs/features/persistence.md` | Persist pipeline encode/save failures are swallowed; bounded loss is accepted but not surfaced. | `implementation` |
-| `PUSH-GAP-001` | `docs/features/push-queue.md` | Offline completion atomicity is not guaranteed when set logs and status updates flush separately. | `implementation` |
 | `PUSH-GAP-002` | `docs/features/push-queue.md` | No background push path exists; push waits until app resumes if the user locks the phone before foreground flush. | `implementation` |
 | `BOOT-GAP-001` | `docs/features/bootstrap.md` | No general manual sync trigger exists outside bootstrap and Today refresh. | `implementation` |
 | `SETTINGS-GAP-002` | `docs/features/settings.md` | Sync now, change server, reset, units, telemetry export/debug, token recovery, and autoreg defaults need one visible behavior surface with proof. | `implementation` |
@@ -90,6 +89,7 @@ gap in the owning docs. Git history is the archive.
 | `TELEM-GAP-002` | `docs/features/telemetry.md` | No export/share surface exists in Settings. | `implementation` |
 | `TELEM-GAP-003` | `docs/features/telemetry.md` | No local debug overlay exists. | `implementation` |
 | `TELEM-GAP-004` | `docs/features/telemetry.md` | Local event retention is only a 10k ring buffer; pushed events are not deleted on acknowledgement. | `implementation` |
+| `TELEM-GAP-005` | `docs/features/telemetry.md` | Save & Done has stage-level proof telemetry, but other multi-surface flows still need explicit stage events when they cross local cache, push queue, and server boundaries. | `proof` |
 | `TIMING-GAP-001` | `docs/features/timing-modes.md` | Superset, circuit, and custom autoreg need explicit remaining-round semantics before enablement. | `decision` |
 | `TIMING-GAP-002` | `docs/features/timing-modes.md` | Distance-based intervals require manual lap/advance until GPS/sensor support exists. | `implementation` |
 | `TIMING-GAP-003` | `docs/features/timing-modes.md` | Background/resume view distortion is a visual watchlist without deterministic proof. | `proof` |

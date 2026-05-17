@@ -29,6 +29,8 @@ import WorkoutCoreFoundation
 /// every field is a `Sendable` array of `Sendable` domain values.
 public struct PulledDataset: Sendable {
     public var workouts: [Workout]
+    public var primitiveWorkouts: [PrimitiveWorkout]
+    public var primitiveWorkoutIDsToDelete: [WorkoutID]
     public var blocks: [Block]
     public var items: [WorkoutItem]
     public var alternatives: [ExerciseAlternative]
@@ -37,6 +39,8 @@ public struct PulledDataset: Sendable {
 
     public init(
         workouts: [Workout] = [],
+        primitiveWorkouts: [PrimitiveWorkout] = [],
+        primitiveWorkoutIDsToDelete: [WorkoutID] = [],
         blocks: [Block] = [],
         items: [WorkoutItem] = [],
         alternatives: [ExerciseAlternative] = [],
@@ -44,6 +48,8 @@ public struct PulledDataset: Sendable {
         userParameters: [UserParameter] = []
     ) {
         self.workouts = workouts
+        self.primitiveWorkouts = primitiveWorkouts
+        self.primitiveWorkoutIDsToDelete = primitiveWorkoutIDsToDelete
         self.blocks = blocks
         self.items = items
         self.alternatives = alternatives
@@ -59,6 +65,11 @@ public protocol WorkoutCache: Sendable {
 
     /// Return workouts, optionally filtered by status and/or updated-since.
     func loadWorkouts(status: WorkoutStatus?, since: Date?) async throws -> [Workout]
+
+    /// Primitive workouts pulled from the server's Block > Set > Slot
+    /// contract. Stored separately from legacy flattened workouts so the
+    /// primitive runtime can reload the authored shape intact.
+    func loadPrimitiveWorkouts() async throws -> [PrimitiveWorkout]
 
     /// All blocks for a given workout, in position order.
     func loadBlocks(workoutID: WorkoutID) async throws -> [Block]
@@ -116,6 +127,11 @@ public protocol WorkoutCache: Sendable {
     /// may have zero set_logs if every set was skipped.
     func loadSetLogs(workoutID: WorkoutID) async throws -> [SetLog]
 
+    /// Primitive result logs for a given workout, ordered by their
+    /// execution coordinates. These are the Block > Set > Slot analogue
+    /// to `loadSetLogs(workoutID:)`.
+    func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [PrimitiveSetLog]
+
     /// Recent set_logs that reference `exerciseID` — either as the planned
     /// `exerciseID` on the underlying `WorkoutItem`, or as a mid-workout
     /// swap captured in `performedExerciseID`. Sorted newest first by
@@ -157,6 +173,11 @@ public protocol WorkoutCache: Sendable {
     /// Idempotent on `SetLog.id` — re-persisting the same set replaces in
     /// place (matches the cache's upsert-on-UUID contract).
     func saveSetLogs(_ setLogs: [SetLog], workoutID: WorkoutID) async throws
+
+    /// Insert or upsert primitive result logs for a completed primitive
+    /// workout. Idempotent on `PrimitiveSetLog.id`; `workoutID` stamps
+    /// logs that do not already carry one.
+    func savePrimitiveSetLogs(_ setLogs: [PrimitiveSetLog], workoutID: WorkoutID) async throws
 
     /// Delete all local set_logs for a workout and return it to planned.
     /// Used by History's same-day reset affordance so an accidental log
@@ -228,9 +249,13 @@ public actor WorkoutCacheImpl: WorkoutCache {
             //    parameter rows. SetLogs belong to Execution, not to the
             //    pulled workout tree; they survive reconcile by design.
             try reconcileWorkoutSubtrees(dataset: dataset, preload: preload)
+            try reconcilePrimitiveWorkoutTombstones(dataset: dataset, preload: preload)
 
             for w in dataset.workouts {
                 try upsertWorkout(w, preload: preload)
+            }
+            for w in dataset.primitiveWorkouts {
+                try upsertPrimitiveWorkout(w, preload: preload)
             }
             for b in dataset.blocks {
                 try upsertBlock(b, preload: preload)
@@ -287,6 +312,13 @@ public actor WorkoutCacheImpl: WorkoutCache {
         descriptor.sortBy = [SortDescriptor(\BlockModel.position)]
         let rows = try modelContext.fetch(descriptor)
         return rows.map { $0.toDomain() }
+    }
+
+    public func loadPrimitiveWorkouts() async throws -> [PrimitiveWorkout] {
+        var descriptor = FetchDescriptor<PrimitiveWorkoutModel>()
+        descriptor.sortBy = [SortDescriptor(\PrimitiveWorkoutModel.name)]
+        let rows = try modelContext.fetch(descriptor)
+        return try rows.map { try $0.toDomain() }
     }
 
     public func loadItems(blockID: BlockID) async throws -> [WorkoutItem] {
@@ -393,8 +425,28 @@ public actor WorkoutCacheImpl: WorkoutCache {
         return rows.map { $0.toDomain() }
     }
 
+    public func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [PrimitiveSetLog] {
+        let descriptor = FetchDescriptor<PrimitiveWorkoutModel>(
+            predicate: #Predicate<PrimitiveWorkoutModel> { $0.id == workoutID }
+        )
+        guard let row = try modelContext.fetch(descriptor).first else { return [] }
+        return try row.primitiveSetLogs().sorted {
+            if $0.blockRepeatIndex != $1.blockRepeatIndex {
+                return $0.blockRepeatIndex < $1.blockRepeatIndex
+            }
+            if $0.setRepeatIndex != $1.setRepeatIndex {
+                return $0.setRepeatIndex < $1.setRepeatIndex
+            }
+            if $0.setIndex != $1.setIndex {
+                return $0.setIndex < $1.setIndex
+            }
+            return $0.completedAt < $1.completedAt
+        }
+    }
+
     public func clear() async throws {
         try modelContext.delete(model: WorkoutModel.self)
+        try modelContext.delete(model: PrimitiveWorkoutModel.self)
         try modelContext.delete(model: BlockModel.self)
         try modelContext.delete(model: WorkoutItemModel.self)
         try modelContext.delete(model: ExerciseModel.self)

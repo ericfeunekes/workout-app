@@ -46,6 +46,8 @@ final class FakeHistoryCache: WorkoutCache, @unchecked Sendable {
         return workouts.filter { $0.status == status }
     }
 
+    func loadPrimitiveWorkouts() async throws -> [PrimitiveWorkout] { [] }
+
     func loadBlocks(workoutID: WorkoutID) async throws -> [Block] {
         blocksByWorkout[workoutID] ?? []
     }
@@ -125,6 +127,8 @@ final class FakeHistoryCache: WorkoutCache, @unchecked Sendable {
         setLogsByWorkout[workoutID] ?? []
     }
 
+    func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [PrimitiveSetLog] { [] }
+
     func loadSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [SetLog] {
         guard limit > 0 else { return [] }
         let allItemIDs = itemsByBlock.values
@@ -180,6 +184,8 @@ final class FakeHistoryCache: WorkoutCache, @unchecked Sendable {
         }
         setLogsByWorkout[workoutID] = bucket
     }
+
+    func savePrimitiveSetLogs(_ setLogs: [PrimitiveSetLog], workoutID: WorkoutID) async throws {}
 
     func resetWorkout(workoutID: WorkoutID) async throws {
         setLogsByWorkout[workoutID] = []

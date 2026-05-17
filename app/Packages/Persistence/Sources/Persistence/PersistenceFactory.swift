@@ -57,13 +57,23 @@ public struct PersistenceFactory {
     public static func makeDefault(
         tokenServiceName: String = "com.ericfeunekes.WorkoutDB.token"
     ) throws -> PersistenceFactory {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV5.self)
-        let configuration = ModelConfiguration(schema: schema)
-        let container = try ModelContainer(
-            for: schema,
-            migrationPlan: WorkoutDBMigrationPlan.self,
-            configurations: [configuration]
-        )
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV6.self)
+        let storeURL = try defaultStoreURL()
+        let configuration = ModelConfiguration(schema: schema, url: storeURL)
+        let container: ModelContainer
+        do {
+            container = try ModelContainer(
+                for: schema,
+                migrationPlan: nil,
+                configurations: [configuration]
+            )
+        } catch {
+            container = try ModelContainer(
+                for: schema,
+                migrationPlan: WorkoutDBMigrationPlan.self,
+                configurations: [configuration]
+            )
+        }
         try runPostMigrationBackfills(on: container)
         return PersistenceFactory(
             container: container,
@@ -73,11 +83,22 @@ public struct PersistenceFactory {
         )
     }
 
+    private static func defaultStoreURL() throws -> URL {
+        try FileManager.default
+            .url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+            .appendingPathComponent("default.store")
+    }
+
     /// In-memory container, used for tests and previews.
     public static func makeInMemory(
         tokenServiceName: String = "com.ericfeunekes.WorkoutDB.token.test"
     ) throws -> PersistenceFactory {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV5.self)
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV6.self)
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(
             for: schema,

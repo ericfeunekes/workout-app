@@ -100,6 +100,47 @@ runCase("WorkoutSource raw values are non-empty and unique") {
     }
 }
 
+runCase("Primitive enums match accepted wire raw values") {
+    try expectEqual(Set(PrimitiveTimingMode.allCases.map(\.rawValue)), [
+        "set_bounded", "time_bounded", "cap_bounded", "target_bounded",
+    ])
+    try expectEqual(Set(PrimitiveTraversal.allCases.map(\.rawValue)), [
+        "sequential", "round_robin", "amrap",
+    ])
+    try expectEqual(Set(PrimitiveLogRole.allCases.map(\.rawValue)), [
+        "slot", "set_result", "block_result",
+    ])
+}
+
+runCase("Primitive workout can express strength and cap-bounded AMRAP slices") {
+    let workoutID = UUID(uuidString: "10000000-0000-4000-8000-000000000001")!
+    let blockID = UUID(uuidString: "20000000-0000-4000-8000-000000000001")!
+    let setID = UUID(uuidString: "30000000-0000-4000-8000-000000000001")!
+    let slotID = UUID(uuidString: "40000000-0000-4000-8000-000000000001")!
+    let exerciseID = UUID(uuidString: "50000000-0000-4000-8000-000000000001")!
+    let slot = PrimitiveSlot(
+        id: slotID,
+        exerciseID: exerciseID,
+        workTargets: [PrimitiveWorkTarget(metric: .reps, valueForm: .single, value: 5, role: .completion)],
+        load: PrimitiveLoad(value: 100, unit: .kg, unitType: .absolute),
+        stimuli: [PrimitiveStimulus(type: .rir, target: 2)]
+    )
+    let set = PrimitiveSet(
+        id: setID,
+        timing: PrimitiveTiming(mode: .setBounded),
+        repeatCount: 3,
+        slots: [slot]
+    )
+    let workout = PrimitiveWorkout(
+        id: workoutID,
+        name: "Primitive strength",
+        blocks: [PrimitiveBlock(id: blockID, sets: [set])]
+    )
+    try expectEqual(workout.blocks[0].sets[0].slots[0].id, slotID)
+    try expectEqual(workout.blocks[0].sets[0].repeatCount, 3)
+    try expectEqual(workout.blocks[0].sets[0].slots[0].stimuli[0].type, .rir)
+}
+
 runCase("UserParameterSource has claude, app_log, manual") {
     // Spec line 190 allows all three for user_parameters — app_log is the
     // app writing rows itself (e.g. bodyweight_kg captured at completion).

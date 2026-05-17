@@ -41,6 +41,11 @@ extension PushQueue {
         _ = try await store.removeMatchingDedupKey(key)
     }
 
+    func dropExistingPrimitiveSetLog(id: UUID) async throws {
+        let key = "primitiveSetLog:\(id.uuidString.lowercased())"
+        _ = try await store.removeMatchingDedupKey(key)
+    }
+
     /// Drop every queued row whose payload is a `.statusUpdate` matching
     /// the given (workoutID, status) pair. `completedAt` is intentionally
     /// NOT part of the identity — a re-send with a fresher completedAt
@@ -51,6 +56,14 @@ extension PushQueue {
         status: CoreDomain.WorkoutStatus
     ) async throws {
         let key = "status:\(workoutID.uuidString.lowercased()):\(status.rawValue)"
+        _ = try await store.removeMatchingDedupKey(key)
+    }
+
+    /// Drop every queued grouped completion for the same workout. A later
+    /// completion record is the freshest local authority and should replace
+    /// the earlier REST publication.
+    func dropExistingCompletionResults(workoutID: WorkoutID) async throws {
+        let key = "completion:\(workoutID.uuidString.lowercased())"
         _ = try await store.removeMatchingDedupKey(key)
     }
 

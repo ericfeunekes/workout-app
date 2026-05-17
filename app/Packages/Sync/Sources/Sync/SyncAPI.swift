@@ -115,6 +115,10 @@ public final class SyncAPI: Sendable {
         try await push.enqueueSetLogs(logs)
     }
 
+    public func pushPrimitiveLog(_ logs: [CoreDomain.PrimitiveSetLog]) async throws {
+        try await push.enqueuePrimitiveSetLogs(logs)
+    }
+
     /// Enqueue a workout status change. See `docs/sync.md` § "Push protocol".
     ///
     /// `notes` rides on the terminal status push so the server is
@@ -133,6 +137,14 @@ public final class SyncAPI: Sendable {
             completedAt: completedAt,
             notes: notes
         )
+    }
+
+    /// Enqueue an app-owned completed-workout record as one grouped
+    /// `/api/sync/results` publication. This keeps final set_logs and the
+    /// completed status together for REST while leaving the domain record
+    /// transport-neutral for future replication surfaces.
+    public func pushCompletion(_ record: CoreDomain.WorkoutCompletionRecord) async throws {
+        try await push.enqueueCompletionResults(record)
     }
 
     /// Enqueue a reset for a same-day workout the user accidentally logged.

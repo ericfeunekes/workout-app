@@ -6,6 +6,7 @@
 
 import XCTest
 import CoreDomain
+import CoreSession
 import WorkoutCoreFoundation
 @testable import FeaturesExecution
 
@@ -221,6 +222,123 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         XCTAssertEqual(logs.first?.durationSec, 75)
     }
 
+    func testAMRAPResultRecordsPrimitiveSetResultOnLiveCompletionPath() async throws {
+        let start = Date(timeIntervalSince1970: 1_700_003_000)
+        let clock = MetconMutableClock(now: start)
+        let fixture = Self.metconThenStrengthContext(
+            firstMode: .amrap,
+            firstTimingConfigJSON: #"{"time_cap_sec":300}"#,
+            firstItems: [
+                ("Pull-up", #"{"reps":5}"#),
+                ("Push-up", #"{"reps":10}"#),
+            ],
+            includePrimitive: true
+        )
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
+            }
+        )
+        let vm = ExecutionViewModel(context: fixture.context, clock: clock, push: hooks)
+
+        vm.start()
+        vm.logAMRAPStation(reps: 5)
+        clock.now = start.addingTimeInterval(300)
+        vm.logAMRAPPartialResult(extraReps: 4)
+        vm.complete()
+        vm.saveAndDone()
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let completions = await recorder.completions
+        let completion = try XCTUnwrap(completions.first)
+        let primitive = try XCTUnwrap(completion.primitiveSetLogs.first)
+        XCTAssertEqual(primitive.role, .setResult)
+        XCTAssertEqual(primitive.workoutID, fixture.context.workout.id)
+        XCTAssertEqual(primitive.setIndex, 0)
+        XCTAssertEqual(primitive.rounds, 0)
+        XCTAssertEqual(primitive.reps, 4)
+        XCTAssertEqual(primitive.durationSec, 300)
+        XCTAssertEqual(primitive.completedAt, clock.now)
+    }
+
+    func testAMRAPPrimitiveSetResultUsesCapTimeWhenSubmittedAfterExpiry() async throws {
+        let start = Date(timeIntervalSince1970: 1_700_003_250)
+        let clock = MetconMutableClock(now: start)
+        let fixture = Self.metconThenStrengthContext(
+            firstMode: .amrap,
+            firstTimingConfigJSON: #"{"time_cap_sec":300}"#,
+            firstItems: [
+                ("Pull-up", #"{"reps":5}"#),
+                ("Push-up", #"{"reps":10}"#),
+            ],
+            includePrimitive: true
+        )
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
+            }
+        )
+        let vm = ExecutionViewModel(context: fixture.context, clock: clock, push: hooks)
+
+        vm.start()
+        vm.logAMRAPStation(reps: 5)
+        clock.now = start.addingTimeInterval(317)
+        vm.logAMRAPPartialResult(extraReps: 4)
+        vm.complete()
+        vm.saveAndDone()
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let completions = await recorder.completions
+        let completion = try XCTUnwrap(completions.first)
+        let primitive = try XCTUnwrap(completion.primitiveSetLogs.first)
+        XCTAssertEqual(primitive.durationSec, 300)
+        XCTAssertEqual(primitive.completedAt, start.addingTimeInterval(300))
+    }
+
+    func testForTimeResultRecordsPrimitiveBlockResultOnLiveCompletionPath() async throws {
+        let start = Date(timeIntervalSince1970: 1_700_003_500)
+        let clock = MetconMutableClock(now: start)
+        let fixture = Self.metconThenStrengthContext(
+            firstMode: .forTime,
+            firstTimingConfigJSON: #"{"time_cap_sec":900}"#,
+            firstItems: [
+                ("Thruster", #"{"reps":21,"load_kg":43.1}"#),
+                ("Pull-up", #"{"reps":21}"#),
+            ],
+            includePrimitive: true
+        )
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
+            }
+        )
+        let vm = ExecutionViewModel(context: fixture.context, clock: clock, push: hooks)
+
+        vm.start()
+        clock.now = start.addingTimeInterval(455)
+        vm.logForTimeResult()
+        vm.complete()
+        vm.saveAndDone()
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let completions = await recorder.completions
+        let completion = try XCTUnwrap(completions.first)
+        let primitive = try XCTUnwrap(completion.primitiveSetLogs.first)
+        XCTAssertEqual(primitive.role, .blockResult)
+        XCTAssertEqual(primitive.workoutID, fixture.context.workout.id)
+        XCTAssertEqual(primitive.setIndex, 0)
+        XCTAssertNil(primitive.rounds)
+        XCTAssertNil(primitive.reps)
+        XCTAssertEqual(primitive.durationSec, 455)
+        XCTAssertEqual(primitive.completedAt, clock.now)
+    }
+
     // MARK: - Fixtures
 
     private struct Fixture {
@@ -232,7 +350,8 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
     private static func metconThenStrengthContext(
         firstMode: TimingMode,
         firstTimingConfigJSON: String,
-        firstItems: [(String, String)]
+        firstItems: [(String, String)],
+        includePrimitive: Bool = false
     ) -> Fixture {
         let userID = UUID()
         let workoutID = UUID()
@@ -299,16 +418,89 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
             prescriptionJSON: #"{"sets":3,"reps":5,"load_kg":100}"#
         )
         exercises[strengthExerciseID] = Exercise(id: strengthExerciseID, name: "Back Squat")
+        let primitiveWorkout = includePrimitive
+            ? makePrimitiveWorkout(
+                workoutID: workoutID,
+                name: workout.name,
+                blockID: metconBlockID,
+                mode: firstMode,
+                items: metconItems
+            )
+            : nil
 
         return Fixture(
             context: WorkoutContext(
                 workout: workout,
+                primitiveWorkout: primitiveWorkout,
+                primitiveExecutionPlan: primitiveWorkout.map { ExecutionPlan(workout: $0) },
                 blocks: [metconBlock, strengthBlock],
                 itemsByBlock: [metconItems, [strengthItem]],
                 exercises: exercises
             ),
             firstItemID: metconItems[0].id,
             secondItemID: metconItems[min(1, metconItems.count - 1)].id
+        )
+    }
+
+    private static func makePrimitiveWorkout(
+        workoutID: UUID,
+        name: String,
+        blockID: UUID,
+        mode: TimingMode,
+        items: [WorkoutItem]
+    ) -> PrimitiveWorkout {
+        let slots = items.map { item in
+            PrimitiveSlot(
+                id: UUID(),
+                exerciseID: item.exerciseID,
+                workTargets: [
+                    PrimitiveWorkTarget(metric: .reps, valueForm: .single, value: 1, role: .completion),
+                ]
+            )
+        }
+        let primitiveSet: PrimitiveSet
+        let blockTargets: [PrimitiveWorkTarget]
+        switch mode {
+        case .amrap:
+            blockTargets = []
+            primitiveSet = PrimitiveSet(
+                id: UUID(),
+                timing: PrimitiveTiming(mode: .capBounded, capSec: 300),
+                traversal: .amrap,
+                workTargets: [
+                    PrimitiveWorkTarget(metric: .rounds, valueForm: .open, role: .observation),
+                ],
+                slots: slots
+            )
+        case .forTime:
+            blockTargets = [
+                PrimitiveWorkTarget(metric: .duration, valueForm: .open, role: .observation),
+            ]
+            primitiveSet = PrimitiveSet(
+                id: UUID(),
+                timing: PrimitiveTiming(mode: .setBounded),
+                traversal: .sequential,
+                slots: slots
+            )
+        default:
+            blockTargets = []
+            primitiveSet = PrimitiveSet(
+                id: UUID(),
+                timing: PrimitiveTiming(mode: .setBounded),
+                traversal: .sequential,
+                slots: slots
+            )
+        }
+        return PrimitiveWorkout(
+            id: workoutID,
+            name: name,
+            blocks: [
+                PrimitiveBlock(
+                    id: blockID,
+                    workTargets: blockTargets,
+                    sets: [primitiveSet]
+                ),
+            ]
         )
     }
 }

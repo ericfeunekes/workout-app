@@ -10,7 +10,7 @@ covers:
   - Wire format for prescriptions (authoring-shape aspect)
   - Set log row shape (log-shape aspect)
   - Seed/log/correction-time runtime resolution (runtime-resolution aspect)
-  - Cutover posture for a complete primitives cutover with local-log preservation (cutover aspect)
+  - Cutover posture for a complete primitives cutover with explicit QA-data reset (cutover aspect)
 ---
 
 # Primitives data model
@@ -70,7 +70,7 @@ authority.
 - **Authoring shape** — the wire format for workout / block / set / slot, how each of the 7 primitives serializes, merge rules for library defaults + alternatives + hierarchy walk. See `primitives-data-model/authoring-shape.md`.
 - **Log shape** — the `set_log` row model, three log roles (`slot`, `set_result`, `block_result`), deterministic UUID composition, per-stimulus typed columns, overlay columns, write semantics. See `primitives-data-model/log-shape.md`.
 - **Runtime resolution** — seed-time transform into `ExecutionPlan`, relative-load resolution against `user_parameters`, driver iteration contract over primitive cells, correction semantics via same-UUID upsert. See `primitives-data-model/runtime-resolution.md`.
-- **Cutover posture** — complete primitives cutover with no legacy acceptance path and explicit preservation of completed local workout logs. See `primitives-data-model/cutover.md`.
+- **Cutover posture** — complete primitives cutover with no legacy acceptance path and explicit reset of current local/server QA workout data. See `primitives-data-model/cutover.md`.
 
 ### Out of scope
 
@@ -79,7 +79,7 @@ authority.
 - **New stimulus types.** The spec supports RIR (shipping), RPE (column reserved), and HR-zone as derived-from-telemetry. Adding velocity, bar-speed, or other stimulus types is a followup; each needs its own small schema migration and resolver.
 - **Cross-stimulus autoreg.** Today only RIR has an autoreg rule. The spec accommodates multiple stimuli on a slot but does not specify cross-stimulus rule semantics. Deferred.
 - **Session-level primitives.** Deload multipliers, weekly volume caps, fatigue models — those belong to a layer above the single-workout primitives. Out of scope.
-- **Legacy acceptance windows.** The cutover does not accept both old and new workout shapes after it lands. Existing server-side prescriptions can be re-pushed by Claude in the primitive shape. Completed local workout logs are different: they are Eric's authoritative client data and must survive via an explicit export/transform/re-import or archival migration path.
+- **Legacy acceptance windows.** The cutover does not accept both old and new workout shapes after it lands. Existing server-side prescriptions can be re-pushed by Claude in the primitive shape. Current completed local logs are QA data for this pre-real-use cutover and may be reset rather than migrated.
 
 ## Acceptance criteria
 
@@ -108,13 +108,13 @@ Proof: a unit test with two `user_parameters` updates (bodyweight_kg changes bet
 
 Proof: a test that logs a slot, edits it, and asserts the row count on `set_log` is exactly 1 with the edited values.
 
-**A5. The cutover preserves completed local workout history and remains reversible within dev.** Existing completed local set logs survive the SwiftData schema cutover as user-observable history facts. The preservation path may transform rows into the primitive log shape or archive them into a read-only historical lane, but it must not silently discard completed workout history. Rolling back the spec still means reverting the server migration + SwiftData version + app code + fixtures in one commit; both sides of the cutover remain runnable.
+**A5. The cutover explicitly resets old QA workout data and remains reversible within dev.** Existing local/server workouts and logs are pre-real-use QA data for this cutover and may be deleted instead of migrated. The reset must be explicit and tested; old data must not silently mix with primitive data. Rolling back the spec still means reverting the server migration + SwiftData version + app code + fixtures in one commit; both sides of the cutover remain runnable.
 
-Proof: migration tests export a pre-cutover local store with representative completed logs, migrate it, and assert that the same workout dates, exercises, performed values, notes, and completion status are still visible post-cutover. Bisect across the cutover commit; both sides of the bisect let `uv run pytest` and the app integration tests pass against the fixtures appropriate to that side.
+Proof: reset/cutover tests start from a pre-cutover store with representative QA workouts/logs, apply the primitive cutover, and assert old-shape workouts/logs are gone while fresh primitive workouts can be pulled, executed, logged, and pushed. Bisect across the cutover commit; both sides of the bisect let `uv run pytest` and the app integration tests pass against the fixtures appropriate to that side.
 
 ### Explicitly not in the acceptance bar
 
-- **Legacy shape remains accepted after cutover.** Not required and explicitly forbidden. Preservation is a one-way migration of completed local history, not a compatibility mode.
+- **Legacy shape remains accepted after cutover.** Not required and explicitly forbidden. Resetting QA data is not a compatibility mode.
 - **The UI looks different.** Pure model-side spec; UI changes are a separate feature.
 - **Every driver is rewritten to be parametric.** Drivers can stay hand-coded per timing mode after the cutover, as long as they read against the new contract. Parametric consolidation is a followup.
 
@@ -122,7 +122,7 @@ Proof: migration tests export a pre-cutover local store with representative comp
 
 ### Assumptions
 
-- **Single-user dev mode persists through this cutover.** No multi-user or production compatibility window is needed. The preservation constraint is narrower: completed local workout logs must survive because they are Eric's authoritative workout history. Server-side prescriptions and in-flight sessions can be rebuilt or abandoned.
+- **Single-user dev mode persists through this cutover.** No multi-user or production compatibility window is needed. Current local/server workouts are QA data, so the primitive cutover may reset them rather than migrate them. Server-side prescriptions and in-flight sessions can be rebuilt or abandoned.
 - **Claude continues to own exercise IDs and prescription composition.** The 7 primitives are authored by Claude in conversation; the app consumes them. If authoring shifts to an in-app editor, the component primitives noted in the concept doc become in-scope.
 - **Stimulus types stay discrete and rare.** The schema uses per-stimulus typed columns (`rir`, `rpe` reserved, raw telemetry columns for derived stimuli). Adding a new stimulus type is a migration. Current count: 2-3 foreseeable.
 
@@ -146,7 +146,13 @@ These are explicit; implementation-planning should treat them as things to inves
 
 **OQ-1. Driver parametric consolidation.** After the contract lands, is it worth collapsing similar drivers (e.g., EMOM and Tabata both being time_bounded × rounds) into one parametric driver, or do the hand-coded drivers survive? Spike: rewrite EMOM + Tabata as one driver reading the `(set.timing, set.traversal, set.repeat, block.repeat, block.timer)` cell. If the resulting code is clearer than two, consolidate across the rest.
 
-**OQ-2. Validation layer.** The authoring-shape aspect enumerates validation constraints (every set has ≥1 slot OR is a pure-timer rest set with `slots: []`, every slot's `work_target` has ≥1 metric with a completion role, etc.). Where do these run — on server ingest, on pull, on seed? Proposal: server-side at ingest, with a re-validation pass at seed as a belt-and-suspenders. Needs a decision.
+**OQ-2. Validation layer.** Resolved for the cutover: server ingest is the
+authoritative rejection point for malformed primitive workouts. The app also
+performs seed-time defensive revalidation before building an `ExecutionPlan` so
+locally cached or manually seeded data cannot execute if it violates the
+primitive contract. Pull-time mapping may reject malformed payloads as a decode
+failure, but it is not a second source of authoring truth. Validation failures
+must point to the offending block/set/slot and the violated primitive rule.
 
 **OQ-3. UI editor affordances.** When Eric edits a workout in the app (today: limited to swap + past-set edit; future: richer), does the editor surface the full primitive tree or a flattened view? Out of scope for this spec, but the node-identity rules bake in assumptions about what an editor will do. Flag for the UI-component-primitives downstream unit.
 
@@ -154,19 +160,20 @@ These are explicit; implementation-planning should treat them as things to inves
 
 ## Cutover posture
 
-Because the repo is single-user dev with no production compatibility constraint, the cutover is a **complete replacement of the active contract**: old prescription JSON and timing-mode shapes stop being accepted, and Claude re-pushes active workouts in the new shape. Completed local workout logs are not disposable. The SwiftData version bump must preserve those history facts through an explicit migration path while dropping legacy authoring and in-flight-session state. See `primitives-data-model/cutover.md` for the specific steps and what ships in the cutover commit.
+Because the repo is single-user dev with no production compatibility constraint, the cutover is a **complete replacement of the active contract**: old prescription JSON and timing-mode shapes stop being accepted, current local/server QA workouts may be reset, and Claude re-pushes active workouts in the new shape. The SwiftData version bump must make the destructive reset explicit while dropping legacy authoring, old logs, and in-flight-session state. See `primitives-data-model/cutover.md` for the specific steps and what ships in the cutover commit.
 
 Earlier coordinated-cutover analysis considered a production-preservation
-scenario with outbox drain, per-mode backfill, and temporary dual-shape server
-acceptance. That is not this repo's active requirement. If broader preservation
-constraints appear, rerun requirements planning and update this spec rather than
-reviving scratch analysis as authority.
+scenario with outbox drain, per-mode backfill, completed-log migration, and
+temporary dual-shape server acceptance. That is not this repo's active
+requirement. If broader preservation constraints appear, rerun requirements
+planning and update this spec rather than reviving scratch analysis as
+authority.
 
 ## Handoff to implementation-planning
 
 Implementation-planning reads this spec and the four aspect files to plan the build. Specifically:
 
 - **A1 is the primary proof surface.** Plan backward from "every timing-mode integration test passes against a new-shape fixture." The shape of the build is: add the new schema, add the seed-time transform, port drivers to read the new contract, regenerate fixtures.
-- **A5 (reversibility) gates the shape of the cutover commit.** The cutover aspect says what lands in one PR; implementation-planning should treat that list as the shipping contract.
+- **A5 (explicit reset and reversibility) gates the shape of the cutover commit.** The cutover aspect says what lands in one PR; implementation-planning should treat that list as the shipping contract.
 - **OQ-1 (driver parametric consolidation) is a spike, not a build task.** Plan the spike before committing to a full driver rewrite pass.
-- **OQ-2 (validation location) is a decision, not a build task.** Resolve with Eric before writing validation code.
+- **OQ-2 (validation location) is resolved.** Server ingest is authoritative; app seed-time validation is defensive; pull-time mapping may reject malformed payloads as decode failure.

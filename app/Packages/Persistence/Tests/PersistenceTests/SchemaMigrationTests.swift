@@ -7,21 +7,23 @@
 // from the server.
 //
 // Covers:
-//   • V1 → V5 — pre-006 store opens under the current schema. The
-//     planner chains V1→V2→V3→V4→V5 lightweight stages.
-//   • V2 → V5 — post-006, pre-R1.4 store opens under V5 AND the SetLog
+//   • V1 → V6 — pre-006 store opens under the current schema. The
+//     planner chains V1→V2→V3→V4→V5→V6 lightweight stages.
+//   • V2 → V6 — post-006, pre-R1.4 store opens under V6 AND the SetLog
 //     denormalization backfill resolves `workoutID` + `plannedExerciseID`
 //     from the parent WorkoutItem → Block chain for rows that predate
 //     the column.
-//   • V3 → V5 — R1.4-era store opens under the current schema AND the
+//   • V3 → V6 — R1.4-era store opens under the current schema AND the
 //     PushItem priority + dedupKey backfill populates the new columns
 //     from each row's decoded envelope.
-//   • V4 → V5 — perf-002-era store opens with skipped/side/intent defaults.
+//   • V4 → V6 — perf-002-era store opens with skipped/side/intent defaults.
+//   • V5 → V6 — the primitive-workout cache table is introduced without
+//     stranding existing workout logs.
 //
 // Strategy per test: spin up an on-disk ModelContainer scoped to the old
 // version, insert a few rows via the shadow types, tear the container
-// down, then reopen the same on-disk URL with a V4-configured container
-// (migration plan runs on open). Read the rows back through the V4
+// down, then reopen the same on-disk URL with the current configured
+// container (migration plan runs on open). Read the rows back through the
 // models and the backfill helper(s).
 
 import XCTest
@@ -94,10 +96,10 @@ final class SchemaMigrationTests: XCTestCase {
 
     /// Build a current ModelContainer pointing at the same on-disk URL, with
     /// the full migration plan so the appropriate stage(s) fire at open.
-    /// V5 is the current runtime schema (per `SchemaVersions.swift`);
+    /// V6 is the current runtime schema (per `SchemaVersions.swift`);
     /// older stores chain forward through the plan.
-    private func makeV4Container(at url: URL) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV5.self)
+    private func makeCurrentContainer(at url: URL) throws -> ModelContainer {
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV6.self)
         let configuration = ModelConfiguration(schema: schema, url: url)
         return try ModelContainer(
             for: schema,
@@ -296,10 +298,10 @@ final class SchemaMigrationTests: XCTestCase {
             try seedV1Store(at: url, ids: ids)
         }
 
-        // 2. Reopen as V5 — the current runtime schema. The planner
-        //    chains V1→V2→V3→V4→V5 lightweight stages automatically.
-        let v4Container = try makeV4Container(at: url)
-        let context = ModelContext(v4Container)
+        // 2. Reopen as V6 — the current runtime schema. The planner
+        //    chains V1→V2→V3→V4→V5→V6 lightweight stages automatically.
+        let currentContainer = try makeCurrentContainer(at: url)
+        let context = ModelContext(currentContainer)
 
         // 3. Read back the Exercise row and confirm V1 data survived
         //    with the new-in-V2 fields defaulted to nil.
@@ -446,8 +448,8 @@ final class SchemaMigrationTests: XCTestCase {
             )
         }
 
-        let v4Container = try makeV4Container(at: url)
-        let context = ModelContext(v4Container)
+        let currentContainer = try makeCurrentContainer(at: url)
+        let context = ModelContext(currentContainer)
         try backfillSetLogDenormalization(context: context)
 
         let setLogs = try context.fetch(FetchDescriptor<SetLogModel>())
@@ -497,11 +499,11 @@ final class SchemaMigrationTests: XCTestCase {
             try seedV2Store(at: url, ids: ids)
         }
 
-        // 2. Reopen as V5. The V2→V3 lightweight stage adds the two
+        // 2. Reopen as V6. The V2→V3 lightweight stage adds the two
         //    nullable columns; the rows land with both nil until the
         //    backfill runs.
-        let v4Container = try makeV4Container(at: url)
-        let context = ModelContext(v4Container)
+        let currentContainer = try makeCurrentContainer(at: url)
+        let context = ModelContext(currentContainer)
 
         // 3. Drive the backfill helper (the factory runs this once at
         //    open time; here we call it directly so the test owns the
@@ -557,6 +559,18 @@ final class SchemaMigrationTests: XCTestCase {
     /// perf-002 build immediately before the skipped/side/intent cutover.
     private func makeV4OnlyContainer(at url: URL) throws -> ModelContainer {
         let schema = Schema(versionedSchema: WorkoutDBSchemaV4.self)
+        let configuration = ModelConfiguration(schema: schema, url: url)
+        return try ModelContainer(
+            for: schema,
+            migrationPlan: nil,
+            configurations: [configuration]
+        )
+    }
+
+    /// Build a V5-only ModelContainer (no migration plan). Simulates the
+    /// build immediately before the primitive workout cache table existed.
+    private func makeV5OnlyContainer(at url: URL) throws -> ModelContainer {
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV5.self)
         let configuration = ModelConfiguration(schema: schema, url: url)
         return try ModelContainer(
             for: schema,
@@ -724,11 +738,11 @@ final class SchemaMigrationTests: XCTestCase {
             )
         }
 
-        // 2. Reopen as V5. The V3→V4 lightweight stage adds the two
+        // 2. Reopen as V6. The V3→V4 lightweight stage adds the two
         //    columns with defaults (priority=0, dedupKey=nil); the
         //    backfill then rewrites them from each envelope.
-        let v4Container = try makeV4Container(at: url)
-        let context = ModelContext(v4Container)
+        let currentContainer = try makeCurrentContainer(at: url)
+        let context = ModelContext(currentContainer)
 
         // 3. Drive the backfill helper directly — same pattern as the
         //    V2→V3 test above. The factory runs this once at open time
@@ -850,8 +864,8 @@ final class SchemaMigrationTests: XCTestCase {
             try seedV4WorkoutAndSetLogStore(at: url, ids: ids)
         }
 
-        let v5Container = try makeV4Container(at: url)
-        let context = ModelContext(v5Container)
+        let currentContainer = try makeCurrentContainer(at: url)
+        let context = ModelContext(currentContainer)
 
         let blocks = try context.fetch(FetchDescriptor<BlockModel>())
         XCTAssertEqual(blocks.count, 1, "V4 Block row must survive V5 migration")
@@ -865,5 +879,125 @@ final class SchemaMigrationTests: XCTestCase {
         XCTAssertEqual(setLog.id, ids.setLogID)
         XCTAssertFalse(setLog.skipped, "Existing logs default to non-skipped")
         XCTAssertEqual(setLog.sideRaw, SetLogSide.bilateral.rawValue)
+    }
+
+    // MARK: - V5 → V6 primitive workout cache
+
+    private func seedV5WorkoutAndSetLogStore(at url: URL, ids: FixtureIDs) throws {
+        let container = try makeV5OnlyContainer(at: url)
+        let context = ModelContext(container)
+        context.insert(WorkoutModel(
+            id: ids.workoutID,
+            userID: ids.userID,
+            name: "Pre-primitive workout",
+            scheduledDate: ids.baseDate,
+            statusRaw: WorkoutStatus.completed.rawValue,
+            sourceRaw: WorkoutSource.claude.rawValue,
+            notes: nil,
+            createdAt: ids.baseDate,
+            updatedAt: ids.baseDate,
+            completedAt: ids.baseDate.addingTimeInterval(3_600),
+            tagsJSON: nil
+        ))
+        context.insert(BlockModel(
+            id: ids.blockID,
+            workoutID: ids.workoutID,
+            parentBlockID: nil,
+            position: 0,
+            name: "Main",
+            timingModeRaw: TimingMode.straightSets.rawValue,
+            timingConfigJSON: "{\"rest_between_sets_sec\":120}",
+            rounds: nil,
+            roundsRepSchemeJSON: nil,
+            notes: nil,
+            intent: nil
+        ))
+        context.insert(WorkoutItemModel(
+            id: ids.itemID,
+            blockID: ids.blockID,
+            position: 0,
+            exerciseID: ids.exerciseID,
+            prescriptionJSON: "{\"sets\":5,\"reps\":5}",
+            prescriptionJSONRaw: nil
+        ))
+        context.insert(ExerciseModel(
+            id: ids.exerciseID,
+            name: "Back Squat",
+            notes: nil,
+            demoURLString: nil,
+            defaultPrescriptionJSON: nil,
+            defaultAlternativesJSON: nil
+        ))
+        context.insert(SetLogModel(
+            id: ids.setLogID,
+            workoutItemID: ids.itemID,
+            workoutID: ids.workoutID,
+            plannedExerciseID: ids.exerciseID,
+            performedExerciseID: nil,
+            setIndex: 1,
+            reps: 5,
+            weight: 100.0,
+            weightUnitRaw: "kg",
+            durationSec: nil,
+            distanceM: nil,
+            rir: 2,
+            isWarmup: false,
+            skipped: false,
+            sideRaw: SetLogSide.bilateral.rawValue,
+            startedAt: ids.baseDate,
+            completedAt: ids.baseDate.addingTimeInterval(60),
+            hrAvgBpm: nil,
+            hrMaxBpm: nil,
+            cadenceAvgSpm: nil,
+            motionSamplesRef: nil,
+            notes: nil
+        ))
+        try context.save()
+    }
+
+    @MainActor
+    func testV5toV6UpgradeAddsPrimitiveWorkoutCacheWithoutLosingLogs() async throws {
+        let url = try XCTUnwrap(storeURL)
+        let ids = FixtureIDs.make()
+
+        do {
+            try seedV5WorkoutAndSetLogStore(at: url, ids: ids)
+        }
+
+        let currentContainer = try makeCurrentContainer(at: url)
+        let context = ModelContext(currentContainer)
+
+        let workouts = try context.fetch(FetchDescriptor<WorkoutModel>())
+        XCTAssertEqual(workouts.count, 1, "V5 Workout row must survive V6 migration")
+        XCTAssertEqual(workouts.first?.id, ids.workoutID)
+
+        let setLogs = try context.fetch(FetchDescriptor<SetLogModel>())
+        XCTAssertEqual(setLogs.count, 1, "V5 SetLog row must survive V6 migration")
+        let setLog = try XCTUnwrap(setLogs.first)
+        XCTAssertEqual(setLog.id, ids.setLogID)
+        XCTAssertEqual(setLog.workoutID, ids.workoutID)
+        XCTAssertEqual(setLog.plannedExerciseID, ids.exerciseID)
+        XCTAssertEqual(setLog.sideRaw, SetLogSide.bilateral.rawValue)
+
+        let primitiveRowsBeforeInsert = try context.fetch(FetchDescriptor<PrimitiveWorkoutModel>())
+        XCTAssertTrue(
+            primitiveRowsBeforeInsert.isEmpty,
+            "V6 should introduce an empty primitive cache table for existing stores"
+        )
+
+        context.insert(PrimitiveWorkoutModel(
+            id: ids.workoutID,
+            name: "Primitive mirror",
+            payloadJSON: "{}"
+        ))
+        try context.save()
+
+        let primitiveRowsAfterInsert = try context.fetch(FetchDescriptor<PrimitiveWorkoutModel>())
+        XCTAssertEqual(
+            primitiveRowsAfterInsert.count,
+            1,
+            "New V6 primitive cache table must be writable after migration"
+        )
+        XCTAssertEqual(primitiveRowsAfterInsert.first?.primitiveSetLogsJSON, "[]")
     }
 }

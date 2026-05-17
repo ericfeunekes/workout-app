@@ -63,6 +63,61 @@ extension WorkoutModel {
     }
 }
 
+extension PrimitiveWorkoutModel {
+    private static let encoder: JSONEncoder = {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        return encoder
+    }()
+
+    private static let decoder: JSONDecoder = {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        return decoder
+    }()
+
+    public func toDomain() throws -> PrimitiveWorkout {
+        try Self.decoder.decode(PrimitiveWorkout.self, from: Data(payloadJSON.utf8))
+    }
+
+    public static func from(_ workout: PrimitiveWorkout) throws -> PrimitiveWorkoutModel {
+        PrimitiveWorkoutModel(
+            id: workout.id,
+            name: workout.name,
+            payloadJSON: try encode(workout)
+        )
+    }
+
+    public func apply(_ workout: PrimitiveWorkout) throws {
+        name = workout.name
+        payloadJSON = try Self.encode(workout)
+    }
+
+    public func primitiveSetLogs() throws -> [PrimitiveSetLog] {
+        let codable = try Self.decoder.decode(
+            [PushQueuePayloadCoding.CodablePrimitiveSetLog].self,
+            from: Data(primitiveSetLogsJSON.utf8)
+        )
+        return try codable.map { try $0.toDomain() }
+    }
+
+    public func applyPrimitiveSetLogs(_ logs: [PrimitiveSetLog]) throws {
+        let data = try Self.encoder.encode(logs.map(PushQueuePayloadCoding.CodablePrimitiveSetLog.init))
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw PersistenceError.encode("primitive set log payload is not UTF-8")
+        }
+        primitiveSetLogsJSON = json
+    }
+
+    private static func encode(_ workout: PrimitiveWorkout) throws -> String {
+        let data = try encoder.encode(workout)
+        guard let json = String(data: data, encoding: .utf8) else {
+            throw PersistenceError.encode("primitive workout payload is not UTF-8")
+        }
+        return json
+    }
+}
+
 extension BlockModel {
     public func toDomain() -> Block {
         Block(

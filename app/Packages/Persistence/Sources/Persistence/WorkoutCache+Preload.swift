@@ -40,6 +40,7 @@ import SwiftData
 
 final class PullPreload {
     var workoutsByID: [UUID: WorkoutModel] = [:]
+    var primitiveWorkoutsByID: [UUID: PrimitiveWorkoutModel] = [:]
     var blocksByID: [UUID: BlockModel] = [:]
     var itemsByID: [UUID: WorkoutItemModel] = [:]
     var alternativesByID: [UUID: ExerciseAlternativeModel] = [:]
@@ -68,6 +69,8 @@ extension WorkoutCacheImpl {
         let preload = PullPreload()
 
         let incomingWorkoutIDs = Set(dataset.workouts.map(\.id))
+        let incomingPrimitiveWorkoutIDs = Set(dataset.primitiveWorkouts.map(\.id))
+            .union(dataset.primitiveWorkoutIDsToDelete)
         let incomingBlockIDs = Set(dataset.blocks.map(\.id))
         let incomingItemIDs = Set(dataset.items.map(\.id))
         let incomingAlternativeIDs = Set(dataset.alternatives.map(\.id))
@@ -84,6 +87,21 @@ extension WorkoutCacheImpl {
             )
             for row in rows {
                 preload.workoutsByID[row.id] = row
+            }
+        }
+
+        // --- Primitive workouts ----------------------------------------
+        if !incomingPrimitiveWorkoutIDs.isEmpty {
+            let primitiveWorkoutIDSet = incomingPrimitiveWorkoutIDs
+            let rows = try recordedFetch(
+                FetchDescriptor<PrimitiveWorkoutModel>(
+                    predicate: #Predicate<PrimitiveWorkoutModel> {
+                        primitiveWorkoutIDSet.contains($0.id)
+                    }
+                )
+            )
+            for row in rows {
+                preload.primitiveWorkoutsByID[row.id] = row
             }
         }
 

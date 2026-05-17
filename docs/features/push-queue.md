@@ -14,7 +14,7 @@ covers:
 # push-queue
 
 ## What it does
-Durable SwiftData-backed FIFO queue for outbound writes. Three payload shapes: `setLogs([SetLog])`, `statusUpdate(workoutID, status, completedAt)`, `events([TelemetryEvent])`. Set logs and status updates POST to `/api/sync/results`; telemetry events POST to `/api/telemetry/events` (`PushQueue.swift:205-212`). `PushFlusher` is an actor that owns a detached `Task.sleep`-based loop at 60s cadence; it calls `SyncAPI.flushPushQueue()` which pulls `bearerToken` from `tokenProvider`, peeks up to `batchSize=32` oldest items, posts each, and on 2xx removes. On 401 it stops the loop (`PushFlusher.swift:66-71`). `ExecutionViewModel` enqueues via fire-and-forget `Task { @MainActor in await hook(...) }`; never awaits from the UI path. On workout `complete` the VM calls `onPushKick` → `flushNow()` so the terminal payload hits the server in seconds not minutes. See `docs/sync.md` § "Push protocol" and "Cadence".
+Durable SwiftData-backed FIFO queue for outbound writes. Result payloads are `setLogs([SetLog])`, `statusUpdate(workoutID, status, completedAt)`, `completionResults(workoutID, completedAt, notes, setLogs)`, `workoutReset(workoutID)`, and `userParameter(...)`; telemetry uses `events([TelemetryEvent])`. Result payloads POST to `/api/sync/results` except user parameters, which POST to `/api/user-parameters`; telemetry events POST to `/api/telemetry/events`. `PushFlusher` is an actor that owns a detached `Task.sleep`-based loop at 60s cadence; it calls `SyncAPI.flushPushQueue()` which pulls `bearerToken` from `tokenProvider`, peeks up to `batchSize=32` oldest items, posts each, and on 2xx removes. On 401 it stops the loop (`PushFlusher.swift:66-71`). Normal set logging enqueues via fire-and-forget hooks. Save & Done is stricter: the VM builds a local `WorkoutCompletionRecord`, awaits REST's durable grouped enqueue, then writes that same record to local history before clearing the live session. See `docs/sync.md` § "Push protocol" and "Cadence".
 
 ## State surface
 - **Inputs:** enqueue calls from `ExecutionViewModel+Push`, `TelemetryEmitterImpl`, `tokenProvider` closure
@@ -32,6 +32,7 @@ Durable SwiftData-backed FIFO queue for outbound writes. Three payload shapes: `
 - **Dead-letter after 5 consecutive non-401 4xx.** Drops the item and emits `execution.push_item_dead_lettered` with `setLogID` / `workoutID` / `userParameterID` correlation id so the event can be joined to the dropped payload.
 - **Priority-weighted FIFO** (bug-056): `peek` sorts by `(priority, enqueuedAt)`. `results` (SetLog / status / UserParameter) are priority 0; `telemetry` is priority 1. Telemetry backlog can't starve set_log pushes. perf-002 persisted `priority` on `PushItemModel` (V4) so SwiftData resolves the sort against a SQLite index with `fetchLimit: batchSize` instead of decoding every row on every flush.
 - **Logical dedup** (bug-055): dedup on `SetLog.id` / `(workoutID, status)` / `UserParameter.id`. Idempotent enqueue also still replaces by `PushItemID`. perf-002 persisted `dedupKey: String?` on `PushItemModel` (V4) so dedup resolves via a scoped `FetchDescriptor` predicate — one scoped fetch per enqueue, not a full-table peek + decode.
+- **Atomic completion publication**: Save & Done queues `completionResults`, a single logical item that encodes final set logs and completed status together. The queue store removes older single-log rows for the same `SetLog.id`, older completed status rows for the workout, and older grouped completion rows for the same workout in the same durable mutation that inserts the grouped replacement. A 2xx removes the grouped item; a 5xx/transport failure keeps logs and status together for retry.
 - **Tolerant peek**: one unknown envelope kind (forward-versioned row) is skipped instead of throwing. Startup sweep via `pruneUndecodableRows()` removes anything the decoder consistently rejects.
 
 ## Edge cases handled in code
@@ -49,9 +50,6 @@ Durable SwiftData-backed FIFO queue for outbound writes. Three payload shapes: `
 
 ## Current gaps
 
-- `PUSH-GAP-001`: Offline completion atomicity is not guaranteed. Set logs and
-  status updates are separate queue items, so a partial flush can leave the
-  server with logs against a still-active workout until retry completes.
 - `PUSH-GAP-002`: No background push path exists. If the user logs a set and
   locks the phone before a foreground flush, push waits until the app resumes.
   This is distinct from `SYNC-GAP-004`: even with foreground-only push accepted,
@@ -65,16 +63,16 @@ Durable SwiftData-backed FIFO queue for outbound writes. Three payload shapes: `
 - **steps:** start workout, log one set, wait ≤60s (or trigger `flushNow` via complete)
 - **expected:** `PushItemModel` row appears on enqueue, `POST /api/sync/results` fires, 2xx, row removed. `ConnectionManager` emits `.pushSucceeded`.
 
-### S2. Happy path: complete + save & done pushes status
+### S2. Happy path: complete + save & done pushes grouped completion
 - **setup:** `.ready`, workout near end
 - **steps:** log final set (auto-advances to `.complete`), tap "save & done"
-- **expected:** one set_log enqueue, one status_update enqueue, `flushNow` kick, both drain to server. Server's workout row transitions `planned → completed` with `completed_at` set.
-- **notes:** regression guard for the `saveAndDone` fix from this session
+- **expected:** one `completionResults` queue item replaces pending single-log rows for that workout's final logs, `flushNow` kicks, and one `/api/sync/results` body carries both `set_logs` and `status_updates`. Server persists the final logs and transitions the workout to `completed` atomically.
+- **notes:** regression guard for completion atomicity; covered by Sync, Shell, and server atomicity tests.
 
-### S3. Status push on explicit complete button
+### S3. Explicit End button does not publish until Save & Done
 - **setup:** mid-workout
 - **steps:** tap "End" button → `ExecutionViewModel.complete()`
-- **expected:** status_update enqueued via `enqueueStatusCompleted`. Same as S2 but via the manual path (`ExecutionViewModel+Push.swift:85-93`).
+- **expected:** route flips to `.complete`, no terminal push is enqueued yet. Tapping Save & Done then publishes the same grouped completion result as S2.
 
 ### S4. Offline → queue grows → reconnect
 - **setup:** airplane mode, `.ready` (cached)
@@ -131,10 +129,10 @@ Durable SwiftData-backed FIFO queue for outbound writes. Three payload shapes: `
 - **expected:** `Task.sleep` eventually throws on suspension or task is cancelled by iOS. No explicit backgroundTask handling in `PushFlusher`. On foreground return, `start()` may need to be re-invoked by the shell — unclear from code whether shell does this.
 - **notes:** unclear — no explicit `scenePhase` wiring visible in `WorkoutDBApp.swift`; review Shell wiring
 
-### S14. FIFO ordering with mixed payloads
-- **setup:** queue empty, enqueue: set_logA (t=0), status_update (t=1), set_logB (t=2), event (t=3)
+### S14. Priority FIFO ordering with mixed payloads
+- **setup:** queue empty, enqueue: telemetry event (t=0), set_logA (t=1), completionResults (t=2), event (t=3)
 - **steps:** flush
-- **expected:** posted in insert order. Each `pushOne` routes to the correct path per `PushQueue.swift:205-212`. Two different endpoints interleave.
+- **expected:** result payloads drain before telemetry because priority 0 sorts ahead of priority 1; FIFO holds within each priority class. Each `pushOne` routes to the correct endpoint.
 
 ### S15. `PushFlusher.start()` called twice
 - **setup:** any

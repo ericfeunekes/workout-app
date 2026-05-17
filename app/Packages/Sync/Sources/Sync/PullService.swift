@@ -20,6 +20,8 @@ public struct PullResult: Sendable, Equatable {
     public let exercises: [CoreDomain.Exercise]
     public let userParameters: [CoreDomain.UserParameter]
     public let workouts: [MappedWorkout]
+    public let primitiveWorkouts: [CoreDomain.PrimitiveWorkout]
+    public let primitiveWorkoutIDsToDelete: [WorkoutID]
     public let lastPerformed: [LastPerformed]
 
     public init(
@@ -27,12 +29,16 @@ public struct PullResult: Sendable, Equatable {
         exercises: [CoreDomain.Exercise],
         userParameters: [CoreDomain.UserParameter],
         workouts: [MappedWorkout],
+        primitiveWorkouts: [CoreDomain.PrimitiveWorkout] = [],
+        primitiveWorkoutIDsToDelete: [WorkoutID] = [],
         lastPerformed: [LastPerformed]
     ) {
         self.serverTime = serverTime
         self.exercises = exercises
         self.userParameters = userParameters
         self.workouts = workouts
+        self.primitiveWorkouts = primitiveWorkouts
+        self.primitiveWorkoutIDsToDelete = primitiveWorkoutIDsToDelete
         self.lastPerformed = lastPerformed
     }
 }
@@ -121,8 +127,21 @@ public struct PullService: Sendable {
             params.append(try unwrap(DTOMapping.mapUserParameter(p)))
         }
         var workouts: [MappedWorkout] = []
+        var primitiveWorkouts: [CoreDomain.PrimitiveWorkout] = []
+        var primitiveWorkoutIDsToDelete: [WorkoutID] = []
         for w in dto.workouts {
-            workouts.append(try unwrap(DTOMapping.mapWorkout(w)))
+            let mappedWorkout = try unwrap(DTOMapping.mapWorkout(w))
+            workouts.append(mappedWorkout)
+            if !w.primitiveBlocks.isEmpty {
+                let primitiveDTO = WorkoutDBSchema.PrimitiveWorkout(
+                    id: w.id,
+                    name: w.name,
+                    primitiveBlocks: w.primitiveBlocks
+                )
+                primitiveWorkouts.append(try unwrap(DTOMapping.mapPrimitiveWorkout(primitiveDTO)))
+            } else {
+                primitiveWorkoutIDsToDelete.append(mappedWorkout.workout.id)
+            }
         }
         var lastPerformed: [LastPerformed] = []
         for lp in dto.lastPerformed {
@@ -144,6 +163,8 @@ public struct PullService: Sendable {
             exercises: exercises,
             userParameters: params,
             workouts: workouts,
+            primitiveWorkouts: primitiveWorkouts,
+            primitiveWorkoutIDsToDelete: primitiveWorkoutIDsToDelete,
             lastPerformed: lastPerformed
         )
     }

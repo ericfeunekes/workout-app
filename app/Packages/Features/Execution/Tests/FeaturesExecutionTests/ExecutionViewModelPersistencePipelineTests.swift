@@ -581,6 +581,89 @@ final class ExecutionViewModelPersistencePipelineTests: XCTestCase {
             stateB.items.first?.sets.filter(\.done).count
         )
     }
+
+    func testRestorePreservesPrimitiveAggregateLogsThroughSaveAndDone() async throws {
+        let store = RecordingSessionStore()
+        let base = makeStraightSetsContext(sets: 1)
+        let primitiveWorkout = PrimitiveWorkout(
+            id: base.workout.id,
+            name: "Primitive AMRAP",
+            blocks: [
+                PrimitiveBlock(id: UUID(uuidString: "20000000-0000-4000-8000-000000000091")!, sets: [
+                    PrimitiveSet(
+                        id: UUID(uuidString: "30000000-0000-4000-8000-000000000091")!,
+                        timing: PrimitiveTiming(mode: .capBounded, capSec: 300),
+                        traversal: .amrap,
+                        workTargets: [
+                            PrimitiveWorkTarget(metric: .rounds, valueForm: .open, role: .observation),
+                        ],
+                        slots: [
+                            PrimitiveSlot(
+                                id: UUID(uuidString: "40000000-0000-4000-8000-000000000091")!,
+                                exerciseID: UUID(uuidString: "50000000-0000-4000-8000-000000000091")!,
+                                workTargets: [
+                                    PrimitiveWorkTarget(
+                                        metric: .reps,
+                                        valueForm: .single,
+                                        value: 10,
+                                        role: .completion
+                                    ),
+                                ]
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        let primitivePlan = try PrimitiveSessionSeeder.seed(workout: primitiveWorkout)
+        let ctx = WorkoutContext(
+            workout: base.workout,
+            primitiveWorkout: primitiveWorkout,
+            primitiveExecutionPlan: primitivePlan,
+            blocks: base.blocks,
+            itemsByBlock: base.itemsByBlock,
+            exercises: base.exercises
+        )
+        let completedAt = Date(timeIntervalSince1970: 1_800)
+        let vm = ExecutionViewModel(context: ctx, sessionStore: store)
+        defer { vm.resetPersistencePipelineForTesting() }
+
+        vm.recordPrimitiveSetResult(
+            blockIndex: 0,
+            setIndexInBlock: 0,
+            reps: 4,
+            rounds: 7,
+            durationSec: 300,
+            completedAt: completedAt
+        )
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
+            }
+        )
+        let restored = ExecutionViewModel(context: ctx, sessionStore: store, push: hooks)
+        defer { restored.resetPersistencePipelineForTesting() }
+        await restored.restoreIfPossible()
+
+        XCTAssertEqual(restored.primitiveSetLogs.count, 1)
+        XCTAssertEqual(restored.primitiveSetLogs[0].workoutID, base.workout.id)
+        XCTAssertEqual(restored.primitiveSetLogs[0].rounds, 7)
+        XCTAssertEqual(restored.primitiveSetLogs[0].completedAt, completedAt)
+
+        restored.complete()
+        restored.saveAndDone()
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let completions = await recorder.completions
+        let completion = try XCTUnwrap(completions.first)
+        XCTAssertEqual(completion.primitiveSetLogs.count, 1)
+        XCTAssertEqual(completion.primitiveSetLogs[0].workoutID, base.workout.id)
+        XCTAssertEqual(completion.primitiveSetLogs[0].rounds, 7)
+        XCTAssertEqual(completion.primitiveSetLogs[0].completedAt, completedAt)
+    }
 }
 
 private func dataByRemovingTopLevelKey(_ key: String, from data: Data) throws -> Data {

@@ -199,6 +199,7 @@ public struct Workout: Codable, Sendable, Equatable {
     public let updatedAt: Date
     public let completedAt: Date?
     public let blocks: [Block]
+    public let primitiveBlocks: [PrimitiveBlock]
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -213,6 +214,7 @@ public struct Workout: Codable, Sendable, Equatable {
         case updatedAt = "updated_at"
         case completedAt = "completed_at"
         case blocks
+        case primitiveBlocks = "primitive_blocks"
     }
 
     public init(
@@ -227,7 +229,8 @@ public struct Workout: Codable, Sendable, Equatable {
         createdAt: Date,
         updatedAt: Date,
         completedAt: Date? = nil,
-        blocks: [Block] = []
+        blocks: [Block] = [],
+        primitiveBlocks: [PrimitiveBlock] = []
     ) {
         self.id = id
         self.userId = userId
@@ -241,6 +244,24 @@ public struct Workout: Codable, Sendable, Equatable {
         self.updatedAt = updatedAt
         self.completedAt = completedAt
         self.blocks = blocks
+        self.primitiveBlocks = primitiveBlocks
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        userId = try container.decode(String.self, forKey: .userId)
+        name = try container.decode(String.self, forKey: .name)
+        scheduledDate = try container.decodeIfPresent(String.self, forKey: .scheduledDate)
+        status = try container.decode(WorkoutStatus.self, forKey: .status)
+        source = try container.decode(WorkoutSource.self, forKey: .source)
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        tagsJson = try container.decodeIfPresent(String.self, forKey: .tagsJson)
+        createdAt = try container.decode(Date.self, forKey: .createdAt)
+        updatedAt = try container.decode(Date.self, forKey: .updatedAt)
+        completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
+        blocks = try container.decode([Block].self, forKey: .blocks)
+        primitiveBlocks = try container.decodeIfPresent([PrimitiveBlock].self, forKey: .primitiveBlocks) ?? []
     }
 }
 

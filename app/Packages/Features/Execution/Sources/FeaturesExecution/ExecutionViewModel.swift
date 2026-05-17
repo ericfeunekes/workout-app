@@ -15,9 +15,9 @@
 // Concurrency:
 //   - The view model is `@MainActor` — it is read and mutated from
 //     SwiftUI views only.
-//   - Persistence writes are fire-and-forget `Task` launches; callers
-//     do not await them. The in-memory state is authoritative for
-//     rendering; the on-disk payload catches up asynchronously.
+//   - Live-session persistence writes are fire-and-forget `Task` launches.
+//     Completion publication is awaited before the session is cleared so the
+//     app does not lose the only completion artifact on process death.
 
 import Foundation
 import CoreAutoreg
@@ -36,34 +36,24 @@ import WorkoutCoreFoundation
 /// that don't exercise push can omit this dependency entirely.
 public typealias SetLogEnqueuer = @Sendable (SetLog) async -> Void
 
-/// Fire-and-forget hook invoked when the workout completes. Shell supplies
-/// this so the terminal `status_update` (and its `completed_at`) is enqueued
-/// alongside the final set_logs. The trailing `String?` carries the user-
-/// authored post-workout note so the server becomes authoritative for the
-/// value — without it the next `sync/pull` overwrote the freshly-typed note
-/// with the server's stale value.
-public typealias StatusEnqueuer = @Sendable (
-    WorkoutID,
-    WorkoutStatus,
-    Date?,
-    String?
-) async -> Void
+/// Hook invoked when Save & Done has produced the canonical app-owned
+/// completion record. Shell supplies this so REST sync can durably enqueue
+/// one grouped results payload. Future replication surfaces should consume the
+/// same record rather than re-derive completion from SessionState.
+public typealias CompletionEnqueuer = @Sendable (WorkoutCompletionRecord) async throws -> Void
 
-/// Fire-and-forget hook invoked after `.complete` is dispatched. Shell
+/// Hook invoked after the completion record is durably enqueued. Shell
 /// supplies this so the push queue drains immediately rather than waiting
-/// for the next ~60s tick of the foreground flusher — the completion's
-/// set_logs and status_update hit the server quickly while the user is
-/// still looking at the ledger.
+/// for the next ~60s tick of the foreground flusher.
 public typealias PushFlushKick = @Sendable () async -> Void
 
-/// Fire-and-forget hook invoked when `saveAndDone` fires — BEFORE the
-/// reducer clears the in-memory session. Shell supplies this so the
-/// completed workout + its set_logs land in the local `WorkoutCache`
+/// Awaited hook invoked when `saveAndDone` fires — BEFORE the reducer
+/// clears the in-memory session. Shell supplies this so the completed
+/// workout + result logs are attempted in the local `WorkoutCache`
 /// immediately, populating the History tab without waiting for a server
-/// round-trip. See `docs/open-questions.md` § "Execution `save & done`
-/// doesn't persist the completed workout to local cache". `nil` (the
+/// round-trip when the best-effort cache writes succeed. `nil` (the
 /// default) preserves the pure-offline test path.
-public typealias LocalCompletionWriter = @Sendable (Workout, [SetLog]) async -> Void
+public typealias LocalCompletionWriter = @Sendable (WorkoutCompletionRecord) async -> Void
 
 /// Fire-and-forget hook invoked when a `UserParameter` is captured during
 /// `saveAndDone` — typically a just-entered bodyweight. Shell supplies
@@ -79,18 +69,18 @@ public typealias UserParameterEnqueuer = @Sendable (UserParameter) async -> Void
 /// persistence extension reads `push` directly.
 public struct ExecutionPushHooks: Sendable {
     public let onSetLogged: SetLogEnqueuer?
-    public let onStatusChanged: StatusEnqueuer?
+    public let onWorkoutCompleted: CompletionEnqueuer?
     public let onPushKick: PushFlushKick?
     public let onUserParameterChanged: UserParameterEnqueuer?
 
     public init(
         onSetLogged: SetLogEnqueuer? = nil,
-        onStatusChanged: StatusEnqueuer? = nil,
+        onWorkoutCompleted: CompletionEnqueuer? = nil,
         onPushKick: PushFlushKick? = nil,
         onUserParameterChanged: UserParameterEnqueuer? = nil
     ) {
         self.onSetLogged = onSetLogged
-        self.onStatusChanged = onStatusChanged
+        self.onWorkoutCompleted = onWorkoutCompleted
         self.onPushKick = onPushKick
         self.onUserParameterChanged = onUserParameterChanged
     }
@@ -120,6 +110,11 @@ public final class ExecutionViewModel {
     /// Item the current proposal targets. Kept alongside the proposal
     /// so `acceptAutoreg`/`undoAutoreg` operate on the right item.
     public internal(set) var currentProposalItemID: UUID?
+
+    /// Primitive result rows recorded by the primitive execution path.
+    /// Included in the app-owned completion record at Save & Done so local
+    /// cache and sync consume the same primitive facts.
+    public internal(set) var primitiveSetLogs: [PrimitiveSetLog] = []
 
     /// Test-observable counter incremented every time `tickBlockTimer()`
     /// fires. Used by bug-042 regression tests to prove the view's
@@ -509,11 +504,11 @@ public final class ExecutionViewModel {
 
     /// Force-complete. Available via an "End" affordance in the nav bar.
     ///
-    /// Does NOT enqueue the status_update here. The terminal server-side
-    /// push is the responsibility of `saveAndDone()` — which fires for
-    /// every path into `.complete` (both auto-advance and this explicit
-    /// End button). Enqueuing here *and* in `saveAndDone` produces a
-    /// double push with the same workout_id + status pair. Session state
+    /// Does NOT publish the completion record here. The terminal
+    /// server-side push is the responsibility of `saveAndDone()` — which
+    /// fires for every path into `.complete` (both auto-advance and this
+    /// explicit End button). Publishing here *and* in `saveAndDone`
+    /// produces a double completion for the same workout. Session state
     /// is persisted, so if the user force-completes and kills the app
     /// before tapping save & done, the complete screen restores on next
     /// launch and the user can still commit from there.

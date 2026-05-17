@@ -149,6 +149,62 @@ public actor PushQueueStoreImpl: PushQueueStore {
         return rows.count
     }
 
+    public func enqueue(_ item: PushItem, replacingDedupKeys keys: Set<String>) async throws {
+        do {
+            try stageEnqueue(item, replacingDedupKeys: keys)
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
+    private func stageEnqueue(_ item: PushItem, replacingDedupKeys keys: Set<String>) throws {
+        let encoded = try PushQueuePayloadCoding.encode(item.payload)
+        var removedIDs = Set<PushItemID>()
+        for key in keys {
+            let descriptor = FetchDescriptor<PushItemModel>(
+                predicate: #Predicate<PushItemModel> { $0.dedupKey == key }
+            )
+            for row in try modelContext.fetch(descriptor) {
+                removedIDs.insert(row.id)
+                modelContext.delete(row)
+            }
+        }
+
+        if !removedIDs.contains(item.id) {
+            let id = item.id
+            let descriptor = FetchDescriptor<PushItemModel>(
+                predicate: #Predicate<PushItemModel> { $0.id == id }
+            )
+            if let existing = try modelContext.fetch(descriptor).first {
+                existing.enqueuedAt = item.enqueuedAt
+                existing.attempts = item.attempts
+                existing.payloadJSON = encoded
+                existing.priority = item.priority
+                existing.dedupKey = item.dedupKey
+            } else {
+                modelContext.insert(PushItemModel(
+                    id: item.id,
+                    enqueuedAt: item.enqueuedAt,
+                    attempts: item.attempts,
+                    payloadJSON: encoded,
+                    priority: item.priority,
+                    dedupKey: item.dedupKey
+                ))
+            }
+        } else {
+            modelContext.insert(PushItemModel(
+                id: item.id,
+                enqueuedAt: item.enqueuedAt,
+                attempts: item.attempts,
+                payloadJSON: encoded,
+                priority: item.priority,
+                dedupKey: item.dedupKey
+            ))
+        }
+    }
+
     public func isEmpty() async throws -> Bool {
         var descriptor = FetchDescriptor<PushItemModel>()
         descriptor.fetchLimit = 1
@@ -190,10 +246,30 @@ public actor PushQueueStoreImpl: PushQueueStore {
         }
         return removed
     }
+
+    #if DEBUG
+    /// Test-only: stage the same replacement mutation as `enqueue(_:replacingDedupKeys:)`,
+    /// then throw before save and run the same rollback cleanup. This proves staged
+    /// deletes/inserts cannot leak into the next successful save.
+    internal func enqueueReplacingThenThrowForTests(
+        _ item: PushItem,
+        replacingDedupKeys keys: Set<String>
+    ) throws {
+        struct TestAbort: Error {}
+        do {
+            try stageEnqueue(item, replacingDedupKeys: keys)
+            throw TestAbort()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+    #endif
 }
 
 public enum PersistenceError: Error, Equatable {
     case decode(String)
+    case encode(String)
     case keychain(OSStatus)
     case connectionMissing
 }

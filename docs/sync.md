@@ -31,6 +31,7 @@ covers:
 | `last_performed` summary | Server → App | Derived | Piggybacked on `/api/sync/pull` |
 | Set logs (results) | App → Server | App | `set_log` |
 | Workout status changes | App → Server | App | `workout.status`, `workout.completed_at` |
+| Workout completion record | App → Server / future publisher | App | Local `WorkoutCompletionRecord` published as grouped REST `set_logs` + completed status today |
 | Body weight at completion | App → Server | App | `user_parameters` row with key `bodyweight_kg` |
 
 **No field is written from both sides.** If a field would be bi-directional (e.g., "preferred rest interval"), it lives in `user_parameters` and Claude owns writes; the app reads.
@@ -89,7 +90,9 @@ Each `set_log` row carries the UUID the app assigned. Re-pushing the same UUID u
 
 `workout_resets` is the same-day History escape hatch: the app deletes local logs immediately, queues `{workout_id}`, and the server deletes all set_logs tied to that workout's items, clears `completed_at`, and returns the workout to `planned`. Without this server-side reset, the next pull would resurrect the completed workout the user just reset locally.
 
-**Batching.** The app sends pending results in whatever size is convenient — per set after each log write is fine; batches at workout completion are also fine. There is no server-side minimum or maximum.
+**Completion atomicity.** During execution, individual set logs may still queue as single-result pushes. Save & Done builds one app-owned local `WorkoutCompletionRecord` from the completed workout and its final set logs. The current REST publisher durably replaces any still-pending single-log/completed-status rows with one grouped queue item, then serializes that record as one `/api/sync/results` body with both `set_logs` and a completed `status_update`; future publishers such as CloudKit should consume the same local record rather than reconstructing completion from separate queue rows.
+
+**Batching.** The app sends pending results in whatever size is convenient — per set after each log write is fine. At workout completion, the final set logs and completed status must publish as one grouped completion result. There is no server-side minimum or maximum.
 
 ---
 

@@ -72,4 +72,26 @@ struct FixtureDecodingTests {
         #expect(event.workoutId == "11111111-1111-1111-1111-111111111111")
         #expect(event.setLogId == nil)
     }
+
+    @Test func primitiveStrengthFixture() throws {
+        let url = Self.fixtureRoot.appendingPathComponent("primitive_strength_workout.json")
+        let data = try Data(contentsOf: url)
+        let workout = try decoder.decode(PrimitiveWorkout.self, from: data)
+        #expect(workout.name == "Primitive strength")
+        #expect(workout.primitiveBlocks[0].sets[0].timing.mode == .setBounded)
+        #expect(workout.primitiveBlocks[0].sets[0].repeatCount == 3)
+        #expect(workout.primitiveBlocks[0].sets[0].slots[0].load?.unit == .kg)
+        #expect(workout.primitiveBlocks[0].sets[0].slots[0].stimuli[0].type == .rir)
+    }
+
+    @Test func primitiveAmrapFixture() throws {
+        let url = Self.fixtureRoot.appendingPathComponent("primitive_amrap_workout.json")
+        let data = try Data(contentsOf: url)
+        let workout = try decoder.decode(PrimitiveWorkout.self, from: data)
+        let set = workout.primitiveBlocks[0].sets[0]
+        #expect(set.timing.mode == .capBounded)
+        #expect(set.traversal == .amrap)
+        #expect(set.workTarget[0].metric == .rounds)
+        #expect(set.slots.count == 2)
+    }
 }

@@ -27,6 +27,7 @@ actor FakePushQueueStore: PushQueueStore {
     /// call order. Useful for debugging a failing regression test — if
     /// the key shape drifts the assertion can show what we actually saw.
     private(set) var removeMatchingDedupKeyCalls: [String] = []
+    private(set) var enqueueReplacingDedupKeysCalls: [Set<String>] = []
 
     func enqueue(_ item: PushItem) async throws {
         if let idx = items.firstIndex(where: { $0.id == item.id }) {
@@ -67,6 +68,19 @@ actor FakePushQueueStore: PushQueueStore {
         let before = items.count
         items.removeAll { $0.dedupKey == key }
         return before - items.count
+    }
+
+    func enqueue(_ item: PushItem, replacingDedupKeys keys: Set<String>) async throws {
+        enqueueReplacingDedupKeysCalls.append(keys)
+        items.removeAll { existing in
+            guard let key = existing.dedupKey else { return false }
+            return keys.contains(key)
+        }
+        if let idx = items.firstIndex(where: { $0.id == item.id }) {
+            items[idx] = item
+        } else {
+            items.append(item)
+        }
     }
 
     func isEmpty() async throws -> Bool {

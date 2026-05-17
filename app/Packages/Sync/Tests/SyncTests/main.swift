@@ -84,6 +84,39 @@ private func encodedFixture() -> Data {
                 }
               ]
             }
+          ],
+          "primitive_blocks": [
+            {
+              "id": "20000000-0000-4000-8000-000000000002",
+              "title": "AMRAP",
+              "repeat": 1,
+              "work_target": [],
+              "sets": [
+                {
+                  "id": "30000000-0000-4000-8000-000000000002",
+                  "title": "Push/Pull",
+                  "timing": { "mode": "cap_bounded", "cap_sec": 300 },
+                  "traversal": "amrap",
+                  "repeat": 1,
+                  "work_target": [
+                    { "metric": "rounds", "value_form": "open", "value": null, "role": "observation" }
+                  ],
+                  "slots": [
+                    {
+                      "id": "40000000-0000-4000-8000-000000000002",
+                      "exercise_id": "\(xid)",
+                      "work_target": [
+                        { "metric": "reps", "value_form": "single", "value": 10, "role": "completion" }
+                      ],
+                      "load": null,
+                      "stimuli": [],
+                      "post_rest_sec": 0,
+                      "is_warmup": false
+                    }
+                  ]
+                }
+              ]
+            }
           ]
         }
       ],
@@ -141,6 +174,30 @@ private func encodedFixture() -> Data {
     return json.data(using: .utf8)!
 }
 
+private func encodedPrimitiveTombstoneFixture() throws -> Data {
+    let now = iso8601("2026-04-17T08:00:00Z")
+    let workout = WorkoutDBSchema.Workout(
+        id: "11111111-1111-1111-1111-111111111111",
+        userId: "22222222-2222-2222-2222-222222222222",
+        name: "Primitive Removed",
+        scheduledDate: "2026-04-18",
+        status: .planned,
+        source: .claude,
+        createdAt: now,
+        updatedAt: now,
+        blocks: [],
+        primitiveBlocks: []
+    )
+    let response = WorkoutDBSchema.SyncPullResponse(
+        workouts: [workout],
+        exercises: [],
+        userParameters: [],
+        lastPerformed: [],
+        serverTime: now
+    )
+    return try JSONEncoder.workoutDB().encode(response)
+}
+
 // MARK: - 1. PullService success
 
 runAsyncCase("PullService success — maps DTOs to Domain") {
@@ -159,6 +216,8 @@ runAsyncCase("PullService success — maps DTOs to Domain") {
     try expectEqual(result.workouts[0].blocks.count, 1)
     try expectEqual(result.workouts[0].blocks[0].timingMode, .straightSets)
     try expectEqual(result.workouts[0].items.count, 1)
+    try expectEqual(result.primitiveWorkouts.count, 1)
+    try expectEqual(result.primitiveWorkouts[0].blocks[0].sets[0].traversal, .amrap)
     try expectEqual(result.lastPerformed.count, 1)
     try expectEqual(result.lastPerformed[0].lastSetLogs.count, 1)
     try expectEqual(result.lastPerformed[0].lastSetLogs[0].rir, 2)
@@ -169,6 +228,21 @@ runAsyncCase("PullService success — maps DTOs to Domain") {
     try expectEqual(calls[0].method, "GET")
     try expectEqual(calls[0].path, "/api/sync/pull")
     try expectEqual(calls[0].bearerToken, "tok")
+}
+
+runAsyncCase("PullService empty primitive_blocks → primitive tombstone") {
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 200, body: try encodedPrimitiveTombstoneFixture()))
+    ])
+    let service = PullService(transport: transport)
+    let result = try await service.pull(since: nil, bearerToken: "tok")
+
+    try expectEqual(result.workouts.count, 1)
+    try expectEqual(result.primitiveWorkouts.count, 0)
+    try expectEqual(
+        result.primitiveWorkoutIDsToDelete,
+        [uuid("11111111-1111-1111-1111-111111111111")]
+    )
 }
 
 // MARK: - 2. PullService 401
@@ -246,6 +320,56 @@ private func makeLog(id: UUID = UUID(), setIndex: Int = 1) -> CoreDomain.SetLog 
         weightUnit: .kg,
         rir: 2,
         completedAt: iso8601("2026-04-17T08:00:00Z")
+    )
+}
+
+private func makeWorkout(
+    id: UUID = uuid("11111111-2222-3333-4444-555555555555"),
+    completedAt: Date? = iso8601("2026-04-17T08:30:00Z"),
+    notes: String? = "leg day PR!"
+) -> CoreDomain.Workout {
+    CoreDomain.Workout(
+        id: id,
+        userID: uuid("22222222-2222-2222-2222-222222222222"),
+        name: "Push A",
+        scheduledDate: iso8601("2026-04-17T07:00:00Z"),
+        status: .completed,
+        source: .claude,
+        notes: notes,
+        createdAt: iso8601("2026-04-17T07:00:00Z"),
+        updatedAt: iso8601("2026-04-17T08:30:00Z"),
+        completedAt: completedAt,
+        tagsJSON: nil
+    )
+}
+
+private func makeCompletionRecord(
+    workoutID: UUID = uuid("11111111-2222-3333-4444-555555555555"),
+    setLogs: [CoreDomain.SetLog] = [makeLog(setIndex: 1)],
+    primitiveSetLogs: [CoreDomain.PrimitiveSetLog] = []
+) -> CoreDomain.WorkoutCompletionRecord {
+    CoreDomain.WorkoutCompletionRecord(
+        workout: makeWorkout(id: workoutID),
+        setLogs: setLogs,
+        primitiveSetLogs: primitiveSetLogs
+    )
+}
+
+private func makePrimitiveLog(
+    id: UUID = uuid("cccccccc-1111-2222-3333-444444444444"),
+    workoutID: UUID? = uuid("11111111-2222-3333-4444-555555555555")
+) -> CoreDomain.PrimitiveSetLog {
+    CoreDomain.PrimitiveSetLog(
+        id: id,
+        role: .setResult,
+        setID: uuid("33333333-2222-3333-4444-555555555555"),
+        blockID: uuid("22222222-2222-3333-4444-555555555555"),
+        workoutID: workoutID,
+        setIndex: 0,
+        reps: 4,
+        durationSec: 300,
+        rounds: 7,
+        completedAt: iso8601("2026-04-17T08:30:00Z")
     )
 }
 
@@ -577,6 +701,40 @@ runAsyncCase("PushQueue — set_logs still route to /api/sync/results after even
     try expectEqual(calls[0].path, "/api/sync/results")
 }
 
+runAsyncCase("PushQueue — primitive_set_logs route to sync results and encode body") {
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 200, body: Data())),
+    ])
+    let queue = PushQueue(store: store, transport: transport)
+    let log = CoreDomain.PrimitiveSetLog(
+        id: uuid("99999999-9999-4999-8999-999999999999"),
+        role: .setResult,
+        setID: uuid("30000000-0000-4000-8000-000000000002"),
+        blockID: uuid("20000000-0000-4000-8000-000000000002"),
+        workoutID: uuid("10000000-0000-4000-8000-000000000002"),
+        setIndex: 0,
+        rounds: 7,
+        completedAt: iso8601("2026-04-20T07:30:00Z")
+    )
+
+    try await queue.enqueuePrimitiveSetLogs([log])
+    _ = try await queue.flush(bearerToken: "tok")
+
+    let calls = await transport.store.recordedCalls()
+    try expectEqual(calls.count, 1)
+    try expectEqual(calls[0].path, "/api/sync/results")
+    guard let body = calls[0].body else {
+        try expect(false, "expected body on POST")
+        return
+    }
+    let payload = try JSONDecoder.workoutDB().decode(WorkoutDBSchema.SyncResultsPayload.self, from: body)
+    try expectEqual(payload.setLogs.count, 0)
+    try expectEqual(payload.primitiveSetLogs.count, 1)
+    try expectEqual(payload.primitiveSetLogs[0].role, .setResult)
+    try expectEqual(payload.primitiveSetLogs[0].rounds, 7)
+}
+
 // MARK: - User parameter push routing
 
 runAsyncCase("PushQueue — userParameter routes to /api/user-parameters") {
@@ -703,6 +861,73 @@ runAsyncCase("UserParameter push is idempotent — same id ships twice across in
 
 // MARK: - SetLog wire-id lowercasing
 
+runAsyncCase("Primitive DTO mapping keeps schema at Sync and emits primitive log DTO") {
+    let json = """
+    {
+      "id": "10000000-0000-4000-8000-000000000002",
+      "name": "Primitive AMRAP",
+      "primitive_blocks": [
+        {
+          "id": "20000000-0000-4000-8000-000000000002",
+          "repeat": 1,
+          "work_target": [],
+          "sets": [
+            {
+              "id": "30000000-0000-4000-8000-000000000002",
+              "timing": { "mode": "cap_bounded", "cap_sec": 300 },
+              "traversal": "amrap",
+              "repeat": 1,
+              "work_target": [
+                { "metric": "rounds", "value_form": "open", "value": null, "role": "observation" }
+              ],
+              "slots": [
+                {
+                  "id": "40000000-0000-4000-8000-000000000002",
+                  "exercise_id": "50000000-0000-4000-8000-000000000002",
+                  "work_target": [
+                    { "metric": "reps", "value_form": "single", "value": 10, "role": "completion" }
+                  ],
+                  "load": null,
+                  "stimuli": [],
+                  "post_rest_sec": 0,
+                  "is_warmup": false
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+    """
+    let dto = try JSONDecoder.workoutDB().decode(
+        WorkoutDBSchema.PrimitiveWorkout.self,
+        from: Data(json.utf8)
+    )
+    let mappedResult = DTOMapping.mapPrimitiveWorkout(dto)
+    let mapped: CoreDomain.PrimitiveWorkout
+    switch mappedResult {
+    case .success(let value): mapped = value
+    case .failure(let error): throw error
+    }
+    try expectEqual(mapped.blocks[0].sets[0].traversal, .amrap)
+    try expectEqual(mapped.blocks[0].sets[0].workTargets[0].metric, .rounds)
+
+    let primitiveLog = CoreDomain.PrimitiveSetLog(
+        id: uuid("99999999-9999-4999-8999-999999999999"),
+        role: .setResult,
+        setID: mapped.blocks[0].sets[0].id,
+        blockID: mapped.blocks[0].id,
+        workoutID: mapped.id,
+        setIndex: 0,
+        rounds: 7,
+        completedAt: iso8601("2026-04-20T07:30:00Z")
+    )
+    let logDTO = DTOMapping.toDTO(primitiveLog)
+    try expectEqual(logDTO.role, .setResult)
+    try expectEqual(logDTO.setId, mapped.blocks[0].sets[0].id.wireID)
+    try expectEqual(logDTO.rounds, 7)
+}
+
 runAsyncCase("SetLog DTO wireID is lowercase even when Swift UUID is uppercase") {
     // Swift's `UUID.uuidString` returns UPPERCASE by default. The
     // project invariant is lowercase on the wire (server accepts either
@@ -819,6 +1044,138 @@ runAsyncCase("Status update carries notes on the wire so the server persists the
     try expectEqual(payload.statusUpdates[0].notes, "leg day PR!")
 }
 
+runAsyncCase("Completion results encode legacy and primitive logs with status in one sync results call") {
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 200, body: Data())),
+    ])
+    let queue = PushQueue(store: store, transport: transport)
+
+    let record = makeCompletionRecord(setLogs: [
+        makeLog(id: uuid("aaaaaaaa-1111-2222-3333-444444444444"), setIndex: 1),
+        makeLog(id: uuid("bbbbbbbb-1111-2222-3333-444444444444"), setIndex: 2),
+    ], primitiveSetLogs: [
+        makePrimitiveLog(workoutID: nil),
+    ])
+    try await queue.enqueueCompletionResults(record)
+    _ = try await queue.flush(bearerToken: "tok")
+
+    let calls = await transport.store.recordedCalls()
+    try expectEqual(calls.count, 1)
+    try expectEqual(calls[0].path, "/api/sync/results")
+    guard let body = calls[0].body else {
+        try expect(false, "expected body on POST")
+        return
+    }
+    let payload = try JSONDecoder.workoutDB().decode(
+        WorkoutDBSchema.SyncResultsPayload.self,
+        from: body
+    )
+    try expectEqual(payload.setLogs.count, 2)
+    try expectEqual(payload.primitiveSetLogs.count, 1)
+    try expectEqual(payload.primitiveSetLogs[0].role, .setResult)
+    try expectEqual(payload.primitiveSetLogs[0].setIndex, 0)
+    try expectEqual(payload.primitiveSetLogs[0].reps, 4)
+    try expectEqual(payload.primitiveSetLogs[0].workoutId, record.workoutID.uuidString.lowercased())
+    try expectEqual(payload.statusUpdates.count, 1)
+    try expectEqual(payload.statusUpdates[0].workoutId, record.workoutID.uuidString.lowercased())
+    try expectEqual(payload.statusUpdates[0].status, WorkoutDBSchema.WorkoutStatus.completed)
+    try expectEqual(payload.statusUpdates[0].notes, "leg day PR!")
+}
+
+runAsyncCase("Completion results 503 leaves grouped logs and status queued together") {
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 503, body: Data())),
+    ])
+    let queue = PushQueue(store: store, transport: transport)
+
+    let record = makeCompletionRecord()
+    try await queue.enqueueCompletionResults(record)
+
+    let result = try await queue.flush(bearerToken: "tok")
+    try expectEqual(result.pushed, 0)
+    try expectEqual(result.remaining, 1)
+    try expect(result.networkFailed, "503 should flag network failure")
+
+    let remaining = await store.all()
+    try expectEqual(remaining.count, 1)
+    try expectEqual(remaining[0].attempts, 1)
+    if case .completionResults(let workoutID, _, _, let logs, let primitiveLogs) = remaining[0].payload {
+        try expectEqual(workoutID, record.workoutID)
+        try expectEqual(logs.count, record.setLogs.count)
+        try expectEqual(primitiveLogs.count, record.primitiveSetLogs.count)
+    } else {
+        try expect(false, "expected completionResults payload")
+    }
+}
+
+runAsyncCase("Completion results 200 removes the single grouped item") {
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 200, body: Data())),
+    ])
+    let queue = PushQueue(store: store, transport: transport)
+
+    try await queue.enqueueCompletionResults(makeCompletionRecord())
+
+    let result = try await queue.flush(bearerToken: "tok")
+    try expectEqual(result.pushed, 1)
+    try expectEqual(result.remaining, 0)
+    let empty = try await store.isEmpty()
+    try expect(empty, "completion item should be removed after 2xx")
+}
+
+runAsyncCase("Completion results dedups older single logs, completed status, and grouped completion") {
+    let store = FakePushQueueStore()
+    let queue = PushQueue(
+        store: store,
+        transport: FakeTransport(outcomes: []),
+        clock: SystemClock()
+    )
+
+    let workoutID = uuid("11111111-2222-3333-4444-555555555555")
+    let log = makeLog(id: uuid("abcdef01-2345-6789-abcd-ef0123456789"))
+    try await queue.enqueueSetLogs([log])
+    try await queue.enqueueStatusUpdate(
+        workoutID: workoutID,
+        status: .completed,
+        completedAt: iso8601("2026-04-17T08:00:00Z"),
+        notes: "older"
+    )
+    try await queue.enqueueCompletionResults(makeCompletionRecord(
+        workoutID: workoutID,
+        setLogs: [log]
+    ))
+    try await queue.enqueueCompletionResults(makeCompletionRecord(
+        workoutID: workoutID,
+        setLogs: [CoreDomain.SetLog(
+            id: log.id,
+            workoutItemID: log.workoutItemID,
+            performedExerciseID: nil,
+            setIndex: 1,
+            reps: 8,
+            weight: 102.5,
+            weightUnit: .kg,
+            rir: 1,
+            completedAt: iso8601("2026-04-17T08:02:00Z")
+        )]
+    ))
+
+    let all = await store.all()
+    try expectEqual(all.count, 1, "completion replaces older single and grouped rows")
+    if case .completionResults(let queuedWorkoutID, _, let notes, let logs, let primitiveLogs) = all[0].payload {
+        try expectEqual(queuedWorkoutID, workoutID)
+        try expectEqual(notes, "leg day PR!")
+        try expectEqual(logs.count, 1)
+        try expectEqual(primitiveLogs.count, 0)
+        try expectEqual(logs[0].reps, 8, "latest grouped payload wins")
+        try expectEqual(logs[0].weight, 102.5)
+    } else {
+        try expect(false, "expected completionResults payload")
+    }
+}
+
 runAsyncCase("Workout reset routes to sync results with lowercase workout id") {
     let store = FakePushQueueStore()
     let transport = FakeTransport(outcomes: [
@@ -931,6 +1288,18 @@ runAsyncCase("PushItem.priority derived from payload case") {
         enqueuedAt: Date()
     )
     try expectEqual(status.priority, 0)
+
+    let completion = PushItem(
+        payload: .completionResults(
+            workoutID: UUID(),
+            completedAt: nil,
+            notes: nil,
+            setLogs: [log],
+            primitiveSetLogs: []
+        ),
+        enqueuedAt: Date()
+    )
+    try expectEqual(completion.priority, 0)
 
     let param = PushItem(
         payload: .userParameter(CoreDomain.UserParameter(
@@ -1580,9 +1949,10 @@ runAsyncCase("PushQueue dedup uses scoped removeMatchingDedupKey — no full-tab
         clock: SystemClock()
     )
 
-    // One single-log setLog, one statusUpdate, one userParameter —
-    // these are the three payload shapes that dedup. Each should
-    // generate exactly one scoped dedup call and zero full-table peeks.
+    // Single setLog, statusUpdate, and userParameter payloads each use
+    // scoped dedup-key removal. Completion results use the stronger
+    // store-level replace operation so stale-row deletion and grouped
+    // insertion commit together.
     let setLog = CoreDomain.SetLog(
         id: uuid("abcdef01-2345-6789-abcd-ef0123456700"),
         workoutItemID: uuid("44444444-4444-4444-4444-444444444444"),
@@ -1600,6 +1970,10 @@ runAsyncCase("PushQueue dedup uses scoped removeMatchingDedupKey — no full-tab
         status: .completed,
         completedAt: iso8601("2026-04-17T08:00:00Z")
     )
+    try await queue.enqueueCompletionResults(makeCompletionRecord(
+        workoutID: uuid("11111111-2222-3333-4444-555555555555"),
+        setLogs: [setLog]
+    ))
     let param = CoreDomain.UserParameter(
         id: uuid("99999999-aaaa-bbbb-cccc-dddddddddddd"),
         userID: uuid("22222222-2222-2222-2222-222222222222"),
@@ -1612,6 +1986,7 @@ runAsyncCase("PushQueue dedup uses scoped removeMatchingDedupKey — no full-tab
 
     let peekCount = await store.peekCallCount
     let dedupCalls = await store.removeMatchingDedupKeyCalls
+    let replacingCalls = await store.enqueueReplacingDedupKeysCalls
     try expectEqual(
         peekCount,
         0,
@@ -1620,7 +1995,7 @@ runAsyncCase("PushQueue dedup uses scoped removeMatchingDedupKey — no full-tab
     try expectEqual(
         dedupCalls.count,
         3,
-        "one scoped dedup call per dedup-shaped enqueue (setLog, status, userParam)"
+        "single setLog/status/userParam use scoped dedup; completion uses atomic replacement"
     )
     try expect(
         dedupCalls.contains("setLog:abcdef01-2345-6789-abcd-ef0123456700"),
@@ -1633,6 +2008,23 @@ runAsyncCase("PushQueue dedup uses scoped removeMatchingDedupKey — no full-tab
     try expect(
         dedupCalls.contains("userParam:99999999-aaaa-bbbb-cccc-dddddddddddd"),
         "userParameter dedup key shape uses lowercase UUID"
+    )
+    try expectEqual(replacingCalls.count, 1, "completion uses one atomic replacement")
+    guard let completionKeys = replacingCalls.first else {
+        try expect(false, "missing completion replacement keys")
+        return
+    }
+    try expect(
+        completionKeys.contains("setLog:abcdef01-2345-6789-abcd-ef0123456700"),
+        "completion replacement includes final setLog key"
+    )
+    try expect(
+        completionKeys.contains("status:11111111-2222-3333-4444-555555555555:completed"),
+        "completion replacement includes completed status key"
+    )
+    try expect(
+        completionKeys.contains("completion:11111111-2222-3333-4444-555555555555"),
+        "completion replacement includes grouped completion key"
     )
 
     // Batch setLogs and events are explicitly NOT deduped — no scoped

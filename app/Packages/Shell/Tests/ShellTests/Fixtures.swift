@@ -168,8 +168,8 @@ enum Fixtures {
                 "exercise_id": "\(benchID.uuidString.lowercased())",
                 "last_set_logs": [
                   {
-                    "id": "aaaaaaaa-0000-0000-0000-000000000001",
-                    "workout_item_id": "aaaaaaaa-0000-0000-0000-000000000002",
+                    "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
+                    "workout_item_id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
                     "performed_exercise_id": null,
                     "set_index": 1,
                     "reps": 5,
@@ -179,6 +179,8 @@ enum Fixtures {
                     "distance_m": null,
                     "rir": 2,
                     "is_warmup": false,
+                    "skipped": false,
+                    "side": "bilateral",
                     "started_at": null,
                     "completed_at": "2026-04-10T07:15:00Z",
                     "hr_avg_bpm": null,
@@ -194,8 +196,8 @@ enum Fixtures {
                 "exercise_id": "\(rowID.uuidString.lowercased())",
                 "last_set_logs": [
                   {
-                    "id": "bbbbbbbb-0000-0000-0000-000000000001",
-                    "workout_item_id": "bbbbbbbb-0000-0000-0000-000000000002",
+                    "id": "bbbbbbbb-bbbb-4bbb-8bbb-000000000001",
+                    "workout_item_id": "bbbbbbbb-bbbb-4bbb-8bbb-000000000002",
                     "performed_exercise_id": null,
                     "set_index": 1,
                     "reps": 8,
@@ -205,6 +207,8 @@ enum Fixtures {
                     "distance_m": null,
                     "rir": 1,
                     "is_warmup": false,
+                    "skipped": false,
+                    "side": "bilateral",
                     "started_at": null,
                     "completed_at": "2026-04-10T07:25:00Z",
                     "hr_avg_bpm": null,
@@ -214,8 +218,8 @@ enum Fixtures {
                     "notes": null
                   },
                   {
-                    "id": "bbbbbbbb-0000-0000-0000-000000000003",
-                    "workout_item_id": "bbbbbbbb-0000-0000-0000-000000000002",
+                    "id": "bbbbbbbb-bbbb-4bbb-8bbb-000000000003",
+                    "workout_item_id": "bbbbbbbb-bbbb-4bbb-8bbb-000000000002",
                     "performed_exercise_id": null,
                     "set_index": 2,
                     "reps": 8,
@@ -225,6 +229,8 @@ enum Fixtures {
                     "distance_m": null,
                     "rir": 1,
                     "is_warmup": false,
+                    "skipped": false,
+                    "side": "bilateral",
                     "started_at": null,
                     "completed_at": "2026-04-10T07:27:00Z",
                     "hr_avg_bpm": null,
@@ -234,8 +240,8 @@ enum Fixtures {
                     "notes": null
                   },
                   {
-                    "id": "bbbbbbbb-0000-0000-0000-000000000004",
-                    "workout_item_id": "bbbbbbbb-0000-0000-0000-000000000002",
+                    "id": "bbbbbbbb-bbbb-4bbb-8bbb-000000000004",
+                    "workout_item_id": "bbbbbbbb-bbbb-4bbb-8bbb-000000000002",
                     "performed_exercise_id": null,
                     "set_index": 3,
                     "reps": 8,
@@ -245,6 +251,8 @@ enum Fixtures {
                     "distance_m": null,
                     "rir": 1,
                     "is_warmup": false,
+                    "skipped": false,
+                    "side": "bilateral",
                     "started_at": null,
                     "completed_at": "2026-04-10T07:29:00Z",
                     "hr_avg_bpm": null,

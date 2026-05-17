@@ -204,8 +204,8 @@ final class TabataAutoLogPushTests: XCTestCase {
             context: ctx,
             clock: clock,
             push: hooks,
-            localCompletionWriter: { [cacheRecorder] workout, setLogs in
-                await cacheRecorder.record(workout: workout, setLogs: setLogs)
+            localCompletionWriter: { [cacheRecorder] record in
+                await cacheRecorder.record(record)
             }
         )
         vm.start()
@@ -293,7 +293,7 @@ private actor AutoLogCompletionRecorder {
     }
     private(set) var calls: [Call] = []
 
-    func record(workout: Workout, setLogs: [SetLog]) {
-        calls.append(Call(workout: workout, setLogs: setLogs))
+    func record(_ record: WorkoutCompletionRecord) {
+        calls.append(Call(workout: record.workout, setLogs: record.setLogs))
     }
 }

@@ -34,6 +34,16 @@ extension WorkoutCacheImpl {
         }
     }
 
+    func upsertPrimitiveWorkout(_ w: PrimitiveWorkout, preload: PullPreload) throws {
+        if let existing = preload.primitiveWorkoutsByID[w.id] {
+            try existing.apply(w)
+        } else {
+            let model = try PrimitiveWorkoutModel.from(w)
+            modelContext.insert(model)
+            preload.primitiveWorkoutsByID[w.id] = model
+        }
+    }
+
     func upsertBlock(_ b: Block, preload: PullPreload) throws {
         let model: BlockModel
         if let existing = preload.blocksByID[b.id] {

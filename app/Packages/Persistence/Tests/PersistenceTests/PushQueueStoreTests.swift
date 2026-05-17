@@ -2,7 +2,7 @@
 //
 // Covers the `PushQueueStore` contract against the SwiftData-backed impl:
 // enqueue → peek → remove, update semantics, isEmpty, idempotent enqueue,
-// payload round-trip for both `setLogs` and `statusUpdate`.
+// payload round-trip for result payloads, user parameters, and telemetry.
 
 import XCTest
 import SwiftData
@@ -49,6 +49,181 @@ final class PushQueueStoreTests: XCTestCase {
         try await store.remove(ids: [item.id])
         let isEmptyAfter = try await store.isEmpty()
         XCTAssertTrue(isEmptyAfter)
+    }
+
+    func testCompletionResultsPayloadRoundTripsThroughStore() async throws {
+        let factory = try makeFactory()
+        let store = factory.pushQueueStore
+
+        let workoutID = UUID()
+        let completedAt = Date(timeIntervalSince1970: 1_700_000_500)
+        var workout = Fixtures.sampleWorkout(id: workoutID, status: .completed)
+        workout.completedAt = completedAt
+        workout.notes = "good finish"
+        let logs = [
+            Fixtures.sampleSetLog(setIndex: 1),
+            Fixtures.sampleSetLog(setIndex: 2),
+        ]
+        let item = PushItem(
+            id: UUID(),
+            payload: .completionResults(
+                workoutID: workout.id,
+                completedAt: workout.completedAt,
+                notes: workout.notes,
+                setLogs: logs,
+                primitiveSetLogs: []
+            ),
+            enqueuedAt: Date(timeIntervalSince1970: 1_700_000_000),
+            attempts: 0
+        )
+        try await store.enqueue(item)
+
+        let peeked = try await store.peek(max: 10)
+        XCTAssertEqual(peeked.count, 1)
+        XCTAssertEqual(peeked[0].dedupKey, "completion:\(workoutID.uuidString.lowercased())")
+        if case .completionResults(let queuedWorkoutID, let queuedCompletedAt, let notes, let queuedLogs, let primitiveLogs) = peeked[0].payload {
+            XCTAssertEqual(queuedWorkoutID, workoutID)
+            XCTAssertEqual(queuedCompletedAt, completedAt)
+            XCTAssertEqual(notes, "good finish")
+            XCTAssertEqual(queuedLogs, logs)
+            XCTAssertEqual(primitiveLogs, [])
+        } else {
+            XCTFail("expected completionResults payload")
+        }
+    }
+
+    func testEnqueueReplacingDedupKeysRemovesMatchesAndInsertsReplacement() async throws {
+        let factory = try makeFactory()
+        let store = factory.pushQueueStore
+        let workoutID = UUID()
+        let staleLog = PushItem(
+            id: UUID(),
+            payload: .setLogs([Fixtures.sampleSetLog(setIndex: 1)]),
+            enqueuedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        let staleStatus = PushItem(
+            id: UUID(),
+            payload: .statusUpdate(
+                workoutID: workoutID,
+                status: .completed,
+                completedAt: Date(timeIntervalSince1970: 1_100),
+                notes: nil
+            ),
+            enqueuedAt: Date(timeIntervalSince1970: 1_100)
+        )
+        let unrelated = PushItem(
+            id: UUID(),
+            payload: .userParameter(CoreDomain.UserParameter(
+                id: UUID(),
+                userID: UUID(),
+                key: "bodyweight_lb",
+                value: "185.0",
+                updatedAt: Date(timeIntervalSince1970: 1_200),
+                source: .appLog
+            )),
+            enqueuedAt: Date(timeIntervalSince1970: 1_200)
+        )
+        try await store.enqueue(staleLog)
+        try await store.enqueue(staleStatus)
+        try await store.enqueue(unrelated)
+
+        let replacement = PushItem(
+            id: UUID(),
+            payload: .completionResults(
+                workoutID: workoutID,
+                completedAt: Date(timeIntervalSince1970: 2_000),
+                notes: "done",
+                setLogs: [Fixtures.sampleSetLog(setIndex: 1)],
+                primitiveSetLogs: []
+            ),
+            enqueuedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        try await store.enqueue(
+            replacement,
+            replacingDedupKeys: Set([
+                staleLog.dedupKey!,
+                staleStatus.dedupKey!,
+                replacement.dedupKey!,
+            ])
+        )
+
+        let peeked = try await store.peek(max: 10)
+        XCTAssertEqual(peeked.count, 2)
+        XCTAssertFalse(peeked.contains { $0.id == staleLog.id })
+        XCTAssertFalse(peeked.contains { $0.id == staleStatus.id })
+        XCTAssertTrue(peeked.contains { $0.id == unrelated.id })
+        XCTAssertTrue(peeked.contains { $0.id == replacement.id })
+    }
+
+    func testEnqueueReplacingDedupKeysRollsBackStagedChangesOnThrow() async throws {
+        let factory = try makeFactory()
+        let store = factory.pushQueueStore
+        guard let impl = store as? PushQueueStoreImpl else {
+            XCTFail("PushQueueStoreImpl expected from the factory")
+            return
+        }
+
+        let workoutID = UUID()
+        let staleLog = PushItem(
+            id: UUID(),
+            payload: .setLogs([Fixtures.sampleSetLog(setIndex: 1)]),
+            enqueuedAt: Date(timeIntervalSince1970: 1_000)
+        )
+        let unrelated = PushItem(
+            id: UUID(),
+            payload: .userParameter(CoreDomain.UserParameter(
+                id: UUID(),
+                userID: UUID(),
+                key: "bodyweight_lb",
+                value: "185.0",
+                updatedAt: Date(timeIntervalSince1970: 1_200),
+                source: .appLog
+            )),
+            enqueuedAt: Date(timeIntervalSince1970: 1_200)
+        )
+        try await store.enqueue(staleLog)
+        try await store.enqueue(unrelated)
+
+        let replacement = PushItem(
+            id: UUID(),
+            payload: .completionResults(
+                workoutID: workoutID,
+                completedAt: Date(timeIntervalSince1970: 2_000),
+                notes: "done",
+                setLogs: [Fixtures.sampleSetLog(setIndex: 1)],
+                primitiveSetLogs: []
+            ),
+            enqueuedAt: Date(timeIntervalSince1970: 2_000)
+        )
+        do {
+            try await impl.enqueueReplacingThenThrowForTests(
+                replacement,
+                replacingDedupKeys: Set([
+                    staleLog.dedupKey!,
+                    replacement.dedupKey!,
+                ])
+            )
+            XCTFail("enqueueReplacingThenThrowForTests should have thrown")
+        } catch {
+            // Expected — the test hook always throws after staging replacement.
+        }
+
+        let cleanItem = PushItem(
+            id: UUID(),
+            payload: .workoutReset(workoutID: UUID()),
+            enqueuedAt: Date(timeIntervalSince1970: 3_000)
+        )
+        try await store.enqueue(cleanItem)
+
+        let peeked = try await store.peek(max: 10)
+        XCTAssertEqual(peeked.count, 3)
+        XCTAssertTrue(peeked.contains { $0.id == staleLog.id })
+        XCTAssertTrue(peeked.contains { $0.id == unrelated.id })
+        XCTAssertTrue(peeked.contains { $0.id == cleanItem.id })
+        XCTAssertFalse(
+            peeked.contains { $0.id == replacement.id },
+            "Rolled-back replacement must not leak into the next successful save"
+        )
     }
 
     func testPeekIsFIFOByEnqueuedAt() async throws {

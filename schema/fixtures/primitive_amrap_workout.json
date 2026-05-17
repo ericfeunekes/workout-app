@@ -1,0 +1,45 @@
+{
+  "id": "10000000-0000-4000-8000-000000000002",
+  "name": "Primitive AMRAP",
+  "primitive_blocks": [
+    {
+      "id": "20000000-0000-4000-8000-000000000002",
+      "title": "Five minute AMRAP",
+      "repeat": 1,
+      "work_target": [],
+      "sets": [
+        {
+          "id": "30000000-0000-4000-8000-000000000002",
+          "timing": { "mode": "cap_bounded", "cap_sec": 300 },
+          "traversal": "amrap",
+          "repeat": 1,
+          "work_target": [
+            { "metric": "rounds", "value_form": "open", "value": null, "role": "observation" }
+          ],
+          "slots": [
+            {
+              "id": "40000000-0000-4000-8000-000000000002",
+              "exercise_id": "50000000-0000-4000-8000-000000000002",
+              "work_target": [
+                { "metric": "reps", "value_form": "single", "value": 10, "role": "completion" }
+              ],
+              "stimuli": [],
+              "post_rest_sec": 0,
+              "is_warmup": false
+            },
+            {
+              "id": "40000000-0000-4000-8000-000000000003",
+              "exercise_id": "50000000-0000-4000-8000-000000000003",
+              "work_target": [
+                { "metric": "reps", "value_form": "single", "value": 5, "role": "completion" }
+              ],
+              "stimuli": [],
+              "post_rest_sec": 0,
+              "is_warmup": false
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

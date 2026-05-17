@@ -107,6 +107,17 @@ public actor PushQueue {
         try await store.enqueue(item)
     }
 
+    public func enqueuePrimitiveSetLogs(_ logs: [CoreDomain.PrimitiveSetLog]) async throws {
+        if logs.count == 1 {
+            try await dropExistingPrimitiveSetLog(id: logs[0].id)
+        }
+        let item = PushItem(
+            payload: .primitiveSetLogs(logs),
+            enqueuedAt: clock.now
+        )
+        try await store.enqueue(item)
+    }
+
     /// Enqueue a terminal-status update for a workout. Logical dedup: any
     /// previously-queued status update for the same (workoutID, status)
     /// pair is dropped first. Real-world trigger: the user taps End, then
@@ -134,6 +145,30 @@ public actor PushQueue {
             enqueuedAt: clock.now
         )
         try await store.enqueue(item)
+    }
+
+    /// Enqueue a terminal completed-workout result as one logical REST
+    /// publication. The input is the app-owned local completion artifact;
+    /// this method turns it into the `/api/sync/results` queue item that
+    /// keeps final set_logs and completed status atomic on the server.
+    public func enqueueCompletionResults(_ record: CoreDomain.WorkoutCompletionRecord) async throws {
+        let item = PushItem(
+            payload: .completionResults(
+                workoutID: record.workoutID,
+                completedAt: record.completedAt,
+                notes: record.notes,
+                setLogs: record.setLogs,
+                primitiveSetLogs: record.primitiveSetLogs
+            ),
+            enqueuedAt: clock.now
+        )
+        var keys = Set(record.setLogs.map { "setLog:\($0.id.uuidString.lowercased())" })
+        for log in record.primitiveSetLogs {
+            keys.insert("primitiveSetLog:\(log.id.uuidString.lowercased())")
+        }
+        keys.insert("status:\(record.workoutID.uuidString.lowercased()):\(CoreDomain.WorkoutStatus.completed.rawValue)")
+        keys.insert("completion:\(record.workoutID.uuidString.lowercased())")
+        try await store.enqueue(item, replacingDedupKeys: keys)
     }
 
     /// Enqueue a workout reset. This is used when the user deletes an

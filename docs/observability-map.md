@@ -69,8 +69,8 @@ This doc is the matrix. A "✓" means that layer records this action; "—" mean
 
 | Action | SessionState | Local cache | Push queue | Server | event_log |
 |---|---|---|---|---|---|
-| Tap "save & done" (no BW/note) | route: complete → today; state cleared | workout status=completed, set_logs written | `.statusUpdate(workout_id, .completed, completed_at)` enqueued | on flush: workout.status='completed', completed_at populated | `execution.session_mutation (save)` ✓ |
-| Tap "save & done" with note | (state cleared) | workout.notes populated on local cache write | (status_update; note is local-only for now) | — (server's status_update has no notes field) | same ✓ |
+| Tap "save & done" (no BW/note) | route: complete → today; state cleared after completion handoff | workout status=completed, set_logs written by the best-effort local writer | one grouped `.completionResults(workout_id, completed_at, notes, set_logs, primitive_set_logs)` payload enqueued; replaces stale per-set/status dedup keys | on flush: workout.status='completed', completed_at populated, result logs upserted atomically by the server handler | `execution.completion_record_built`, `execution.completion_publish_finished`, `execution.completion_local_writer_completed`, `execution.completion_local_cache_write_succeeded/failed`, `execution.session_mutation (save)` ✓ |
+| Tap "save & done" with note | (state cleared) | workout.notes populated on local cache write | grouped completion carries note with the completed status update | on flush: server status update receives note with completion payload | same, with `has_note=true` in completion proof payloads ✓ |
 | Tap "save & done" with bodyweight | (state cleared) | user_parameter (key=bodyweight_kg) upserted with deterministic id (MD5 of `userID|key|observedAt`) | `.userParameter(UserParameter)` enqueued (dedup by id) | on flush: `user_parameters` upsert by id (append-only); 403 on id collision across users | same ✓ |
 
 ### History
@@ -130,8 +130,10 @@ Each feature doc's scenarios should exercise the rows above. Current gaps flagge
 ## How to use this
 
 1. When you implement a new user-facing feature, add its row to the table above.
-2. When you write QA scenarios, cite which layer-cells you're verifying.
-3. When a user reports "did X work?", this is the first place to look to know where to check.
+2. When you write an implementation plan, include a telemetry/proof map for
+   rows whose truth cannot be established from the UI alone.
+3. When you write QA scenarios, cite which layer-cells you're verifying.
+4. When a user reports "did X work?", this is the first place to look to know where to check.
 
 ## `event_log` retention
 

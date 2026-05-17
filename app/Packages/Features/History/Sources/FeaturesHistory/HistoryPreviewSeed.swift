@@ -236,6 +236,8 @@ final class SeedCache: WorkoutCache, @unchecked Sendable {
         return seed.workouts.filter { $0.status == status }
     }
 
+    func loadPrimitiveWorkouts() async throws -> [PrimitiveWorkout] { [] }
+
     func loadBlocks(workoutID: WorkoutID) async throws -> [Block] {
         seed.blocks.filter { $0.workoutID == workoutID }
     }
@@ -320,6 +322,8 @@ final class SeedCache: WorkoutCache, @unchecked Sendable {
             .sorted { $0.setIndex < $1.setIndex }
     }
 
+    func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [PrimitiveSetLog] { [] }
+
     func loadSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [SetLog] {
         guard limit > 0 else { return [] }
         let itemIDs = Set(
@@ -338,6 +342,8 @@ final class SeedCache: WorkoutCache, @unchecked Sendable {
     func loadOrphanedSetLogs() async throws -> [SetLog] { [] }
 
     func saveSetLogs(_ setLogs: [SetLog], workoutID: WorkoutID) async throws {}
+
+    func savePrimitiveSetLogs(_ setLogs: [PrimitiveSetLog], workoutID: WorkoutID) async throws {}
 
     func resetWorkout(workoutID: WorkoutID) async throws {}
 

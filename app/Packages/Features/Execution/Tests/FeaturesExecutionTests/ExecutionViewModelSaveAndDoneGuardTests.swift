@@ -5,7 +5,7 @@
 // Bug: a fast double-tap on the Complete screen's "save & done" button,
 // or a SwiftUI re-render that fired the tap action twice before the
 // reducer's `.save` collapsed the screen, invoked `saveAndDone` more
-// than once. Each invocation enqueued a terminal `status_update` AND
+// than once. Each invocation enqueued a terminal completion record AND
 // a bodyweight `UserParameter`. Since `user_parameters` is append-only
 // on the server, the duplicate bodyweight would live forever.
 //
@@ -23,14 +23,14 @@ final class ExecutionViewModelSaveAndDoneGuardTests: XCTestCase {
 
     func testSaveAndDoneRejectsReentrantCall() async throws {
         // Fire `saveAndDone` twice back-to-back. The second call must
-        // be dropped by the re-entrancy guard so only ONE status_update
+        // be dropped by the re-entrancy guard so only ONE completion record
         // and ONE user_parameter row land in the enqueuer recorders.
         let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_042))
         let (ctx, _) = GuardTestFixtures.context(sets: 1, reps: 5, loadKg: 100)
         let recorder = EnqueueGuardRecorder()
         let hooks = ExecutionPushHooks(
-            onStatusChanged: { [recorder] id, status, completedAt, _ in
-                await recorder.appendStatus(workoutID: id, status: status, at: completedAt)
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
             },
             onUserParameterChanged: { [recorder] param in
                 await recorder.appendUserParameter(param)
@@ -51,10 +51,10 @@ final class ExecutionViewModelSaveAndDoneGuardTests: XCTestCase {
 
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let statuses = await recorder.statusUpdates
+        let completions = await recorder.completions
         XCTAssertEqual(
-            statuses.count, 1,
-            "re-entrant saveAndDone must be dropped: expected 1 status_update, got \(statuses.count)"
+            completions.count, 1,
+            "re-entrant saveAndDone must be dropped: expected 1 completion, got \(completions.count)"
         )
 
         let params = await recorder.userParameters
@@ -170,19 +170,11 @@ private enum GuardTestFixtures {
 /// Tiny recorder. Parallel actor to the one in `ExecutionViewModelPushTests`
 /// but renamed so it can sit in its own file.
 actor EnqueueGuardRecorder {
-    struct StatusObservation: Equatable {
-        let workoutID: UUID
-        let status: WorkoutStatus
-        let completedAt: Date?
-    }
-
-    private(set) var statusUpdates: [StatusObservation] = []
+    private(set) var completions: [WorkoutCompletionRecord] = []
     private(set) var userParameters: [UserParameter] = []
 
-    func appendStatus(workoutID: UUID, status: WorkoutStatus, at: Date?) {
-        statusUpdates.append(
-            StatusObservation(workoutID: workoutID, status: status, completedAt: at)
-        )
+    func appendCompletion(_ record: WorkoutCompletionRecord) {
+        completions.append(record)
     }
 
     func appendUserParameter(_ param: UserParameter) {

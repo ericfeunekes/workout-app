@@ -6,6 +6,7 @@
 
 import Foundation
 import CoreSession
+import CoreDomain
 import CoreAutoreg
 import CorePrescription
 import WorkoutCoreFoundation
@@ -23,6 +24,110 @@ let exerciseAlt = UUID()
 /// about the timestamp; those that do override inline. Hard-coded (not
 /// `Date()`) so repeated runs produce identical state snapshots.
 let logSetStamp = Date(timeIntervalSince1970: 1_700_000_000)
+
+runCase("primitive ExecutionPlan seeds strength set without legacy timing mode") {
+    let workoutID = UUID(uuidString: "10000000-0000-4000-8000-000000000001")!
+    let blockID = UUID(uuidString: "20000000-0000-4000-8000-000000000001")!
+    let setID = UUID(uuidString: "30000000-0000-4000-8000-000000000001")!
+    let slotID = UUID(uuidString: "40000000-0000-4000-8000-000000000001")!
+    let exerciseID = UUID(uuidString: "50000000-0000-4000-8000-000000000001")!
+    let workout = PrimitiveWorkout(
+        id: workoutID,
+        name: "Primitive strength",
+        blocks: [
+            PrimitiveBlock(id: blockID, sets: [
+                PrimitiveSet(
+                    id: setID,
+                    timing: PrimitiveTiming(mode: .setBounded),
+                    repeatCount: 3,
+                    slots: [
+                        PrimitiveSlot(
+                            id: slotID,
+                            exerciseID: exerciseID,
+                            workTargets: [
+                                PrimitiveWorkTarget(metric: .reps, valueForm: .single, value: 5, role: .completion),
+                            ],
+                            load: PrimitiveLoad(value: 100, unit: .kg, unitType: .absolute),
+                            stimuli: [PrimitiveStimulus(type: .rir, target: 2)]
+                        ),
+                    ]
+                ),
+            ]),
+        ]
+    )
+    let plan = ExecutionPlan(workout: workout)
+    try expectEqual(plan.workoutID, workoutID)
+    try expectEqual(plan.blocks[0].sets[0].setRepeat, 3)
+    try expectEqual(plan.blocks[0].sets[0].slots[0].slotID, slotID)
+    try expectEqual(plan.blocks[0].sets[0].slots[0].loadKg, 100)
+}
+
+runCase("primitive log coordinate creates stable role-scoped ids") {
+    let slotID = UUID(uuidString: "40000000-0000-4000-8000-000000000001")!
+    let setID = UUID(uuidString: "30000000-0000-4000-8000-000000000001")!
+    let blockID = UUID(uuidString: "20000000-0000-4000-8000-000000000001")!
+    let a = PrimitiveLogCoordinate(
+        role: .slot,
+        slotID: slotID,
+        setID: setID,
+        blockID: blockID,
+        blockRepeatIndex: 0,
+        setRepeatIndex: 1,
+        setIndex: 0
+    ).deterministicLogID
+    let b = PrimitiveLogCoordinate(
+        role: .slot,
+        slotID: slotID,
+        setID: setID,
+        blockID: blockID,
+        blockRepeatIndex: 0,
+        setRepeatIndex: 1,
+        setIndex: 0
+    ).deterministicLogID
+    let c = PrimitiveLogCoordinate(
+        role: .slot,
+        slotID: slotID,
+        setID: setID,
+        blockID: blockID,
+        blockRepeatIndex: 0,
+        setRepeatIndex: 2,
+        setIndex: 0
+    ).deterministicLogID
+    try expectEqual(a, b)
+    try expect(a != c, "repeat index must produce a distinct primitive log id")
+
+    let setResultA = PrimitiveLogCoordinate(
+        role: .setResult,
+        setID: setID,
+        blockID: blockID,
+        blockRepeatIndex: 0,
+        setRepeatIndex: 1,
+        setIndex: 0
+    ).deterministicLogID
+    let setResultB = PrimitiveLogCoordinate(
+        role: .setResult,
+        setID: setID,
+        blockID: blockID,
+        blockRepeatIndex: 0,
+        setRepeatIndex: 1,
+        setIndex: 99
+    ).deterministicLogID
+    let blockResultA = PrimitiveLogCoordinate(
+        role: .blockResult,
+        blockID: blockID,
+        blockRepeatIndex: 0,
+        setRepeatIndex: 7,
+        setIndex: 9
+    ).deterministicLogID
+    let blockResultB = PrimitiveLogCoordinate(
+        role: .blockResult,
+        blockID: blockID,
+        blockRepeatIndex: 0
+    ).deterministicLogID
+    try expectEqual(setResultA, setResultB)
+    try expectEqual(blockResultA, blockResultB)
+    try expect(setResultA != blockResultA, "aggregate roles must remain role-scoped")
+}
 
 func pristineSets(loadKg: Double = 100.0, reps: Int = 5, count: Int = 3) -> [SetPlan] {
     (1...count).map { i in

@@ -21,7 +21,7 @@ extension PushQueue {
     /// endpoint and are append-only.
     func pushPath(for payload: PushItem.Payload) -> String {
         switch payload {
-        case .setLogs, .statusUpdate, .workoutReset:
+        case .setLogs, .primitiveSetLogs, .statusUpdate, .completionResults, .workoutReset:
             return "/api/sync/results"
         case .events:
             return "/api/telemetry/events"
@@ -38,12 +38,22 @@ extension PushQueue {
         switch item.payload {
         case .setLogs(let logs):
             return try encodeSetLogs(logs)
+        case .primitiveSetLogs(let logs):
+            return try encodePrimitiveSetLogs(logs)
         case .statusUpdate(let workoutID, let status, let completedAt, let notes):
             return try encodeStatusUpdate(
                 workoutID: workoutID,
                 status: status,
                 completedAt: completedAt,
                 notes: notes
+            )
+        case .completionResults(let workoutID, let completedAt, let notes, let logs, let primitiveLogs):
+            return try encodeCompletionResults(
+                workoutID: workoutID,
+                completedAt: completedAt,
+                notes: notes,
+                logs: logs,
+                primitiveLogs: primitiveLogs
             )
         case .workoutReset(let workoutID):
             return try encodeWorkoutReset(workoutID: workoutID)
@@ -61,6 +71,16 @@ extension PushQueue {
     private func encodeSetLogs(_ logs: [CoreDomain.SetLog]) throws -> Data {
         let payload = WorkoutDBSchema.SyncResultsPayload(
             setLogs: logs.map(DTOMapping.toDTO),
+            statusUpdates: [],
+            workoutResets: []
+        )
+        return try encoder.encode(payload)
+    }
+
+    private func encodePrimitiveSetLogs(_ logs: [CoreDomain.PrimitiveSetLog]) throws -> Data {
+        try requirePrimitiveWorkoutIDs(logs)
+        let payload = WorkoutDBSchema.SyncResultsPayload(
+            primitiveSetLogs: logs.map(DTOMapping.toDTO),
             statusUpdates: [],
             workoutResets: []
         )
@@ -92,6 +112,56 @@ extension PushQueue {
             workoutResets: []
         )
         return try encoder.encode(payload)
+    }
+
+    private func encodeCompletionResults(
+        workoutID: WorkoutID,
+        completedAt: Date?,
+        notes: String?,
+        logs: [CoreDomain.SetLog],
+        primitiveLogs: [CoreDomain.PrimitiveSetLog]
+    ) throws -> Data {
+        // swiftlint:disable:next force_unwrapping
+        let wireStatus = WorkoutDBSchema.WorkoutStatus(rawValue: CoreDomain.WorkoutStatus.completed.rawValue)!
+        let dto = WorkoutDBSchema.WorkoutStatusUpdate(
+            workoutId: workoutID.wireID,
+            status: wireStatus,
+            completedAt: completedAt,
+            notes: notes
+        )
+        let payload = WorkoutDBSchema.SyncResultsPayload(
+            setLogs: logs.map(DTOMapping.toDTO),
+            primitiveSetLogs: try primitiveLogs.map { log in
+                let stamped = try primitiveLog(log, stampedWith: workoutID)
+                return DTOMapping.toDTO(stamped)
+            },
+            statusUpdates: [dto],
+            workoutResets: []
+        )
+        return try encoder.encode(payload)
+    }
+
+    private func primitiveLog(
+        _ log: CoreDomain.PrimitiveSetLog,
+        stampedWith workoutID: WorkoutID
+    ) throws -> CoreDomain.PrimitiveSetLog {
+        var stamped = log
+        if stamped.workoutID == nil {
+            stamped.workoutID = workoutID
+        }
+        return stamped
+    }
+
+    private func requirePrimitiveWorkoutIDs(_ logs: [CoreDomain.PrimitiveSetLog]) throws {
+        if logs.contains(where: { $0.workoutID == nil }) {
+            throw EncodingError.invalidValue(
+                logs,
+                .init(
+                    codingPath: [],
+                    debugDescription: "primitive set logs require workoutID before sync encoding"
+                )
+            )
+        }
     }
 
     private func encodeWorkoutReset(workoutID: WorkoutID) throws -> Data {

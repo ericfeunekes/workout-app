@@ -145,6 +145,34 @@ extension WorkoutCacheImpl {
         }
     }
 
+    public func savePrimitiveSetLogs(
+        _ setLogs: [PrimitiveSetLog],
+        workoutID: WorkoutID
+    ) async throws {
+        guard !setLogs.isEmpty else { return }
+        do {
+            let descriptor = FetchDescriptor<PrimitiveWorkoutModel>(
+                predicate: #Predicate<PrimitiveWorkoutModel> { $0.id == workoutID }
+            )
+            guard let row = try modelContext.fetch(descriptor).first else { return }
+            var merged = try row.primitiveSetLogs()
+            for rawLog in setLogs {
+                var log = rawLog
+                log.workoutID = rawLog.workoutID ?? workoutID
+                if let index = merged.firstIndex(where: { $0.id == log.id }) {
+                    merged[index] = log
+                } else {
+                    merged.append(log)
+                }
+            }
+            try row.applyPrimitiveSetLogs(merged)
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
     public func resetWorkout(workoutID: WorkoutID) async throws {
         do {
             let workoutDescriptor = FetchDescriptor<WorkoutModel>(

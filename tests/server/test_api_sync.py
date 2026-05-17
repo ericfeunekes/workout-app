@@ -11,6 +11,7 @@ from workoutdb_server.models import (
     AppUser,
     Block,
     Exercise,
+    PrimitiveSetLog,
     SetLog,
     UserParameter,
     Workout,
@@ -170,6 +171,7 @@ def test_push_set_logs_and_status(client, test_engine, test_user_id) -> None:
     body = response.json()
     assert body == {
         "set_logs_received": 1,
+        "primitive_set_logs_received": 0,
         "status_updates_received": 1,
         "workout_resets_received": 0,
     }
@@ -236,6 +238,7 @@ def test_workout_reset_deletes_logs_and_replans_workout(client, test_engine, tes
     assert reset.status_code == 200
     assert reset.json() == {
         "set_logs_received": 0,
+        "primitive_set_logs_received": 0,
         "status_updates_received": 0,
         "workout_resets_received": 1,
     }
@@ -247,6 +250,63 @@ def test_workout_reset_deletes_logs_and_replans_workout(client, test_engine, tes
 
     with Session(test_engine) as session:
         assert session.get(SetLog, "88888888-8888-8888-8888-888888888888") is None
+
+
+def test_push_accepts_primitive_set_result_shape(client, test_engine, test_user_id) -> None:
+    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
+    workout_id = _create_future_workout(client, exercise_id)
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "set_logs": [],
+            "primitive_set_logs": [
+                {
+                    "id": "99999999-9999-4999-8999-999999999999",
+                    "role": "set_result",
+                    "slot_id": None,
+                    "set_id": "30000000-0000-4000-8000-000000000002",
+                    "block_id": "20000000-0000-4000-8000-000000000002",
+                    "workout_id": workout_id,
+                    "set_index": 0,
+                    "set_repeat_index": 0,
+                    "block_repeat_index": 0,
+                    "rounds": 7,
+                    "duration_sec": 300,
+                    "completed_at": "2026-04-20T07:30:00Z",
+                }
+            ],
+            "status_updates": [],
+            "workout_resets": [],
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["primitive_set_logs_received"] == 1
+
+    with Session(test_engine) as session:
+        row = session.get(PrimitiveSetLog, "99999999-9999-4999-8999-999999999999")
+        assert row is not None
+        assert row.workout_id == workout_id
+        assert row.rounds == 7
+
+
+def test_push_rejects_malformed_primitive_log_role_scope(client, test_engine, test_user_id) -> None:
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                {
+                    "id": "99999999-9999-4999-8999-999999999998",
+                    "role": "set_result",
+                    "slot_id": "40000000-0000-4000-8000-000000000002",
+                    "set_id": "30000000-0000-4000-8000-000000000002",
+                    "block_id": "20000000-0000-4000-8000-000000000002",
+                    "set_index": 0,
+                    "completed_at": "2026-04-20T07:30:00Z",
+                }
+            ]
+        },
+    )
+    assert response.status_code == 422
 
 
 def test_workout_status_update_persists_notes(client, test_engine, test_user_id) -> None:
@@ -774,17 +834,18 @@ def test_push_rejects_cross_tenant_set_log(client, test_engine) -> None:
 def test_sync_results_mixed_ownership_rejects_foreign_items(
     client, test_engine, test_user_id
 ) -> None:
-    """Batched set_logs: one foreign workout_item mixed with own items must reject all.
+    """A late foreign status update rolls back earlier own result mutations.
 
-    Regression guard for perf-007: the ownership check was refactored from a
-    per-row `db.get(WorkoutItem, ...)` loop into a single batched query that
-    builds an `{item_id: owner_user_id}` map. If the map build drops the
-    tenant check (e.g. forgets to compare against the auth'd user) or the
-    loop forgets to validate on lookup hit, a foreign item could slip in
-    next to a valid own item. The batch must 404 as a whole — not partially
-    commit.
+    Completion pushes send final set_logs and terminal status in one
+    `/api/sync/results` request. If a later row in that request fails tenant
+    validation, the earlier successful log upsert and workout mutation must
+    roll back as one transaction.
     """
-    own_exercise_id, own_item_id = _seed_completed_workout(test_engine, test_user_id)
+    _own_exercise_id, own_item_id = _seed_completed_workout(test_engine, test_user_id)
+    with Session(test_engine) as session:
+        own_item = session.get(WorkoutItem, own_item_id)
+        assert own_item is not None
+        own_workout_id = own_item.block.workout_id
 
     # Seed a workout for a different user with its own workout_item.
     with Session(test_engine) as session:
@@ -815,10 +876,9 @@ def test_sync_results_mixed_ownership_rejects_foreign_items(
         )
         session.add(foreign_item)
         session.commit()
-        foreign_item_id = foreign_item.id
+        foreign_workout_id = foreign_workout.id
 
     own_log_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-    foreign_log_id = "dddddddd-dddd-4ddd-8ddd-dddddddddddd"
 
     response = client.post(
         "/api/sync/results",
@@ -833,27 +893,35 @@ def test_sync_results_mixed_ownership_rejects_foreign_items(
                     "weight_unit": "kg",
                     "completed_at": "2026-04-20T07:30:00Z",
                 },
+            ],
+            "status_updates": [
                 {
-                    "id": foreign_log_id,
-                    "workout_item_id": foreign_item_id,
-                    "set_index": 1,
-                    "reps": 5,
-                    "weight": 100.0,
-                    "weight_unit": "kg",
-                    "completed_at": "2026-04-20T07:31:00Z",
+                    "workout_id": own_workout_id,
+                    "status": "completed",
+                    "completed_at": "2026-04-20T08:00:00Z",
+                    "notes": "atomic note must not land",
+                },
+                {
+                    "workout_id": foreign_workout_id,
+                    "status": "completed",
+                    "completed_at": "2026-04-20T08:01:00Z",
+                    "notes": "foreign update must reject",
                 },
             ],
-            "status_updates": [],
         },
     )
     assert response.status_code == 404, response.text
-    assert foreign_item_id in response.json()["detail"]
+    assert foreign_workout_id in response.json()["detail"]
 
-    # Neither log must have been persisted — SQLAlchemy's rollback on the
-    # raised HTTPException keeps the whole batch atomic.
+    # The own log and own status update ran before the foreign status failed.
+    # SQLAlchemy's rollback on the raised HTTPException must still discard
+    # both earlier mutations.
     with Session(test_engine) as session:
         assert session.get(SetLog, own_log_id) is None
-        assert session.get(SetLog, foreign_log_id) is None
+        own_workout = session.get(Workout, own_workout_id)
+        assert own_workout is not None
+        assert own_workout.notes is None
+        assert own_workout.completed_at == datetime(2026, 4, 10, 7)
 
 
 def test_sync_results_rejects_malformed_uuid(client, test_user_id):

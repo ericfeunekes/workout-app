@@ -2,9 +2,10 @@
 //
 // Push-enqueue helpers split out of `ExecutionViewModel.swift` so the
 // class body stays under SwiftLint's `type_body_length` cap. These are
-// fire-and-forget — they never gate the UI mutation path on network
-// latency. See `docs/sync.md` § "Push protocol" and the file header on
-// `ExecutionViewModel.swift` for the semantics.
+// Most push helpers are fire-and-forget. Save & Done is the exception:
+// completion publication and local completion persistence finish before the
+// live session is cleared. See `docs/sync.md` § "Push protocol" and the file
+// header on `ExecutionViewModel.swift` for the semantics.
 //
 // Telemetry emit helpers + payload structs live in
 // `ExecutionViewModel+Telemetry.swift` so both files stay under
@@ -104,10 +105,12 @@ extension ExecutionViewModel {
     /// SwiftLint's `type_body_length` cap.
     ///
     /// Ordering matters here:
-    /// 1. Enqueue the terminal status_update FIRST — the push queue
-    ///    carries the `completed` flip even on the auto-advance path.
-    /// 2. Hand the completed workout + set_logs to the local cache writer
-    ///    (History reads it immediately).
+    /// 1. Build the app-owned completion record once from the live
+    ///    session before `.save` clears it.
+    /// 2. Durably hand the record to the completion publisher, then await
+    ///    the best-effort local cache writer. Both consume the same facts,
+    ///    and both complete their work before the persisted live session
+    ///    is cleared; only the queue handoff is the durable artifact.
     /// 3. Fire the bodyweight user_parameter (if any) through the push
     ///    hook — the shell wires this to both cache + push queue.
     /// 4. Dispatch `.save` through the reducer to wipe the in-memory
@@ -122,20 +125,36 @@ extension ExecutionViewModel {
         emitSessionMutation("save")
         let completedAt = clock.now
         let persistedNote = Self.normalizeNote(note)
-        // Terminal status push carries the note so the server is
-        // authoritative for the value — the next `sync/pull` would
-        // otherwise overwrite the local cache's freshly-typed note
-        // with the server's stale value.
-        enqueueStatusCompleted(at: completedAt, notes: persistedNote)
-        writeCompletionToLocalCache(note: persistedNote)
-        if let kg = bodyweightKg {
-            enqueueBodyweight(kg: kg, at: completedAt)
+        let completion = buildCompletionRecord(note: persistedNote, completedAt: completedAt)
+        emitCompletionRecordBuilt(completion)
+        // swiftlint:disable:next no_direct_task_unstructured
+        Task { @MainActor in
+            do {
+                let publisherInstalled = try await publishWorkoutCompletion(completion)
+                emitCompletionPublishResult(
+                    completion,
+                    publisherInstalled: publisherInstalled,
+                    errorDescription: nil
+                )
+                await writeCompletionToLocalCache(completion)
+                emitCompletionLocalWriterCompleted(completion)
+                if let kg = bodyweightKg {
+                    enqueueBodyweight(kg: kg, at: completedAt)
+                }
+                // For v0 we hand the reducer an empty freshItems/structure and
+                // rely on the shell's Route flip to move the user back to Today.
+                let empty = SessionState.Structure(itemsPerBlock: [], setsPerItem: [])
+                apply([.save(freshItems: [], freshStructure: empty)])
+                clearPersistedSession()
+            } catch {
+                emitCompletionPublishResult(
+                    completion,
+                    publisherInstalled: true,
+                    errorDescription: String(describing: error)
+                )
+                saveAndDoneInFlightStorage = false
+            }
         }
-        // For v0 we hand the reducer an empty freshItems/structure and
-        // rely on the shell's Route flip to move the user back to Today.
-        let empty = SessionState.Structure(itemsPerBlock: [], setsPerItem: [])
-        apply([.save(freshItems: [], freshStructure: empty)])
-        clearPersistedSession()
     }
 
     /// Build a `SetLog` from the item + the reducer-resolved load and push
@@ -319,26 +338,22 @@ extension ExecutionViewModel {
         )
     }
 
-    /// Enqueue the terminal status_update + kick a flush. The periodic
-    /// foreground flusher (every ~60s, see `PushFlusher` in Shell) would
-    /// eventually drain both, but on completion the user is still
-    /// looking at the ledger — we want the write to reach the server in
-    /// seconds, not a minute. Per `docs/sync.md` § "Cadence", push is
-    /// fire-and-forget at the UI level; an enqueue that can't reach the
-    /// server stays on disk and retries on the next tick.
-    func enqueueStatusCompleted(at completedAt: Date, notes: String? = nil) {
-        let workoutID = state.workoutID
+    /// Publish the canonical completed-workout record + kick a flush.
+    /// The hook owner decides how to publish it (today: REST push queue;
+    /// future: other replication surfaces), but every publisher sees the
+    /// same app-owned facts.
+    func publishWorkoutCompletion(_ record: WorkoutCompletionRecord) async throws -> Bool {
         let hooks = push
-        // swiftlint:disable:next no_direct_task_unstructured
-        Task { @MainActor in
-            await hooks.onStatusChanged?(workoutID, .completed, completedAt, notes)
-            await hooks.onPushKick?()
-        }
+        guard let publisher = hooks.onWorkoutCompleted else { return false }
+        try await publisher(record)
+        await hooks.onPushKick?()
+        return true
     }
 
-    /// Build the completed `Workout` + `[SetLog]` from the current session
-    /// and hand them to `localCompletionWriter` (if wired). Called from
-    /// `saveAndDone` BEFORE the reducer's `.save` wipes the in-memory log.
+    /// Build the completed `Workout` + `[SetLog]` from the current session.
+    /// Called from `saveAndDone` BEFORE the reducer's `.save` wipes the
+    /// in-memory log. The returned value is the single app-owned completion
+    /// record consumed by local History and outbound publishers.
     ///
     /// The Workout is constructed by taking the pulled template and
     /// stamping `status = .completed` + `completedAt = now`. `notes` is
@@ -374,13 +389,10 @@ extension ExecutionViewModel {
     ///     (a 10s bench press + 90s rest would look like a 100s set).
     ///     See `SessionState.workStartedAt`.
     ///
-    /// Fire-and-forget: the local write runs in a detached Task so it
-    /// never blocks the UI mutation path. The push queue is the
-    /// authoritative server path; this write exists so History sees the
-    /// workout immediately.
-    func writeCompletionToLocalCache(note: String? = nil) {
-        guard let writer = localCompletionWriter else { return }
-        let completedAt = clock.now
+    func buildCompletionRecord(
+        note: String? = nil,
+        completedAt: Date
+    ) -> WorkoutCompletionRecord {
         let base = context.workout
         let completedWorkout = Workout(
             id: base.id,
@@ -396,10 +408,65 @@ extension ExecutionViewModel {
             tagsJSON: base.tagsJSON
         )
         let setLogs = buildCompletionSetLogs(fallbackCompletedAt: completedAt)
-        // swiftlint:disable:next no_direct_task_unstructured
-        Task { @MainActor in
-            await writer(completedWorkout, setLogs)
-        }
+        return WorkoutCompletionRecord(
+            workout: completedWorkout,
+            setLogs: setLogs,
+            primitiveSetLogs: primitiveSetLogs
+        )
+    }
+
+    public func recordPrimitiveSetResult(
+        blockIndex: Int,
+        setIndexInBlock: Int,
+        blockRepeatIndex: Int = 0,
+        setRepeatIndex: Int = 0,
+        reps: Int? = nil,
+        rounds: Int? = nil,
+        durationSec: Double? = nil,
+        completedAt: Date? = nil
+    ) {
+        guard let plan = context.primitiveExecutionPlan else { return }
+        guard blockIndex >= 0, blockIndex < plan.blocks.count else { return }
+        let block = plan.blocks[blockIndex]
+        guard setIndexInBlock >= 0, setIndexInBlock < block.sets.count else { return }
+        primitiveSetLogs.append(PrimitiveSessionSeeder.setResultLog(
+            plan: plan,
+            blockIndex: blockIndex,
+            setIndexInBlock: setIndexInBlock,
+            blockRepeatIndex: blockRepeatIndex,
+            setRepeatIndex: setRepeatIndex,
+            reps: reps,
+            rounds: rounds,
+            durationSec: durationSec,
+            completedAt: completedAt ?? clock.now
+        ))
+        persist()
+    }
+
+    public func recordPrimitiveBlockResult(
+        blockIndex: Int,
+        blockRepeatIndex: Int = 0,
+        durationSec: Double? = nil,
+        completedAt: Date? = nil
+    ) {
+        guard let plan = context.primitiveExecutionPlan else { return }
+        guard blockIndex >= 0, blockIndex < plan.blocks.count else { return }
+        primitiveSetLogs.append(PrimitiveSessionSeeder.blockResultLog(
+            plan: plan,
+            blockIndex: blockIndex,
+            blockRepeatIndex: blockRepeatIndex,
+            durationSec: durationSec,
+            completedAt: completedAt ?? clock.now
+        ))
+        persist()
+    }
+
+    /// Hand the completed-workout record to `localCompletionWriter` (if
+    /// wired). Called from `saveAndDone` BEFORE the reducer's `.save` wipes
+    /// the in-memory log.
+    func writeCompletionToLocalCache(_ record: WorkoutCompletionRecord) async {
+        guard let writer = localCompletionWriter else { return }
+        await writer(record)
     }
 
     /// Flatten every done `SetPlan` in `state.items` into a `SetLog`

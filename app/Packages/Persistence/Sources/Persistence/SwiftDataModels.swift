@@ -21,7 +21,7 @@
 //     overwrites on UUID); we do not want those overwrites to cascade into
 //     historical set_logs. Keep the link loose.
 //
-// These file-scope classes are the latest `WorkoutDBSchemaV5` shape
+// These file-scope classes are the latest `WorkoutDBSchemaV6` shape
 // (post-perf-002 PushItem `priority` + `dedupKey` columns). The V1
 // (pre-006), V2 (post-006, pre-R1.4), and V3 (R1.4, pre-perf-002)
 // shapes are preserved as shadow @Model types inside their respective
@@ -78,6 +78,28 @@ public final class WorkoutModel {
         self.updatedAt = updatedAt
         self.completedAt = completedAt
         self.tagsJSON = tagsJSON
+    }
+}
+
+// MARK: - PrimitiveWorkoutModel
+
+@Model
+public final class PrimitiveWorkoutModel {
+    @Attribute(.unique) public var id: UUID
+    public var name: String
+    public var payloadJSON: String
+    public var primitiveSetLogsJSON: String
+
+    public init(
+        id: UUID,
+        name: String,
+        payloadJSON: String,
+        primitiveSetLogsJSON: String = "[]"
+    ) {
+        self.id = id
+        self.name = name
+        self.payloadJSON = payloadJSON
+        self.primitiveSetLogsJSON = primitiveSetLogsJSON
     }
 }
 

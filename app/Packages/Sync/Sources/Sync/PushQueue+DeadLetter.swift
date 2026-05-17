@@ -44,7 +44,9 @@ extension PushQueue {
     func payloadKind(for payload: PushItem.Payload) -> String {
         switch payload {
         case .setLogs: return "set_logs"
+        case .primitiveSetLogs: return "primitive_set_logs"
         case .statusUpdate: return "status_update"
+        case .completionResults: return "completion_results"
         case .workoutReset: return "workout_reset"
         case .events: return "events"
         case .userParameter: return "user_parameter"
@@ -69,7 +71,18 @@ extension PushQueue {
         case .setLogs(let logs):
             guard let first = logs.first else { return nil }
             return #""set_log_id":"\#(first.id.wireID)""#
+        case .primitiveSetLogs(let logs):
+            guard let first = logs.first else { return nil }
+            return #""primitive_set_log_id":"\#(first.id.wireID)""#
         case .statusUpdate(let workoutID, _, _, _):
+            return #""workout_id":"\#(workoutID.wireID)""#
+        case .completionResults(let workoutID, _, _, let logs, let primitiveLogs):
+            if let first = logs.first {
+                return #""workout_id":"\#(workoutID.wireID)","set_log_id":"\#(first.id.wireID)""#
+            }
+            if let first = primitiveLogs.first {
+                return #""workout_id":"\#(workoutID.wireID)","primitive_set_log_id":"\#(first.id.wireID)""#
+            }
             return #""workout_id":"\#(workoutID.wireID)""#
         case .workoutReset(let workoutID):
             return #""workout_id":"\#(workoutID.wireID)""#

@@ -13,6 +13,7 @@
 
 import Foundation
 import CoreAutoreg
+import CoreDomain
 import CoreSession
 import CoreTelemetry
 import WorkoutCoreFoundation
@@ -173,6 +174,64 @@ extension ExecutionViewModel {
         ))
     }
 
+    /// Emit that Save & Done has materialized the transport-neutral
+    /// completion record from live session state. This is the first proof
+    /// point for completion durability: after this event, every persistence
+    /// or replication surface should consume the same record rather than
+    /// re-reading `SessionState`.
+    func emitCompletionRecordBuilt(_ record: WorkoutCompletionRecord) {
+        telemetry.emit(Event(
+            sessionID: TelemetrySession.id,
+            kind: "state",
+            name: "execution.completion_record_built",
+            dataJSON: Self.encodeTelemetryPayload(Self.completionPayload(record)),
+            workoutID: record.workoutID
+        ))
+    }
+
+    /// Emit the result of handing the completion record to the configured
+    /// publisher. `publisherInstalled == false` is the DEBUG / pure-offline
+    /// path where no publisher is installed; production shell wiring should
+    /// emit success or failure with `publisherInstalled == true`.
+    func emitCompletionPublishResult(
+        _ record: WorkoutCompletionRecord,
+        publisherInstalled: Bool,
+        errorDescription: String?
+    ) {
+        let base = Self.completionPayload(record)
+        let payload = CompletionPublishEventPayload(
+            workoutID: base.workoutID,
+            setLogCount: base.setLogCount,
+            primitiveSetLogCount: base.primitiveSetLogCount,
+            hasNote: base.hasNote,
+            publisherInstalled: publisherInstalled,
+            error: errorDescription.map(Self.trimTelemetryError)
+        )
+        telemetry.emit(Event(
+            sessionID: TelemetrySession.id,
+            kind: errorDescription == nil ? "state" : "error",
+            name: errorDescription == nil
+                ? "execution.completion_publish_finished"
+                : "execution.completion_publish_failed",
+            dataJSON: Self.encodeTelemetryPayload(payload),
+            workoutID: record.workoutID
+        ))
+    }
+
+    /// Emit after the local completion writer returns to the view model.
+    /// This proves ordering relative to session clear. The shell writer
+    /// emits lower-level cache success/failure events for actual SwiftData
+    /// write outcomes.
+    func emitCompletionLocalWriterCompleted(_ record: WorkoutCompletionRecord) {
+        telemetry.emit(Event(
+            sessionID: TelemetrySession.id,
+            kind: "state",
+            name: "execution.completion_local_writer_completed",
+            dataJSON: Self.encodeTelemetryPayload(Self.completionPayload(record)),
+            workoutID: record.workoutID
+        ))
+    }
+
     // MARK: - Telemetry payload encoding
 
     /// Encode an `Encodable` telemetry payload into a JSON string for
@@ -189,6 +248,19 @@ extension ExecutionViewModel {
         let data = try! encoder.encode(payload)
         // swiftlint:disable:next force_unwrapping
         return String(data: data, encoding: .utf8)!
+    }
+
+    private static func completionPayload(_ record: WorkoutCompletionRecord) -> CompletionEventPayload {
+        CompletionEventPayload(
+            workoutID: record.workoutID.wireID,
+            setLogCount: record.setLogs.count,
+            primitiveSetLogCount: record.primitiveSetLogs.count,
+            hasNote: record.notes != nil
+        )
+    }
+
+    private static func trimTelemetryError(_ description: String) -> String {
+        String(description.prefix(240))
     }
 }
 
@@ -239,6 +311,39 @@ private struct AutoregProposedEventPayload: Encodable {
         case proposedLoadKg = "proposed_load_kg"
         case stepKg = "step_kg"
         case reason
+    }
+}
+
+/// Common completion event payload. `workout_id` is repeated in `data_json`
+/// even though `Event.workoutID` is also populated so JSONL exports can be
+/// inspected without joining the typed columns.
+private struct CompletionEventPayload: Encodable {
+    let workoutID: String
+    let setLogCount: Int
+    let primitiveSetLogCount: Int
+    let hasNote: Bool
+    enum CodingKeys: String, CodingKey {
+        case workoutID = "workout_id"
+        case setLogCount = "set_log_count"
+        case primitiveSetLogCount = "primitive_set_log_count"
+        case hasNote = "has_note"
+    }
+}
+
+private struct CompletionPublishEventPayload: Encodable {
+    let workoutID: String
+    let setLogCount: Int
+    let primitiveSetLogCount: Int
+    let hasNote: Bool
+    let publisherInstalled: Bool
+    let error: String?
+    enum CodingKeys: String, CodingKey {
+        case workoutID = "workout_id"
+        case setLogCount = "set_log_count"
+        case primitiveSetLogCount = "primitive_set_log_count"
+        case hasNote = "has_note"
+        case publisherInstalled = "publisher_installed"
+        case error
     }
 }
 

@@ -166,6 +166,14 @@ struct RootView: View {
     }
 
     private static func makePersistence() -> PersistenceFactory {
+        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+            do {
+                return try PersistenceFactory.makeInMemory()
+            } catch {
+                fatalError("PersistenceFactory.makeInMemory() failed under XCTest: \(error)")
+            }
+        }
+
         do {
             return try PersistenceFactory.makeDefault()
         } catch {

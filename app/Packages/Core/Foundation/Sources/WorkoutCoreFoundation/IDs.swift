@@ -15,6 +15,8 @@ import Foundation
 
 public typealias WorkoutID = UUID
 public typealias BlockID = UUID
+public typealias PrimitiveSetID = UUID
+public typealias PrimitiveSlotID = UUID
 public typealias WorkoutItemID = UUID
 public typealias ExerciseID = UUID
 public typealias ExerciseAlternativeID = UUID

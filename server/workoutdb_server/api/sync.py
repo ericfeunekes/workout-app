@@ -16,6 +16,7 @@ from sqlalchemy import func, select
 from workoutdb_server.api.deps import CurrentUserId, DbSession
 from workoutdb_server.api.schemas import (
     ExerciseLastPerformed,
+    PrimitiveSetLogIn,
     SetLogIn,
     SetLogRead,
     SyncPullOut,
@@ -27,6 +28,7 @@ from workoutdb_server.api.workouts import workout_tree_loader
 from workoutdb_server.models import (
     Block,
     Exercise,
+    PrimitiveSetLog,
     SetLog,
     UserParameter,
     Workout,
@@ -218,6 +220,8 @@ def sync_results(payload: SyncResultsIn, db: DbSession, user_id: CurrentUserId) 
             )
         _upsert_set_log(db, log)
 
+    _upsert_primitive_set_logs(db, payload.primitive_set_logs, user_id)
+
     for update in payload.status_updates:
         workout = db.get(Workout, update.workout_id)
         if workout is None or workout.user_id != user_id:
@@ -242,9 +246,30 @@ def sync_results(payload: SyncResultsIn, db: DbSession, user_id: CurrentUserId) 
     db.commit()
     return {
         "set_logs_received": len(payload.set_logs),
+        "primitive_set_logs_received": len(payload.primitive_set_logs),
         "status_updates_received": len(payload.status_updates),
         "workout_resets_received": len(payload.workout_resets),
     }
+
+
+def _upsert_primitive_set_logs(db: DbSession, logs: list[PrimitiveSetLogIn], user_id: str) -> None:
+    referenced_workout_ids = {log.workout_id for log in logs}
+    if referenced_workout_ids:
+        owner_rows = db.execute(
+            select(Workout.id, Workout.user_id).where(Workout.id.in_(referenced_workout_ids))
+        ).all()
+        owner_by_workout: dict[str, str] = {row[0]: row[1] for row in owner_rows}
+    else:
+        owner_by_workout = {}
+
+    for log in logs:
+        owner = owner_by_workout.get(log.workout_id)
+        if owner is None or owner != user_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Workout {log.workout_id} not found",
+            )
+        _upsert_primitive_set_log(db, log)
 
 
 def _reset_workout(db: DbSession, payload: WorkoutReset, user_id: str) -> None:
@@ -270,6 +295,13 @@ def _reset_workout(db: DbSession, payload: WorkoutReset, user_id: str) -> None:
         )
         for log in logs:
             db.delete(log)
+    primitive_logs = (
+        db.execute(select(PrimitiveSetLog).where(PrimitiveSetLog.workout_id == workout.id))
+        .scalars()
+        .all()
+    )
+    for log in primitive_logs:
+        db.delete(log)
 
     workout.status = "planned"
     workout.completed_at = None
@@ -327,4 +359,33 @@ def _upsert_set_log(db: DbSession, payload: SetLogIn) -> SetLog:
             "notes",
         ):
             setattr(row, field, getattr(payload, field))
+    return row
+
+
+def _upsert_primitive_set_log(db: DbSession, payload: PrimitiveSetLogIn) -> PrimitiveSetLog:
+    row = db.get(PrimitiveSetLog, payload.id)
+    if row is None:
+        row = PrimitiveSetLog(id=payload.id)
+        db.add(row)
+    for field in (
+        "role",
+        "slot_id",
+        "set_id",
+        "block_id",
+        "workout_id",
+        "planned_exercise_id",
+        "performed_exercise_id",
+        "set_index",
+        "set_repeat_index",
+        "block_repeat_index",
+        "reps",
+        "weight",
+        "weight_unit",
+        "duration_sec",
+        "rounds",
+        "rir",
+        "is_warmup",
+        "completed_at",
+    ):
+        setattr(row, field, getattr(payload, field))
     return row

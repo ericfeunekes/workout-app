@@ -1237,6 +1237,510 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "PrimitiveBlockIn": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "repeat": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Repeat",
+            "default": 1
+          },
+          "work_target": {
+            "items": {
+              "$ref": "#/components/schemas/PrimitiveWorkTargetIn"
+            },
+            "type": "array",
+            "title": "Work Target"
+          },
+          "sets": {
+            "items": {
+              "$ref": "#/components/schemas/PrimitiveSetIn"
+            },
+            "type": "array",
+            "title": "Sets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "sets"
+        ],
+        "title": "PrimitiveBlockIn"
+      },
+      "PrimitiveLoadIn": {
+        "properties": {
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "unit": {
+            "type": "string",
+            "enum": [
+              "kg",
+              "lb"
+            ],
+            "title": "Unit"
+          },
+          "unit_type": {
+            "type": "string",
+            "const": "absolute",
+            "title": "Unit Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "unit",
+          "unit_type"
+        ],
+        "title": "PrimitiveLoadIn"
+      },
+      "PrimitiveSetIn": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "timing": {
+            "$ref": "#/components/schemas/PrimitiveTimingIn"
+          },
+          "traversal": {
+            "type": "string",
+            "enum": [
+              "sequential",
+              "round_robin",
+              "amrap"
+            ],
+            "title": "Traversal",
+            "default": "sequential"
+          },
+          "repeat": {
+            "type": "integer",
+            "minimum": 1.0,
+            "title": "Repeat",
+            "default": 1
+          },
+          "work_target": {
+            "items": {
+              "$ref": "#/components/schemas/PrimitiveWorkTargetIn"
+            },
+            "type": "array",
+            "title": "Work Target"
+          },
+          "slots": {
+            "items": {
+              "$ref": "#/components/schemas/PrimitiveSlotIn"
+            },
+            "type": "array",
+            "title": "Slots"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "timing"
+        ],
+        "title": "PrimitiveSetIn"
+      },
+      "PrimitiveSetLogIn": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "slot",
+              "set_result",
+              "block_result"
+            ],
+            "title": "Role",
+            "default": "slot"
+          },
+          "slot_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slot Id"
+          },
+          "set_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Set Id"
+          },
+          "block_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Block Id"
+          },
+          "workout_id": {
+            "type": "string",
+            "title": "Workout Id"
+          },
+          "planned_exercise_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Planned Exercise Id"
+          },
+          "performed_exercise_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Performed Exercise Id"
+          },
+          "set_index": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Set Index"
+          },
+          "set_repeat_index": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Set Repeat Index",
+            "default": 0
+          },
+          "block_repeat_index": {
+            "type": "integer",
+            "minimum": 0.0,
+            "title": "Block Repeat Index",
+            "default": 0
+          },
+          "reps": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reps"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          },
+          "weight_unit": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "kg",
+                  "lb"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Unit"
+          },
+          "duration_sec": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Sec"
+          },
+          "rounds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rounds"
+          },
+          "rir": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 5.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rir"
+          },
+          "is_warmup": {
+            "type": "boolean",
+            "title": "Is Warmup",
+            "default": false
+          },
+          "completed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Completed At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "workout_id",
+          "set_index",
+          "completed_at"
+        ],
+        "title": "PrimitiveSetLogIn"
+      },
+      "PrimitiveSlotIn": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "exercise_id": {
+            "type": "string",
+            "title": "Exercise Id"
+          },
+          "work_target": {
+            "items": {
+              "$ref": "#/components/schemas/PrimitiveWorkTargetIn"
+            },
+            "type": "array",
+            "title": "Work Target"
+          },
+          "load": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrimitiveLoadIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "stimuli": {
+            "items": {
+              "$ref": "#/components/schemas/PrimitiveStimulusIn"
+            },
+            "type": "array",
+            "title": "Stimuli"
+          },
+          "post_rest_sec": {
+            "type": "integer",
+            "title": "Post Rest Sec",
+            "default": 0
+          },
+          "is_warmup": {
+            "type": "boolean",
+            "title": "Is Warmup",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "exercise_id"
+        ],
+        "title": "PrimitiveSlotIn"
+      },
+      "PrimitiveStimulusIn": {
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "rir",
+              "hr_zone"
+            ],
+            "title": "Type"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "title": "PrimitiveStimulusIn"
+      },
+      "PrimitiveTimingIn": {
+        "properties": {
+          "mode": {
+            "type": "string",
+            "enum": [
+              "set_bounded",
+              "time_bounded",
+              "cap_bounded",
+              "target_bounded"
+            ],
+            "title": "Mode"
+          },
+          "interval_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval Sec"
+          },
+          "rounds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rounds"
+          },
+          "cap_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cap Sec"
+          }
+        },
+        "type": "object",
+        "required": [
+          "mode"
+        ],
+        "title": "PrimitiveTimingIn"
+      },
+      "PrimitiveWorkTargetIn": {
+        "properties": {
+          "metric": {
+            "type": "string",
+            "enum": [
+              "reps",
+              "duration",
+              "distance",
+              "rounds",
+              "completion",
+              "load_carried"
+            ],
+            "title": "Metric"
+          },
+          "value_form": {
+            "type": "string",
+            "enum": [
+              "single",
+              "range",
+              "open"
+            ],
+            "title": "Value Form"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "completion",
+              "observation"
+            ],
+            "title": "Role"
+          }
+        },
+        "type": "object",
+        "required": [
+          "metric",
+          "value_form",
+          "role"
+        ],
+        "title": "PrimitiveWorkTargetIn"
+      },
       "SetLogIn": {
         "properties": {
           "id": {
@@ -1689,6 +2193,13 @@
             "type": "array",
             "title": "Set Logs"
           },
+          "primitive_set_logs": {
+            "items": {
+              "$ref": "#/components/schemas/PrimitiveSetLogIn"
+            },
+            "type": "array",
+            "title": "Primitive Set Logs"
+          },
           "status_updates": {
             "items": {
               "$ref": "#/components/schemas/WorkoutStatusUpdate"
@@ -2030,6 +2541,13 @@
             },
             "type": "array",
             "title": "Blocks"
+          },
+          "primitive_blocks": {
+            "items": {
+              "$ref": "#/components/schemas/PrimitiveBlockIn"
+            },
+            "type": "array",
+            "title": "Primitive Blocks"
           }
         },
         "type": "object",
@@ -2207,6 +2725,13 @@
             },
             "type": "array",
             "title": "Blocks"
+          },
+          "primitive_blocks": {
+            "items": {
+              "$ref": "#/components/schemas/PrimitiveBlockIn"
+            },
+            "type": "array",
+            "title": "Primitive Blocks"
           }
         },
         "type": "object",
@@ -2375,6 +2900,20 @@
               }
             ],
             "title": "Blocks"
+          },
+          "primitive_blocks": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PrimitiveBlockIn"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primitive Blocks"
           }
         },
         "type": "object",

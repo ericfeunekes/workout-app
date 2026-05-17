@@ -81,6 +81,145 @@ final class WorkoutCacheTests: XCTestCase {
         XCTAssertEqual(rows[0].name, "Renamed")
     }
 
+    func testPrimitiveWorkoutRoundTripsThroughCache() async throws {
+        let factory = try makeFactory()
+        let cache = factory.workoutCache
+        let workoutID = UUID(uuidString: "10000000-0000-4000-8000-000000000031")!
+        let primitive = PrimitiveWorkout(
+            id: workoutID,
+            name: "Primitive AMRAP",
+            blocks: [
+                PrimitiveBlock(
+                    id: UUID(uuidString: "20000000-0000-4000-8000-000000000031")!,
+                    sets: [
+                        PrimitiveSet(
+                            id: UUID(uuidString: "30000000-0000-4000-8000-000000000031")!,
+                            timing: PrimitiveTiming(mode: .capBounded, capSec: 300),
+                            traversal: .amrap,
+                            workTargets: [
+                                PrimitiveWorkTarget(metric: .rounds, valueForm: .open, role: .observation),
+                            ],
+                            slots: [
+                                PrimitiveSlot(
+                                    id: UUID(uuidString: "40000000-0000-4000-8000-000000000031")!,
+                                    exerciseID: UUID(uuidString: "50000000-0000-4000-8000-000000000031")!,
+                                    workTargets: [
+                                        PrimitiveWorkTarget(
+                                            metric: .reps,
+                                            valueForm: .single,
+                                            value: 10,
+                                            role: .completion
+                                        ),
+                                    ]
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ]
+        )
+
+        try await cache.save(PulledDataset(primitiveWorkouts: [primitive]))
+
+        let loaded = try await cache.loadPrimitiveWorkouts()
+        XCTAssertEqual(loaded, [primitive])
+    }
+
+    func testPrimitiveWorkoutUpsertReplacesPayload() async throws {
+        let factory = try makeFactory()
+        let cache = factory.workoutCache
+        let workoutID = UUID(uuidString: "10000000-0000-4000-8000-000000000032")!
+        let blockID = UUID(uuidString: "20000000-0000-4000-8000-000000000032")!
+        let setID = UUID(uuidString: "30000000-0000-4000-8000-000000000032")!
+        let first = PrimitiveWorkout(
+            id: workoutID,
+            name: "Before",
+            blocks: [
+                PrimitiveBlock(id: blockID, sets: [
+                    PrimitiveSet(id: setID, timing: PrimitiveTiming(mode: .setBounded), slots: []),
+                ]),
+            ]
+        )
+        var updated = first
+        updated.name = "After"
+        updated.blocks[0].sets[0].repeatCount = 3
+
+        try await cache.save(PulledDataset(primitiveWorkouts: [first]))
+        try await cache.save(PulledDataset(primitiveWorkouts: [updated]))
+
+        let loaded = try await cache.loadPrimitiveWorkouts()
+        XCTAssertEqual(loaded, [updated])
+    }
+
+    func testPrimitiveWorkoutTombstoneDeletesCachedPayload() async throws {
+        let factory = try makeFactory()
+        let cache = factory.workoutCache
+        let workoutID = UUID(uuidString: "10000000-0000-4000-8000-000000000034")!
+        let primitive = PrimitiveWorkout(
+            id: workoutID,
+            name: "Before",
+            blocks: [
+                PrimitiveBlock(id: UUID(uuidString: "20000000-0000-4000-8000-000000000034")!, sets: [
+                    PrimitiveSet(
+                        id: UUID(uuidString: "30000000-0000-4000-8000-000000000034")!,
+                        timing: PrimitiveTiming(mode: .setBounded),
+                        slots: []
+                    ),
+                ]),
+            ]
+        )
+
+        try await cache.save(PulledDataset(primitiveWorkouts: [primitive]))
+        try await cache.save(PulledDataset(primitiveWorkoutIDsToDelete: [workoutID]))
+
+        let loaded = try await cache.loadPrimitiveWorkouts()
+        XCTAssertTrue(loaded.isEmpty)
+    }
+
+    func testPrimitiveSetLogsRoundTripThroughCache() async throws {
+        let factory = try makeFactory()
+        let cache = factory.workoutCache
+        let workoutID = UUID(uuidString: "10000000-0000-4000-8000-000000000033")!
+        let completedAt = Fixtures.baseDate.addingTimeInterval(900)
+        let primitive = PrimitiveWorkout(
+            id: workoutID,
+            name: "Primitive Logged",
+            blocks: [
+                PrimitiveBlock(id: UUID(uuidString: "20000000-0000-4000-8000-000000000034")!, sets: [
+                    PrimitiveSet(
+                        id: UUID(uuidString: "30000000-0000-4000-8000-000000000034")!,
+                        timing: PrimitiveTiming(mode: .capBounded, capSec: 300),
+                        slots: []
+                    ),
+                ]),
+            ]
+        )
+        let log = PrimitiveSetLog(
+            id: UUID(uuidString: "60000000-0000-4000-8000-000000000033")!,
+            role: .setResult,
+            setID: UUID(uuidString: "30000000-0000-4000-8000-000000000033")!,
+            blockID: UUID(uuidString: "20000000-0000-4000-8000-000000000033")!,
+            workoutID: nil,
+            setIndex: 0,
+            reps: 4,
+            durationSec: 300,
+            rounds: 7,
+            completedAt: completedAt
+        )
+
+        try await cache.save(PulledDataset(primitiveWorkouts: [primitive]))
+        try await cache.savePrimitiveSetLogs([log], workoutID: workoutID)
+
+        let loaded = try await cache.loadPrimitiveSetLogs(workoutID: workoutID)
+        XCTAssertEqual(loaded.count, 1)
+        XCTAssertEqual(loaded[0].workoutID, workoutID)
+        XCTAssertEqual(loaded[0].role, .setResult)
+        XCTAssertEqual(loaded[0].setIndex, 0)
+        XCTAssertEqual(loaded[0].reps, 4)
+        XCTAssertEqual(loaded[0].rounds, 7)
+        XCTAssertEqual(loaded[0].durationSec, 300)
+    }
+
     func testFilterWorkoutsByStatus() async throws {
         let factory = try makeFactory()
         let cache = factory.workoutCache

@@ -26,10 +26,12 @@ struct SessionStateCodable: Codable, Sendable {
     /// normalization treats them as READY rather than already-started.
     let explicitSetStartAware: Bool
     let state: SessionState
+    let primitiveSetLogs: [PrimitiveSetLog]
 
-    init(state: SessionState) {
+    init(state: SessionState, primitiveSetLogs: [PrimitiveSetLog] = []) {
         self.explicitSetStartAware = true
         self.state = state
+        self.primitiveSetLogs = primitiveSetLogs
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -47,6 +49,7 @@ struct SessionStateCodable: Codable, Sendable {
         case note
         case structure
         case explicitSetStartAware
+        case primitiveSetLogs
     }
 
     init(from decoder: Decoder) throws {
@@ -87,6 +90,10 @@ struct SessionStateCodable: Codable, Sendable {
         // re-seed from the pulled workout rather than silently dropping
         // an unknown enum case and mis-aligning later blocks' policies.
         let structure = try c.decode(StructureCodable.self, forKey: .structure).decodedValue()
+        let primitiveSetLogs = try c.decodeIfPresent(
+            [PrimitiveSetLogCodable].self,
+            forKey: .primitiveSetLogs
+        )?.map { try $0.decodedValue() } ?? []
         self.explicitSetStartAware = explicitSetStartAware
         self.state = SessionState(
             workoutID: workoutID,
@@ -103,6 +110,7 @@ struct SessionStateCodable: Codable, Sendable {
             note: note,
             structure: structure
         )
+        self.primitiveSetLogs = primitiveSetLogs
     }
 
     func encode(to encoder: Encoder) throws {
@@ -121,6 +129,7 @@ struct SessionStateCodable: Codable, Sendable {
         try c.encode(state.note, forKey: .note)
         try c.encode(StructureCodable(value: state.structure), forKey: .structure)
         try c.encode(explicitSetStartAware, forKey: .explicitSetStartAware)
+        try c.encode(primitiveSetLogs.map(PrimitiveSetLogCodable.init(value:)), forKey: .primitiveSetLogs)
     }
 }
 
@@ -275,6 +284,79 @@ private struct CompositeSetProgressCodable: Codable {
             firstStartedAt: firstStartedAt,
             phase: try phase.decodedValue(),
             completedSlots: completedSlots
+        )
+    }
+}
+
+private struct PrimitiveSetLogCodable: Codable {
+    let id: UUID
+    let role: String
+    let slotID: UUID?
+    let setID: UUID?
+    let blockID: UUID?
+    let workoutID: UUID?
+    let plannedExerciseID: UUID?
+    let performedExerciseID: UUID?
+    let setIndex: Int
+    let setRepeatIndex: Int
+    let blockRepeatIndex: Int
+    let reps: Int?
+    let weight: Double?
+    let weightUnit: String?
+    let durationSec: Double?
+    let rounds: Int?
+    let rir: Int?
+    let isWarmup: Bool
+    let completedAt: Date
+
+    init(value: PrimitiveSetLog) {
+        id = value.id
+        role = value.role.rawValue
+        slotID = value.slotID
+        setID = value.setID
+        blockID = value.blockID
+        workoutID = value.workoutID
+        plannedExerciseID = value.plannedExerciseID
+        performedExerciseID = value.performedExerciseID
+        setIndex = value.setIndex
+        setRepeatIndex = value.setRepeatIndex
+        blockRepeatIndex = value.blockRepeatIndex
+        reps = value.reps
+        weight = value.weight
+        weightUnit = value.weightUnit?.rawValue
+        durationSec = value.durationSec
+        rounds = value.rounds
+        rir = value.rir
+        isWarmup = value.isWarmup
+        completedAt = value.completedAt
+    }
+
+    func decodedValue() throws -> PrimitiveSetLog {
+        guard let role = PrimitiveLogRole(rawValue: role) else {
+            throw DecodingError.dataCorrupted(
+                .init(codingPath: [], debugDescription: "Unknown primitive log role: \(role)")
+            )
+        }
+        return PrimitiveSetLog(
+            id: id,
+            role: role,
+            slotID: slotID,
+            setID: setID,
+            blockID: blockID,
+            workoutID: workoutID,
+            plannedExerciseID: plannedExerciseID,
+            performedExerciseID: performedExerciseID,
+            setIndex: setIndex,
+            setRepeatIndex: setRepeatIndex,
+            blockRepeatIndex: blockRepeatIndex,
+            reps: reps,
+            weight: weight,
+            weightUnit: weightUnit.flatMap { WeightUnit(rawValue: $0) },
+            durationSec: durationSec,
+            rounds: rounds,
+            rir: rir,
+            isWarmup: isWarmup,
+            completedAt: completedAt
         )
     }
 }

@@ -12,12 +12,22 @@
 
 import Foundation
 import CoreDomain
+import CoreSession
 import WorkoutCoreFoundation
 
 /// Everything the Execution screens need to render a live workout.
 public struct WorkoutContext: Sendable {
     /// The workout being executed.
     public let workout: Workout
+
+    /// Intact primitive authoring shape for this workout, when the server
+    /// supplied one. Legacy workout rows leave this nil.
+    public let primitiveWorkout: PrimitiveWorkout?
+
+    /// Runtime plan seeded from `primitiveWorkout`. Keeping this on the
+    /// context lets the production execution VM emit primitive result logs
+    /// without reaching back into Persistence.
+    public let primitiveExecutionPlan: ExecutionPlan?
 
     /// Blocks in position order.
     public let blocks: [Block]
@@ -57,6 +67,8 @@ public struct WorkoutContext: Sendable {
 
     public init(
         workout: Workout,
+        primitiveWorkout: PrimitiveWorkout? = nil,
+        primitiveExecutionPlan: ExecutionPlan? = nil,
         blocks: [Block],
         itemsByBlock: [[WorkoutItem]],
         exercises: [UUID: Exercise],
@@ -65,6 +77,8 @@ public struct WorkoutContext: Sendable {
         userParameters: [String: Double] = [:]
     ) {
         self.workout = workout
+        self.primitiveWorkout = primitiveWorkout
+        self.primitiveExecutionPlan = primitiveExecutionPlan
         self.blocks = blocks
         self.itemsByBlock = itemsByBlock
         self.exercises = exercises

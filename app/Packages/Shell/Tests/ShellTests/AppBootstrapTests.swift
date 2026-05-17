@@ -22,6 +22,7 @@ import FeaturesToday
 import Persistence
 import Sync
 import WorkoutCoreFoundation
+import WorkoutDBSchema
 @testable import FeaturesExecution
 @testable import Shell
 
@@ -336,6 +337,128 @@ final class AppBootstrapTests: XCTestCase {
         XCTAssertEqual(params.count, 1)
     }
 
+    func testBuildWorkoutContextIncludesPrimitivePlanFromCache() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let workoutID = UUID(uuidString: "10000000-0000-4000-8000-000000000061")!
+        let userID = UUID(uuidString: "01000000-0000-4000-8000-000000000061")!
+        let blockID = UUID(uuidString: "20000000-0000-4000-8000-000000000061")!
+        let setID = UUID(uuidString: "30000000-0000-4000-8000-000000000061")!
+        let slotID = UUID(uuidString: "40000000-0000-4000-8000-000000000061")!
+        let exerciseID = UUID(uuidString: "50000000-0000-4000-8000-000000000061")!
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let workout = Workout(
+            id: workoutID,
+            userID: userID,
+            name: "Primitive Cached",
+            scheduledDate: now,
+            status: .planned,
+            source: .claude,
+            createdAt: now,
+            updatedAt: now
+        )
+        let primitive = PrimitiveWorkout(
+            id: workoutID,
+            name: "Primitive Cached",
+            blocks: [
+                PrimitiveBlock(id: blockID, sets: [
+                    PrimitiveSet(
+                        id: setID,
+                        timing: PrimitiveTiming(mode: .capBounded, capSec: 300),
+                        traversal: .amrap,
+                        slots: [
+                            PrimitiveSlot(
+                                id: slotID,
+                                exerciseID: exerciseID,
+                                workTargets: [
+                                    PrimitiveWorkTarget(
+                                        metric: .reps,
+                                        valueForm: .single,
+                                        value: 10,
+                                        role: .completion
+                                    ),
+                                ]
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        try await factory.workoutCache.save(PulledDataset(
+            workouts: [workout],
+            primitiveWorkouts: [primitive],
+            exercises: [Exercise(id: exerciseID, name: "Push-up")]
+        ))
+
+        let context = try await AppBootstrap.buildWorkoutContext(
+            for: workout,
+            cache: factory.workoutCache
+        )
+
+        XCTAssertEqual(context.primitiveWorkout, primitive)
+        XCTAssertEqual(context.primitiveExecutionPlan?.workoutID, workoutID)
+        XCTAssertEqual(context.primitiveExecutionPlan?.blocks[0].sets[0].traversal, .amrap)
+    }
+
+    func testSavePullPropagatesPrimitiveTombstoneToCache() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let workoutID = UUID(uuidString: "10000000-0000-4000-8000-000000000062")!
+        let userID = UUID(uuidString: "01000000-0000-4000-8000-000000000062")!
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let workout = Workout(
+            id: workoutID,
+            userID: userID,
+            name: "Primitive Removed",
+            scheduledDate: now,
+            status: .planned,
+            source: .claude,
+            createdAt: now,
+            updatedAt: now
+        )
+        let primitive = PrimitiveWorkout(
+            id: workoutID,
+            name: "Primitive Removed",
+            blocks: [
+                PrimitiveBlock(id: UUID(uuidString: "20000000-0000-4000-8000-000000000062")!, sets: [
+                    PrimitiveSet(
+                        id: UUID(uuidString: "30000000-0000-4000-8000-000000000062")!,
+                        timing: PrimitiveTiming(mode: .setBounded),
+                        slots: []
+                    ),
+                ]),
+            ]
+        )
+        try await factory.workoutCache.save(PulledDataset(
+            workouts: [workout],
+            primitiveWorkouts: [primitive]
+        ))
+
+        let result = PullResult(
+            serverTime: now,
+            exercises: [],
+            userParameters: [],
+            workouts: [
+                MappedWorkout(
+                    workout: workout,
+                    blocks: [],
+                    items: [],
+                    alternatives: []
+                ),
+            ],
+            primitiveWorkoutIDsToDelete: [workoutID],
+            lastPerformed: []
+        )
+        try await AppBootstrap.savePull(result, into: factory.workoutCache)
+
+        let primitiveWorkouts = try await factory.workoutCache.loadPrimitiveWorkouts()
+        XCTAssertTrue(primitiveWorkouts.isEmpty)
+        let workouts = try await factory.workoutCache.loadWorkouts(status: nil, since: nil)
+        XCTAssertEqual(workouts.map(\.id), [workoutID])
+    }
+
     // MARK: - qa-027 · completed-only cache stays in .ready
 
     /// qa-027: cold-launch after the user has completed all planned
@@ -497,12 +620,14 @@ final class AppBootstrapTests: XCTestCase {
         let transport = ScriptedTransport(
             getOutcomes: [.ok(fixture.json)]
         )
+        let telemetry = ShellTelemetryRecorder()
 
         let result = try await AppBootstrap.bootstrap(
             connection: (url: URL(string: "https://example.test")!, token: "tok"),
             persistence: factory,
             now: fixture.scheduledDate,
-            transportBuilder: { _ in transport }
+            transportBuilder: { _ in transport },
+            telemetryEmitter: telemetry
         )
         guard case let .ready(_, executionHolder, _) = result else {
             return XCTFail("expected .ready, got \(result)")
@@ -541,6 +666,52 @@ final class AppBootstrapTests: XCTestCase {
         let logs = try await factory.workoutCache.loadSetLogs(workoutID: saved.id)
         XCTAssertEqual(logs.count, 7)
         XCTAssertTrue(logs.allSatisfy { $0.reps != nil })
+
+        let postPaths = await transport.store.snapshotPostPaths()
+        XCTAssertTrue(postPaths.contains("/api/sync/results"))
+        let resultBodies = await transport.store.snapshotPostBodies()
+        let syncResultsPayloads = resultBodies.compactMap { body in
+            try? JSONDecoder.workoutDB().decode(SyncResultsPayload.self, from: body)
+        }
+        XCTAssertEqual(
+            syncResultsPayloads.filter { $0.setLogs.isEmpty && !$0.statusUpdates.isEmpty }.count,
+            0,
+            "Save & Done must not emit a second standalone status-only results push"
+        )
+        let completionPayload = try XCTUnwrap(
+            syncResultsPayloads.first { !$0.setLogs.isEmpty && !$0.statusUpdates.isEmpty }
+        )
+        XCTAssertEqual(completionPayload.setLogs.count, 7)
+        XCTAssertEqual(completionPayload.statusUpdates.count, 1)
+        XCTAssertEqual(
+            completionPayload.statusUpdates[0].workoutId,
+            fixture.domainWorkout.id.uuidString.lowercased()
+        )
+        XCTAssertEqual(completionPayload.statusUpdates[0].status, WorkoutDBSchema.WorkoutStatus.completed)
+
+        let completionEvents = telemetry.events.filter {
+            $0.name.hasPrefix("execution.completion_")
+        }
+        XCTAssertEqual(
+            completionEvents.map(\.name),
+            [
+                "execution.completion_record_built",
+                "execution.completion_publish_finished",
+                "execution.completion_local_cache_write_succeeded",
+                "execution.completion_local_writer_completed",
+            ]
+        )
+        XCTAssertTrue(
+            completionEvents.allSatisfy { $0.workoutID == fixture.domainWorkout.id },
+            "every completion proof event must carry the completed workout id"
+        )
+        let payloads = try completionEvents.map(Self.decodeTelemetryPayload)
+        let workoutID = fixture.domainWorkout.id.uuidString.lowercased()
+        XCTAssertTrue(payloads.allSatisfy { $0["workout_id"] as? String == workoutID })
+        XCTAssertTrue(payloads.allSatisfy { $0["set_log_count"] as? Int == 7 })
+        XCTAssertTrue(payloads.allSatisfy { $0["primitive_set_log_count"] as? Int == 0 })
+        XCTAssertTrue(payloads.allSatisfy { $0["has_note"] as? Bool == false })
+        XCTAssertEqual(payloads[1]["publisher_installed"] as? Bool, true)
     }
 
     // MARK: - Post-save VM rebuild (qa-002 / qa-003)
@@ -732,8 +903,8 @@ final class AppBootstrapTests: XCTestCase {
             "bundle must survive the rebuild, not just one field)"
         )
         XCTAssertNotNil(
-            vmB.push.onStatusChanged,
-            "rebuilt VM must retain onStatusChanged"
+            vmB.push.onWorkoutCompleted,
+            "rebuilt VM must retain onWorkoutCompleted"
         )
         XCTAssertNotNil(
             vmB.push.onPushKick,
@@ -1379,6 +1550,32 @@ final class AppBootstrapTests: XCTestCase {
 
     private func uniqueService() -> String {
         "com.ericfeunekes.WorkoutDB.token.test.\(UUID().uuidString)"
+    }
+
+    private static func decodeTelemetryPayload(
+        _ event: Event
+    ) throws -> [String: Any] {
+        let raw = try XCTUnwrap(event.dataJSON)
+        let data = try XCTUnwrap(raw.data(using: .utf8))
+        let decoded = try JSONSerialization.jsonObject(with: data)
+        return try XCTUnwrap(decoded as? [String: Any])
+    }
+}
+
+private final class ShellTelemetryRecorder: TelemetryEmitter, @unchecked Sendable {
+    private let lock = NSLock()
+    private var buffer: [Event] = []
+
+    var events: [Event] {
+        lock.lock()
+        defer { lock.unlock() }
+        return buffer
+    }
+
+    func emit(_ event: Event) {
+        lock.lock()
+        defer { lock.unlock() }
+        buffer.append(event)
     }
 }
 

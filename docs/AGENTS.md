@@ -15,7 +15,8 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 
 ## Read first
 
-- `specs/v2-architecture.md` — **accepted** target architecture. Every non-trivial change is evaluated against this. Read in full before working on schema, sync, or the app.
+- `specs/v2-architecture.md` — **accepted** target architecture. Every non-trivial change is evaluated against this. Read in full before working on schema, sync, or the app. **Note:** the Data model section is superseded by `specs/primitives-data-model.md`; everything else in v2 remains authoritative.
+- `specs/primitives-data-model.md` — **accepted target spec (not yet implemented)** for the prescription + log + runtime-resolution data model. Replaces the 12-timing-mode enum with 7 composable primitives under a Block > Set > Slot hierarchy. Aspect files under `specs/primitives-data-model/` cover authoring shape, log shape, runtime resolution, and cutover posture.
 - `workout-generation.md` — canonical workout authoring guide. Start here when generating plans: data model, safe current timing modes, autoreg, result persistence, examples, and generator checklist.
 - `prescription.md` — authoring vocabulary. What Claude must put in a workout so the app can execute it. Per-timing-mode shapes, RIR + autoregulation rules, parametric shapes.
 - `workout-taxonomy.md` — bootstrap workout-domain and block-archetype taxonomy. Use this before authoring new workout shapes so training intent maps to the right timing/logging primitive.
@@ -48,7 +49,7 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `runbooks/closeout.md` — per-change closeout checklist (enforces the complete-cutover philosophy).
 - `runbooks/first-real-workout.md` — critical path from "alpha-ready codebase" to "first real workout logged to server." Lists Eric-actions (credentials, hardware, decisions) vs Claude-actions (last-mile code + wiring). The hand-off sequence.
 - `infrastructure/home-server.md` — one-time setup + ongoing deploy for the Python server (Tailscale, launchd, backup, rollback).
-- `specs/` — accepted specs (`v2-architecture.md`) and decision explorations (`data-model-exploration.md`).
+- `specs/` — accepted specs (`v2-architecture.md`, `primitives-data-model.md` + aspect dir) and decision explorations (`data-model-exploration.md`).
 - `architecture/` — the structural contract. Start at `architecture/context.md` (the 9-question answers), then `boundaries.md` (allowed dependency directions), `fitness-functions.md` (every rule → automated check), `hotspots.md` (preemptive risk register), `swift-packages.md` (iOS package graph).
 - `ios-dev-loop.md` — how an agent drives the iOS app (build / launch / screenshot / tap / iterate). Recommends XcodeBuildMCP; documents the ad-hoc fallback (xcrun simctl + debug launch args) that works without it.
 - `decisions/` — ADRs. Current set: `ADR-2026-04-17-ux-scope.md`, `ADR-2026-04-17-rir-autoreg-sync.md`, `ADR-2026-04-17-architecture.md`, `ADR-2026-04-18-shell-package-placement.md`, `ADR-2026-04-18-smart-defaults.md`.
@@ -56,6 +57,7 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `design/` — Claude Design handoff bundle (HTML/CSS/JSX prototypes, wireframes, rules). Read `design/ORIGIN.md` first, then `design/HANDOFF.md`. Reference, not spec.
 - `plans/active/` — current implementation plans. Start here before continuing an in-flight multi-slice build.
 - `plans/backlog/feedback-implementation-phases/` — phase-by-phase implementation plans for carrying the 2026-04-25 feedback through schema, execution UX, history, watch authority, watch UI, and future in-app Claude/chat.
+- `plans/backlog/primitives-cutover-phases/` — phase specs for the primitives-data-model cutover. README owns the phase list and deferral notes; per-phase files carry outcome-altitude specs consumed by implementation-planning.
 - `bugs.md` — active QA issue tracker. Closed issues are removed; use git history for past rows.
 
 See also `schema/README.md` (outside `docs/`) — the shared schema package (OpenAPI + Swift DTOs) and its drift-prevention contract tests. Common dev commands: `make help` at the repo root.

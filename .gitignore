@@ -45,3 +45,4 @@ htmlcov/
 scripts/             # local one-off scripts; not architectural
 backups/             # created by `make db-backup`; SQLite snapshots
 *.sqlite.backup      # ad-hoc backup artifacts
+.cxd-workspace/

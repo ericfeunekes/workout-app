@@ -23,6 +23,10 @@ The app doesn't need to know what a muscle group is. It doesn't need substitutio
 
 ## Data model
 
+> **Status (2026-04-28):** This section is **superseded by `docs/specs/primitives-data-model.md`**. That spec replaces the per-timing-mode prescription model described below with a 7-primitive composition over a Block > Set > Slot hierarchy. The sections that follow (Persistence architecture, API contract, Sync, What Claude pushes, Watch integration) remain authoritative for everything except the prescription/log data shape.
+>
+> The content below is retained for historical context until the primitives cutover lands. After cutover, this section will be rewritten to point at the primitives spec as the canonical data model.
+
 ### Core principle: composition with timing
 
 Everything is blocks. A block has a timing mode and contains exercises (or nested blocks). The app's job is to read the timing mode and drive the appropriate timer UI.

@@ -50,12 +50,32 @@ open app/WorkoutDB.xcodeproj
 
 In Xcode's Signing & Capabilities panel, set your Apple Developer Team. The simulator build works without one; device deploy requires it. Re-run `make xcodegen` after any change to `app/project.yml` or when adding a new SwiftPM package.
 
-## Verify without Xcode
+## Verify app packages
 
-Core + Sync packages build and test on Command Line Tools alone:
+The Core + Sync subset is the fast package gate:
 
 ```bash
-make test-core   # runs all Core + Sync Swift package tests
+make test-core
+```
+
+The full app package gate runs every wired package test under `app/Packages/`:
+
+```bash
+make test-app-packages
+```
+
+## Verify with Xcode
+
+Run the generated app scheme compile/link smoke:
+
+```bash
+make test-app-xcode
+```
+
+The current pre-QA gate for app-facing work is:
+
+```bash
+make pre-qa
 ```
 
 ## Agent-driven iOS loop

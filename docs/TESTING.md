@@ -8,6 +8,7 @@ covers:
   - server/
   - app/
   - schema/
+  - docs/feature-gap-map.md
   - docs/QA.md
 ---
 
@@ -61,7 +62,7 @@ Scope:
 - Sync endpoint correctness (pull-with-since, idempotent results push).
 - Migration idempotency and forward compatibility.
 
-Run: `uv pip install -e ".[dev]" && pytest`.
+Run: `uv sync --extra dev && uv run pytest`.
 
 ## Contract tests — `tests/contract/` and `schema/`
 
@@ -93,11 +94,17 @@ Scope:
 - Watch/HealthKit bridge behavior against fakes where real device behavior is
   not being claimed.
 
-Run current partial gate: `make test-core`.
+Run the fast Core + Sync subset with `make test-core`.
 
-Current gap: `make test-core` does not run every package test target. Add or
-use a broader `make test-app-packages` / `make check-app` gate before relying on
-package-level app proof for implementation closeout.
+Run every currently wired app package test target with:
+
+```bash
+make test-app-packages
+```
+
+This gate covers executable Swift package test targets and XCTest packages
+under `app/Packages/`. It is the package-level app proof expected before
+implementation closeout for app logic changes.
 
 ## App-hosted tests — `app/WorkoutDBTests`
 
@@ -109,15 +116,15 @@ Scope:
 - targeted integrated invariants that need the actual app bundle or simulator
   host
 
-Current gap: the `WorkoutDB` scheme currently has only a no-op smoke test. Add
-real app-hosted invariants before treating this tier as behavioral proof.
+Current gap `TEST-GAP-002`: the `WorkoutDB` scheme currently has only a no-op
+smoke test. This tier proves compile/link/XCTest invocation for the generated
+app scheme; it is not behavioral app-hosted proof until real launch-time or
+composition invariants are added.
 
-Run:
+Run directly:
 
 ```bash
-xcodebuild test -project app/WorkoutDB.xcodeproj -scheme WorkoutDB \
-  -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
-  -configuration Debug CODE_SIGNING_ALLOWED=NO
+make test-app-xcode
 ```
 
 ## Realistic-local integration and end-to-end probes
@@ -138,7 +145,26 @@ Expected shapes:
 
 Current gap: there is no single local server/app sync harness yet. Keep this as
 an explicit capability gap when implementation touches real URLSession +
-FastAPI + SQLite behavior.
+FastAPI + SQLite behavior. A future harness should be reachable from
+`make pre-qa`, not buried in a one-off script.
+
+## Pre-QA Gate
+
+`make pre-qa` is the current local gate before entering `docs/QA.md` flows.
+It composes:
+
+- `make check` for Python lint/import contracts, Python tests, and schema
+  package tests
+- `make check-app` for every wired app package test plus the generated iOS app
+  scheme compile/link smoke
+
+`make pre-qa` does not replace QA. It proves the deterministic and
+realistic-local layers currently wired in the repo. If the behavior depends on
+a missing realistic-local harness, route that capability gap through the owning
+docs and `docs/feature-gap-map.md` before relying on QA.
+
+Before simulator/device QA, run `make qa-ready` to verify XcodeBuildMCP tool
+availability. That is QA readiness, not testing proof.
 
 ## Proof Expectations By Change Type
 
@@ -163,6 +189,9 @@ FastAPI + SQLite behavior.
 ## What's not under test yet
 
 - Claude-side behavior (conversation-driven planning, progression) — by design. If an invariant about what Claude pushes needs pinning, encode it as a server-side validator + test.
-- A complete `make pre-qa` gate that composes server/schema checks, all runnable
-  app package tests, app-hosted smoke tests, and any required local
-  integration/end-to-end probes.
+- `TEST-GAP-001`: a server/app sync harness that runs FastAPI + SQLite locally
+  and drives the Swift Sync boundary through real HTTP.
+- `TEST-GAP-002`: real app-hosted behavioral invariants beyond the current
+  no-op app compile/link smoke.
+- `TEST-GAP-003`: real-device proof harnesses for Watch, HealthKit, and
+  device-only behavior.

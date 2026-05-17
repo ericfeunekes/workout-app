@@ -143,8 +143,13 @@ fix, and repeat until clean.
 Verification must match the touched surfaces and the claim being made:
 
 - `make check` for repo-wide server/schema gates
-- app-facing iOS work follows `docs/QA.md`: use XcodeBuildMCP, exercise real
-  user gestures, record visible UI when relevant, inspect screenshots or
+- `make pre-qa` for app-facing or cross-stack work before simulator/device QA
+- use `docs/TESTING.md` and `code-analysis:testing-audit` to decide whether the
+  current repo has the realistic-local proof harness the claim needs; if not,
+  route the capability gap through the owning docs and `docs/feature-gap-map.md`
+  before relying on QA
+- app-facing iOS work then follows `docs/QA.md`: use XcodeBuildMCP, exercise
+  real user gestures, record visible UI when relevant, inspect screenshots or
   `snapshot-ui`, ask `img ask --video`, and route findings
 - state, persistence, sync, offline, auth, and telemetry claims need tests,
   logs, queues, DB/API readbacks, or local-store readbacks in addition to any

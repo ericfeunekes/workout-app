@@ -7,6 +7,7 @@ covers:
   - docs/features/
   - docs/modifier-equipment.md
   - docs/sync.md
+  - docs/TESTING.md
   - docs/watch-metrics.md
   - docs/specs/primitives-data-model.md
 ---
@@ -90,6 +91,9 @@ gap in the owning docs. Git history is the archive.
 | `SYNC-GAP-001` | `docs/sync.md` | Stale live-session expiry remains undecided. | `decision` |
 | `SYNC-GAP-002` | `docs/sync.md` | CloudKit replication needs a record-family spike with authority, account, conflict, and Claude readback proof. | `spike` |
 | `SYNC-GAP-003` | `docs/sync.md` | Cloudflare Access endpoint needs a narrow endpoint spike with identity and capability proof. | `spike` |
+| `TEST-GAP-001` | `docs/TESTING.md`, `docs/sync.md` | No server/app sync harness runs FastAPI + SQLite locally and drives the Swift Sync boundary through real HTTP. | `proof` |
+| `TEST-GAP-002` | `docs/TESTING.md` | App-hosted Xcode tests are only compile/link smoke; no real launch-time or composition invariant exists. | `proof` |
+| `TEST-GAP-003` | `docs/TESTING.md` | No real-device proof harness exists for Watch, HealthKit, and device-only behavior. | `proof` |
 | `WATCHKIT-GAP-001` | `docs/features/watch-workoutkit-handoff.md` | Final per-archetype WorkoutKit mapping table is missing. | `spike` |
 | `WATCHKIT-GAP-002` | `docs/features/watch-workoutkit-handoff.md` | Real-device open/schedule proof is missing. | `spike` |
 | `WATCHKIT-GAP-003` | `docs/features/watch-workoutkit-handoff.md` | Completion reconciliation identity path is unsettled. | `spike` |

@@ -15,9 +15,8 @@ Run through this before any commit that represents "done." It's short on purpose
 
 ## Universal
 
-- [ ] `uv run ruff check` passes.
-- [ ] `uv run ruff format --check` passes.
-- [ ] `uv run pytest` passes (green locally before pushing — pre-push hook also enforces).
+- [ ] `make check` passes (green locally before pushing — pre-push also enforces the Python/import subset).
+- [ ] `make pre-qa` was run for cross-stack, app-logic, or visible iOS changes; if a required realistic-local harness is missing, the gap is routed before closeout.
 - [ ] No TODOs, FIXMEs, or "temporary" code introduced. If a nitpick was noticed during the work, it was resolved as part of the commit (see `AGENTS.md` invariants).
 - [ ] No legacy / v1 references resurrected (YAML, Google Calendar, intent taxonomy, muscle/movement/equipment tables, the `workoutdb` CLI).
 - [ ] Commit message explains *why*, not just *what*.
@@ -94,6 +93,8 @@ If the change implements or proves target behavior tracked in a feature doc:
 
 If the change affects user-visible iOS behavior:
 
+- [ ] `make check-app` passes, or any current pre-QA failure is named and scoped before QA starts.
+- [ ] `make qa-ready` passes before simulator/device QA starts.
 - [ ] The relevant feature/spec/bug note was read, and the QA run covered the user expectation changed by this work.
 - [ ] XcodeBuildMCP was used for the simulator build/run and for the useful interaction tools: taps, swipes, long presses, dismissals, inputs, screenshots, recording, and `snapshot-ui`.
 - [ ] The proof matched the claim: visual changes used visual evidence, state/persistence/sync claims used tests or state readbacks, and device-only behavior used a real-device path when needed.

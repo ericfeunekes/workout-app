@@ -10,6 +10,7 @@ covers:
   - docs/specs/primitives-data-model.md
   - docs/modifier-equipment.md
   - docs/sync.md
+  - docs/TESTING.md
   - docs/watch-metrics.md
 ---
 
@@ -58,6 +59,7 @@ small: pick the gap cluster, prove it, then update the gaps.
 | Save, persistence, and push | Parallel reliability lane | `SAVE-GAP-001`, `SAVE-GAP-002`, `PERSIST-GAP-001`, `PERSIST-GAP-002`, `PERSIST-GAP-003`, `PUSH-GAP-001`, `PUSH-GAP-002`, `SYNC-GAP-001` | Protects logged workout data across completion, relaunch, offline use, and foreground/background sync. | Choose atomicity, expiry, or diagnostics gaps explicitly; avoid broad sync rewrites. |
 | Bootstrap and first run | Parallel polish lane | `BOOT-GAP-001`, `FIRST-GAP-001`, `FIRST-GAP-002` | Covers connection setup and manual recovery affordances. | Promote only if first-run or sync recovery blocks real use. |
 | Telemetry and diagnostics | Parallel proof lane | `TELEM-GAP-001`, `TELEM-GAP-002`, `TELEM-GAP-003`, `TELEM-GAP-004` | Gives enough local and server-side evidence to answer whether actions landed. | Add coverage/export/debug surfaces only when they improve real QA or incident recovery. |
+| Testing proof infrastructure | Parallel proof lane | `TEST-GAP-001`, `TEST-GAP-002`, `TEST-GAP-003` | Builds the realistic-local and app-hosted harnesses that pre-QA needs before simulator/device QA can be trusted for boundary claims. | Promote when a selected implementation depends on a missing proof harness; otherwise keep the gap explicit. |
 | Early WorkoutKit handoff | Evidence lane | `WATCHKIT-GAP-001`, `WATCHKIT-GAP-002`, `WATCHKIT-GAP-003` | Shorter Apple Watch path: push eligible workouts to Apple's Workout app, then reconcile completion facts. | Spike the per-archetype mapping, real-device open/schedule behavior, and completion identity path. |
 | CloudKit replication | Spike lane | `SYNC-GAP-002` | May reduce custom transport work if iCloud can move plan/result records reliably enough for the app and Claude readback. | Spike record families, authority, account model, conflict behavior, and readback proof. |
 | Cloudflare protected endpoint | Spike lane | `SYNC-GAP-003` | Reuses existing OAuth/Access posture for narrow app-facing sync or data endpoints when CloudKit is insufficient. | Spike one Access-protected endpoint and prove identity plus capability boundaries. |

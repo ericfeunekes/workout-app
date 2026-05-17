@@ -2,7 +2,8 @@
 #   pre-commit install --hook-type pre-commit --hook-type pre-push
 #
 # Pre-commit: fast formatters and linters on staged files.
-# Pre-push:   full test suite before anything leaves the machine.
+# Pre-push:   Python/server gate before anything leaves the machine.
+# Current app pre-QA is an explicit macOS/Xcode gate: `make pre-qa`.
 #
 # See docs/WORKFLOW.md for the rationale (local-first hygiene, minimal CI).
 
@@ -40,6 +41,14 @@ repos:
         entry: uv run pytest
         language: system
         stages: [pre-push]
+        pass_filenames: false
+        always_run: true
+
+      - id: pre-qa
+        name: pre-qa (manual server/schema/app gate)
+        entry: make pre-qa
+        language: system
+        stages: [manual]
         pass_filenames: false
         always_run: true
 

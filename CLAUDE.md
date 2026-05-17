@@ -39,7 +39,7 @@ the planning flow. Quick pointers:
 
 ### Finishing work
 - Follow `docs/runbooks/closeout.md` — the per-change checklist enforces the cutover philosophy.
-- Pre-push hook runs `pytest` automatically; install once with `pre-commit install --hook-type pre-commit --hook-type pre-push`.
+- Pre-push hook runs import-linter and `pytest` automatically; install once with `pre-commit install --hook-type pre-commit --hook-type pre-push`.
 
 ### After context loss
 - Re-read this file, `docs/WORKFLOW.md`, and `docs/specs/v2-architecture.md`.
@@ -89,17 +89,18 @@ pre-commit install --hook-type pre-commit --hook-type pre-push
 cp .env.example .env      # then fill in WORKOUTDB_BEARER_TOKEN
 
 # Server
-uv run pytest             # full test suite
+make check                # lint/import contracts + Python tests + schema Swift tests
 uv run ruff check .       # lint
 uv run ruff format .      # format
 uv run uvicorn workoutdb_server.main:app --reload   # run locally
 
 # App
-make test-core           # partial Swift package gate; see docs/TESTING.md
+make test-core           # fast Core + Sync package subset
+make test-app-packages   # every wired app package test target
 make xcodegen            # regenerate app/WorkoutDB.xcodeproj from project.yml
-xcodebuild test -project app/WorkoutDB.xcodeproj -scheme WorkoutDB \
-  -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
-  -configuration Debug CODE_SIGNING_ALLOWED=NO
+make test-app-xcode      # generated app compile/link smoke on simulator
+make pre-qa              # current local pre-QA gate before docs/QA.md
+make qa-ready            # verify XcodeBuildMCP before simulator/device QA
 ```
 
 **CI** (`.github/workflows/ci.yml`): Linux only, server tests + ruff on push and PR. iOS build/test deferred until the app exists and we revisit public-vs-private repo. See `docs/WORKFLOW.md` § "CI scope" for the budget math.

@@ -90,17 +90,24 @@ and all affected code, tests, schemas, and docs on the new contract.
 
 Before closeout:
 
-- `ruff check` + `ruff format --check`
-- `pytest` (server tests pass)
-- Contract tests pass (once they exist)
-- For app changes: follow `docs/QA.md`. Match proof to the claim; use
-  XcodeBuildMCP simulator QA for visible iOS behavior, record and review video
-  with `img ask --video` when visible UI changes, use tests/readbacks/logs for
-  state and sync claims, and use real devices for Watch, HealthKit, or
-  device-only claims.
+- `make check` for Python lint/import contracts, Python tests, and schema
+  package tests
+- `make check-app` for app-facing work: every wired Swift package test plus the
+  generated iOS app scheme compile/link smoke
+- `make pre-qa` before entering `docs/QA.md` on any change that spans server,
+  schema, app logic, or visible iOS behavior; if the needed realistic-local
+  harness is missing, route that gap before relying on QA
+- Contract tests pass
+- For app changes: run the pre-QA checks in `docs/TESTING.md` first, then
+  follow `docs/QA.md`. Match proof to the claim; use XcodeBuildMCP simulator QA
+  for visible iOS behavior, record and review video with `img ask --video` when
+  visible UI changes, use tests/readbacks/logs for state and sync claims, and
+  use real devices for Watch, HealthKit, or device-only claims.
 - For non-trivial changes: **always** dispatch an independent reviewer agent — self-review by the implementer catches nothing new
 
-The pre-push git hook enforces the Python checks automatically; see `.pre-commit-config.yaml`.
+The pre-push git hook enforces the Python checks automatically. Full app
+pre-QA remains an explicit local gate because it needs macOS/Xcode; see
+`.pre-commit-config.yaml` and `docs/TESTING.md`.
 
 ## The implementer / reviewer cycle — **Codex reviews, not same-model subagents**
 
@@ -162,6 +169,7 @@ Claude Code exposes named skills for specific phases of work. Use them rather th
 | `scoping:implementation-planning` | When one phase or unit is ready to become a proof-mapped build plan with concrete files, tests, review gates, and closeout. |
 | `code-analysis:architecture` | Any question about where a piece of code belongs, what a new module's dependencies should look like, or whether two concerns should share a file. Three modes: audit (existing), greenfield (new), enforcement (automated checks). |
 | `code-analysis:review` | Multi-perspective review of a change. Lead agent understands the context, subagents attack from distinct angles, lead synthesizes. Uses the implementer/reviewer cycle described above. |
+| `code-analysis:testing-audit` | When a change needs pre-QA proof-bar discovery: identify missing realistic-local, contract, integration, end-to-end, persistence, time, concurrency, or device-adjacent harnesses before simulator/device QA. |
 | `code-analysis:investigate` | Hypothesis-driven problem investigation. If you've done two rounds of guessing and haven't isolated the root cause, invoke this instead of guessing a third time. |
 | `code-analysis:diagnose-problem-pattern` | When several recent bugs or tests point at a shared structural issue — surface the pattern before patching another symptom. |
 | Codex review via `cxd task` | When non-trivial implementation needs a different-model review. Use the implementer/reviewer cycle above. |
@@ -215,7 +223,11 @@ This repo's CI stays narrow because most validation runs locally via pre-commit/
 Quality stays high via local hygiene, not via CI fan-out:
 
 - **Pre-commit hook**: ruff format + ruff check --fix on staged files.
-- **Pre-push hook**: full `pytest` run.
+- **Pre-push hook**: import-linter + full `pytest` run.
+- **Manual current local gate**: `make pre-qa` for server/schema/app package
+  tests and app scheme compile/link smoke.
+- **Manual QA readiness**: `make qa-ready` for XcodeBuildMCP availability
+  before simulator/device QA.
 
 Both hooks are configured in `.pre-commit-config.yaml`. Install once after cloning with `pre-commit install --hook-type pre-commit --hook-type pre-push`.
 

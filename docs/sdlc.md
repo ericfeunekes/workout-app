@@ -6,6 +6,7 @@ purpose: Progressive-disclosure workflow from durable requirements to backlog la
 covers:
   - docs/backlog.md
   - docs/feature-gap-map.md
+  - docs/QA.md
   - docs/runbooks/closeout.md
   - docs/WORKFLOW.md
 ---
@@ -120,7 +121,10 @@ unit. The output is an executable plan under
 Implementation planning binds the durable requirements and phase outcome to:
 
 - concrete code surfaces
-- proof map entries tied to `docs/TESTING.md` and `docs/QA.md`
+- proof map entries tied to `docs/TESTING.md`, `docs/QA.md`, and the
+  claim being made
+- app-facing QA expectations: simulator, video, screenshot, `snapshot-ui`,
+  state readback, log, test, or real-device proof as appropriate
 - review gates
 - closeout expectations
 - stop conditions for missing contracts or wrong phase boundaries
@@ -136,11 +140,17 @@ work. Non-trivial work follows the implementer/reviewer loop in
 `docs/WORKFLOW.md`: implement, run local gates, dispatch independent review,
 fix, and repeat until clean.
 
-Verification must match the touched surfaces:
+Verification must match the touched surfaces and the claim being made:
 
 - `make check` for repo-wide server/schema gates
-- simulator or device proof for user-facing iOS behavior
-- real-device proof for Watch or HealthKit claims
+- app-facing iOS work follows `docs/QA.md`: use XcodeBuildMCP, exercise real
+  user gestures, record visible UI when relevant, inspect screenshots or
+  `snapshot-ui`, ask `img ask --video`, and route findings
+- state, persistence, sync, offline, auth, and telemetry claims need tests,
+  logs, queues, DB/API readbacks, or local-store readbacks in addition to any
+  video
+- Watch, HealthKit, haptics, physical ergonomics, sleep/wake, or real network
+  behavior require real-device or dedicated proof
 - targeted docs validation for documentation-only changes
 
 ### 7. Closeout
@@ -158,6 +168,12 @@ When work closes or changes gaps:
    to all affected owning docs or an ADR.
 5. Run the relevant verification gates and record any residual risk in the
    final handoff.
+
+For app-facing work, closeout includes a short QA summary in the final response:
+expectation tested, route or device used, gestures and edge states exercised,
+evidence used, `img ask` verdict when applicable, and any bugs or questions
+filed. Commit durable proof notes only when closing a bug or changing durable
+feature status; otherwise raw scratch artifacts stay local support.
 
 Backlog rows are not completion records. If a gap is closed, remove it or narrow
 it to the remaining missing behavior. Git history is the archive.

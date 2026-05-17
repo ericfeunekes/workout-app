@@ -148,3 +148,5 @@ Do not add durable plan directories under `docs/`. Requirements docs describe ho
 ## Agent harness
 
 `.claude/` and `.codex/` are checked in so agent harness config (MCP wiring, enabled plugins, project overlays) stays in sync across machines. `.xskills/` and `.claude/settings.local.json` are agent-local and gitignored. `scratch/` is for ephemeral multi-unit work.
+
+For MCP tooling, keep one canonical command path per server. Do not add repo-local wrappers, fallback command chains, or machine-specific MCP variants unless Eric explicitly asks for that split. XcodeBuildMCP is the global `xcodebuildmcp` command; keep machine-specific simulator IDs and home paths out of committed config.

@@ -94,9 +94,10 @@ If the change implements or proves target behavior tracked in a feature doc:
 
 If the change affects user-visible iOS behavior:
 
-- [ ] The `docs/QA.md` closeout QA run was completed with XcodeBuildMCP.
-- [ ] The run exercised the relevant taps, swipes, long presses, dismissals, inputs, persistence, edge states, and error/offline paths.
-- [ ] Simulator video and screenshots were captured.
+- [ ] The relevant feature/spec/bug note was read, and the QA run covered the user expectation changed by this work.
+- [ ] XcodeBuildMCP was used for the simulator build/run and for the useful interaction tools: taps, swipes, long presses, dismissals, inputs, screenshots, recording, and `snapshot-ui`.
+- [ ] The proof matched the claim: visual changes used visual evidence, state/persistence/sync claims used tests or state readbacks, and device-only behavior used a real-device path when needed.
+- [ ] Simulator video and screenshots were captured when the change had a visible iPhone UI surface.
 - [ ] The recording was reviewed with `img ask --video`, and the verdict was read before closeout.
 - [ ] Any bugs or open product/design questions found during QA were routed to `docs/bugs.md` or `docs/open-questions.md`.
 

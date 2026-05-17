@@ -2,7 +2,7 @@
 title: QA
 status: accepted
 last_reviewed: 2026-05-17
-purpose: The UX QA contract for closing app-facing work, including MCP-driven simulator runs, recorded evidence, and independent video-model assessment.
+purpose: The UX QA guide for closing app-facing work with MCP-driven simulator runs, recorded evidence, and independent video-model assessment.
 covers:
   - docs/bugs.md
   - docs/features/
@@ -12,9 +12,9 @@ covers:
 # QA
 
 WorkoutDB uses QA to protect the user experience, not just prove that code
-compiled. Any app-facing chunk of work must close with a recorded simulator run
-that exercises the implemented behavior through the same gestures Eric would use
-in the gym.
+compiled. For app-facing work, closeout should include a simulator run that
+exercises the implemented behavior through the same gestures Eric would use in
+the gym.
 
 QA evidence can be broad; issue tracking must stay narrow.
 
@@ -22,13 +22,13 @@ QA evidence can be broad; issue tracking must stay narrow.
 
 - **Active issues:** `docs/bugs.md`.
 - **Closed issues:** git history for `docs/bugs.md`, plus the regression test or invariant added by the fix.
-- **Raw evidence:** `scratch/qa-runs/` while the run is active. This directory is gitignored and must not become a second bug tracker or the only proof of a verified claim.
+- **Raw evidence:** `scratch/qa-runs/` while the run is active. This directory is gitignored and must not become a second bug tracker.
 
 Do not keep durable issue lists in `scratch/`. A QA run can write temporary notes, screenshots, recordings, JSONL observations, and per-run reports there, but every still-open finding is migrated to `docs/bugs.md` before closeout. Once migration is done, scratch summaries that duplicate the bug list should be deleted or ignored.
 
 ## When QA Is Required
 
-Run this QA for every chunk that changes user-visible app behavior:
+Use this guide for every chunk that changes user-visible app behavior:
 
 - Screens, navigation, sheets, menus, preview cards, or empty/loading/error states.
 - Timer behavior, workout execution, rest transitions, logging, skip/done flows, or history correction.
@@ -39,17 +39,20 @@ Pure server, schema, or documentation-only work does not need simulator UX QA
 unless the user-facing behavior depends on it. If a change has no simulator
 surface, say that in the closeout and name the proof that replaced it.
 
-## Required Closeout QA
+## Closeout QA
 
-For each app-facing chunk, run a complete simulator QA pass before declaring the
-work done.
+For each app-facing chunk, run enough simulator QA to be confident the changed
+experience works as intended. Keep it practical: read the relevant feature,
+spec, or bug note, turn it into the user tasks that matter, and confirm those
+tasks work. Do not create formal scenario maps unless a change is large enough
+that the coverage would otherwise be hard to reason about.
 
-1. **Name the contract.** State what was implemented, which feature/spec/bug it
-   satisfies, and the user expectation being protected.
+1. **Name the expectation.** State what was implemented, which feature/spec/bug
+   it satisfies, and the user expectation being protected.
 2. **Build and launch with XcodeBuildMCP.** Use the canonical `xcodebuildmcp`
    command from `docs/ios-dev-loop.md`. Prefer MCP build/run, UI hierarchy,
-   tap, swipe, type, long-press, screenshot, logging, and video tools over raw
-   shell commands.
+   tap, swipe, type, long-press, screenshot, log-capture, and video tools over
+   raw shell commands.
 3. **Record the run.** Start a simulator video before the first interaction.
    Keep screenshots at meaningful checkpoints. Store raw artifacts under
    `scratch/qa-runs/<YYYY-MM-DD>-<slug>/` while active.
@@ -60,8 +63,8 @@ work done.
    states where relevant.
 5. **Inspect while running.** Use screenshots and `snapshot-ui` to verify what
    is actually on screen. Check labels, hit targets, enabled/disabled states,
-   timers, counters, persisted values, and whether the visible state matches the
-   feature contract.
+   timers, counters, persisted values, offscreen activatable elements, and
+   whether the visible state matches the feature contract.
 6. **Ask the video model.** Pass the recording to `img ask --video`. Ask it to
    compare the recording against the implemented contract and the QA steps that
    were supposed to be run.
@@ -71,6 +74,31 @@ work done.
 
 QA is not complete until the recording, screenshots, local observations, and
 video-model assessment agree or the disagreement has been explained and routed.
+
+## Match The Proof To The Claim
+
+Do not use the simulator video as proof for things the video cannot show. Pick
+the evidence that matches the claim:
+
+- **Visible UX:** simulator recording, screenshots, and `snapshot-ui`.
+- **Gestures and navigation:** MCP taps, swipes, long presses, text entry, sheet
+  dismissal, back/forward navigation, and replayable user tasks.
+- **Accessibility surface:** `snapshot-ui` labels, traits, enabled state, frame
+  size, focus order where observable, plus Dynamic Type or VoiceOver checks when
+  the change affects critical workout execution.
+- **Timer or state-machine behavior:** unit tests or XCUITest where practical,
+  plus a visible simulator run for the user-facing flow.
+- **Persistence:** navigate away/back, relaunch the app, or inspect the local
+  store when the claim is data survival.
+- **Sync, offline, auth, or telemetry:** use the relevant queue, API, server DB,
+  event log, or error surface. A video can show the UI response, not the backend
+  truth.
+- **Watch, haptics, HealthKit, physical ergonomics, sleep/wake, or real network
+  behavior:** use a real device or a dedicated test path when the claim depends
+  on device behavior.
+
+The question at closeout is simple: did the evidence actually prove the thing
+we are claiming, or did it only make the screen look plausible?
 
 ## Interaction Coverage
 
@@ -121,25 +149,25 @@ Treat the model as an independent reviewer, not an oracle. If it disagrees with
 your observation, inspect the recording or rerun a narrower recording until the
 evidence is unambiguous.
 
-## Proof Summary
+## Closeout Summary
 
-When a chunk closes, write a short QA proof summary. A closeout-message summary
-is transient handoff only. If the proof closes a bug, closes or narrows a gap,
-or changes durable feature/release status, the summary must be committed in the
-owning feature doc, product evidence matrix, or another durable QA surface.
+When a chunk closes, write a short QA summary in the closeout response. If the
+run closes a bug or changes durable feature status, update the owning durable
+doc where that status already lives. Do not create a separate QA evidence ledger
+unless the work is large enough that future readers will realistically need it.
 
 Include:
 
-- Run ID and date.
-- Implemented contract under test.
+- What expectation was tested.
 - Simulator/device and app route used.
-- Gestures exercised.
-- Screenshots and recording paths.
-- `img ask` output path and verdict.
+- The main gestures and edge states exercised.
+- Whether screenshots, recording, `snapshot-ui`, logs, tests, state readbacks,
+  or real-device checks were used.
+- `img ask` verdict.
 - Bugs filed, questions opened, or reasons no further action was needed.
 
-Raw local artifacts can stay in `scratch/qa-runs/`, but durable claims must be
-summarized in committed docs when they affect feature status or close a bug.
+Raw local artifacts can stay in `scratch/qa-runs/`. Keep the durable repo docs
+focused on decisions, open bugs, and feature status.
 
 ## What Counts As A QA Issue
 
@@ -166,18 +194,16 @@ Use absolute dates for QA sessions when relevant. For example, a missed-workout 
 ## What `verified` Means
 
 Feature docs use `verified` only when the behavior has external proof beyond
-code inspection. A verified promotion needs a committed proof summary in the
-owning feature doc, product evidence matrix, or another committed QA surface.
-Raw `scratch/` captures may support the summary, but they are not durable proof
-on their own.
+code inspection. The owning feature doc should say, briefly, what kind of proof
+supports the status. It does not need a formal evidence packet.
 
 Acceptable proof includes:
 
 - A pinned UI test or XCUITest that runs in CI.
-- A committed simulator QA summary with a stable run ID, steps, expected result,
-  observed result, and references to any local screenshots or recordings.
-- A committed MCP-driven simulator walk summary with the same steps, observed
-  state, recording path, and `img ask` verdict.
+- An MCP-driven simulator walk with recording, screenshots or `snapshot-ui`, and
+  `img ask` review.
+- A short durable note in the owning feature doc when the verification changes
+  feature status.
 
 UI, layout, contrast, tap-target, and timer-flow behavior cannot be promoted to
 `verified` from source inspection alone. High-risk timing surfaces need both the
@@ -193,8 +219,8 @@ At the end of a QA run:
 2. Run the `img ask --video` review and read the result before reporting QA as complete.
 3. Add or update `docs/bugs.md` rows for every still-open issue.
 4. Delete or ignore scratch-level bug summaries that duplicate `docs/bugs.md`.
-5. Keep raw screenshots, recordings, and per-run reports only as local support
-   for a committed proof summary.
+5. Keep raw screenshots, recordings, and per-run reports as local support unless
+   the owning feature doc needs a brief status note.
 6. If a fix closes a row, remove it from `docs/bugs.md` in the same change that adds the proof.
 
 This keeps one active list while preserving enough evidence to reproduce serious findings.

@@ -1,9 +1,7 @@
 schemaVersion: 1
 sessionDefaults:
-  projectPath: /Users/efeunekes001/coding/workout-app/app/WorkoutDB.xcodeproj
+  projectPath: app/WorkoutDB.xcodeproj
   scheme: WorkoutDB
   configuration: Debug
-  simulatorId: 22A47946-FD68-4C83-BC3C-FE62BB8E2748
   bundleId: com.ericfeunekes.WorkoutDB
-  simulatorName: WorkoutDB-Dev
   simulatorPlatform: iOS Simulator

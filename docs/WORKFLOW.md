@@ -8,6 +8,7 @@ covers:
   - AGENTS.md
   - docs/sdlc.md
   - docs/MIGRATIONS.md
+  - docs/QA.md
   - docs/runbooks/closeout.md
 ---
 
@@ -92,7 +93,11 @@ Before closeout:
 - `ruff check` + `ruff format --check`
 - `pytest` (server tests pass)
 - Contract tests pass (once they exist)
-- For app changes: `xcodebuild` on the iOS Simulator scheme (see `docs/ios-dev-loop.md`)
+- For app changes: follow `docs/QA.md`. Match proof to the claim; use
+  XcodeBuildMCP simulator QA for visible iOS behavior, record and review video
+  with `img ask --video` when visible UI changes, use tests/readbacks/logs for
+  state and sync claims, and use real devices for Watch, HealthKit, or
+  device-only claims.
 - For non-trivial changes: **always** dispatch an independent reviewer agent — self-review by the implementer catches nothing new
 
 The pre-push git hook enforces the Python checks automatically; see `.pre-commit-config.yaml`.
@@ -174,7 +179,11 @@ See `docs/ios-dev-loop.md` for the full story. Short version:
 
 ### Close
 
-Follow `docs/runbooks/closeout.md`. The checklist is short and enforces the cutover philosophy — every affected surface is updated, every decision is in a durable file, nothing is left for "later."
+Follow `docs/runbooks/closeout.md`. The checklist is short and enforces the
+cutover philosophy — every affected surface is updated, every decision is in a
+durable file, nothing is left for "later." For app-facing work, the closeout
+response includes the QA summary from `docs/QA.md`; durable docs only get proof
+or status notes when a bug, gap, feature status, or release status changes.
 
 ### Deploy
 

@@ -18,7 +18,7 @@ The iOS app (`app/WorkoutDB.xcodeproj`) is generated from `app/project.yml` via 
 
 1. **Xcode 26.3+** — Apple's own agentic bridge lives here. The Xcode UI can expose an MCP bridge to external agents (previews, issue navigator, project-aware edits).
 2. **Claude Code** (this tool) or **Codex CLI** — the coding agent.
-3. **XcodeBuildMCP** — the MCP server that turns Xcode / simctl / device-control into structured tool calls. Install via `npm install -g xcodebuildmcp` (or run via `npx` on first use).
+3. **XcodeBuildMCP** — the MCP server that turns Xcode / simctl / device-control into structured tool calls. Install it globally so both Macs expose the same `xcodebuildmcp` command.
 4. **Xcode's external-agent MCP bridge**, enabled from within Xcode.
 
 **What the MCP tools give you** (each is a real Claude Code tool call, not a shell one-liner):
@@ -98,22 +98,24 @@ Practical rule: use **XCTest UI tests** for watch behavior. Agent writes the tes
 | Cross-platform (Android too) or WebDriver-style | Appium — only if those constraints exist |
 | Can't find a structured tool for a weird Xcode GUI gap | Claude computer-use (beta) as a last resort |
 
-## Installing XcodeBuildMCP (one-time — done in this repo at 2026-04-18)
+## Installing XcodeBuildMCP
 
 ### Status
 
-Already installed + configured. `.mcp.json` at repo root registers the server with the full workflow set enabled via env var. On a fresh Claude Code session in this repo, 60 tools are exposed.
+Configured as a single global command. `.mcp.json` and `.codex/config.toml` both call `xcodebuildmcp` directly, matching the original setup.
 
-### What was done
+The portability boundary is: both Macs must have `xcodebuildmcp` on the agent PATH. Do not commit machine-specific paths, Volta paths, npm prefix paths, simulator UUIDs, or usernames into MCP config.
+
+The MCP server env includes `/usr/local/bin` and `/opt/homebrew/bin` in `PATH` so either Intel/Homebrew or Apple Silicon/Homebrew global npm installs resolve the same bare `xcodebuildmcp` command.
+
+### First-time install on each Mac
 
 ```bash
-# 1. Install via npm (uses the volta-managed node toolchain):
+# Install the shared MCP command.
 npm install -g xcodebuildmcp
-# → binary at ~/.volta/bin/xcodebuildmcp
 
-# 2. Register with Claude Code at project scope. This writes .mcp.json
-#    at the repo root — committed so any clone picks it up.
-#    (The full shape of .mcp.json is visible at /Users/efeunekes001/coding/workout-app/.mcp.json.)
+# Verify the tool registry.
+make xcode-mcp-tools
 ```
 
 ### The committed `.mcp.json`
@@ -133,15 +135,17 @@ npm install -g xcodebuildmcp
 }
 ```
 
-**Why the env var matters:** `xcodebuildmcp mcp` with no env loads only 27 tools from the `session-management` + `simulator` workflows. The env list above unlocks `ui-automation` (tap, swipe, snapshot-ui, screenshot, type-text), `debugging` (LLDB, breakpoints), `logging` (sim log capture), and `xcode-ide` (Xcode bridge) — 60 tools total.
+**Why the env var matters:** `xcodebuildmcp mcp` with no env loads a narrower workflow set. The env list above unlocks `ui-automation` (tap, swipe, snapshot-ui, screenshot, type-text), `debugging` (LLDB, breakpoints), `logging` (sim log capture), `xcode-ide` (Xcode bridge), and SwiftPM helpers. With `xcodebuildmcp` 2.5.2, `make xcode-mcp-tools` reports 69 canonical tools.
 
 ### Xcode IDE bridge (optional but useful)
 
 In Xcode 26.3+ under **Xcode → Settings → Internal (or Agents)**, toggle "Allow external agents to access Xcode tools." This unlocks the `xcode-ide` workflow's IDE-only capabilities (previews, issue navigator).
 
+This machine check on 2026-05-17 found macOS 26.5 with Xcode 16.4 selected. That is enough for SwiftPM and Simulator basics, but not enough for Apple's Xcode 26.3+ external-agent bridge. Upgrade/select Xcode 26.3+ before relying on `xcode-ide` tools.
+
 ### Restart gotcha
 
-Claude Code loads MCP tool registries at session start. After installing or changing `.mcp.json`, **the currently running Claude Code session will not see the new tools** — restart Claude Code to pick them up. `claude mcp list` shows Connected regardless of session state, so it's not a reliable "will this work" check; only the next session is.
+Claude Code and Codex load MCP tool registries at session start. After installing `xcodebuildmcp`, installing local skills, or changing `.mcp.json` / `.codex/config.toml`, restart the agent app/session to pick up the new tools.
 
 ### Verify after restart
 
@@ -160,6 +164,8 @@ mcp__xcodebuild__ui-automation-screenshot()          → PNG bytes
 ```
 
 The exact tool name format is `mcp__<server>__<workflow>-<tool>` in Claude Code. Use `ToolSearch("xcodebuild")` within a session to discover the live names.
+
+The `.xcodebuildmcp/config.yaml` file intentionally stores only portable defaults: relative project path, scheme, configuration, bundle ID, and simulator platform. Pick the simulator per run by name from the live simulator list; never commit a simulator UUID.
 
 ## When the fallback is fine
 

@@ -31,17 +31,20 @@ Xcode project is generated from `app/project.yml` by [XcodeGen](https://github.c
 sudo xcode-select -s /Applications/Xcode.app
 sudo xcodebuild -license accept
 
-# 3. Install XcodeGen (generates the .xcodeproj from app/project.yml):
+# 3. Install XcodeBuildMCP globally so agents can use the same command on both Macs:
+npm install -g xcodebuildmcp
+
+# 4. Install XcodeGen (generates the .xcodeproj from app/project.yml):
 brew install xcodegen
 
-# 4. (Optional) Install SwiftLint so the pre-commit hook activates the app
+# 5. (Optional) Install SwiftLint so the pre-commit hook activates the app
 #    architectural rules (FF-13/14/15):
 brew install swiftlint
 
-# 5. Generate the Xcode project:
+# 6. Generate the Xcode project:
 make xcodegen
 
-# 6. Open in Xcode:
+# 7. Open in Xcode:
 open app/WorkoutDB.xcodeproj
 ```
 
@@ -57,7 +60,7 @@ make test-core   # runs all Core + Sync Swift package tests
 
 ## Agent-driven iOS loop
 
-When a coding agent (Claude Code / Codex CLI) needs to build, launch, interact, and screenshot the iOS app, see `docs/ios-dev-loop.md`. The recommended tool is **XcodeBuildMCP** (npm package; one-time install + Xcode 26.3+ MCP bridge enable). Without it, the fallback stack is `xcrun simctl` + screenshot + `Read` + `#if DEBUG` launch-arg route jumps (`--start-active`, `--jump-rest`, `--jump-complete`).
+When a coding agent (Claude Code / Codex CLI) needs to build, launch, interact, and screenshot the iOS app, see `docs/ios-dev-loop.md`. The recommended tool is **XcodeBuildMCP** installed globally so both Macs expose the same `xcodebuildmcp` command. Without it, the fallback stack is `xcrun simctl` + screenshot + `Read` + `#if DEBUG` launch-arg route jumps (`--start-active`, `--jump-rest`, `--jump-complete`).
 
 ## Layout (target)
 

@@ -1,7 +1,7 @@
 # Common commands for local development. Every target is a thin wrapper over
 # uv / swift so the source of truth stays in pyproject.toml and Package.swift.
 
-.PHONY: help setup dev test test-python test-swift test-core lint format check regen-schema xcodegen clean \
+.PHONY: help setup dev test test-python test-swift test-core lint format check regen-schema xcodegen xcode-mcp-tools clean \
         db-backup db-restore deploy deploy-rollback server-status server-logs
 
 # Deploy / ops targets. Override HOST on the command line (e.g. `make deploy HOST=workoutdb.tail-xyz.ts.net`).
@@ -13,6 +13,7 @@ TAG  ?= main
 # running; SQLite's online backup API (`sqlite3_backup_*`) is safe here.
 _ENV_DB_PATH := $(shell awk -F= '/^WORKOUTDB_DB_PATH=/{print $$2}' .env 2>/dev/null)
 LOCAL_DB_PATH ?= $(if $(WORKOUTDB_DB_PATH),$(WORKOUTDB_DB_PATH),$(if $(_ENV_DB_PATH),$(_ENV_DB_PATH),./workoutdb.sqlite))
+XCODE_MCP_PATH := /usr/local/bin:/opt/homebrew/bin:$(PATH)
 
 help:  ## Show this help
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*?##/ {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -59,6 +60,9 @@ regen-schema:  ## Regenerate schema/openapi.json from the live FastAPI app
 
 xcodegen:  ## Regenerate app/WorkoutDB.xcodeproj from app/project.yml
 	cd app && xcodegen generate
+
+xcode-mcp-tools:  ## Verify global XcodeBuildMCP exposes tools
+	PATH="$(XCODE_MCP_PATH)" xcodebuildmcp tools
 
 clean:  ## Remove .pytest_cache, .ruff_cache, schema/.build, app/.build, Xcode DerivedData
 	rm -rf .pytest_cache .ruff_cache schema/.build

@@ -30,6 +30,11 @@ the planning flow. Quick pointers:
 - Schema change → follow the seven-step cutover flow in `docs/MIGRATIONS.md`.
 - New API endpoint → route in `server/workoutdb_server/api/`, models updated, test in `tests/server/`, `docs/ARCHITECTURE.md` updated if sync story changes.
 - New timing mode → extend enum in server + SwiftData + spec; app timer engine handles it.
+- Testing audit is pre-QA. Use it to find automated and realistic-local proof
+  gaps — unit, integration, contract, end-to-end, local service, persistence,
+  time, concurrency, and device-adjacent harness gaps. Do not collapse it into
+  simulator/video QA; `docs/QA.md` starts after the relevant testing proof is
+  green or the capability gap is named.
 - Bug found → hypothesis-driven debugging before patching.
 
 ### Finishing work
@@ -90,7 +95,11 @@ uv run ruff format .      # format
 uv run uvicorn workoutdb_server.main:app --reload   # run locally
 
 # App
-# Xcode project to be added under app/ — build + test via Xcode
+make test-core           # partial Swift package gate; see docs/TESTING.md
+make xcodegen            # regenerate app/WorkoutDB.xcodeproj from project.yml
+xcodebuild test -project app/WorkoutDB.xcodeproj -scheme WorkoutDB \
+  -destination 'platform=iOS Simulator,name=iPhone 16 Pro' \
+  -configuration Debug CODE_SIGNING_ALLOWED=NO
 ```
 
 **CI** (`.github/workflows/ci.yml`): Linux only, server tests + ruff on push and PR. iOS build/test deferred until the app exists and we revisit public-vs-private repo. See `docs/WORKFLOW.md` § "CI scope" for the budget math.

@@ -35,6 +35,12 @@ All intelligence lives outside the app, in conversation with Claude:
 
 The app doesn't need to know what a muscle group is. It doesn't need substitution logic. It doesn't need to infer stimulus. It receives a fully composed workout with everything it needs to run the session, including pre-computed alternatives and user-specific parameters.
 
+Future read-only taxonomy, capability, or external-mapping data may be added
+when a concrete history, export, or sync behavior requires it. That data must
+not turn the app into the programming authority: primitive execution stays
+vendor-neutral, and adapter-specific WorkoutKit, Strava, HealthKit, or exercise
+similarity decisions belong in separate taxonomy or adapter-profile layers.
+
 ---
 
 ## Data model
@@ -62,7 +68,12 @@ An atomic movement. Minimal metadata — the app doesn't reason about exercises,
 | `default_prescription_json` | String? | Library-level prescription defaults (typically `target_rir` + `autoreg`) merged into every `workout_item` that references this exercise unless the item overrides. See `docs/decisions/ADR-2026-04-18-smart-defaults.md`. |
 | `default_alternatives_json` | String? | Library-level alternatives — a JSON array matching the `exercise_alternative` shape minus the `workout_item_id` pointer. Items that omit alternatives inherit this list. |
 
-No muscle groups, movement patterns, or modality on the exercise itself. That knowledge lives in conversation. If Claude wants the app to display a muscle tag for context, it goes in `notes` or `metadata_json`.
+No muscle groups, movement patterns, or modality on the exercise itself in the
+current pre-primitives baseline. That knowledge lives in conversation. If
+Claude wants the app to display a muscle tag for context, it goes in `notes` or
+`metadata_json`. A later exercise taxonomy may add structured relationships or
+external mappings, but only as read-only data for named history/export/sync
+behaviors, not as app-side programming logic.
 
 **ID management:** Claude lists existing exercises via `GET /api/exercises` at the start of a conversation, then reuses UUIDs for recurring exercises. Pushing a new exercise with a fresh UUID creates a new row — the server doesn't deduplicate. This keeps the server dumb and gives Claude explicit control over history continuity.
 

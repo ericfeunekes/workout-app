@@ -79,6 +79,12 @@ authority.
 - **New stimulus types.** The spec supports RIR (shipping), RPE (column reserved), and HR-zone as derived-from-telemetry. Adding velocity, bar-speed, or other stimulus types is a followup; each needs its own small schema migration and resolver.
 - **Cross-stimulus autoreg.** Today only RIR has an autoreg rule. The spec accommodates multiple stimuli on a slot but does not specify cross-stimulus rule semantics. Deferred.
 - **Session-level primitives.** Deload multipliers, weekly volume caps, fatigue models — those belong to a layer above the single-workout primitives. Out of scope.
+- **Adapter-specific export fields.** WorkoutKit, Strava, HealthKit, or any
+  other external-system mapping data does not live on primitive block, set,
+  slot, or log nodes. Primitive nodes carry vendor-neutral structure, timing,
+  targets, loads, stimuli, overlays, stable IDs, and result roles. External
+  adapter profiles inspect those facts and classify support outside the
+  primitive execution contract.
 - **Legacy acceptance windows.** The cutover does not accept both old and new workout shapes after it lands. Existing server-side prescriptions can be re-pushed by Claude in the primitive shape. Current completed local logs are QA data for this pre-real-use cutover and may be reset rather than migrated.
 
 ## Acceptance criteria
@@ -214,6 +220,10 @@ In scope:
   actually touches those consumers.
 - Keep `EXEC-GAP-008` separate unless the cutover work naturally exposes the
   expanded per-slot editing seam.
+- Preserve external-adapter neutrality: the cutover may add only
+  vendor-neutral primitive fields. WorkoutKit, Strava, HealthKit, or other
+  export capability mapping remains an adapter/profile layer over the
+  primitive contract.
 
 Out of scope unless the architecture review says otherwise:
 

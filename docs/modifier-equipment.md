@@ -33,6 +33,11 @@ choose equipment, rewrite progression, or infer stimulus from a modifier.
 - `prescription_json`, exercise names/notes, alternatives, and workout notes are
   the preferred first homes. Add schema only when a concrete query, sync, or UI
   requirement cannot be met by authored data.
+- Future exercise taxonomy should be additive to this contract, not hidden in
+  primitive workout nodes. Stable exercise identity can later be connected to
+  structured attributes, variant relationships, external exercise mappings, or
+  similarity/distance scores, but those belong to an exercise/taxonomy layer
+  once a concrete behavior requires them.
 
 ## Vocabulary rules
 
@@ -70,6 +75,9 @@ choose equipment, rewrite progression, or infer stimulus from a modifier.
   labels in the workout-generation flow.
 - `MOD-GAP-003`: Cross-variant history aggregation is undefined. Until a later
   requirement promotes it, History should group by authored exercise identity.
+  The future requirement should define whether relationships are muscle-group
+  based, movement-pattern based, equipment based, explicit variant families,
+  learned similarity, or some combination.
 - `MOD-GAP-004`: No schema change is justified yet. A future phase must name
   the concrete query/sync/UI behavior before adding structured modifier or
   equipment columns.

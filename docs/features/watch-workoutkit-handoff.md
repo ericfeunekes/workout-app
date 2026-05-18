@@ -45,6 +45,10 @@ WorkoutKit handoff bridge.
 
 The bridge must be explicit about what survives the mapping:
 
+- WorkoutKit mapping consumes Setmark primitives through an adapter profile; it
+  must not add WorkoutKit-specific fields to primitive workout, block, set,
+  slot, or log records. The same primitive inspection shape should be reusable
+  by future export targets such as Strava or other health/training systems.
 - **Eligible workouts** map to a known WorkoutKit workout type and activity
   type. Each mapped workout carries a stable Setmark workout identifier in the
   phone-side tracking record so completion can reconcile back.
@@ -52,7 +56,9 @@ The bridge must be explicit about what survives the mapping:
   fake or lossy export. Examples likely include complex strength blocks,
   clusters, supersets, and anything whose value depends on per-set load/reps/RIR
   logging.
-- **Partial mappings** are allowed only when the user-facing loss is named
+- **Support status is profile-specific.** A primitive composition can be
+  native, degraded, Setmark-only, or unsupported depending on the export
+  target. Degraded mappings are allowed only when the user-facing loss is named
   before export. For example, a run with target pace may map cleanly while
   Setmark-specific notes remain phone-only.
 - **Completion reconciliation** is app-owned imported-result behavior. It may
@@ -115,7 +121,7 @@ Completion proof must answer these cases before implementation planning:
 ## Current gaps
 
 - `WATCHKIT-GAP-001`: Initial allowlist exists; the final per-archetype mapping
-  table still needs to be built and proven.
+  table still needs to be built and proven through a WorkoutKit adapter profile.
 - `WATCHKIT-GAP-002`: No app package currently wraps WorkoutKit, and real-device
   WorkoutKit scheduling/opening has not been proven.
 - `WATCHKIT-GAP-003`: Completion reconciliation path is unsettled. HealthKit

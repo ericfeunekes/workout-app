@@ -157,8 +157,8 @@ extension ExecutionViewModel {
         }
     }
 
-    /// Build a `SetLog` from the item + the reducer-resolved load and push
-    /// it through `onSetLogged` if the hook is wired. The load is read
+    /// Build result logs from the item + the reducer-resolved load and push
+    /// the primitive slot log if the primitive hook is wired. The load is read
     /// from the *post-log* state so it reflects the prescribed load for
     /// that `set_index` (autoreg's load adjustments run against the
     /// post-log state — they target remaining non-done sets — so reading
@@ -172,7 +172,6 @@ extension ExecutionViewModel {
         reps: Int,
         rir: Int?
     ) {
-        guard let onSetLogged = push.onSetLogged else { return }
         let itemLog = state.items.first(where: { $0.itemID == item.id })
         let loggedSet = itemLog?.sets.first(where: { $0.setIndex == setIndex })
         // `SetPlan.loadKg` is `Double?` (nil == loadless / BW). The
@@ -208,16 +207,34 @@ extension ExecutionViewModel {
             hrAvgBpm: skipped ? nil : loggedSet?.hrAvgBpm,
             cadenceAvgSpm: skipped ? nil : loggedSet?.cadenceAvgSpm
         )
-        // swiftlint:disable:next no_direct_task_unstructured
-        Task { @MainActor in
-            await onSetLogged(setLog)
+        let primitiveLog = appendPrimitiveSlotLog(
+            item: item,
+            setIndex: setIndex,
+            reps: setLog.reps,
+            weight: setLog.weight,
+            weightUnit: setLog.weightUnit,
+            durationSec: setLog.durationSec,
+            distanceM: setLog.distanceM,
+            rir: setLog.rir,
+            completedAt: completedAt,
+            performedExerciseID: performedExerciseID,
+            skipped: skipped
+        )
+        if context.primitiveExecutionPlan != nil {
+            guard let primitiveLog else { return }
+            enqueuePrimitiveSetObserver(primitiveLog)
+            return
+        }
+        if primitiveLog == nil {
+            enqueueLocalSetObserver(setLog)
+            return
         }
     }
 
-    /// Cardio sibling of `enqueueLoggedSet`. Builds a cardio `SetLog`
+    /// Cardio sibling of `enqueueLoggedSet`. Builds a cardio result log
     /// (no `reps` / `rir`, populated `durationSec` / `distanceM` /
     /// `hrAvgBpm` / `cadenceAvgSpm` / `startedAt`, and authored load
-    /// when the target is loaded) and pushes it through `onSetLogged`
+    /// when the target is loaded) and pushes it through the primitive hook
     /// if the hook is wired. Same deterministic UUID scheme as the
     /// strength path so retries upsert in place.
     func enqueueLoggedCardioSet(
@@ -225,7 +242,6 @@ extension ExecutionViewModel {
         setIndex: Int,
         input: CardioLogInput
     ) {
-        guard let onSetLogged = push.onSetLogged else { return }
         let itemLog = state.items.first(where: { $0.itemID == item.id })
         let loggedSet = itemLog?.sets.first(where: { $0.setIndex == setIndex })
         let performedExerciseID = itemLog?.performedExerciseID
@@ -251,9 +267,27 @@ extension ExecutionViewModel {
             hrAvgBpm: skipped ? nil : input.hrAvgBpm,
             cadenceAvgSpm: skipped ? nil : input.cadenceAvgSpm
         )
-        // swiftlint:disable:next no_direct_task_unstructured
-        Task { @MainActor in
-            await onSetLogged(setLog)
+        let primitiveLog = appendPrimitiveSlotLog(
+            item: item,
+            setIndex: setIndex,
+            reps: nil,
+            weight: setLog.weight,
+            weightUnit: setLog.weightUnit,
+            durationSec: setLog.durationSec,
+            distanceM: setLog.distanceM,
+            rir: nil,
+            completedAt: completedAt,
+            performedExerciseID: performedExerciseID,
+            skipped: skipped
+        )
+        if context.primitiveExecutionPlan != nil {
+            guard let primitiveLog else { return }
+            enqueuePrimitiveSetObserver(primitiveLog)
+            return
+        }
+        if primitiveLog == nil {
+            enqueueLocalSetObserver(setLog)
+            return
         }
     }
 
@@ -287,7 +321,6 @@ extension ExecutionViewModel {
         item: WorkoutItem,
         setIndex: Int
     ) {
-        guard let onSetLogged = push.onSetLogged else { return }
         guard let itemLog = state.items.first(where: { $0.itemID == item.id }),
               let set = itemLog.sets.first(where: { $0.setIndex == setIndex }) else {
             return
@@ -316,9 +349,97 @@ extension ExecutionViewModel {
             hrAvgBpm: skipped ? nil : set.hrAvgBpm,
             cadenceAvgSpm: skipped ? nil : set.cadenceAvgSpm
         )
+        let primitiveLog = appendPrimitiveSlotLog(
+            item: item,
+            setIndex: setIndex,
+            reps: setLog.reps,
+            weight: setLog.weight,
+            weightUnit: setLog.weightUnit,
+            durationSec: setLog.durationSec,
+            distanceM: setLog.distanceM,
+            rir: setLog.rir,
+            completedAt: completedAt,
+            performedExerciseID: itemLog.performedExerciseID,
+            skipped: skipped
+        )
+        if context.primitiveExecutionPlan != nil {
+            guard let primitiveLog else { return }
+            enqueuePrimitiveSetObserver(primitiveLog)
+            return
+        }
+        if primitiveLog == nil {
+            enqueueLocalSetObserver(setLog)
+            return
+        }
+    }
+
+    private func appendPrimitiveSlotLog(
+        item: WorkoutItem,
+        setIndex: Int,
+        reps: Int?,
+        weight: Double?,
+        weightUnit: WeightUnit?,
+        durationSec: Double?,
+        distanceM: Double?,
+        rir: Int?,
+        completedAt: Date,
+        performedExerciseID: ExerciseID?,
+        skipped: Bool
+    ) -> PrimitiveSetLog? {
+        guard !skipped,
+              let plan = context.primitiveExecutionPlan,
+              let slotPosition = primitiveSlotPosition(for: item, in: plan) else {
+            return nil
+        }
+        var log = slotPosition.slot.slotLog(
+            workoutID: plan.workoutID,
+            blockRepeatIndex: 0,
+            setRepeatIndex: max(0, setIndex - 1),
+            setIndex: slotPosition.slotIndex,
+            reps: reps,
+            weight: weight,
+            weightUnit: weightUnit,
+            durationSec: durationSec,
+            distanceM: distanceM,
+            rir: rir,
+            completedAt: completedAt
+        )
+        log.performedExerciseID = performedExerciseID
+        primitiveSetLogs.removeAll { existing in
+            existing.id == log.id && existing.role == .slot
+        }
+        primitiveSetLogs.append(log)
+        persist()
+        return log
+    }
+
+    private func primitiveSlotPosition(
+        for item: WorkoutItem,
+        in plan: ExecutionPlan
+    ) -> (slot: ExecutionSlot, slotIndex: Int)? {
+        for block in plan.blocks {
+            for set in block.sets {
+                for (slotIndex, slot) in set.slots.enumerated() where slot.slotID == item.id {
+                    return (slot, slotIndex)
+                }
+            }
+        }
+        return nil
+    }
+
+    private func enqueueLocalSetObserver(_ setLog: SetLog) {
+        guard let onSetLogged = push.onSetLogged else { return }
         // swiftlint:disable:next no_direct_task_unstructured
         Task { @MainActor in
             await onSetLogged(setLog)
+        }
+    }
+
+    private func enqueuePrimitiveSetObserver(_ primitiveLog: PrimitiveSetLog) {
+        guard let onPrimitiveSetLogged = push.onPrimitiveSetLogged else { return }
+        // swiftlint:disable:next no_direct_task_unstructured
+        Task { @MainActor in
+            await onPrimitiveSetLogged(primitiveLog)
         }
     }
 
@@ -632,5 +753,12 @@ extension ExecutionViewModel {
         enterRestIfZeroItemBlock()
         enterTabataWorkWindowIfNeeded()
         enterBlockTimerIfNeeded()
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        guard index >= 0, index < count else { return nil }
+        return self[index]
     }
 }

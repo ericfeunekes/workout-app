@@ -133,7 +133,10 @@ for block_repeat_index in 0 ..< block.block_repeat:
 
 ### Legal `(timing × traversal)` cell matrix
 
-Authored sets must land in a legal cell. Ingest rejects workouts whose sets specify illegal combinations.
+Authored sets must land in a legal cell and must also represent a legal
+composition of work. The timing/traversal matrix is necessary but not
+sufficient: ingest rejects compositions that contain no executable work, even
+if their timing cell is legal.
 
 | timing ↓ / traversal → | `sequential` | `round_robin` | `amrap` |
 |---|---|---|---|
@@ -156,6 +159,37 @@ Cell semantics:
 - **`target_bounded × round_robin`**: Same polling, alternating slots.
 
 Illegal cells reject at ingest, not at runtime. An ingest-time validator enumerates the (timing, traversal) cells above and rejects `set_bounded × amrap` and `target_bounded × amrap` with a precise error pointing to the offending set.
+
+### Executable-work legality
+
+The primitive model is not a general-purpose timer builder. A workout must
+contain at least one executable slot with an `exercise_id`. A block must contain
+at least one executable-work set unless a future accepted spec adds an explicit
+non-executable block type. Zero-slot primitive sets are rejected in the current
+bridge runtime; a future rest/transition timer capability must first make
+primitive rest execution authoritative end-to-end.
+
+Rejected examples:
+
+- a workout whose only content is a countdown timer
+- a block containing only a zero-slot timer set
+- a zero-slot `time_bounded` or `cap_bounded` set before primitive rest runtime
+  support exists
+- a zero-slot `set_bounded` set
+- a zero-slot set carrying a `work_target` or producing `set_result`
+- a block-level aggregate result target on a block with no executable slots
+
+Valid examples:
+
+- a Tabata block with executable work slots and rest represented by the current
+  legacy execution/rest machinery until the primitive rest cutover lands
+- a strength block with executable sets plus rest represented outside the
+  primitive set list until primitive rest execution is authoritative
+- a block-level countdown cap around executable AMRAP or for-time work
+
+Server ingest is the authoritative rejection point. App seed-time validation
+re-runs the same rules defensively before building `ExecutionPlan`, so malformed
+cached fixtures cannot produce a timer-only session.
 
 ### Resolving Q-I — completion vs observation dispatch
 

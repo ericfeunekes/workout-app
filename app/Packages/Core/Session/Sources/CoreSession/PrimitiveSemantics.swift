@@ -43,10 +43,22 @@ public struct PrimitiveResultInputContract: Equatable, Sendable {
 
 public enum PrimitiveSemantics {
     public static func validate(_ workout: PrimitiveWorkout) throws {
+        guard workout.blocks.contains(where: { block in
+            block.sets.contains(where: { !$0.slots.isEmpty })
+        }) else {
+            throw PrimitiveSemanticError.invalidTiming(setID: workout.id)
+        }
         for block in workout.blocks {
-            for set in block.sets {
-                try validate(set)
-            }
+            try validate(block)
+        }
+    }
+
+    public static func validate(_ block: PrimitiveBlock) throws {
+        guard block.sets.contains(where: { !$0.slots.isEmpty }) else {
+            throw PrimitiveSemanticError.invalidTiming(setID: block.id)
+        }
+        for set in block.sets {
+            try validate(set)
         }
     }
 
@@ -66,6 +78,9 @@ public enum PrimitiveSemantics {
         if set.timing.mode == .capBounded, set.timing.capSec == nil {
             throw PrimitiveSemanticError.invalidTiming(setID: set.id)
         }
+        if set.slots.isEmpty {
+            throw PrimitiveSemanticError.invalidTiming(setID: set.id)
+        }
         if set.timing.mode == .capBounded,
            set.traversal == .amrap,
            !set.workTargets.hasObservation(.rounds) {
@@ -75,9 +90,6 @@ public enum PrimitiveSemantics {
            set.traversal != .amrap,
            !set.slots.isEmpty,
            !set.workTargets.hasObservation(.duration) {
-            throw PrimitiveSemanticError.invalidTiming(setID: set.id)
-        }
-        if set.slots.isEmpty && set.timing.mode != .timeBounded && set.timing.mode != .capBounded {
             throw PrimitiveSemanticError.invalidTiming(setID: set.id)
         }
     }

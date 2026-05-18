@@ -2,9 +2,8 @@
 //
 // Covers the push-enqueue hooks on ExecutionViewModel introduced when
 // the push queue wiring landed (see `docs/sync.md` § "Push protocol").
-//   - logSet invokes the SetLogEnqueuer exactly once with the correct
-//     SetLog shape (UUID, workoutItemID, setIndex, reps, weight, rir,
-//     isWarmup=false, completedAt=now).
+//   - logSet invokes the PrimitiveSetLogEnqueuer exactly once with the
+//     primitive slot result shape the production shell pushes.
 //   - saveAndDone invokes the CompletionEnqueuer exactly once with
 //     the app-owned completion record, and the kick runs once.
 //   - no-op when enqueuers are nil — the existing offline-first tests
@@ -28,11 +27,12 @@ final class ExecutionViewModelPushTests: XCTestCase {
         let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_500))
         let (ctx, _) = PushTestFixtures.context(
             sets: 3, reps: 5, loadKg: 100,
-            prescriptionJSONOverride: #"{"sets":3,"reps":5,"load_kg":100,"weight_unit":"kg"}"#
+            prescriptionJSONOverride: #"{"sets":3,"reps":5,"load_kg":100,"weight_unit":"kg"}"#,
+            includePrimitivePlan: true
         )
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
@@ -40,19 +40,21 @@ final class ExecutionViewModelPushTests: XCTestCase {
         vm.logSet(reps: 5, rir: 2)
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         let log = try XCTUnwrap(logs.first)
         XCTAssertEqual(log.weight, 100)
         XCTAssertEqual(log.weightUnit, .kg)
     }
 
-    func testLogSetInvokesSetLogEnqueuerExactlyOnce() async throws {
+    func testLogSetInvokesPrimitiveSetLogEnqueuerExactlyOnce() async throws {
         let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_000))
-        let (ctx, itemID) = PushTestFixtures.context(sets: 4, reps: 5, loadKg: 100)
+        let (ctx, itemID) = PushTestFixtures.context(
+            sets: 4, reps: 5, loadKg: 100, includePrimitivePlan: true
+        )
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in
-                await recorder.appendSet(log)
+            onPrimitiveSetLogged: { [recorder] log in
+                await recorder.appendPrimitiveSet(log)
             }
         )
         let vm = ExecutionViewModel(
@@ -66,17 +68,19 @@ final class ExecutionViewModelPushTests: XCTestCase {
 
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertEqual(logs.count, 1)
         let log = try XCTUnwrap(logs.first)
-        XCTAssertEqual(log.workoutItemID, itemID)
-        XCTAssertEqual(log.setIndex, 1)
+        XCTAssertEqual(log.role, .slot)
+        XCTAssertEqual(log.slotID, itemID)
+        XCTAssertEqual(log.setIndex, 0)
+        XCTAssertEqual(log.setRepeatIndex, 0)
+        XCTAssertEqual(log.blockRepeatIndex, 0)
         XCTAssertEqual(log.reps, 5)
         XCTAssertEqual(log.rir, 2)
         XCTAssertEqual(log.weight, 100)
         // R2.10: JSON fixture omits `weight_unit` → defaults to .lb.
         XCTAssertEqual(log.weightUnit, .lb)
-        XCTAssertFalse(log.isWarmup)
         XCTAssertEqual(log.completedAt, fixed.now)
         XCTAssertNil(log.performedExerciseID)
     }
@@ -349,11 +353,12 @@ final class ExecutionViewModelPushTests: XCTestCase {
         let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_777))
         let (ctx, _) = PushTestFixtures.context(
             sets: 3, reps: 8, loadKg: 0,
-            prescriptionJSONOverride: #"{"sets":3,"reps":8}"#
+            prescriptionJSONOverride: #"{"sets":3,"reps":8}"#,
+            includePrimitivePlan: true
         )
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
@@ -361,7 +366,7 @@ final class ExecutionViewModelPushTests: XCTestCase {
         vm.logSet(reps: 8, rir: nil)
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         let log = try XCTUnwrap(logs.first)
         XCTAssertNil(log.weight, "BW row pushes nil weight, NOT 0")
         XCTAssertNil(log.weightUnit, "no weight unit when there's no weight")
@@ -380,7 +385,8 @@ private enum PushTestFixtures {
         sets: Int,
         reps: Int,
         loadKg: Double,
-        prescriptionJSONOverride: String? = nil
+        prescriptionJSONOverride: String? = nil,
+        includePrimitivePlan: Bool = false
     ) -> (WorkoutContext, UUID) {
         let userID = UUID()
         let workoutID = UUID()
@@ -408,8 +414,54 @@ private enum PushTestFixtures {
             exerciseID: exerciseID,
             prescriptionJSON: prescriptionJSON
         )
+        var primitiveWorkout: PrimitiveWorkout?
+        var primitivePlan: ExecutionPlan?
+        if includePrimitivePlan {
+            let primitive = PrimitiveWorkout(
+                id: workoutID,
+                name: workout.name,
+                blocks: [
+                    PrimitiveBlock(id: blockID, sets: [
+                        PrimitiveSet(
+                            id: UUID(),
+                            timing: PrimitiveTiming(mode: .setBounded),
+                            traversal: .sequential,
+                            repeatCount: sets,
+                            slots: [
+                                PrimitiveSlot(
+                                    id: itemID,
+                                    exerciseID: exerciseID,
+                                    workTargets: [
+                                        PrimitiveWorkTarget(
+                                            metric: .reps,
+                                            valueForm: .single,
+                                            value: Double(reps),
+                                            role: .completion
+                                        ),
+                                    ],
+                                    load: loadKg == 0
+                                        ? PrimitiveLoad(
+                                            unit: .bodyweight,
+                                            unitType: .implicitBodyweight
+                                        )
+                                        : PrimitiveLoad(
+                                            value: loadKg,
+                                            unit: prescriptionJSON.contains(#""weight_unit":"kg""#) ? .kg : .lb,
+                                            unitType: .absolute
+                                        )
+                                ),
+                            ]
+                        ),
+                    ]),
+                ]
+            )
+            primitiveWorkout = primitive
+            primitivePlan = try! ExecutionPlan.validated(workout: primitive)
+        }
         let ctx = WorkoutContext(
             workout: workout,
+            primitiveWorkout: primitiveWorkout,
+            primitiveExecutionPlan: primitivePlan,
             blocks: [block],
             itemsByBlock: [[item]],
             exercises: [exerciseID: Exercise(id: exerciseID, name: "Bench")]
@@ -497,12 +549,17 @@ actor EnqueueRecorder {
     }
 
     private(set) var setLogs: [SetLog] = []
+    private(set) var primitiveSetLogs: [PrimitiveSetLog] = []
     private(set) var statusUpdates: [StatusObservation] = []
     private(set) var completions: [WorkoutCompletionRecord] = []
     private(set) var userParameters: [UserParameter] = []
 
     func appendSet(_ log: SetLog) {
         setLogs.append(log)
+    }
+
+    func appendPrimitiveSet(_ log: PrimitiveSetLog) {
+        primitiveSetLogs.append(log)
     }
 
     func appendStatus(

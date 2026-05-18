@@ -28,11 +28,65 @@ struct FixtureDecodingTests {
         let workout = try decoder.decode(Workout.self, from: data)
         #expect(workout.name == "Tuesday Legs")
         #expect(workout.status == .planned)
-        #expect(workout.blocks.count == 1)
-        #expect(workout.blocks[0].timingMode == .straightSets)
-        #expect(workout.blocks[0].workoutItems.count == 1)
-        #expect(workout.blocks[0].workoutItems[0].alternatives.count == 1)
+        #expect(workout.primitiveBlocks.count == 1)
+        #expect(workout.primitiveBlocks[0].sets.count == 1)
+        #expect(workout.primitiveBlocks[0].sets[0].timing.mode == .setBounded)
         #expect(workout.tagsJson == "[\"hypertrophy_block_2\", \"week_3\"]")
+    }
+
+    @Test func workoutDecodeRejectsInvalidPrimitiveBlocks() throws {
+        let json = """
+        {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "user_id": "22222222-2222-2222-2222-222222222222",
+          "name": "Mixed primitive",
+          "scheduled_date": "2026-04-20",
+          "status": "planned",
+          "source": "claude",
+          "notes": null,
+          "tags_json": null,
+          "created_at": "2026-04-17T08:00:00Z",
+          "updated_at": "2026-04-17T08:00:00Z",
+          "completed_at": null,
+          "primitive_blocks": [
+            {
+              "id": "33333333-3333-4333-8333-333333333333",
+              "title": "Main",
+              "repeat": 1,
+              "work_target": [],
+              "sets": [
+                {
+                  "id": "44444444-4444-4444-8444-444444444444",
+                  "timing": { "mode": "set_bounded" },
+                  "traversal": "sequential",
+                  "repeat": 1,
+                  "work_target": [],
+                  "slots": [
+                    {
+                      "id": "55555555-5555-4555-8555-555555555555",
+                      "exercise_id": "e0000001-0000-4000-8000-000000000001",
+                      "work_target": [],
+                      "load": null,
+                      "stimuli": [],
+                      "post_rest_sec": 0,
+                      "is_warmup": false
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "id": "99999999-9999-4999-8999-999999999999",
+              "sets": [
+                { "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "timing": { "mode": "future_mode" }, "slots": [] }
+              ]
+            }
+          ]
+        }
+        """.data(using: .utf8)!
+        #expect(throws: DecodingError.self) {
+            _ = try decoder.decode(Workout.self, from: json)
+        }
     }
 
     @Test func syncPullResponseFixture() throws {
@@ -46,8 +100,9 @@ struct FixtureDecodingTests {
         #expect(response.lastPerformed.count == 1)
         let first = response.lastPerformed[0]
         #expect(first.exerciseId == "e0000001-0000-4000-8000-000000000001")
+        #expect(first.lastSetLogs.first?.role == .slot)
         #expect(first.lastSetLogs.first?.weight == 100.0)
-        #expect(first.lastSetLogs.first?.hrAvgBpm == 142)
+        #expect(first.lastSetLogs.first?.rir == 2)
     }
 
     @Test func exerciseWithDefaultsFixture() throws {

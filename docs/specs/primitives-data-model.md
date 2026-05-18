@@ -153,6 +153,10 @@ The durable contract is:
 The semantics layer must answer, for each primitive composition:
 
 - Which timing/traversal cells are legal, bounded, unbounded, or rejected.
+- Whether a composition represents executable work or an invalid
+  timer-only/programming artifact. In the current bridge runtime, a timer
+  without slots is not accepted; rest/transition primitive timers require a
+  later primitive-runtime authority cutover before ingest can allow them.
 - Which metrics are completion-driving and which are observations.
 - Which metric is primary for display, and which metrics are secondary.
 - Which outputs become `slot`, `set_result`, or `block_result` rows.
@@ -200,27 +204,33 @@ Residual scope after this cluster:
   cutover cluster because it must exercise the real URLSession/FastAPI/SQLite
   boundary.
 
-### Next implementation cluster
+### Current implementation cluster
 
-The next cluster is the primitive contract cutover and sync/readback proof. It
-must prove that primitive workouts can move through the real system, not only
+The active cluster is the primitive contract cutover and sync/readback proof.
+It proves that primitive workouts can move through the real system, not only
 that the app runtime can reason about primitive fixtures.
 
-In scope:
+Implemented in this cluster:
 
-- Replace remaining old-shape wire/schema surfaces with the primitive
+- Replaced remaining old-shape wire/schema surfaces with the primitive
   authoring/log contract where this lane owns them: server API models,
   OpenAPI/shared Swift DTOs, SwiftData cache shape, fixtures, and docs.
-- Implement the explicit destructive reset of old local/server QA workout data
+- Implemented the explicit destructive reset of old local/server QA workout data
   required by `cutover.md`.
-- Prove pull -> local cache -> `ExecutionPlan` seed -> execution log/result
+- Proved pull -> local cache -> `ExecutionPlan` seed -> execution log/result
   grouping -> push -> server readback for representative primitive workouts.
-- Extend stage/proof telemetry where simulator click-through QA needs an
+- Tightened primitive result role query-safety by validating pushed slot,
+  set_result, and block_result identifiers against the referenced workout's
+  primitive tree.
+- Extended stage/proof telemetry where simulator click-through QA needs an
   event trail for non-visual boundaries. At minimum, QA should be able to
   correlate primitive cache write, `ExecutionPlan` assembly, primitive result
   logging, completion publishing, push response, and queue drain through
   `workout_id` / primitive set-log identifiers or an explicitly documented
   equivalent readback.
+
+Remaining in or after closeout:
+
 - Close or narrow `PDM-GAP-003`, `PDM-GAP-004`, `PDM-GAP-005`,
   `PDM-GAP-006`, and residual `PDM-GAP-007` only where the implementation
   actually touches those consumers.
@@ -261,6 +271,9 @@ The cutover implementation must add deterministic proof for:
 - **Timing x traversal:** legal `set_bounded`, `time_bounded`, `cap_bounded`,
   and `target_bounded` compositions across sequential, round-robin, and AMRAP
   traversal, plus explicit rejection of illegal cells such as uncapped AMRAP.
+- **Executable-work legality:** rejection of timer-only workouts, timer-only
+  blocks, all zero-slot sets in the current bridge runtime, and aggregate
+  result targets attached to scopes with no executable work.
 - **Work targets:** `reps`, `duration`, `distance`, `rounds`, `completion`,
   and `load_carried` across single, range, and open value forms, with
   completion metrics driving done conditions and observation metrics recorded
@@ -311,20 +324,15 @@ already cover.
 
 ## Current gaps
 
-- `PDM-GAP-001`: The accepted primitive hierarchy is not implemented in the
-  server schema, API, shared Swift DTOs, SwiftData models, execution seeding,
-  timing drivers, sync payloads, fixtures, or current feature docs. Future
-  implementation planning must start from this accepted contract and cite the
-  aspect gaps below for the specific proof obligations it intends to close.
-
 - The completed foundation phase proved the visible primitive execution slice,
   CoreSession semantics, narrow server legality parity, and Today preview
   projection through automated gates and simulator QA. It also produced
   durable repro rows for `bug-089`, `bug-090`, and `bug-091`; those bugs remain
-  open until their specific route/progress/launch fixes land. This phase does
-  not close the full cutover. Remaining material items are the full
-  wire/schema/cache/sync/reset cutover, `PDM-GAP-006` residual readback and
-  correction consumers, the open bug rows, and the proof matrix above.
+  open until their specific route/progress/launch fixes land. The full
+  primitive wire/schema/cache/sync/reset cutover is now implemented in the
+  active cluster; remaining material items are `PDM-GAP-006` residual readback
+  and correction consumers, unsupported primitive bridge shapes, the open bug
+  rows, and the proof matrix above.
 
 - `PDM-GAP-007`: Primitive composition semantics are now centralized for
   CoreSession app-runtime seeding/projection/result rules and narrow server
@@ -333,6 +341,12 @@ already cover.
   outside execution completion, persistence grouping, sync payload
   construction, server readback/query semantics, and any feature consumer
   touched by the full cutover.
+
+- `PDM-GAP-008`: Primitive composition legality is not yet fully centralized
+  beyond the timing/traversal matrix. The contract must reject no-work
+  compositions that look structurally valid but are not meaningful executable
+  workouts, including timer-only workouts, timer-only blocks, unsupported
+  zero-slot sets, and aggregate result targets attached to no executable work.
 
 ## Open questions
 

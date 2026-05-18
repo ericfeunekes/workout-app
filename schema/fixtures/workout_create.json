@@ -10,31 +10,36 @@
   "created_at": "2026-04-17T08:00:00Z",
   "updated_at": "2026-04-17T08:00:00Z",
   "completed_at": null,
-  "blocks": [
+  "primitive_blocks": [
     {
-      "id": "33333333-3333-3333-3333-333333333333",
-      "position": 0,
-      "parent_block_id": null,
-      "name": "Main",
-      "timing_mode": "straight_sets",
-      "timing_config_json": "{\"rest_between_sets_sec\": 180}",
-      "rounds": null,
-      "rounds_rep_scheme_json": null,
-      "notes": null,
-      "intent": null,
-      "workout_items": [
+      "id": "33333333-3333-4333-8333-333333333333",
+      "title": "Main",
+      "repeat": 1,
+      "work_target": [],
+      "sets": [
         {
-          "id": "44444444-4444-4444-4444-444444444444",
-          "position": 0,
-          "exercise_id": "e0000001-0000-4000-8000-000000000001",
-          "prescription_json": "{\"sets\": 5, \"reps\": 5, \"load_kg\": 100}",
-          "prescription_json_raw": null,
-          "alternatives": [
+          "id": "44444444-4444-4444-8444-444444444444",
+          "title": "Back squat",
+          "timing": { "mode": "set_bounded" },
+          "traversal": "sequential",
+          "repeat": 5,
+          "work_target": [],
+          "slots": [
             {
-              "id": "55555555-5555-5555-5555-555555555555",
-              "exercise_id": "e0000002-0000-4000-8000-000000000002",
-              "reason": "bar taken",
-              "parameter_overrides_json": null
+              "id": "55555555-5555-4555-8555-555555555555",
+              "exercise_id": "e0000001-0000-4000-8000-000000000001",
+              "work_target": [
+                {
+                  "metric": "reps",
+                  "value_form": "single",
+                  "value": 5,
+                  "role": "completion"
+                }
+              ],
+              "load": { "value": 100, "unit": "kg", "unit_type": "absolute" },
+              "stimuli": [],
+              "post_rest_sec": 180,
+              "is_warmup": false
             }
           ]
         }

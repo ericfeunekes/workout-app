@@ -170,10 +170,22 @@ final class WorkoutCacheTests: XCTestCase {
         )
 
         try await cache.save(PulledDataset(primitiveWorkouts: [primitive]))
+        try await cache.savePrimitiveSetLogs([
+            PrimitiveSetLog(
+                id: UUID(uuidString: "60000000-0000-4000-8000-000000000034")!,
+                role: .blockResult,
+                blockID: UUID(uuidString: "20000000-0000-4000-8000-000000000034")!,
+                workoutID: workoutID,
+                setIndex: 0,
+                completedAt: Fixtures.baseDate
+            ),
+        ], workoutID: workoutID)
         try await cache.save(PulledDataset(primitiveWorkoutIDsToDelete: [workoutID]))
 
         let loaded = try await cache.loadPrimitiveWorkouts()
         XCTAssertTrue(loaded.isEmpty)
+        let logs = try await cache.loadPrimitiveSetLogs(workoutID: workoutID)
+        XCTAssertTrue(logs.isEmpty)
     }
 
     func testPrimitiveSetLogsRoundTripThroughCache() async throws {

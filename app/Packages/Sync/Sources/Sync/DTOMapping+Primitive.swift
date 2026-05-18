@@ -126,6 +126,76 @@ extension DTOMapping {
         )
     }
 
+    public static func mapPrimitiveSetLog(
+        _ dto: WorkoutDBSchema.PrimitiveSetLog
+    ) -> Result<CoreDomain.PrimitiveSetLog, SyncError> {
+        guard let id = UUID(uuidString: dto.id) else {
+            return .failure(.decode("PrimitiveSetLog.id is not a UUID: \(dto.id)"))
+        }
+        guard let role = CoreDomain.PrimitiveLogRole(rawValue: dto.role.rawValue) else {
+            return .failure(.decode("PrimitiveSetLog.role unknown: \(dto.role.rawValue)"))
+        }
+        let slotID: PrimitiveSlotID?
+        switch parseOptionalUUID(dto.slotId, fieldName: "PrimitiveSetLog.slot_id") {
+        case .success(let parsed): slotID = parsed
+        case .failure(let error): return .failure(error)
+        }
+        let setID: PrimitiveSetID?
+        switch parseOptionalUUID(dto.setId, fieldName: "PrimitiveSetLog.set_id") {
+        case .success(let parsed): setID = parsed
+        case .failure(let error): return .failure(error)
+        }
+        let blockID: BlockID?
+        switch parseOptionalUUID(dto.blockId, fieldName: "PrimitiveSetLog.block_id") {
+        case .success(let parsed): blockID = parsed
+        case .failure(let error): return .failure(error)
+        }
+        let workoutID: WorkoutID?
+        switch parseOptionalUUID(dto.workoutId, fieldName: "PrimitiveSetLog.workout_id") {
+        case .success(let parsed): workoutID = parsed
+        case .failure(let error): return .failure(error)
+        }
+        let plannedID: ExerciseID?
+        switch parseOptionalUUID(
+            dto.plannedExerciseId,
+            fieldName: "PrimitiveSetLog.planned_exercise_id"
+        ) {
+        case .success(let parsed): plannedID = parsed
+        case .failure(let error): return .failure(error)
+        }
+        let performedID: ExerciseID?
+        switch parseOptionalUUID(
+            dto.performedExerciseId,
+            fieldName: "PrimitiveSetLog.performed_exercise_id"
+        ) {
+        case .success(let parsed): performedID = parsed
+        case .failure(let error): return .failure(error)
+        }
+        let unit = dto.weightUnit.flatMap { CoreDomain.WeightUnit(rawValue: $0.rawValue) }
+        return .success(CoreDomain.PrimitiveSetLog(
+            id: id,
+            role: role,
+            slotID: slotID,
+            setID: setID,
+            blockID: blockID,
+            workoutID: workoutID,
+            plannedExerciseID: plannedID,
+            performedExerciseID: performedID,
+            setIndex: dto.setIndex,
+            setRepeatIndex: dto.setRepeatIndex,
+            blockRepeatIndex: dto.blockRepeatIndex,
+            reps: dto.reps,
+            weight: dto.weight,
+            weightUnit: unit,
+            durationSec: dto.durationSec,
+            distanceM: dto.distanceM,
+            rounds: dto.rounds,
+            rir: dto.rir,
+            isWarmup: dto.isWarmup,
+            completedAt: dto.completedAt
+        ))
+    }
+
     private static func mapPrimitiveWorkTarget(
         _ dto: WorkoutDBSchema.PrimitiveWorkTarget
     ) -> CoreDomain.PrimitiveWorkTarget {

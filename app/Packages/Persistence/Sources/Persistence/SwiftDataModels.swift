@@ -21,7 +21,7 @@
 //     overwrites on UUID); we do not want those overwrites to cascade into
 //     historical set_logs. Keep the link loose.
 //
-// These file-scope classes are the latest `WorkoutDBSchemaV6` shape
+// These file-scope classes are the latest `WorkoutDBSchemaV7` shape
 // (post-perf-002 PushItem `priority` + `dedupKey` columns). The V1
 // (pre-006), V2 (post-006, pre-R1.4), and V3 (R1.4, pre-perf-002)
 // shapes are preserved as shadow @Model types inside their respective
@@ -88,18 +88,85 @@ public final class PrimitiveWorkoutModel {
     @Attribute(.unique) public var id: UUID
     public var name: String
     public var payloadJSON: String
-    public var primitiveSetLogsJSON: String
 
     public init(
         id: UUID,
         name: String,
-        payloadJSON: String,
-        primitiveSetLogsJSON: String = "[]"
+        payloadJSON: String
     ) {
         self.id = id
         self.name = name
         self.payloadJSON = payloadJSON
-        self.primitiveSetLogsJSON = primitiveSetLogsJSON
+    }
+}
+
+// MARK: - PrimitiveSetLogModel
+
+@Model
+public final class PrimitiveSetLogModel {
+    @Attribute(.unique) public var id: UUID
+    public var roleRaw: String
+    public var slotID: UUID?
+    public var setID: UUID?
+    public var blockID: UUID?
+    public var workoutID: UUID
+    public var plannedExerciseID: UUID?
+    public var performedExerciseID: UUID?
+    public var setIndex: Int
+    public var setRepeatIndex: Int
+    public var blockRepeatIndex: Int
+    public var reps: Int?
+    public var weight: Double?
+    public var weightUnitRaw: String?
+    public var durationSec: Double?
+    public var distanceM: Double?
+    public var rounds: Int?
+    public var rir: Int?
+    public var isWarmup: Bool
+    public var completedAt: Date
+
+    public init(
+        id: UUID,
+        roleRaw: String,
+        slotID: UUID?,
+        setID: UUID?,
+        blockID: UUID?,
+        workoutID: UUID,
+        plannedExerciseID: UUID?,
+        performedExerciseID: UUID?,
+        setIndex: Int,
+        setRepeatIndex: Int,
+        blockRepeatIndex: Int,
+        reps: Int?,
+        weight: Double?,
+        weightUnitRaw: String?,
+        durationSec: Double?,
+        distanceM: Double?,
+        rounds: Int?,
+        rir: Int?,
+        isWarmup: Bool,
+        completedAt: Date
+    ) {
+        self.id = id
+        self.roleRaw = roleRaw
+        self.slotID = slotID
+        self.setID = setID
+        self.blockID = blockID
+        self.workoutID = workoutID
+        self.plannedExerciseID = plannedExerciseID
+        self.performedExerciseID = performedExerciseID
+        self.setIndex = setIndex
+        self.setRepeatIndex = setRepeatIndex
+        self.blockRepeatIndex = blockRepeatIndex
+        self.reps = reps
+        self.weight = weight
+        self.weightUnitRaw = weightUnitRaw
+        self.durationSec = durationSec
+        self.distanceM = distanceM
+        self.rounds = rounds
+        self.rir = rir
+        self.isWarmup = isWarmup
+        self.completedAt = completedAt
     }
 }
 

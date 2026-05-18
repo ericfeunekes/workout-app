@@ -13,6 +13,7 @@ import pytest
 
 _SCHEMA_ROOT = Path(__file__).resolve().parents[2] / "schema"
 _ENUMS_FILE = _SCHEMA_ROOT / "Sources" / "WorkoutDBSchema" / "Enums.swift"
+_PRIMITIVE_FILE = _SCHEMA_ROOT / "Sources" / "WorkoutDBSchema" / "PrimitiveEntities.swift"
 
 
 def _extract_enum_cases(swift_source: str, enum_name: str) -> set[str]:
@@ -46,6 +47,12 @@ def _extract_enum_cases(swift_source: str, enum_name: str) -> set[str]:
 def swift_source() -> str:
     assert _ENUMS_FILE.exists(), f"{_ENUMS_FILE} missing"
     return _ENUMS_FILE.read_text()
+
+
+@pytest.fixture(scope="module")
+def primitive_swift_source() -> str:
+    assert _PRIMITIVE_FILE.exists(), f"{_PRIMITIVE_FILE} missing"
+    return _PRIMITIVE_FILE.read_text()
 
 
 def test_timing_mode_parity(swift_source: str) -> None:
@@ -90,6 +97,51 @@ def test_set_log_side_parity(swift_source: str) -> None:
 def test_user_parameter_source_parity(swift_source: str) -> None:
     swift = _extract_enum_cases(swift_source, "UserParameterSource")
     assert swift == {"claude", "app_log", "manual"}
+
+
+def test_primitive_timing_mode_parity(primitive_swift_source: str) -> None:
+    swift = _extract_enum_cases(primitive_swift_source, "PrimitiveTimingMode")
+    assert swift == {"set_bounded", "time_bounded", "cap_bounded", "target_bounded"}
+
+
+def test_primitive_traversal_parity(primitive_swift_source: str) -> None:
+    swift = _extract_enum_cases(primitive_swift_source, "PrimitiveTraversal")
+    assert swift == {"sequential", "round_robin", "amrap"}
+
+
+def test_primitive_metric_parity(primitive_swift_source: str) -> None:
+    swift = _extract_enum_cases(primitive_swift_source, "PrimitiveMetric")
+    assert swift == {"reps", "duration", "distance", "rounds", "completion", "load_carried"}
+
+
+def test_primitive_value_form_parity(primitive_swift_source: str) -> None:
+    swift = _extract_enum_cases(primitive_swift_source, "PrimitiveValueForm")
+    assert swift == {"single", "range", "open"}
+
+
+def test_primitive_work_role_parity(primitive_swift_source: str) -> None:
+    swift = _extract_enum_cases(primitive_swift_source, "PrimitiveWorkRole")
+    assert swift == {"completion", "observation"}
+
+
+def test_primitive_load_unit_parity(primitive_swift_source: str) -> None:
+    swift = _extract_enum_cases(primitive_swift_source, "PrimitiveLoadUnit")
+    assert swift == {"kg", "lb", "1rm", "bodyweight"}
+
+
+def test_primitive_load_unit_type_parity(primitive_swift_source: str) -> None:
+    swift = _extract_enum_cases(primitive_swift_source, "PrimitiveLoadUnitType")
+    assert swift == {"absolute", "relative", "implicit_bodyweight"}
+
+
+def test_primitive_stimulus_type_parity(primitive_swift_source: str) -> None:
+    swift = _extract_enum_cases(primitive_swift_source, "PrimitiveStimulusType")
+    assert swift == {"rir", "hr_zone"}
+
+
+def test_primitive_log_role_parity(primitive_swift_source: str) -> None:
+    swift = _extract_enum_cases(primitive_swift_source, "PrimitiveLogRole")
+    assert swift == {"slot", "set_result", "block_result"}
 
 
 def _has_xcode() -> bool:

@@ -67,3 +67,16 @@ def test_openapi_requires_bearer_auth(live_openapi: dict) -> None:
     assert schemes, "No securitySchemes declared; bearer auth isn't surfaced in the OpenAPI"
     bearer = any(s.get("type") == "http" and s.get("scheme") == "bearer" for s in schemes.values())
     assert bearer, f"HTTP Bearer scheme not found in securitySchemes: {list(schemes)}"
+
+
+def test_sync_results_response_schema_is_specific(live_openapi: dict) -> None:
+    response = live_openapi["paths"]["/api/sync/results"]["post"]["responses"]["200"]
+    schema_ref = response["content"]["application/json"]["schema"]["$ref"]
+    assert schema_ref == "#/components/schemas/SyncResultsOut"
+
+    schema = live_openapi["components"]["schemas"]["SyncResultsOut"]
+    assert set(schema["required"]) == {
+        "primitive_set_logs_received",
+        "status_updates_received",
+        "workout_resets_received",
+    }

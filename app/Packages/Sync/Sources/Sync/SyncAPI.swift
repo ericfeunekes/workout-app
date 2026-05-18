@@ -109,10 +109,11 @@ public final class SyncAPI: Sendable {
         }
     }
 
-    /// Enqueue a set_log batch. Returns immediately; push happens on the
-    /// next `flushPushQueue(...)` tick.
+    /// Legacy set_log pushes are intentionally closed after the primitive
+    /// result cutover. Callers must send `PrimitiveSetLog` rows.
     public func pushLog(_ logs: [CoreDomain.SetLog]) async throws {
-        try await push.enqueueSetLogs(logs)
+        _ = logs
+        throw SyncError.encode("legacy set_logs are not syncable after primitive result cutover")
     }
 
     public func pushPrimitiveLog(_ logs: [CoreDomain.PrimitiveSetLog]) async throws {

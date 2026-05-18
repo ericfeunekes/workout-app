@@ -78,9 +78,19 @@ extension WorkoutCacheImpl {
         preload: PullPreload
     ) throws {
         for workoutID in dataset.primitiveWorkoutIDsToDelete {
+            try deletePrimitiveSetLogs(workoutID: workoutID)
             guard let row = preload.primitiveWorkoutsByID.removeValue(forKey: workoutID) else {
                 continue
             }
+            modelContext.delete(row)
+        }
+    }
+
+    private func deletePrimitiveSetLogs(workoutID: WorkoutID) throws {
+        let descriptor = FetchDescriptor<PrimitiveSetLogModel>(
+            predicate: #Predicate<PrimitiveSetLogModel> { $0.workoutID == workoutID }
+        )
+        for row in try recordedFetch(descriptor) {
             modelContext.delete(row)
         }
     }

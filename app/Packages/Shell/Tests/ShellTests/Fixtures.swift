@@ -169,100 +169,98 @@ enum Fixtures {
                 "last_set_logs": [
                   {
                     "id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000001",
-                    "workout_item_id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
+                    "role": "slot",
+                    "slot_id": "aaaaaaaa-aaaa-4aaa-8aaa-000000000002",
+                    "set_id": null,
+                    "block_id": null,
+                    "workout_id": "\(workoutID.uuidString.lowercased())",
+                    "planned_exercise_id": "\(benchID.uuidString.lowercased())",
                     "performed_exercise_id": null,
                     "set_index": 1,
+                    "set_repeat_index": 0,
+                    "block_repeat_index": 0,
                     "reps": 5,
                     "weight": 100.0,
                     "weight_unit": "kg",
                     "duration_sec": null,
                     "distance_m": null,
+                    "rounds": null,
                     "rir": 2,
                     "is_warmup": false,
-                    "skipped": false,
-                    "side": "bilateral",
-                    "started_at": null,
-                    "completed_at": "2026-04-10T07:15:00Z",
-                    "hr_avg_bpm": null,
-                    "hr_max_bpm": null,
-                    "cadence_avg_spm": null,
-                    "motion_samples_ref": null,
-                    "notes": null
+                    "completed_at": "2026-04-10T07:15:00Z"
                   }
-                ],
-                "prescription_json": "{\\"sets\\":5,\\"reps\\":5,\\"load_kg\\":100}"
+                ]
               },
               {
                 "exercise_id": "\(rowID.uuidString.lowercased())",
                 "last_set_logs": [
                   {
                     "id": "bbbbbbbb-bbbb-4bbb-8bbb-000000000001",
-                    "workout_item_id": "bbbbbbbb-bbbb-4bbb-8bbb-000000000002",
+                    "role": "slot",
+                    "slot_id": "bbbbbbbb-bbbb-4bbb-8bbb-000000000002",
+                    "set_id": null,
+                    "block_id": null,
+                    "workout_id": "\(workoutID.uuidString.lowercased())",
+                    "planned_exercise_id": "\(rowID.uuidString.lowercased())",
                     "performed_exercise_id": null,
                     "set_index": 1,
+                    "set_repeat_index": 0,
+                    "block_repeat_index": 0,
                     "reps": 8,
                     "weight": 77.5,
                     "weight_unit": "kg",
                     "duration_sec": null,
                     "distance_m": null,
+                    "rounds": null,
                     "rir": 1,
                     "is_warmup": false,
-                    "skipped": false,
-                    "side": "bilateral",
-                    "started_at": null,
-                    "completed_at": "2026-04-10T07:25:00Z",
-                    "hr_avg_bpm": null,
-                    "hr_max_bpm": null,
-                    "cadence_avg_spm": null,
-                    "motion_samples_ref": null,
-                    "notes": null
+                    "completed_at": "2026-04-10T07:25:00Z"
                   },
                   {
                     "id": "bbbbbbbb-bbbb-4bbb-8bbb-000000000003",
-                    "workout_item_id": "bbbbbbbb-bbbb-4bbb-8bbb-000000000002",
+                    "role": "slot",
+                    "slot_id": "bbbbbbbb-bbbb-4bbb-8bbb-000000000002",
+                    "set_id": null,
+                    "block_id": null,
+                    "workout_id": "\(workoutID.uuidString.lowercased())",
+                    "planned_exercise_id": "\(rowID.uuidString.lowercased())",
                     "performed_exercise_id": null,
                     "set_index": 2,
+                    "set_repeat_index": 1,
+                    "block_repeat_index": 0,
                     "reps": 8,
                     "weight": 77.5,
                     "weight_unit": "kg",
                     "duration_sec": null,
                     "distance_m": null,
+                    "rounds": null,
                     "rir": 1,
                     "is_warmup": false,
-                    "skipped": false,
-                    "side": "bilateral",
-                    "started_at": null,
-                    "completed_at": "2026-04-10T07:27:00Z",
-                    "hr_avg_bpm": null,
-                    "hr_max_bpm": null,
-                    "cadence_avg_spm": null,
-                    "motion_samples_ref": null,
-                    "notes": null
+                    "completed_at": "2026-04-10T07:27:00Z"
                   },
                   {
                     "id": "bbbbbbbb-bbbb-4bbb-8bbb-000000000004",
-                    "workout_item_id": "bbbbbbbb-bbbb-4bbb-8bbb-000000000002",
+                    "role": "slot",
+                    "slot_id": "bbbbbbbb-bbbb-4bbb-8bbb-000000000002",
+                    "set_id": null,
+                    "block_id": null,
+                    "workout_id": "\(workoutID.uuidString.lowercased())",
+                    "planned_exercise_id": "\(rowID.uuidString.lowercased())",
                     "performed_exercise_id": null,
                     "set_index": 3,
+                    "set_repeat_index": 2,
+                    "block_repeat_index": 0,
                     "reps": 8,
                     "weight": 77.5,
                     "weight_unit": "kg",
                     "duration_sec": null,
                     "distance_m": null,
+                    "rounds": null,
                     "rir": 1,
                     "is_warmup": false,
-                    "skipped": false,
-                    "side": "bilateral",
-                    "started_at": null,
-                    "completed_at": "2026-04-10T07:29:00Z",
-                    "hr_avg_bpm": null,
-                    "hr_max_bpm": null,
-                    "cadence_avg_spm": null,
-                    "motion_samples_ref": null,
-                    "notes": null
+                    "completed_at": "2026-04-10T07:29:00Z"
                   }
-                ],
-                "prescription_json": "{\\"sets\\":3,\\"reps\\":8,\\"load_kg\\":77.5}"
+                ]
               }
             ]
             """
@@ -285,31 +283,50 @@ enum Fixtures {
               "created_at": "\(createdAtString)",
               "updated_at": "\(createdAtString)",
               "completed_at": null,
-              "blocks": [
+              "primitive_blocks": [
                 {
                   "id": "\(blockID.uuidString.lowercased())",
-                  "position": 0,
-                  "parent_block_id": null,
-                  "name": null,
-                  "timing_mode": "straight_sets",
-                  "timing_config_json": "{}",
-                  "rounds": null,
-                  "rounds_rep_scheme_json": null,
-                  "notes": null,
-                  "workout_items": [
+                  "title": null,
+                  "repeat": 1,
+                  "work_target": [],
+                  "sets": [
                     {
                       "id": "\(item1ID.uuidString.lowercased())",
-                      "position": 0,
-                      "exercise_id": "\(benchID.uuidString.lowercased())",
-                      "prescription_json": "{\\"sets\\":4,\\"reps\\":5,\\"load_kg\\":102.5}",
-                      "alternatives": []
+                      "title": null,
+                      "timing": {"mode": "set_bounded", "interval_sec": null, "rounds": null, "cap_sec": null},
+                      "traversal": "sequential",
+                      "repeat": 4,
+                      "work_target": [],
+                      "slots": [
+                        {
+                          "id": "\(item1ID.uuidString.lowercased())",
+                          "exercise_id": "\(benchID.uuidString.lowercased())",
+                          "work_target": [{"metric": "reps", "value_form": "single", "value": 5, "role": "completion"}],
+                          "load": {"value": 102.5, "unit": "kg", "unit_type": "absolute"},
+                          "stimuli": [],
+                          "post_rest_sec": 0,
+                          "is_warmup": false
+                        }
+                      ]
                     },
                     {
                       "id": "\(item2ID.uuidString.lowercased())",
-                      "position": 1,
-                      "exercise_id": "\(rowID.uuidString.lowercased())",
-                      "prescription_json": "{\\"sets\\":3,\\"reps\\":8,\\"load_kg\\":80}",
-                      "alternatives": []
+                      "title": null,
+                      "timing": {"mode": "set_bounded", "interval_sec": null, "rounds": null, "cap_sec": null},
+                      "traversal": "sequential",
+                      "repeat": 3,
+                      "work_target": [],
+                      "slots": [
+                        {
+                          "id": "\(item2ID.uuidString.lowercased())",
+                          "exercise_id": "\(rowID.uuidString.lowercased())",
+                          "work_target": [{"metric": "reps", "value_form": "single", "value": 8, "role": "completion"}],
+                          "load": {"value": 80, "unit": "kg", "unit_type": "absolute"},
+                          "stimuli": [],
+                          "post_rest_sec": 0,
+                          "is_warmup": false
+                        }
+                      ]
                     }
                   ]
                 }

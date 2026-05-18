@@ -235,10 +235,18 @@ public struct TodayLoader: Sendable {
                 .sorted { $0.position < $1.position }
                 .flatMap { itemsByBlock[$0.id] ?? [] }
             let primitiveWorkout = primitiveWorkouts.first { $0.id == workout.id }
-            let primitivePlan = try PrimitivePlanAssembly.executionPlan(
-                for: primitiveWorkout,
-                userParameters: userParameters
-            )
+            let primitivePlan: ExecutionPlan?
+            if workout.id == selectedWorkoutID {
+                primitivePlan = try PrimitivePlanAssembly.executionPlan(
+                    for: primitiveWorkout,
+                    userParameters: userParameters
+                )
+            } else {
+                primitivePlan = try? PrimitivePlanAssembly.executionPlan(
+                    for: primitiveWorkout,
+                    userParameters: userParameters
+                )
+            }
             return TodayContext(
                 workout: workout,
                 primitiveWorkout: primitiveWorkout,

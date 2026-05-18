@@ -169,7 +169,8 @@ public final class TodayViewModel {
     }
 
     public func canStart(workoutID targetWorkoutID: WorkoutID) -> Bool {
-        targetWorkoutID == workoutID || startWorkoutAction != nil
+        guard startableWorkoutIDs.contains(targetWorkoutID) else { return false }
+        return targetWorkoutID == workoutID || startWorkoutAction != nil
     }
 
     // MARK: - Dependencies for reload
@@ -184,6 +185,7 @@ public final class TodayViewModel {
     private let sessionStateBinding: (@Sendable (SessionMutation) -> Void)?
     private var refreshAction: (@Sendable () async -> Bool)?
     private var startWorkoutAction: (@Sendable @MainActor (WorkoutID) async -> Bool)?
+    private var startableWorkoutIDs: Set<WorkoutID>
 
     public init(
         context: TodayContext,
@@ -201,6 +203,9 @@ public final class TodayViewModel {
         self.workoutID = context.workout.id
         self.sessionStateBinding = context.sessionStateBinding
         self.telemetry = telemetry
+        self.startableWorkoutIDs = Self.startableWorkoutIDs(
+            from: planContext
+        )
     }
 
     public init(
@@ -219,6 +224,9 @@ public final class TodayViewModel {
         self.workoutID = selected.workout.id
         self.sessionStateBinding = selected.sessionStateBinding
         self.telemetry = telemetry
+        self.startableWorkoutIDs = Self.startableWorkoutIDs(
+            from: planContext
+        )
     }
 
     /// Build a VM that starts in the empty-glance state — no planned
@@ -261,6 +269,7 @@ public final class TodayViewModel {
         self.workoutID = nil
         self.sessionStateBinding = sessionStateBinding
         self.telemetry = emptyTelemetry
+        self.startableWorkoutIDs = []
     }
 
     /// Flip session route to `.active`. No-op when the binding is absent
@@ -373,6 +382,7 @@ public final class TodayViewModel {
             refreshState = .idle
             isEmpty = true
             workoutID = nil
+            startableWorkoutIDs = []
             return
         }
         programName = context.selected.workout.name
@@ -383,6 +393,9 @@ public final class TodayViewModel {
         workoutDetails = Self.deriveWorkoutDetails(from: context, now: Date())
         isEmpty = false
         workoutID = context.selected.workout.id
+        startableWorkoutIDs = Self.startableWorkoutIDs(
+            from: context
+        )
     }
 
     // MARK: - Derivation
@@ -505,9 +518,24 @@ public final class TodayViewModel {
             cardBlocks: cardBlocks,
             hasMoreBlocks: context.blocks.count > cardBlocks.count,
             badge: badge(for: section.kind, isSelected: context.workout.id == selectedID),
-            isStartable: context.workout.id == selectedID,
+            isStartable: context.workout.id == selectedID && isExecutionStartable(context),
             isSelected: context.workout.id == selectedID
         )
+    }
+
+    private static func startableWorkoutIDs(from context: TodayPlanContext) -> Set<WorkoutID> {
+        Set(context.workouts.compactMap { workoutContext in
+            isExecutionStartable(workoutContext)
+                ? workoutContext.workout.id
+                : nil
+        })
+    }
+
+    private static func isExecutionStartable(_ context: TodayContext) -> Bool {
+        if context.primitiveWorkout != nil, context.primitiveExecutionPlan == nil {
+            return false
+        }
+        return true
     }
 
     private static func sectionMetadata(

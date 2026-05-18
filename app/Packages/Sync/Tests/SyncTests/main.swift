@@ -43,8 +43,6 @@ private func encodedFixture() -> Data {
     let wid = "11111111-1111-1111-1111-111111111111"
     let uid = "22222222-2222-2222-2222-222222222222"
     let xid = "33333333-3333-3333-3333-333333333333"
-    let bid = "44444444-4444-4444-4444-444444444444"
-    let iid = "55555555-5555-5555-5555-555555555555"
     let pid = "66666666-6666-6666-6666-666666666666"
     let sid = "77777777-7777-7777-7777-777777777777"
     let json = """
@@ -62,29 +60,6 @@ private func encodedFixture() -> Data {
           "created_at": "2026-04-17T07:00:00Z",
           "updated_at": "2026-04-17T07:00:00Z",
           "completed_at": null,
-          "blocks": [
-            {
-              "id": "\(bid)",
-              "position": 0,
-              "parent_block_id": null,
-              "name": "Main",
-              "timing_mode": "straight_sets",
-              "timing_config_json": "{}",
-              "rounds": null,
-              "rounds_rep_scheme_json": null,
-              "notes": null,
-              "intent": null,
-              "workout_items": [
-                {
-                  "id": "\(iid)",
-                  "position": 0,
-                  "exercise_id": "\(xid)",
-                  "prescription_json": "{\\"sets\\":5,\\"reps\\":5}",
-                  "alternatives": []
-                }
-              ]
-            }
-          ],
           "primitive_blocks": [
             {
               "id": "20000000-0000-4000-8000-000000000002",
@@ -144,28 +119,27 @@ private func encodedFixture() -> Data {
           "last_set_logs": [
             {
               "id": "\(sid)",
-              "workout_item_id": "\(iid)",
+              "role": "slot",
+              "slot_id": "40000000-0000-4000-8000-000000000002",
+              "set_id": "30000000-0000-4000-8000-000000000002",
+              "block_id": "20000000-0000-4000-8000-000000000002",
+              "workout_id": "\(wid)",
+              "planned_exercise_id": "\(xid)",
               "performed_exercise_id": null,
               "set_index": 1,
+              "set_repeat_index": 0,
+              "block_repeat_index": 0,
               "reps": 5,
               "weight": 100.0,
               "weight_unit": "kg",
               "duration_sec": null,
               "distance_m": null,
+              "rounds": null,
               "rir": 2,
               "is_warmup": false,
-              "skipped": false,
-              "side": "bilateral",
-              "started_at": null,
-              "completed_at": "2026-04-10T07:15:00Z",
-              "hr_avg_bpm": 142,
-              "hr_max_bpm": 168,
-              "cadence_avg_spm": null,
-              "motion_samples_ref": null,
-              "notes": null
+              "completed_at": "2026-04-10T07:15:00Z"
             }
-          ],
-          "prescription_json": "{\\"sets\\":5}"
+          ]
         }
       ],
       "server_time": "2026-04-17T08:00:00Z"
@@ -185,7 +159,6 @@ private func encodedPrimitiveTombstoneFixture() throws -> Data {
         source: .claude,
         createdAt: now,
         updatedAt: now,
-        blocks: [],
         primitiveBlocks: []
     )
     let response = WorkoutDBSchema.SyncPullResponse(
@@ -218,11 +191,88 @@ private func encodedInvalidPrimitiveBlocksFixture() -> Data {
           "primitive_blocks": [
             {
               "id": "20000000-0000-4000-8000-000000000022",
+              "repeat": 1,
+              "work_target": [],
               "sets": [
                 {
                   "id": "30000000-0000-4000-8000-000000000022",
                   "timing": { "mode": "future_mode" },
+                  "repeat": 1,
+                  "work_target": [],
                   "slots": []
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "exercises": [],
+      "user_parameters": [],
+      "last_performed": [],
+      "server_time": "2026-04-17T08:00:00Z"
+    }
+    """
+    return json.data(using: .utf8)!
+}
+
+private func encodedMixedPrimitiveBlocksFixture() -> Data {
+    let json = """
+    {
+      "workouts": [
+        {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "user_id": "22222222-2222-2222-2222-222222222222",
+          "name": "Primitive Drift With Valid Block",
+          "scheduled_date": "2026-04-18",
+          "status": "planned",
+          "source": "claude",
+          "notes": null,
+          "tags_json": null,
+          "created_at": "2026-04-17T07:00:00Z",
+          "updated_at": "2026-04-17T07:00:00Z",
+          "completed_at": null,
+          "blocks": [],
+          "primitive_blocks": [
+            {
+              "id": "20000000-0000-4000-8000-000000000023",
+              "repeat": 1,
+              "work_target": [],
+              "sets": [
+                {
+                  "id": "30000000-0000-4000-8000-000000000023",
+                  "timing": { "mode": "future_mode" },
+                  "repeat": 1,
+                  "work_target": [],
+                  "slots": []
+                }
+              ]
+            },
+            {
+              "id": "20000000-0000-4000-8000-000000000024",
+              "title": null,
+              "repeat": 1,
+              "work_target": [],
+              "sets": [
+                {
+                  "id": "30000000-0000-4000-8000-000000000024",
+                  "title": null,
+                  "timing": { "mode": "set_bounded" },
+                  "traversal": "sequential",
+                  "repeat": 1,
+                  "work_target": [],
+                  "slots": [
+                    {
+                      "id": "40000000-0000-4000-8000-000000000024",
+                      "exercise_id": "33333333-3333-3333-3333-333333333333",
+                      "work_target": [
+                        { "metric": "reps", "value_form": "single", "value": 5, "role": "completion" }
+                      ],
+                      "load": null,
+                      "stimuli": [],
+                      "post_rest_sec": 0,
+                      "is_warmup": false
+                    }
+                  ]
                 }
               ]
             }
@@ -254,7 +304,6 @@ runAsyncCase("PullService success — maps DTOs to Domain") {
     try expectEqual(result.workouts.count, 1)
     try expectEqual(result.workouts[0].workout.name, "Pull A")
     try expectEqual(result.workouts[0].blocks.count, 1)
-    try expectEqual(result.workouts[0].blocks[0].timingMode, .straightSets)
     try expectEqual(result.workouts[0].items.count, 1)
     try expectEqual(result.primitiveWorkouts.count, 1)
     try expectEqual(result.primitiveWorkouts[0].blocks[0].sets[0].traversal, .amrap)
@@ -285,19 +334,32 @@ runAsyncCase("PullService empty primitive_blocks → primitive tombstone") {
     )
 }
 
-runAsyncCase("PullService invalid primitive_blocks → decode failure") {
+runAsyncCase("PullService invalid primitive_blocks → decode error") {
     let transport = FakeTransport(outcomes: [
         .response(HTTPResponse(status: 200, body: encodedInvalidPrimitiveBlocksFixture()))
     ])
     let service = PullService(transport: transport)
-
     do {
         _ = try await service.pull(since: nil, bearerToken: "tok")
-        try expect(false, "expected primitive decode failure")
+        try expect(false, "expected decode throw")
     } catch let err as SyncError {
-        guard case .decode = err else {
+        if case .decode = err {} else {
             try expect(false, "expected .decode, got \(err)")
-            return
+        }
+    }
+}
+
+runAsyncCase("PullService mixed primitive_blocks → decode error") {
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 200, body: encodedMixedPrimitiveBlocksFixture()))
+    ])
+    let service = PullService(transport: transport)
+    do {
+        _ = try await service.pull(since: nil, bearerToken: "tok")
+        try expect(false, "expected decode throw")
+    } catch let err as SyncError {
+        if case .decode = err {} else {
+            try expect(false, "expected .decode, got \(err)")
         }
     }
 }
@@ -438,8 +500,8 @@ runAsyncCase("PushQueue enqueue + flush — both items accepted, queue drains") 
     ])
     let queue = PushQueue(store: store, transport: transport)
 
-    try await queue.enqueueSetLogs([makeLog(setIndex: 1)])
-    try await queue.enqueueSetLogs([makeLog(setIndex: 2)])
+    try await queue.enqueuePrimitiveSetLogs([makePrimitiveLog(id: uuid("cccccccc-1111-2222-3333-444444444401"))])
+    try await queue.enqueuePrimitiveSetLogs([makePrimitiveLog(id: uuid("cccccccc-1111-2222-3333-444444444402"))])
 
     let result = try await queue.flush(bearerToken: "tok")
     try expectEqual(result.pushed, 2)
@@ -460,10 +522,10 @@ runAsyncCase("PushQueue flush — first 200, second 503: first removed, second r
     ])
     let queue = PushQueue(store: store, transport: transport)
 
-    let firstLog = makeLog(setIndex: 1)
-    let secondLog = makeLog(setIndex: 2)
-    try await queue.enqueueSetLogs([firstLog])
-    try await queue.enqueueSetLogs([secondLog])
+    let firstLog = makePrimitiveLog(id: uuid("cccccccc-1111-2222-3333-444444444411"))
+    let secondLog = makePrimitiveLog(id: uuid("cccccccc-1111-2222-3333-444444444412"))
+    try await queue.enqueuePrimitiveSetLogs([firstLog])
+    try await queue.enqueuePrimitiveSetLogs([secondLog])
 
     let result = try await queue.flush(bearerToken: "tok")
     try expectEqual(result.pushed, 1)
@@ -474,10 +536,10 @@ runAsyncCase("PushQueue flush — first 200, second 503: first removed, second r
     let remaining = await store.all()
     try expectEqual(remaining.count, 1)
     try expectEqual(remaining[0].attempts, 1)
-    if case .setLogs(let logs) = remaining[0].payload {
-        try expectEqual(logs.first?.setIndex, 2)
+    if case .primitiveSetLogs(let logs) = remaining[0].payload {
+        try expectEqual(logs.first?.id, secondLog.id)
     } else {
-        try expect(false, "expected setLogs payload")
+        try expect(false, "expected primitiveSetLogs payload")
     }
 }
 
@@ -489,8 +551,8 @@ runAsyncCase("PushQueue flush — 401 leaves everything queued, flags tokenRejec
         .response(HTTPResponse(status: 401, body: Data())),
     ])
     let queue = PushQueue(store: store, transport: transport)
-    try await queue.enqueueSetLogs([makeLog(setIndex: 1)])
-    try await queue.enqueueSetLogs([makeLog(setIndex: 2)])
+    try await queue.enqueuePrimitiveSetLogs([makePrimitiveLog(id: uuid("cccccccc-1111-2222-3333-444444444421"))])
+    try await queue.enqueuePrimitiveSetLogs([makePrimitiveLog(id: uuid("cccccccc-1111-2222-3333-444444444422"))])
 
     let result = try await queue.flush(bearerToken: "tok")
     try expectEqual(result.pushed, 0)
@@ -511,8 +573,8 @@ runAsyncCase("PushQueue idempotency — re-flushing against accepting transport 
     ))
     let queue = PushQueue(store: store, transport: transport)
 
-    try await queue.enqueueSetLogs([makeLog(setIndex: 1)])
-    try await queue.enqueueSetLogs([makeLog(setIndex: 2)])
+    try await queue.enqueuePrimitiveSetLogs([makePrimitiveLog(id: uuid("cccccccc-1111-2222-3333-444444444431"))])
+    try await queue.enqueuePrimitiveSetLogs([makePrimitiveLog(id: uuid("cccccccc-1111-2222-3333-444444444432"))])
 
     let first = try await queue.flush(bearerToken: "tok")
     try expectEqual(first.pushed, 2)
@@ -562,46 +624,49 @@ runAsyncCase("DTOMapping — full sync_pull_response.json fixture maps with full
     try expectEqual(mappedParam.value, "81.5")
     try expectEqual(mappedParam.source, .claude)
 
-    // last_performed: one entry for back-squat with one SetLog.
+    // last_performed: one entry for back-squat with one primitive slot log.
     try expectEqual(pull.lastPerformed.count, 1)
     let lp = pull.lastPerformed[0]
     try expectEqual(lp.exerciseId, "e0000001-0000-4000-8000-000000000001")
     try expectEqual(lp.lastSetLogs.count, 1)
 
-    let setLogResult = DTOMapping.mapSetLog(lp.lastSetLogs[0])
-    let mappedLog: CoreDomain.SetLog
+    let setLogResult = DTOMapping.mapPrimitiveSetLog(lp.lastSetLogs[0])
+    let mappedLog: CoreDomain.PrimitiveSetLog
     switch setLogResult {
     case .success(let log): mappedLog = log
     case .failure(let err): throw err
     }
     try expectEqual(mappedLog.id, uuid("77777777-7777-7777-7777-777777777777"))
-    try expectEqual(mappedLog.workoutItemID, uuid("44444444-4444-4444-4444-444444444444"))
+    try expectEqual(mappedLog.role, .slot)
+    try expectEqual(mappedLog.slotID, uuid("40000000-0000-4000-8000-000000000002"))
+    try expectEqual(mappedLog.setID, uuid("30000000-0000-4000-8000-000000000002"))
+    try expectEqual(mappedLog.blockID, uuid("20000000-0000-4000-8000-000000000002"))
+    try expectEqual(mappedLog.workoutID, uuid("11111111-1111-1111-1111-111111111111"))
+    try expectEqual(mappedLog.plannedExerciseID, uuid("e0000001-0000-4000-8000-000000000001"))
     try expect(mappedLog.performedExerciseID == nil, "performed_exercise_id should be nil")
     try expectEqual(mappedLog.setIndex, 1)
+    try expectEqual(mappedLog.setRepeatIndex, 0)
+    try expectEqual(mappedLog.blockRepeatIndex, 0)
     try expectEqual(mappedLog.reps, 5)
     try expectEqual(mappedLog.weight, 100.0)
     try expectEqual(mappedLog.weightUnit, .kg)
     try expectEqual(mappedLog.rir, 2)
     try expect(!mappedLog.isWarmup, "is_warmup false in fixture")
     try expectEqual(mappedLog.completedAt, iso8601("2026-04-10T07:15:00Z"))
-    try expectEqual(mappedLog.hrAvgBpm, 142)
-    try expectEqual(mappedLog.hrMaxBpm, 168)
-    try expect(mappedLog.cadenceAvgSpm == nil)
-    try expect(mappedLog.notes == nil)
 
     // Round-trip the set log back to the wire and confirm the shape survives.
     let roundtrip = DTOMapping.toDTO(mappedLog)
     try expectEqual(roundtrip.id, lp.lastSetLogs[0].id)
-    try expectEqual(roundtrip.workoutItemId, lp.lastSetLogs[0].workoutItemId)
+    try expectEqual(roundtrip.role, lp.lastSetLogs[0].role)
+    try expectEqual(roundtrip.slotId, lp.lastSetLogs[0].slotId)
+    try expectEqual(roundtrip.workoutId, lp.lastSetLogs[0].workoutId)
     try expectEqual(roundtrip.rir, lp.lastSetLogs[0].rir)
     try expectEqual(roundtrip.weightUnit, lp.lastSetLogs[0].weightUnit)
 
     // Workouts slot is empty in this fixture — confirm the mapper handles that cleanly.
     try expectEqual(pull.workouts.count, 0)
 
-    // Also exercise the full-workout mapping via the `workout_create.json` fixture,
-    // which has nested blocks / items / alternatives — the code path that used to
-    // be blocked by slug-shaped exercise ids.
+    // Also exercise the workout header mapping via the `workout_create.json` fixture.
     let workoutRaw = try FixtureLoader.loadData("workout_create.json")
     let workoutDTO = try decoder.decode(WorkoutDBSchema.Workout.self, from: workoutRaw)
     let workoutResult = DTOMapping.mapWorkout(workoutDTO)
@@ -616,15 +681,113 @@ runAsyncCase("DTOMapping — full sync_pull_response.json fixture maps with full
     try expectEqual(mappedWorkout.workout.status, .planned)
     try expectEqual(mappedWorkout.workout.source, .claude)
     try expectEqual(mappedWorkout.blocks.count, 1)
-    try expectEqual(mappedWorkout.blocks[0].id, uuid("33333333-3333-3333-3333-333333333333"))
-    try expectEqual(mappedWorkout.blocks[0].timingMode, .straightSets)
     try expectEqual(mappedWorkout.items.count, 1)
-    try expectEqual(mappedWorkout.items[0].id, uuid("44444444-4444-4444-4444-444444444444"))
-    try expectEqual(mappedWorkout.items[0].exerciseID, uuid("e0000001-0000-4000-8000-000000000001"))
-    try expectEqual(mappedWorkout.alternatives.count, 1)
-    try expectEqual(mappedWorkout.alternatives[0].id, uuid("55555555-5555-5555-5555-555555555555"))
-    try expectEqual(mappedWorkout.alternatives[0].exerciseID, uuid("e0000002-0000-4000-8000-000000000002"))
-    try expectEqual(mappedWorkout.alternatives[0].workoutItemID, uuid("44444444-4444-4444-4444-444444444444"))
+    try expectEqual(mappedWorkout.alternatives.count, 0)
+}
+
+runCase("DTOMapping rejects primitive block repeat until bridge supports block-level repeats") {
+    let json = """
+    {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "user_id": "22222222-2222-2222-2222-222222222222",
+      "name": "Repeated block",
+      "scheduled_date": "2026-04-20",
+      "status": "planned",
+      "source": "claude",
+      "notes": null,
+      "tags_json": null,
+      "created_at": "2026-04-17T08:00:00Z",
+      "updated_at": "2026-04-17T08:00:00Z",
+      "completed_at": null,
+      "primitive_blocks": [
+        {
+          "id": "33333333-3333-4333-8333-333333333333",
+          "repeat": 2,
+          "work_target": [],
+          "sets": [
+            {
+              "id": "44444444-4444-4444-8444-444444444444",
+              "timing": { "mode": "set_bounded" },
+              "traversal": "sequential",
+              "repeat": 1,
+              "work_target": [],
+              "slots": [
+                {
+                  "id": "55555555-5555-4555-8555-555555555555",
+                  "exercise_id": "e0000001-0000-4000-8000-000000000001",
+                  "work_target": [],
+                  "stimuli": [],
+                  "post_rest_sec": 0,
+                  "is_warmup": false
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+    """
+    let workout = try JSONDecoder.workoutDB().decode(
+        WorkoutDBSchema.Workout.self,
+        from: Data(json.utf8)
+    )
+    switch DTOMapping.mapWorkout(workout) {
+    case .success:
+        try expect(false, "block repeats must fail closed until the bridge can preserve them")
+    case .failure:
+        break
+    }
+}
+
+runCase("DTOMapping projects round-robin primitive repeat into legacy block rounds") {
+    let json = """
+    {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "user_id": "22222222-2222-2222-2222-222222222222",
+      "name": "Primitive circuit",
+      "scheduled_date": "2026-04-20",
+      "status": "planned",
+      "source": "claude",
+      "notes": null,
+      "tags_json": null,
+      "created_at": "2026-04-17T08:00:00Z",
+      "updated_at": "2026-04-17T08:00:00Z",
+      "completed_at": null,
+      "primitive_blocks": [
+        {
+          "id": "33333333-3333-4333-8333-333333333333",
+          "repeat": 1,
+          "work_target": [],
+          "sets": [
+            {
+              "id": "44444444-4444-4444-8444-444444444444",
+              "timing": { "mode": "set_bounded" },
+              "traversal": "round_robin",
+              "repeat": 3,
+              "work_target": [],
+              "slots": [
+                {
+                  "id": "55555555-5555-4555-8555-555555555555",
+                  "exercise_id": "e0000001-0000-4000-8000-000000000001",
+                  "work_target": [],
+                  "stimuli": [],
+                  "post_rest_sec": 0,
+                  "is_warmup": false
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+    """
+    let workout = try JSONDecoder.workoutDB().decode(
+        WorkoutDBSchema.Workout.self,
+        from: Data(json.utf8)
+    )
+    let mapped = try DTOMapping.mapWorkout(workout).get()
+    try expectEqual(mapped.blocks[0].timingMode, .circuit)
+    try expectEqual(mapped.blocks[0].rounds, 3)
 }
 
 // MARK: - 10. ConnectionState transitions
@@ -742,8 +905,8 @@ runAsyncCase("PushQueue — telemetry events route to /api/telemetry/events") {
     try expectEqual(calls[0].path, "/api/telemetry/events")
 }
 
-runAsyncCase("PushQueue — set_logs still route to /api/sync/results after event case added") {
-    // Regression guard: adding `.events` must not misroute `.setLogs`.
+runAsyncCase("PushQueue — legacy set_logs fail before transport") {
+    // Primitive result cutover must not silently ship an empty results body.
     let store = FakePushQueueStore()
     let transport = FakeTransport(outcomes: [
         .response(HTTPResponse(status: 200, body: Data())),
@@ -751,11 +914,45 @@ runAsyncCase("PushQueue — set_logs still route to /api/sync/results after even
     let queue = PushQueue(store: store, transport: transport)
 
     try await queue.enqueueSetLogs([makeLog(setIndex: 1)])
-    _ = try await queue.flush(bearerToken: "tok")
+    do {
+        _ = try await queue.flush(bearerToken: "tok")
+        try expect(false, "expected legacy set_logs encode failure")
+    } catch let err as SyncError {
+        if case .encode(let message) = err {
+            try expect(message.contains("legacy set_logs"), "unexpected message: \(message)")
+        } else {
+            try expect(false, "expected SyncError.encode, got \(err)")
+        }
+    }
 
     let calls = await transport.store.recordedCalls()
-    try expectEqual(calls.count, 1)
-    try expectEqual(calls[0].path, "/api/sync/results")
+    try expectEqual(calls.count, 0)
+}
+
+runAsyncCase("PushQueue — completion with legacy set_logs fails before transport") {
+    let store = FakePushQueueStore()
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 200, body: Data())),
+    ])
+    let queue = PushQueue(store: store, transport: transport)
+
+    try await queue.enqueueCompletionResults(makeCompletionRecord(
+        setLogs: [makeLog(setIndex: 1)],
+        primitiveSetLogs: []
+    ))
+    do {
+        _ = try await queue.flush(bearerToken: "tok")
+        try expect(false, "expected legacy completion set_logs encode failure")
+    } catch let err as SyncError {
+        if case .encode(let message) = err {
+            try expect(message.contains("legacy set_logs"), "unexpected message: \(message)")
+        } else {
+            try expect(false, "expected SyncError.encode, got \(err)")
+        }
+    }
+
+    let calls = await transport.store.recordedCalls()
+    try expectEqual(calls.count, 0)
 }
 
 runAsyncCase("PushQueue — primitive_set_logs route to sync results and encode body") {
@@ -790,7 +987,6 @@ runAsyncCase("PushQueue — primitive_set_logs route to sync results and encode 
         return
     }
     let payload = try JSONDecoder.workoutDB().decode(WorkoutDBSchema.SyncResultsPayload.self, from: body)
-    try expectEqual(payload.setLogs.count, 0)
     try expectEqual(payload.primitiveSetLogs.count, 1)
     try expectEqual(payload.primitiveSetLogs[0].role, .setResult)
     try expectEqual(payload.primitiveSetLogs[0].rounds, 7)
@@ -1021,7 +1217,25 @@ runAsyncCase("SetLog DTO wireID is lowercase even when Swift UUID is uppercase")
     // re-casing layer would be caught. The encoded body's `id` field
     // must be lowercase.
     let encoder = JSONEncoder.workoutDB()
-    let payload = WorkoutDBSchema.SyncResultsPayload(setLogs: [dto], statusUpdates: [])
+    let primitiveDTO = WorkoutDBSchema.PrimitiveSetLog(
+        id: dto.id,
+        role: .slot,
+        slotId: "ffeeddcc-bbaa-9988-7766-554433221100",
+        setId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+        blockId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
+        workoutId: "cccccccc-cccc-4ccc-8ccc-cccccccccccc",
+        plannedExerciseId: "11112222-3333-4444-5555-666677778888",
+        setIndex: dto.setIndex,
+        reps: dto.reps,
+        weight: dto.weight,
+        weightUnit: dto.weightUnit,
+        rir: dto.rir,
+        completedAt: dto.completedAt
+    )
+    let payload = WorkoutDBSchema.SyncResultsPayload(
+        primitiveSetLogs: [primitiveDTO],
+        statusUpdates: []
+    )
     let data = try encoder.encode(payload)
     guard let json = String(data: data, encoding: .utf8) else {
         try expect(false, "expected utf8-decodable body")
@@ -1106,17 +1320,14 @@ runAsyncCase("Status update carries notes on the wire so the server persists the
     try expectEqual(payload.statusUpdates[0].notes, "leg day PR!")
 }
 
-runAsyncCase("Completion results encode legacy and primitive logs with status in one sync results call") {
+runAsyncCase("Completion results encode primitive logs with status in one sync results call") {
     let store = FakePushQueueStore()
     let transport = FakeTransport(outcomes: [
         .response(HTTPResponse(status: 200, body: Data())),
     ])
     let queue = PushQueue(store: store, transport: transport)
 
-    let record = makeCompletionRecord(setLogs: [
-        makeLog(id: uuid("aaaaaaaa-1111-2222-3333-444444444444"), setIndex: 1),
-        makeLog(id: uuid("bbbbbbbb-1111-2222-3333-444444444444"), setIndex: 2),
-    ], primitiveSetLogs: [
+    let record = makeCompletionRecord(setLogs: [], primitiveSetLogs: [
         makePrimitiveLog(workoutID: nil),
     ])
     try await queue.enqueueCompletionResults(record)
@@ -1133,7 +1344,6 @@ runAsyncCase("Completion results encode legacy and primitive logs with status in
         WorkoutDBSchema.SyncResultsPayload.self,
         from: body
     )
-    try expectEqual(payload.setLogs.count, 2)
     try expectEqual(payload.primitiveSetLogs.count, 1)
     try expectEqual(payload.primitiveSetLogs[0].role, .setResult)
     try expectEqual(payload.primitiveSetLogs[0].setIndex, 0)
@@ -1152,7 +1362,9 @@ runAsyncCase("Completion results 503 leaves grouped logs and status queued toget
     ])
     let queue = PushQueue(store: store, transport: transport)
 
-    let record = makeCompletionRecord()
+    let record = makeCompletionRecord(setLogs: [], primitiveSetLogs: [
+        makePrimitiveLog(workoutID: nil),
+    ])
     try await queue.enqueueCompletionResults(record)
 
     let result = try await queue.flush(bearerToken: "tok")
@@ -1179,7 +1391,9 @@ runAsyncCase("Completion results 200 removes the single grouped item") {
     ])
     let queue = PushQueue(store: store, transport: transport)
 
-    try await queue.enqueueCompletionResults(makeCompletionRecord())
+    try await queue.enqueueCompletionResults(makeCompletionRecord(setLogs: [], primitiveSetLogs: [
+        makePrimitiveLog(workoutID: nil),
+    ]))
 
     let result = try await queue.flush(bearerToken: "tok")
     try expectEqual(result.pushed, 1)
@@ -1261,7 +1475,6 @@ runAsyncCase("Workout reset routes to sync results with lowercase workout id") {
         WorkoutDBSchema.SyncResultsPayload.self,
         from: body
     )
-    try expectEqual(payload.setLogs.count, 0)
     try expectEqual(payload.statusUpdates.count, 0)
     try expectEqual(payload.workoutResets.count, 1)
     try expectEqual(
@@ -1285,9 +1498,9 @@ runAsyncCase("PushQueue drains results (priority 0) before telemetry (priority 1
     ))
     let queue = PushQueue(store: store, transport: transport)
 
-    // Order-of-enqueue: two old telemetry events, then one fresh set
-    // log, then one more telemetry event. If we sorted by enqueuedAt
-    // alone, the set log would land third. Priority weighting must
+    // Order-of-enqueue: two old telemetry events, then one fresh primitive
+    // result, then one more telemetry event. If we sorted by enqueuedAt
+    // alone, the result would land third. Priority weighting must
     // pull it to position one.
     try await queue.enqueueEvents([
         CoreTelemetry.Event(
@@ -1305,7 +1518,9 @@ runAsyncCase("PushQueue drains results (priority 0) before telemetry (priority 1
             name: "debug.verbose.2"
         )
     ])
-    try await queue.enqueueSetLogs([makeLog(setIndex: 1)])
+    try await queue.enqueuePrimitiveSetLogs([
+        makePrimitiveLog(id: uuid("cccccccc-1111-2222-3333-444444444441"))
+    ])
     try await queue.enqueueEvents([
         CoreTelemetry.Event(
             timestamp: iso8601("2026-04-17T07:00:02Z"),
@@ -1320,7 +1535,7 @@ runAsyncCase("PushQueue drains results (priority 0) before telemetry (priority 1
     let calls = await transport.store.recordedCalls()
     try expectEqual(calls.count, 4, "all four items must flush")
 
-    // First call MUST be the set_log results endpoint. Prior to the
+    // First call MUST be the primitive results endpoint. Prior to the
     // priority fix this was position 3 (chronological after the two
     // older telemetry events).
     try expectEqual(calls[0].path, "/api/sync/results", "result pushed first")
@@ -1416,11 +1631,11 @@ runAsyncCase("PushQueue — telemetry body decodes as TelemetryEventsPayload wit
 
 // MARK: - Replace-in-place on enqueue (logical dedup)
 
-runAsyncCase("PushQueue replace-in-place — enqueueing same SetLog id twice collapses to one entry with latest payload") {
+runAsyncCase("PushQueue replace-in-place — enqueueing same primitive log id twice collapses to one entry with latest payload") {
     // Regression for "no logical dedup; unknown envelope kind stalls the
     // whole queue" — the dedup half. Without this, a just-logged set
     // edited a second later before the queue flushes would leave two
-    // `.setLogs` rows queued: the stale first push and the fresh second.
+    // `.primitiveSetLogs` rows queued: the stale first push and the fresh second.
     // On flush the stale one lands first and transiently overwrites the
     // corrected bytes on the server until the fresh one resolves.
     let store = FakePushQueueStore()
@@ -1431,42 +1646,27 @@ runAsyncCase("PushQueue replace-in-place — enqueueing same SetLog id twice col
     )
 
     let setLogID = uuid("abcdef01-2345-6789-abcd-ef0123456789")
-    let first = CoreDomain.SetLog(
-        id: setLogID,
-        workoutItemID: uuid("44444444-4444-4444-4444-444444444444"),
-        performedExerciseID: nil,
-        setIndex: 3,
-        reps: 5,
-        weight: 100,
-        weightUnit: .kg,
-        rir: 2,
-        completedAt: iso8601("2026-04-17T08:00:00Z")
-    )
-    let corrected = CoreDomain.SetLog(
-        id: setLogID,  // SAME id — logical identity
-        workoutItemID: first.workoutItemID,
-        performedExerciseID: nil,
-        setIndex: 3,
-        reps: 8,       // corrected rep count
-        weight: 102.5, // corrected load
-        weightUnit: .kg,
-        rir: 1,
-        completedAt: iso8601("2026-04-17T08:00:30Z")
-    )
+    let first = makePrimitiveLog(id: setLogID)
+    var corrected = first
+    corrected.reps = 8
+    corrected.weight = 102.5
+    corrected.weightUnit = .kg
+    corrected.rir = 1
+    corrected.completedAt = iso8601("2026-04-17T08:00:30Z")
 
-    try await queue.enqueueSetLogs([first])
-    try await queue.enqueueSetLogs([corrected])
+    try await queue.enqueuePrimitiveSetLogs([first])
+    try await queue.enqueuePrimitiveSetLogs([corrected])
 
     let all = await store.all()
-    try expectEqual(all.count, 1, "logical dedup by SetLog id must collapse to one entry")
-    if case .setLogs(let logs) = all[0].payload {
+    try expectEqual(all.count, 1, "logical dedup by primitive log id must collapse to one entry")
+    if case .primitiveSetLogs(let logs) = all[0].payload {
         try expectEqual(logs.count, 1)
         try expectEqual(logs[0].id, setLogID)
         try expectEqual(logs[0].reps, 8, "latest payload wins")
         try expectEqual(logs[0].weight, 102.5)
         try expectEqual(logs[0].rir, 1)
     } else {
-        try expect(false, "expected setLogs payload")
+        try expect(false, "expected primitiveSetLogs payload")
     }
 }
 
@@ -1595,7 +1795,9 @@ runAsyncCase("PushFlusherBackoffAfterTransientFailure — 503 extends the next s
         store: store,
         tokenProvider: { "tok" }
     )
-    try await api.pushLog([makeLog(setIndex: 1)])
+    try await api.pushPrimitiveLog([
+        makePrimitiveLog(id: uuid("cccccccc-1111-2222-3333-444444444451"))
+    ])
 
     let first = try await api.flushPushQueue()
     try expect(first.networkFailed, "first 503 must flag networkFailed")
@@ -1634,8 +1836,8 @@ runAsyncCase("PushFlusherDeadLettersPersistent4xxAfter5Attempts — 422 drops + 
         telemetry: recorder
     )
     let logID = uuid("cafe0001-0000-4000-8000-000000000001")
-    let log = makeLog(id: logID, setIndex: 1)
-    try await queue.enqueueSetLogs([log])
+    let log = makePrimitiveLog(id: logID)
+    try await queue.enqueuePrimitiveSetLogs([log])
 
     // Flush N times — the queue retries the same item each call because
     // the fake transport keeps feeding 422s. After 5 attempts the row
@@ -1657,7 +1859,7 @@ runAsyncCase("PushFlusherDeadLettersPersistent4xxAfter5Attempts — 422 drops + 
         return
     }
     try expect(
-        json.contains("\"payload_kind\":\"set_logs\""),
+        json.contains("\"payload_kind\":\"primitive_set_logs\""),
         "dead-letter data must name the payload kind: \(json)"
     )
     try expect(
@@ -1669,8 +1871,8 @@ runAsyncCase("PushFlusherDeadLettersPersistent4xxAfter5Attempts — 422 drops + 
         "dead-letter data must record the attempt count: \(json)"
     )
     try expect(
-        json.contains("\"set_log_id\":\"\(logID.wireID)\""),
-        "dead-letter data must carry set_log_id for correlation: \(json)"
+        json.contains("\"primitive_set_log_id\":\"\(logID.wireID)\""),
+        "dead-letter data must carry primitive_set_log_id for correlation: \(json)"
     )
 }
 
@@ -1887,8 +2089,8 @@ runAsyncCase("PushFlusherResetsBackoffOnFreshEnqueue — new item starts with a 
         transport: transport,
         telemetry: recorder
     )
-    let firstLog = makeLog(setIndex: 1)
-    try await queue.enqueueSetLogs([firstLog])
+    let firstLog = makePrimitiveLog(id: uuid("cccccccc-1111-2222-3333-444444444461"))
+    try await queue.enqueuePrimitiveSetLogs([firstLog])
 
     // Burn through the full dead-letter cycle on the first item.
     for _ in 0..<PushBackoff.deadLetterThreshold {
@@ -1903,9 +2105,9 @@ runAsyncCase("PushFlusherResetsBackoffOnFreshEnqueue — new item starts with a 
     }
     try expectEqual(firstDeadLetters.count, 1, "one dead-letter so far")
 
-    // Fresh enqueue with a new SetLog id — this gets a new PushItem.id.
-    let secondLog = makeLog(setIndex: 2)
-    try await queue.enqueueSetLogs([secondLog])
+    // Fresh enqueue with a new primitive log id — this gets a new PushItem.id.
+    let secondLog = makePrimitiveLog(id: uuid("cccccccc-1111-2222-3333-444444444462"))
+    try await queue.enqueuePrimitiveSetLogs([secondLog])
 
     // One 422 attempt on the second item.
     _ = try await queue.flush(bearerToken: "tok")
@@ -1947,7 +2149,9 @@ runAsyncCase("PushFlusher401StillTriggersTokenRejected — not a dead-letter pat
         transport: transport,
         telemetry: recorder
     )
-    try await queue.enqueueSetLogs([makeLog(setIndex: 1)])
+    try await queue.enqueuePrimitiveSetLogs([
+        makePrimitiveLog(id: uuid("cccccccc-1111-2222-3333-444444444471"))
+    ])
 
     // Run a batch of flushes well past the dead-letter threshold.
     for _ in 0..<PushBackoff.deadLetterThreshold + 2 {

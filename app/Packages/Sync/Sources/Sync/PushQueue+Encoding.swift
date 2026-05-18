@@ -69,12 +69,13 @@ extension PushQueue {
     }
 
     private func encodeSetLogs(_ logs: [CoreDomain.SetLog]) throws -> Data {
-        let payload = WorkoutDBSchema.SyncResultsPayload(
-            setLogs: logs.map(DTOMapping.toDTO),
-            statusUpdates: [],
-            workoutResets: []
+        throw EncodingError.invalidValue(
+            logs,
+            .init(
+                codingPath: [],
+                debugDescription: "legacy set_logs are not syncable after primitive result cutover"
+            )
         )
-        return try encoder.encode(payload)
     }
 
     private func encodePrimitiveSetLogs(_ logs: [CoreDomain.PrimitiveSetLog]) throws -> Data {
@@ -107,7 +108,6 @@ extension PushQueue {
             notes: notes
         )
         let payload = WorkoutDBSchema.SyncResultsPayload(
-            setLogs: [],
             statusUpdates: [dto],
             workoutResets: []
         )
@@ -121,6 +121,15 @@ extension PushQueue {
         logs: [CoreDomain.SetLog],
         primitiveLogs: [CoreDomain.PrimitiveSetLog]
     ) throws -> Data {
+        if !logs.isEmpty && primitiveLogs.isEmpty {
+            throw EncodingError.invalidValue(
+                logs,
+                EncodingError.Context(
+                    codingPath: [],
+                    debugDescription: "legacy set_logs are not syncable after primitive result cutover"
+                )
+            )
+        }
         // swiftlint:disable:next force_unwrapping
         let wireStatus = WorkoutDBSchema.WorkoutStatus(rawValue: CoreDomain.WorkoutStatus.completed.rawValue)!
         let dto = WorkoutDBSchema.WorkoutStatusUpdate(
@@ -130,7 +139,6 @@ extension PushQueue {
             notes: notes
         )
         let payload = WorkoutDBSchema.SyncResultsPayload(
-            setLogs: logs.map(DTOMapping.toDTO),
             primitiveSetLogs: try primitiveLogs.map { log in
                 let stamped = try primitiveLog(log, stampedWith: workoutID)
                 return DTOMapping.toDTO(stamped)
@@ -167,7 +175,6 @@ extension PushQueue {
     private func encodeWorkoutReset(workoutID: WorkoutID) throws -> Data {
         let dto = WorkoutDBSchema.WorkoutReset(workoutId: workoutID.wireID)
         let payload = WorkoutDBSchema.SyncResultsPayload(
-            setLogs: [],
             statusUpdates: [],
             workoutResets: [dto]
         )

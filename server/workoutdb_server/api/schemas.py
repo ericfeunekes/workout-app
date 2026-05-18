@@ -400,8 +400,8 @@ class PrimitiveSetIn(_UuidInputBase):
     def _legal_runtime_cell(self) -> "PrimitiveSetIn":
         if self.traversal == "amrap" and self.timing.mode in {"set_bounded", "target_bounded"}:
             raise ValueError(f"{self.timing.mode} x amrap is not a legal primitive runtime cell")
-        if not self.slots and self.timing.mode not in {"time_bounded", "cap_bounded"}:
-            raise ValueError("zero-slot primitive sets require time_bounded or cap_bounded timing")
+        if not self.slots:
+            raise ValueError("primitive sets require at least one slot")
         if self.timing.mode == "cap_bounded" and self.traversal == "amrap":
             has_rounds = any(
                 target.metric == "rounds" and target.role == "observation"
@@ -436,12 +436,20 @@ class PrimitiveBlockIn(_UuidInputBase):
     work_target: list[PrimitiveWorkTargetIn] = Field(default_factory=list)
     sets: list[PrimitiveSetIn]
 
+    @model_validator(mode="after")
+    def _contains_executable_work(self) -> "PrimitiveBlockIn":
+        if not any(set_.slots for set_ in self.sets):
+            raise ValueError("primitive blocks require at least one slot-backed executable set")
+        return self
+
 
 class WorkoutCreate(_UuidInputBase):
     """Accepts a full workout tree (blocks → items → alternatives) in one request.
 
     user_id is resolved from the bearer token, not the body (ADR-2026-04-17).
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     id: str | None = None
     name: str
@@ -450,12 +458,13 @@ class WorkoutCreate(_UuidInputBase):
     source: Literal["claude", "manual"] = "claude"
     notes: str | None = None
     tags_json: str | None = None
-    blocks: list[BlockIn] = Field(default_factory=list)
-    primitive_blocks: list[PrimitiveBlockIn] = Field(default_factory=list)
+    primitive_blocks: list[PrimitiveBlockIn] = Field(min_length=1)
 
 
 class WorkoutUpdate(_UuidInputBase):
     """Partial update. Blocks, if present, replace the full tree (simpler than diff)."""
+
+    model_config = ConfigDict(extra="forbid")
 
     name: str | None = None
     scheduled_date: str | None = None
@@ -463,8 +472,7 @@ class WorkoutUpdate(_UuidInputBase):
     notes: str | None = None
     tags_json: str | None = None
     completed_at: UtcDatetimeIn | None = None
-    blocks: list[BlockIn] | None = None
-    primitive_blocks: list[PrimitiveBlockIn] | None = None
+    primitive_blocks: list[PrimitiveBlockIn] | None = Field(default=None, min_length=1)
 
 
 class WorkoutRead(_UuidReadBase):
@@ -481,8 +489,7 @@ class WorkoutRead(_UuidReadBase):
     created_at: UtcDatetime
     updated_at: UtcDatetime
     completed_at: UtcDatetime | None
-    blocks: list[BlockRead]
-    primitive_blocks: list[PrimitiveBlockIn] = Field(default_factory=list)
+    primitive_blocks: list[PrimitiveBlockIn] = Field(min_length=1)
 
 
 # ---------- Set logs (app pushes these back) ----------
@@ -541,8 +548,8 @@ class PrimitiveSetLogIn(_UuidInputBase):
         if self.workout_id is None:
             raise ValueError("primitive log rows require workout_id")
         if self.role == "slot":
-            if self.slot_id is None or self.set_id is None:
-                raise ValueError("slot primitive log rows require slot_id and set_id")
+            if self.slot_id is None or self.set_id is None or self.block_id is None:
+                raise ValueError("slot primitive log rows require slot_id, set_id, and block_id")
         elif self.role == "set_result":
             if self.slot_id is not None or self.set_id is None or self.block_id is None:
                 raise ValueError("set_result rows require set_id and block_id and no slot_id")
@@ -550,6 +557,31 @@ class PrimitiveSetLogIn(_UuidInputBase):
             if self.slot_id is not None or self.set_id is not None or self.block_id is None:
                 raise ValueError("block_result rows require block_id only")
         return self
+
+
+class PrimitiveSetLogRead(_UuidReadBase):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: str
+    role: str
+    slot_id: str | None
+    set_id: str | None
+    block_id: str | None
+    workout_id: str
+    planned_exercise_id: str | None
+    performed_exercise_id: str | None
+    set_index: int
+    set_repeat_index: int
+    block_repeat_index: int
+    reps: int | None
+    weight: float | None
+    weight_unit: str | None
+    duration_sec: float | None
+    distance_m: float | None
+    rounds: int | None
+    rir: int | None
+    is_warmup: bool
+    completed_at: UtcDatetime
 
 
 class SetLogRead(_UuidReadBase):
@@ -646,18 +678,24 @@ class WorkoutReset(_UuidInputBase):
 class SyncResultsIn(_UuidInputBase):
     """App pushes this when a workout finishes (or on next connectivity)."""
 
-    set_logs: list[SetLogIn] = Field(default_factory=list)
+    model_config = ConfigDict(extra="forbid")
+
     primitive_set_logs: list[PrimitiveSetLogIn] = Field(default_factory=list)
     status_updates: list[WorkoutStatusUpdate] = Field(default_factory=list)
     workout_resets: list[WorkoutReset] = Field(default_factory=list)
+
+
+class SyncResultsOut(_UuidReadBase):
+    primitive_set_logs_received: int
+    status_updates_received: int
+    workout_resets_received: int
 
 
 class ExerciseLastPerformed(_UuidReadBase):
     """Inline history the app uses to show 'last time you did this exercise.'"""
 
     exercise_id: str
-    last_set_logs: list[SetLogRead]
-    prescription_json: str | None = None
+    last_set_logs: list[PrimitiveSetLogRead]
 
 
 class SyncPullOut(_UuidReadBase):

@@ -15,6 +15,7 @@
 
 import Foundation
 import CoreDomain
+import WorkoutCoreFoundation
 
 extension WorkoutModel {
     public func toDomain() -> Workout {
@@ -93,28 +94,86 @@ extension PrimitiveWorkoutModel {
         payloadJSON = try Self.encode(workout)
     }
 
-    public func primitiveSetLogs() throws -> [PrimitiveSetLog] {
-        let codable = try Self.decoder.decode(
-            [PushQueuePayloadCoding.CodablePrimitiveSetLog].self,
-            from: Data(primitiveSetLogsJSON.utf8)
-        )
-        return try codable.map { try $0.toDomain() }
-    }
-
-    public func applyPrimitiveSetLogs(_ logs: [PrimitiveSetLog]) throws {
-        let data = try Self.encoder.encode(logs.map(PushQueuePayloadCoding.CodablePrimitiveSetLog.init))
-        guard let json = String(data: data, encoding: .utf8) else {
-            throw PersistenceError.encode("primitive set log payload is not UTF-8")
-        }
-        primitiveSetLogsJSON = json
-    }
-
     private static func encode(_ workout: PrimitiveWorkout) throws -> String {
         let data = try encoder.encode(workout)
         guard let json = String(data: data, encoding: .utf8) else {
             throw PersistenceError.encode("primitive workout payload is not UTF-8")
         }
         return json
+    }
+}
+
+extension PrimitiveSetLogModel {
+    public func toDomain() -> PrimitiveSetLog {
+        PrimitiveSetLog(
+            id: id,
+            role: PrimitiveLogRole(rawValue: roleRaw) ?? .slot,
+            slotID: slotID,
+            setID: setID,
+            blockID: blockID,
+            workoutID: workoutID,
+            plannedExerciseID: plannedExerciseID,
+            performedExerciseID: performedExerciseID,
+            setIndex: setIndex,
+            setRepeatIndex: setRepeatIndex,
+            blockRepeatIndex: blockRepeatIndex,
+            reps: reps,
+            weight: weight,
+            weightUnit: weightUnitRaw.flatMap(WeightUnit.init(rawValue:)),
+            durationSec: durationSec,
+            distanceM: distanceM,
+            rounds: rounds,
+            rir: rir,
+            isWarmup: isWarmup,
+            completedAt: completedAt
+        )
+    }
+
+    public static func from(_ log: PrimitiveSetLog, workoutID: WorkoutID) -> PrimitiveSetLogModel {
+        PrimitiveSetLogModel(
+            id: log.id,
+            roleRaw: log.role.rawValue,
+            slotID: log.slotID,
+            setID: log.setID,
+            blockID: log.blockID,
+            workoutID: log.workoutID ?? workoutID,
+            plannedExerciseID: log.plannedExerciseID,
+            performedExerciseID: log.performedExerciseID,
+            setIndex: log.setIndex,
+            setRepeatIndex: log.setRepeatIndex,
+            blockRepeatIndex: log.blockRepeatIndex,
+            reps: log.reps,
+            weight: log.weight,
+            weightUnitRaw: log.weightUnit?.rawValue,
+            durationSec: log.durationSec,
+            distanceM: log.distanceM,
+            rounds: log.rounds,
+            rir: log.rir,
+            isWarmup: log.isWarmup,
+            completedAt: log.completedAt
+        )
+    }
+
+    public func apply(_ log: PrimitiveSetLog, workoutID defaultWorkoutID: WorkoutID) {
+        roleRaw = log.role.rawValue
+        slotID = log.slotID
+        setID = log.setID
+        blockID = log.blockID
+        workoutID = log.workoutID ?? defaultWorkoutID
+        plannedExerciseID = log.plannedExerciseID
+        performedExerciseID = log.performedExerciseID
+        setIndex = log.setIndex
+        setRepeatIndex = log.setRepeatIndex
+        blockRepeatIndex = log.blockRepeatIndex
+        reps = log.reps
+        weight = log.weight
+        weightUnitRaw = log.weightUnit?.rawValue
+        durationSec = log.durationSec
+        distanceM = log.distanceM
+        rounds = log.rounds
+        rir = log.rir
+        isWarmup = log.isWarmup
+        completedAt = log.completedAt
     }
 }
 

@@ -559,6 +559,26 @@ runCase("primitive semantics rejects malformed timing cells and ambiguous comple
     } catch PrimitiveSemanticError.invalidTiming(let setID) {
         try expectEqual(setID, primitiveUUID(0x3017))
     }
+
+    let zeroSlotTimed = PrimitiveWorkout(
+        id: primitiveUUID(0x1018),
+        name: "Timer-only",
+        blocks: [
+            PrimitiveBlock(id: primitiveUUID(0x2018), sets: [
+                PrimitiveSet(
+                    id: primitiveUUID(0x3018),
+                    timing: .init(mode: .timeBounded, intervalSec: 60, rounds: 1),
+                    slots: []
+                ),
+            ]),
+        ]
+    )
+    do {
+        _ = try ExecutionPlan.validated(workout: zeroSlotTimed)
+        try expect(false, "zero-slot timed primitive sets must reject")
+    } catch PrimitiveSemanticError.invalidTiming(let setID) {
+        try expectEqual(setID, primitiveUUID(0x1018))
+    }
 }
 
 runCase("primitive metric roles preserve non-rep slot result logs") {
@@ -735,12 +755,26 @@ runCase("session preview projection handles zero-set rest block") {
     try expectEqual(projection.upcoming, [])
 }
 
-runCase("session preview projection exposes zero-slot timed set") {
+runCase("primitive semantics rejects zero-slot timed rest sibling until runtime supports it") {
+    let exerciseID = primitiveUUID(0x5204)
     let workout = PrimitiveWorkout(
         id: primitiveUUID(0x1204),
         name: "Timed",
         blocks: [
             PrimitiveBlock(id: primitiveUUID(0x2204), sets: [
+                PrimitiveSet(
+                    id: primitiveUUID(0x3203),
+                    timing: .init(mode: .setBounded),
+                    slots: [
+                        PrimitiveSlot(
+                            id: primitiveUUID(0x4203),
+                            exerciseID: exerciseID,
+                            workTargets: [
+                                .init(metric: .reps, valueForm: .single, value: 10, role: .completion),
+                            ]
+                        ),
+                    ]
+                ),
                 PrimitiveSet(
                     id: primitiveUUID(0x3204),
                     timing: .init(mode: .timeBounded, intervalSec: 60, rounds: 3),
@@ -749,13 +783,12 @@ runCase("session preview projection exposes zero-slot timed set") {
             ]),
         ]
     )
-    let projection = SessionPreviewProjection(plan: try ExecutionPlan.validated(workout: workout))
-
-    try expectEqual(projection.current?.exerciseID, nil)
-    try expectEqual(projection.current?.slotID, nil)
-    try expectEqual(projection.current?.isTimerOnly, true)
-    try expectEqual(projection.current?.metrics.detail, "3 x 1:00")
-    try expectEqual(projection.remaining, .unbounded)
+    do {
+        _ = try ExecutionPlan.validated(workout: workout)
+        try expect(false, "zero-slot timed rest siblings must reject until primitive rest runtime exists")
+    } catch PrimitiveSemanticError.invalidTiming(let setID) {
+        try expectEqual(setID, primitiveUUID(0x3204))
+    }
 }
 
 runCase("session preview projection binds metadata to forwarded current block") {

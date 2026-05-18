@@ -24,28 +24,27 @@
       "last_set_logs": [
         {
           "id": "77777777-7777-7777-7777-777777777777",
-          "workout_item_id": "44444444-4444-4444-4444-444444444444",
+          "role": "slot",
+          "slot_id": "40000000-0000-4000-8000-000000000002",
+          "set_id": "30000000-0000-4000-8000-000000000002",
+          "block_id": "20000000-0000-4000-8000-000000000002",
+          "workout_id": "11111111-1111-1111-1111-111111111111",
+          "planned_exercise_id": "e0000001-0000-4000-8000-000000000001",
           "performed_exercise_id": null,
           "set_index": 1,
+          "set_repeat_index": 0,
+          "block_repeat_index": 0,
           "reps": 5,
           "weight": 100.0,
           "weight_unit": "kg",
           "duration_sec": null,
           "distance_m": null,
+          "rounds": null,
           "rir": 2,
           "is_warmup": false,
-          "skipped": false,
-          "side": "bilateral",
-          "started_at": null,
-          "completed_at": "2026-04-10T07:15:00Z",
-          "hr_avg_bpm": 142,
-          "hr_max_bpm": 168,
-          "cadence_avg_spm": null,
-          "motion_samples_ref": null,
-          "notes": null
+          "completed_at": "2026-04-10T07:15:00Z"
         }
-      ],
-      "prescription_json": "{\"sets\": 5, \"reps\": 5, \"load_kg\": 100}"
+      ]
     }
   ],
   "server_time": "2026-04-17T08:00:00Z"

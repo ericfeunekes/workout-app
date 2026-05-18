@@ -43,22 +43,18 @@ public struct PullResult: Sendable, Equatable {
     }
 }
 
-/// Per-exercise history fragment piggybacked on the pull. The `SetLog`s have
-/// already been mapped to Domain; `prescriptionJSON` stays opaque (parsers
-/// live in `Core/Prescription`).
+/// Per-exercise history fragment piggybacked on the pull. The primitive slot
+/// result logs have already been mapped to Domain.
 public struct LastPerformed: Sendable, Equatable {
     public let exerciseID: ExerciseID
-    public let lastSetLogs: [CoreDomain.SetLog]
-    public let prescriptionJSON: String?
+    public let lastSetLogs: [CoreDomain.PrimitiveSetLog]
 
     public init(
         exerciseID: ExerciseID,
-        lastSetLogs: [CoreDomain.SetLog],
-        prescriptionJSON: String? = nil
+        lastSetLogs: [CoreDomain.PrimitiveSetLog]
     ) {
         self.exerciseID = exerciseID
         self.lastSetLogs = lastSetLogs
-        self.prescriptionJSON = prescriptionJSON
     }
 }
 
@@ -148,14 +144,13 @@ public struct PullService: Sendable {
             guard let exerciseID = UUID(uuidString: lp.exerciseId) else {
                 throw SyncError.decode("last_performed.exercise_id is not a UUID: \(lp.exerciseId)")
             }
-            var mappedLogs: [CoreDomain.SetLog] = []
+            var mappedLogs: [CoreDomain.PrimitiveSetLog] = []
             for log in lp.lastSetLogs {
-                mappedLogs.append(try unwrap(DTOMapping.mapSetLog(log)))
+                mappedLogs.append(try unwrap(DTOMapping.mapPrimitiveSetLog(log)))
             }
             lastPerformed.append(LastPerformed(
                 exerciseID: exerciseID,
-                lastSetLogs: mappedLogs,
-                prescriptionJSON: lp.prescriptionJson
+                lastSetLogs: mappedLogs
             ))
         }
         return PullResult(

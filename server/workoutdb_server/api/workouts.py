@@ -10,41 +10,22 @@ from sqlalchemy.orm import Session, selectinload
 
 from workoutdb_server.api.deps import CurrentUserId, DbSession
 from workoutdb_server.api.schemas import (
-    BlockIn,
-    ExerciseAlternativeIn,
     PrimitiveBlockIn,
     WorkoutCreate,
-    WorkoutItemIn,
     WorkoutRead,
     WorkoutUpdate,
 )
 from workoutdb_server.models import (
-    Block,
     Exercise,
-    ExerciseAlternative,
     Workout,
-    WorkoutItem,
 )
-from workoutdb_server.sync.prescription_merge import (
-    canonicalize,
-    merge_alternatives,
-    merge_prescriptions,
-)
-from workoutdb_server.sync.prescription_validate import validate_resolved_prescription
 
 router = APIRouter(prefix="/api/workouts", tags=["workouts"])
 
 
 def workout_tree_loader():
-    """Eager-load blocks → items → alternatives in one go to avoid lazy-load N+1.
-
-    Importable by other routers (sync) that return workout trees.
-    """
-    return (
-        selectinload(Workout.blocks)
-        .selectinload(Block.workout_items)
-        .selectinload(WorkoutItem.alternatives)
-    )
+    """Compatibility no-op for callers that still request a loader option."""
+    return selectinload(Workout.blocks)
 
 
 def _new_id() -> str:
@@ -52,6 +33,7 @@ def _new_id() -> str:
 
 
 def _build_workout_tree(payload: WorkoutCreate, user_id: str, db: Session) -> Workout:
+    _validate_primitive_exercises_exist(db, payload.primitive_blocks)
     workout = Workout(
         id=payload.id or _new_id(),
         user_id=user_id,
@@ -63,113 +45,7 @@ def _build_workout_tree(payload: WorkoutCreate, user_id: str, db: Session) -> Wo
         tags_json=payload.tags_json,
         primitive_blocks_json=_primitive_blocks_to_json(payload.primitive_blocks),
     )
-    workout.blocks = [_build_block(b, db) for b in payload.blocks]
     return workout
-
-
-def _build_block(payload: BlockIn, db: Session) -> Block:
-    block = Block(
-        id=payload.id or _new_id(),
-        parent_block_id=payload.parent_block_id,
-        position=payload.position,
-        name=payload.name,
-        timing_mode=payload.timing_mode,
-        timing_config_json=payload.timing_config_json,
-        rounds=payload.rounds,
-        rounds_rep_scheme_json=payload.rounds_rep_scheme_json,
-        notes=payload.notes,
-        intent=payload.intent,
-    )
-    block.workout_items = [
-        _build_item(i, db, block_position=payload.position) for i in payload.workout_items
-    ]
-    return block
-
-
-def _build_item(payload: WorkoutItemIn, db: Session, *, block_position: int) -> WorkoutItem:
-    """Resolve library defaults into the workout_item's stored prescription.
-
-    Looks up the referenced exercise's default_prescription_json / default_
-    alternatives_json, merges them with what the client sent, and stores the
-    resolved form. The original sparse payload is preserved in
-    prescription_json_raw when the merge changed something; otherwise the raw
-    column is null (saves bytes + makes re-pushes visibly idempotent).
-
-    bug-036: prevalidate that `exercise_id` resolves to a real exercise row.
-    Without this check, a missing / unknown exercise_id falls through to the
-    FK constraint on `workout_items.exercise_id` at commit time and bubbles
-    a generic 500. Fail fast here with a specific 422 so the client can
-    react.
-    """
-    exercise = db.get(Exercise, payload.exercise_id)
-    if exercise is None:
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-            detail=f"exercise_id {payload.exercise_id} not found",
-        )
-    default_prescription = exercise.default_prescription_json
-    default_alternatives = exercise.default_alternatives_json
-
-    resolved_prescription = merge_prescriptions(default_prescription, payload.prescription_json)
-
-    # qa-017: enforce the v1-shipped subset of autoreg after the merge — catches
-    # both client-authored violations and library-default-induced ones in one
-    # place. Runs before any DB writes so a 422 leaves no partial rows behind.
-    validate_resolved_prescription(
-        resolved_prescription,
-        item_position=payload.position,
-        block_position=block_position,
-    )
-
-    raw_canonical = canonicalize(payload.prescription_json)
-    prescription_raw = payload.prescription_json if resolved_prescription != raw_canonical else None
-
-    item_alts_dicts = [_alt_to_dict(a) for a in payload.alternatives]
-    resolved_alts_dicts = merge_alternatives(default_alternatives, item_alts_dicts)
-
-    # bug-R2.3 follow-up: prevalidate each resolved alternative's exercise_id
-    # against the Exercise table. Without this check, an unknown exercise_id
-    # (from either the client payload or a stale library default) falls
-    # through to the FK on `exercise_alternative.exercise_id` at commit time
-    # and bubbles a generic 500. Run BEFORE any DB writes so the 422 path
-    # leaves no partial rows behind.
-    for alt in resolved_alts_dicts:
-        alt_ex = db.get(Exercise, alt["exercise_id"])
-        if alt_ex is None:
-            raise HTTPException(
-                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-                detail=f"alternative exercise_id {alt['exercise_id']} not found",
-            )
-
-    item = WorkoutItem(
-        id=payload.id or _new_id(),
-        position=payload.position,
-        exercise_id=payload.exercise_id,
-        prescription_json=resolved_prescription,
-        prescription_json_raw=prescription_raw,
-    )
-    item.alternatives = [_alt_from_dict(a) for a in resolved_alts_dicts]
-    return item
-
-
-def _alt_to_dict(payload: ExerciseAlternativeIn) -> dict:
-    """Serialize an incoming alternative payload to the dict shape merge_alternatives expects."""
-    return {
-        "id": payload.id,
-        "exercise_id": payload.exercise_id,
-        "reason": payload.reason,
-        "parameter_overrides_json": payload.parameter_overrides_json,
-    }
-
-
-def _alt_from_dict(data: dict) -> ExerciseAlternative:
-    """Materialize a resolved alternative dict (from either the client or the library default)."""
-    return ExerciseAlternative(
-        id=data.get("id") or _new_id(),
-        exercise_id=data["exercise_id"],
-        reason=data["reason"],
-        parameter_overrides_json=data.get("parameter_overrides_json"),
-    )
 
 
 @router.post("", response_model=WorkoutRead)
@@ -199,7 +75,6 @@ def create_workout(payload: WorkoutCreate, db: DbSession, user_id: CurrentUserId
                 notes=payload.notes,
                 tags_json=payload.tags_json,
                 completed_at=None,
-                blocks_payload=payload.blocks,
                 db=db,
                 primitive_blocks_payload=payload.primitive_blocks,
             )
@@ -230,7 +105,6 @@ def update_workout(
         notes=payload.notes,
         tags_json=payload.tags_json,
         completed_at=payload.completed_at,
-        blocks_payload=payload.blocks,
         db=db,
         primitive_blocks_payload=payload.primitive_blocks,
     )
@@ -249,7 +123,6 @@ def _apply_workout_update(
     notes: str | None,
     tags_json: str | None,
     completed_at: datetime | None,
-    blocks_payload: list[BlockIn] | None,
     db: Session,
     primitive_blocks_payload: list[PrimitiveBlockIn] | None = None,
 ) -> None:
@@ -283,14 +156,10 @@ def _apply_workout_update(
     if completed_at is not None:
         workout.completed_at = completed_at
 
-    if blocks_payload is not None:
-        # Force orphan-cleanup before inserting the new tree. Without the
-        # explicit flush, same-PK re-inserts race with the cascade delete and
-        # some new rows land with detached / empty children. See docstring.
+    if primitive_blocks_payload is not None:
+        _validate_primitive_exercises_exist(db, primitive_blocks_payload)
         workout.blocks = []
         db.flush()
-        workout.blocks = [_build_block(b, db) for b in blocks_payload]
-    if primitive_blocks_payload is not None:
         workout.primitive_blocks_json = _primitive_blocks_to_json(primitive_blocks_payload)
 
     # Force updated_at to bump even when only nested blocks changed — SQLAlchemy's
@@ -303,6 +172,24 @@ def _primitive_blocks_to_json(blocks: list[PrimitiveBlockIn]) -> str:
         [_primitive_dump(block.model_dump(mode="json", exclude_none=True)) for block in blocks],
         separators=(",", ":"),
     )
+
+
+def _validate_primitive_exercises_exist(db: Session, blocks: list[PrimitiveBlockIn]) -> None:
+    exercise_ids = {
+        slot.exercise_id
+        for block in blocks
+        for primitive_set in block.sets
+        for slot in primitive_set.slots
+    }
+    if not exercise_ids:
+        return
+    rows = db.execute(select(Exercise.id).where(Exercise.id.in_(exercise_ids))).scalars().all()
+    missing = sorted(exercise_ids - set(rows))
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=f"primitive slot exercise_id not found: {', '.join(missing)}",
+        )
 
 
 def _primitive_dump(value):

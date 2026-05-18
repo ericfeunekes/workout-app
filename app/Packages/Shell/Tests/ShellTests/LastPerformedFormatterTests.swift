@@ -212,26 +212,28 @@ final class LastPerformedFormatterTests: XCTestCase {
         weightUnit: WeightUnit?,
         rir: Int?,
         isWarmup: Bool = false
-    ) -> SetLog {
-        SetLog(
+    ) -> PrimitiveSetLog {
+        PrimitiveSetLog(
             id: UUID(),
-            workoutItemID: workoutItemID,
+            role: .slot,
+            slotID: workoutItemID,
+            setID: nil,
+            blockID: nil,
+            workoutID: UUID(),
+            plannedExerciseID: nil,
             performedExerciseID: nil,
             setIndex: setIndex,
+            setRepeatIndex: max(0, setIndex - 1),
+            blockRepeatIndex: 0,
             reps: reps,
             weight: weight,
             weightUnit: weightUnit,
             durationSec: nil,
             distanceM: nil,
+            rounds: nil,
             rir: rir,
             isWarmup: isWarmup,
-            startedAt: nil,
             completedAt: Date(timeIntervalSince1970: 1_700_000_000),
-            hrAvgBpm: nil,
-            hrMaxBpm: nil,
-            cadenceAvgSpm: nil,
-            motionSamplesRef: nil,
-            notes: nil
         )
     }
 }

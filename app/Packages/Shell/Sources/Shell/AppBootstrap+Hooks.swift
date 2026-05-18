@@ -426,7 +426,7 @@ extension AppBootstrap {
 
     /// Build the push-hook bundle handed to `ExecutionViewModel`.
     ///
-    /// - `onSetLogged` routes each logged set to `SyncAPI.pushLog`.
+    /// - `onPrimitiveSetLogged` routes each logged slot to `SyncAPI.pushPrimitiveLog`.
     /// - `onWorkoutCompleted` routes the app-owned completion record to
     ///   one grouped REST results payload.
     /// - `onPushKick` drains the push queue as soon as `saveAndDone`
@@ -441,8 +441,8 @@ extension AppBootstrap {
         appSync: AppSyncCoordinator
     ) -> ExecutionPushHooks {
         ExecutionPushHooks(
-            onSetLogged: { [syncAPI] log in
-                try? await syncAPI.pushLog([log])
+            onPrimitiveSetLogged: { [syncAPI] log in
+                try? await syncAPI.pushPrimitiveLog([log])
             },
             onWorkoutCompleted: { [syncAPI] record in
                 try await syncAPI.pushCompletion(record)

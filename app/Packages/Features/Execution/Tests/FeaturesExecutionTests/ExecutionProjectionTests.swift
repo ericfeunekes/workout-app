@@ -904,8 +904,8 @@ final class ExecutionProjectionTests: XCTestCase {
         XCTAssertEqual(projection.workQueue.first?.detail, "50 m · 32 kg")
     }
 
-    func testTodayRouteUsesPrimitivePreviewForZeroSlotTimedWork() throws {
-        var (context, _) = Self.context(
+    func testTodayRouteRejectsZeroSlotTimedPrimitiveWork() throws {
+        let (context, _) = Self.context(
             timingMode: .emom,
             blockName: "Bike intervals",
             blockIntent: "Hold a steady cadence",
@@ -926,27 +926,9 @@ final class ExecutionProjectionTests: XCTestCase {
                 ]),
             ]
         )
-        context = WorkoutContext(
-            workout: context.workout,
-            primitiveWorkout: primitiveWorkout,
-            primitiveExecutionPlan: try ExecutionPlan.validated(workout: primitiveWorkout),
-            blocks: context.blocks,
-            itemsByBlock: context.itemsByBlock,
-            exercises: context.exercises
-        )
-        let vm = ExecutionViewModel(context: context, clock: FixedClock(now: now))
-
-        let projection = vm.executionProjection(now: now)
-
-        XCTAssertEqual(projection.currentTask.kind, .today)
-        XCTAssertEqual(projection.currentTask.title, "Bike intervals")
-        XCTAssertEqual(projection.currentTask.detail, "3 x 1:00")
-        XCTAssertNil(projection.currentTask.exerciseName)
-        XCTAssertEqual(projection.currentTask.primaryMetric, "3 x 1:00")
-        XCTAssertNil(projection.currentTask.secondaryMetric)
-        XCTAssertEqual(projection.currentTask.blockIntent, "Hold a steady cadence")
-        XCTAssertEqual(projection.remainingWork.totalSets, 0)
-        XCTAssertEqual(projection.workQueue.map(\.title), [])
+        XCTAssertThrowsError(try ExecutionPlan.validated(workout: primitiveWorkout)) { error in
+            XCTAssertTrue(error is PrimitiveSemanticError)
+        }
     }
 
     // MARK: - Fixtures

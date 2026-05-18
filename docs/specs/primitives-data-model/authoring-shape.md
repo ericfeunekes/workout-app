@@ -91,7 +91,11 @@ The server is responsible for generating ids per this table on every authoring r
   - `{ "direction": "count_down", "duration_sec": 1200 }` — caps the block at 20 min. Acts as an outer AMRAP cap around whatever the sets inside do.
 - **`stimuli`** — block-level stimuli. Applies to every set/slot inside unless overridden at a lower level.
 - **`work_target`** — block-level work-target observations (rare). Mostly `{(rounds, open, observation)}` for counting AMRAP rounds across repeated sets, or `{(duration, open, observation)}` for for-time.
-- **`sets`** — the set sequence that plays `repeat` times.
+- **`sets`** — the set sequence that plays `repeat` times. A block must contain
+  at least one executable-work set with one or more slots. Zero-slot timer sets
+  are rejected in the current bridge runtime; rest/transition primitive timers
+  require a later primitive-runtime authority cutover before they can be
+  accepted at ingest.
 
 ## Set shape
 
@@ -116,7 +120,11 @@ The server is responsible for generating ids per this table on every authoring r
 - **`repeat`** — how many times this set plays back-to-back within its parent block's pass. Default 1. **Canonical rule:** if multiple sets logically differ (work set + rest set), author them as sibling sets inside one block; if the same set-instance repeats, use `set.repeat`. Do NOT encode the same workout as either "block-repeat of one set" or "set-repeat within one block" depending on authoring mood — pick by this rule. Canonical form for "4 × (1 min on, 1 min off)" is one block containing two sets (work set + rest set) with `block.repeat: 4` (four cycles of the work-then-rest pattern). The alternative encoding (one set, two slots, `set.repeat: 4`) is rejected at ingest because the work and rest are semantically distinct sets, not distinct slots.
 - **`stimuli`** — set-level stimulus attachments. Common for "stay in zone 3 for this whole 20-minute AMRAP."
 - **`work_target`** — set-level work-target. Common for AMRAP: `{(rounds, open, observation)}` on a time-bounded set.
-- **`slots`** — the atomic prescription units. **May be empty (`[]`)** when the set is a pure-timer rest interval (tabata rest phase, between-round rest blocks). A zero-slot set is a valid authored form: its semantic is "elapse the timing, no work." Required: a zero-slot set must have `timing.mode = "time_bounded"` or `timing.mode = "cap_bounded"` (authoring-time rejection of zero-slot `set_bounded` sets — nothing would commit to end them). Driver behavior: a zero-slot time_bounded set advances the clock per `timing.params` and emits zero slot rows; a zero-slot cap_bounded set does the same under cap. No set_result row is emitted unless the set carries an explicit work_target.
+- **`slots`** — the atomic prescription units. Required: every set must have
+  at least one slot. A zero-slot set is not a way to author "just a timer", a
+  rest interval, or a workout with no exercise in the current bridge runtime.
+  Rest/transition primitive timers are a follow-up runtime-authority capability,
+  not accepted authoring input yet.
 
 ## Slot shape
 
@@ -184,6 +192,12 @@ Rejected-at-ingest constraints that keep authoring within what the runtime can e
 4. **Block/set/slot ids are unique within the workout** and follow the identity rule above.
 5. **Alternatives belong to exactly one base slot.** An alternative id appears under exactly one slot's `alternatives`.
 6. **Timing × traversal must be a legal cell.** See the matrix in runtime-resolution.md.
+7. **Executable-work composition is required.** Every persisted workout must
+   contain at least one slot with an `exercise_id`. Every block must contain at
+   least one executable-work set unless a future block type explicitly marks it
+   as non-executable metadata. Zero-slot timer sets are rejected in the current
+   bridge runtime; rest/transition primitive timers require a later
+   primitive-runtime authority cutover before ingest can allow them.
 
 ## Primitive serialization
 

@@ -110,8 +110,18 @@ class Workout(Base):
     )
 
     @property
-    def primitive_blocks(self) -> list[dict]:
-        return json.loads(self.primitive_blocks_json or "[]")
+    def primitive_blocks(self):
+        if not self.primitive_blocks_json:
+            raise ValueError("persisted primitive_blocks_json must not be empty")
+        try:
+            blocks = json.loads(self.primitive_blocks_json)
+        except (json.JSONDecodeError, TypeError):
+            raise ValueError("persisted primitive_blocks_json is not valid JSON") from None
+        if not isinstance(blocks, list):
+            raise ValueError("persisted primitive_blocks_json must be a JSON array")
+        if not blocks:
+            raise ValueError("persisted primitive_blocks_json must contain at least one block")
+        return blocks
 
     __table_args__ = (
         CheckConstraint(

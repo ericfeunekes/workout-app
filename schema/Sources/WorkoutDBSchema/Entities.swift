@@ -198,7 +198,6 @@ public struct Workout: Codable, Sendable, Equatable {
     public let createdAt: Date
     public let updatedAt: Date
     public let completedAt: Date?
-    public let blocks: [Block]
     public let primitiveBlocks: [PrimitiveBlock]
 
     enum CodingKeys: String, CodingKey {
@@ -213,7 +212,6 @@ public struct Workout: Codable, Sendable, Equatable {
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case completedAt = "completed_at"
-        case blocks
         case primitiveBlocks = "primitive_blocks"
     }
 
@@ -229,7 +227,6 @@ public struct Workout: Codable, Sendable, Equatable {
         createdAt: Date,
         updatedAt: Date,
         completedAt: Date? = nil,
-        blocks: [Block] = [],
         primitiveBlocks: [PrimitiveBlock] = []
     ) {
         self.id = id
@@ -243,7 +240,6 @@ public struct Workout: Codable, Sendable, Equatable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.completedAt = completedAt
-        self.blocks = blocks
         self.primitiveBlocks = primitiveBlocks
     }
 
@@ -260,11 +256,7 @@ public struct Workout: Codable, Sendable, Equatable {
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
-        blocks = try container.decode([Block].self, forKey: .blocks)
-        primitiveBlocks = try container.decodeIfPresent(
-            [PrimitiveBlock].self,
-            forKey: .primitiveBlocks
-        ) ?? []
+        primitiveBlocks = try container.decode([PrimitiveBlock].self, forKey: .primitiveBlocks)
     }
 }
 

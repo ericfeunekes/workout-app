@@ -426,11 +426,11 @@ public actor WorkoutCacheImpl: WorkoutCache {
     }
 
     public func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [PrimitiveSetLog] {
-        let descriptor = FetchDescriptor<PrimitiveWorkoutModel>(
-            predicate: #Predicate<PrimitiveWorkoutModel> { $0.id == workoutID }
+        let descriptor = FetchDescriptor<PrimitiveSetLogModel>(
+            predicate: #Predicate<PrimitiveSetLogModel> { $0.workoutID == workoutID }
         )
-        guard let row = try modelContext.fetch(descriptor).first else { return [] }
-        return try row.primitiveSetLogs().sorted {
+        let rows = try modelContext.fetch(descriptor)
+        return rows.map { $0.toDomain() }.sorted {
             if $0.blockRepeatIndex != $1.blockRepeatIndex {
                 return $0.blockRepeatIndex < $1.blockRepeatIndex
             }
@@ -447,6 +447,7 @@ public actor WorkoutCacheImpl: WorkoutCache {
     public func clear() async throws {
         try modelContext.delete(model: WorkoutModel.self)
         try modelContext.delete(model: PrimitiveWorkoutModel.self)
+        try modelContext.delete(model: PrimitiveSetLogModel.self)
         try modelContext.delete(model: BlockModel.self)
         try modelContext.delete(model: WorkoutItemModel.self)
         try modelContext.delete(model: ExerciseModel.self)

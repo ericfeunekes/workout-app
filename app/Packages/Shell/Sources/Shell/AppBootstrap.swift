@@ -199,22 +199,15 @@ public enum AppBootstrap {
         ))
     }
 
-    /// Wire the History edit hook onto the shell-owned
-    /// `HistoryViewModel`. The VM is constructed at RootView init
-    /// (bug-016 — hoisted to `@State` so it survives body rebuilds),
-    /// but `SyncAPI` doesn't exist until bootstrap runs. Setting the
-    /// hook here is the narrowest plumbing that closes bug-015 without
-    /// re-architecting the VM lifetime. Same deterministic-UUID
-    /// contract as the Execution log push: the edited SetLog carries
-    /// the original log's id, so the server upserts in place.
+    /// Wire server-backed History hooks onto the shell-owned
+    /// `HistoryViewModel`. Past-set edits are local-only until the
+    /// History surface edits primitive result rows directly; old
+    /// `SetLog` pushes are closed after the primitive result cutover.
     private static func wireHistoryEditHook(
         _ historyViewModel: HistoryViewModel?,
         syncAPI: SyncAPI
     ) {
         guard let historyViewModel else { return }
-        historyViewModel.setSetLogEditHook({ [syncAPI] log in
-            try? await syncAPI.pushLog([log])
-        })
         historyViewModel.setWorkoutResetHook({ [syncAPI] workoutID in
             try? await syncAPI.resetWorkout(workoutID: workoutID)
             _ = try? await syncAPI.flushPushQueue()

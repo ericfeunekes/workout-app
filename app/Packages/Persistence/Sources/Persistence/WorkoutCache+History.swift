@@ -151,21 +151,19 @@ extension WorkoutCacheImpl {
     ) async throws {
         guard !setLogs.isEmpty else { return }
         do {
-            let descriptor = FetchDescriptor<PrimitiveWorkoutModel>(
-                predicate: #Predicate<PrimitiveWorkoutModel> { $0.id == workoutID }
-            )
-            guard let row = try modelContext.fetch(descriptor).first else { return }
-            var merged = try row.primitiveSetLogs()
             for rawLog in setLogs {
                 var log = rawLog
                 log.workoutID = rawLog.workoutID ?? workoutID
-                if let index = merged.firstIndex(where: { $0.id == log.id }) {
-                    merged[index] = log
+                let logID = log.id
+                let descriptor = FetchDescriptor<PrimitiveSetLogModel>(
+                    predicate: #Predicate<PrimitiveSetLogModel> { $0.id == logID }
+                )
+                if let existing = try modelContext.fetch(descriptor).first {
+                    existing.apply(log, workoutID: workoutID)
                 } else {
-                    merged.append(log)
+                    modelContext.insert(PrimitiveSetLogModel.from(log, workoutID: workoutID))
                 }
             }
-            try row.applyPrimitiveSetLogs(merged)
             try modelContext.save()
         } catch {
             modelContext.rollback()
@@ -186,6 +184,12 @@ extension WorkoutCacheImpl {
                 predicate: #Predicate<SetLogModel> { $0.workoutID == workoutID }
             )
             for log in try modelContext.fetch(logsDescriptor) {
+                modelContext.delete(log)
+            }
+            let primitiveLogsDescriptor = FetchDescriptor<PrimitiveSetLogModel>(
+                predicate: #Predicate<PrimitiveSetLogModel> { $0.workoutID == workoutID }
+            )
+            for log in try modelContext.fetch(primitiveLogsDescriptor) {
                 modelContext.delete(log)
             }
 

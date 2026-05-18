@@ -1,19 +1,19 @@
 // SchemaVersions.swift
 //
 // Versioned SwiftData schema. The runtime uses the LATEST version
-// (`WorkoutDBSchemaV6`). Older versions are preserved here so SwiftData
+// (`WorkoutDBSchemaV7`). Older versions are preserved here so SwiftData
 // can migrate a store that was written by a previous app build — without
 // the version enum for the old shape, SwiftData has nothing to compare
 // the on-disk store's metadata against and will fail (or, worse, corrupt)
 // the store when the shape doesn't match the single declared schema.
 //
 // Shape contract: every version lists its own `@Model` snapshot. Each
-// snapshot's model classes use the SAME simple name as the live V5 types
+// snapshot's model classes use the SAME simple name as the live V7 types
 // (`WorkoutModel`, `ExerciseModel`, …) so the CoreData entity name is
 // stable across versions — that's what SwiftData diffs to decide whether
 // a migration applies. Nesting the snapshots inside the version enum
 // keeps the Swift-type namespace clear; the rest of the package reads
-// the file-scope V4 types unqualified.
+// the file-scope V7 types unqualified.
 //
 // V1 → V2 is lightweight: V2 only adds optional-nullable `String` columns
 // (`defaultPrescriptionJSON`, `defaultAlternativesJSON` on Exercise;
@@ -49,13 +49,21 @@
 // server migration (`false` / `bilateral`).
 //
 // V5 → V6 is lightweight: adds `PrimitiveWorkoutModel`, the intact pulled
-// Block > Set > Slot payload used by the primitive execution runtime and
-// its local primitive completion rows.
+// Block > Set > Slot payload used by the primitive execution runtime.
+//
+// V6 → V7 is lightweight: adds `PrimitiveSetLogModel` so primitive result
+// rows are first-class queryable data. The primitive cutover explicitly
+// permits resetting QA workout/result data, so embedded V6 primitive logs are
+// not preserved.
 //
 // Shadow @Model types for V1 / V2 / V3 / V4 live in their dedicated
 // `SchemaVersionsV{N}Models.swift` files so the version enum bodies
-// stay under SwiftLint's `type_body_length` cap.
+// stay under SwiftLint's `type_body_length` cap. V6 keeps its one-off
+// primitive workout snapshot inline because downstream SwiftPM package
+// builds must always see that schema extension when compiling Persistence
+// as a dependency.
 
+import CoreDomain
 import Foundation
 import SwiftData
 
@@ -162,6 +170,50 @@ public enum WorkoutDBSchemaV6: VersionedSchema {
             EventModel.self,
         ]
     }
+
+    @Model
+    final class PrimitiveWorkoutModel {
+        @Attribute(.unique) var id: UUID
+        var name: String
+        var payloadJSON: String
+        var primitiveSetLogsJSON: String
+
+        init(
+            id: UUID,
+            name: String,
+            payloadJSON: String,
+            primitiveSetLogsJSON: String = "[]"
+        ) {
+            self.id = id
+            self.name = name
+            self.payloadJSON = payloadJSON
+            self.primitiveSetLogsJSON = primitiveSetLogsJSON
+        }
+    }
+}
+
+// MARK: - V7 (primitive result rows) — first-class primitive set logs
+
+public enum WorkoutDBSchemaV7: VersionedSchema {
+    public static var versionIdentifier: Schema.Version { Schema.Version(7, 0, 0) }
+
+    public static var models: [any PersistentModel.Type] {
+        [
+            WorkoutModel.self,
+            PrimitiveWorkoutModel.self,
+            PrimitiveSetLogModel.self,
+            BlockModel.self,
+            WorkoutItemModel.self,
+            ExerciseModel.self,
+            ExerciseAlternativeModel.self,
+            SetLogModel.self,
+            UserParameterModel.self,
+            AppUserModel.self,
+            SessionSnapshotModel.self,
+            PushItemModel.self,
+            EventModel.self,
+        ]
+    }
 }
 
 // MARK: - Migration plan
@@ -175,6 +227,7 @@ public enum WorkoutDBMigrationPlan: SchemaMigrationPlan {
             WorkoutDBSchemaV4.self,
             WorkoutDBSchemaV5.self,
             WorkoutDBSchemaV6.self,
+            WorkoutDBSchemaV7.self,
         ]
     }
 
@@ -216,6 +269,10 @@ public enum WorkoutDBMigrationPlan: SchemaMigrationPlan {
             .lightweight(
                 fromVersion: WorkoutDBSchemaV5.self,
                 toVersion: WorkoutDBSchemaV6.self
+            ),
+            .lightweight(
+                fromVersion: WorkoutDBSchemaV6.self,
+                toVersion: WorkoutDBSchemaV7.self
             ),
         ]
     }

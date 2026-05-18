@@ -385,7 +385,7 @@ final class TodayViewModelTests: XCTestCase {
         XCTAssertEqual(preview.upcoming.map(\.detail), ["8 reps", "100 kg · 5 reps", "8 reps"])
     }
 
-    func testWorkoutDetailUsesPrimitiveProjectionForZeroSlotTimedWork() throws {
+    func testWorkoutDetailDoesNotPreviewZeroSlotTimedPrimitiveWork() throws {
         let workoutID = UUID()
         let blockID = UUID()
         let primitiveSetID = UUID()
@@ -428,7 +428,7 @@ final class TodayViewModelTests: XCTestCase {
         let context = TodayContext(
             workout: workout,
             primitiveWorkout: primitiveWorkout,
-            primitiveExecutionPlan: try ExecutionPlan.validated(workout: primitiveWorkout),
+            primitiveExecutionPlan: nil,
             blocks: [block],
             items: [],
             exercises: [:],
@@ -439,13 +439,7 @@ final class TodayViewModelTests: XCTestCase {
             planContext: TodayPlanContext(selected: context, workouts: [context])
         )
         let detail = try XCTUnwrap(vm.detail(for: workoutID))
-        let preview = try XCTUnwrap(detail.preview)
-
-        XCTAssertEqual(preview.currentTitle, "Bike intervals")
-        XCTAssertEqual(preview.currentDetail, "3 x 1:00")
-        XCTAssertEqual(preview.blockIntent, "Hold a steady cadence")
-        XCTAssertEqual(preview.remainingLine, "open-ended current block")
-        XCTAssertEqual(preview.upcoming, [])
+        XCTAssertNil(detail.preview)
     }
 
     func testAdjustmentDraftIncludesWorkoutContext() throws {
@@ -677,6 +671,60 @@ final class TodayViewModelTests: XCTestCase {
         vm.setStartWorkoutAction { _ in true }
 
         XCTAssertTrue(vm.canStart(workoutID: alternateID))
+    }
+
+    func testPreviewStartGateRejectsInvalidPrimitiveAlternateEvenWithInjectedStarter() {
+        let selectedID = UUID()
+        let alternateID = UUID()
+        let selected = makeContext(
+            userID: UUID(),
+            name: "Today",
+            scheduledDate: Date(),
+            tagsJSON: nil,
+            workoutID: selectedID
+        )
+        let alternateWorkout = Workout(
+            id: alternateID,
+            userID: selected.workout.userID,
+            name: "Invalid primitive alternate",
+            scheduledDate: Date().addingTimeInterval(86_400),
+            status: .planned,
+            source: .claude,
+            notes: nil,
+            createdAt: Date(),
+            updatedAt: Date(),
+            completedAt: nil,
+            tagsJSON: nil
+        )
+        let primitiveWorkout = PrimitiveWorkout(
+            id: alternateID,
+            name: alternateWorkout.name,
+            blocks: [
+                PrimitiveBlock(id: UUID(), sets: [
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: .init(mode: .timeBounded, intervalSec: 60, rounds: 1),
+                        slots: []
+                    ),
+                ]),
+            ]
+        )
+        let alternate = TodayContext(
+            workout: alternateWorkout,
+            primitiveWorkout: primitiveWorkout,
+            primitiveExecutionPlan: nil,
+            blocks: [],
+            items: [],
+            exercises: [:],
+            lastPerformed: [:]
+        )
+        let vm = TodayViewModel(planContext: TodayPlanContext(
+            selected: selected,
+            workouts: [selected, alternate]
+        ))
+        vm.setStartWorkoutAction { _ in true }
+
+        XCTAssertFalse(vm.canStart(workoutID: alternateID))
     }
 
     // MARK: - Reload (bug-036)

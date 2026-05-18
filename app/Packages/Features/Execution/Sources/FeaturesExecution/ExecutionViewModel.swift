@@ -35,6 +35,7 @@ import WorkoutCoreFoundation
 /// server. `nil` (the default) preserves the pure-offline test path — tests
 /// that don't exercise push can omit this dependency entirely.
 public typealias SetLogEnqueuer = @Sendable (SetLog) async -> Void
+public typealias PrimitiveSetLogEnqueuer = @Sendable (PrimitiveSetLog) async -> Void
 
 /// Hook invoked when Save & Done has produced the canonical app-owned
 /// completion record. Shell supplies this so REST sync can durably enqueue
@@ -69,17 +70,20 @@ public typealias UserParameterEnqueuer = @Sendable (UserParameter) async -> Void
 /// persistence extension reads `push` directly.
 public struct ExecutionPushHooks: Sendable {
     public let onSetLogged: SetLogEnqueuer?
+    public let onPrimitiveSetLogged: PrimitiveSetLogEnqueuer?
     public let onWorkoutCompleted: CompletionEnqueuer?
     public let onPushKick: PushFlushKick?
     public let onUserParameterChanged: UserParameterEnqueuer?
 
     public init(
         onSetLogged: SetLogEnqueuer? = nil,
+        onPrimitiveSetLogged: PrimitiveSetLogEnqueuer? = nil,
         onWorkoutCompleted: CompletionEnqueuer? = nil,
         onPushKick: PushFlushKick? = nil,
         onUserParameterChanged: UserParameterEnqueuer? = nil
     ) {
         self.onSetLogged = onSetLogged
+        self.onPrimitiveSetLogged = onPrimitiveSetLogged
         self.onWorkoutCompleted = onWorkoutCompleted
         self.onPushKick = onPushKick
         self.onUserParameterChanged = onUserParameterChanged

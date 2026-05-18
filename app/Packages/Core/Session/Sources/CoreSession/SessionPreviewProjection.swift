@@ -248,25 +248,7 @@ private extension ExecutionPlan {
             block.sets.enumerated().flatMap { setIndex, set in
                 (0..<max(1, set.setRepeat)).flatMap { setRepeatIndex in
                     if set.slots.isEmpty {
-                        return [
-                            SessionPreviewWork(
-                                blockIndex: blockIndex,
-                                blockID: block.blockID,
-                                setID: set.setID,
-                                setIndexInBlock: setIndex,
-                                setRepeatIndex: setRepeatIndex,
-                                slotID: nil,
-                                slotIndex: 0,
-                                exerciseID: nil,
-                                primaryDisplayTarget: set.workTargets.first,
-                                secondaryDisplayTargets: Array(set.workTargets.dropFirst()),
-                                loadKg: nil,
-                                loadUnit: nil,
-                                loadDisplayValue: nil,
-                                isWarmup: false,
-                                timing: set.timing
-                            ),
-                        ]
+                        return [] as [SessionPreviewWork]
                     }
                     return set.slots.enumerated().map { slotIndex, slot in
                         SessionPreviewWork(

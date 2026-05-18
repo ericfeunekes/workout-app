@@ -46,25 +46,21 @@ public struct WorkoutReset: Codable, Sendable, Equatable {
 }
 
 public struct SyncResultsPayload: Codable, Sendable, Equatable {
-    public let setLogs: [SetLog]
     public let primitiveSetLogs: [PrimitiveSetLog]
     public let statusUpdates: [WorkoutStatusUpdate]
     public let workoutResets: [WorkoutReset]
 
     enum CodingKeys: String, CodingKey {
-        case setLogs = "set_logs"
         case primitiveSetLogs = "primitive_set_logs"
         case statusUpdates = "status_updates"
         case workoutResets = "workout_resets"
     }
 
     public init(
-        setLogs: [SetLog] = [],
         primitiveSetLogs: [PrimitiveSetLog] = [],
         statusUpdates: [WorkoutStatusUpdate] = [],
         workoutResets: [WorkoutReset] = []
     ) {
-        self.setLogs = setLogs
         self.primitiveSetLogs = primitiveSetLogs
         self.statusUpdates = statusUpdates
         self.workoutResets = workoutResets
@@ -73,19 +69,16 @@ public struct SyncResultsPayload: Codable, Sendable, Equatable {
 
 public struct ExerciseLastPerformed: Codable, Sendable, Equatable {
     public let exerciseId: String
-    public let lastSetLogs: [SetLog]
-    public let prescriptionJson: String?
+    public let lastSetLogs: [PrimitiveSetLog]
 
     enum CodingKeys: String, CodingKey {
         case exerciseId = "exercise_id"
         case lastSetLogs = "last_set_logs"
-        case prescriptionJson = "prescription_json"
     }
 
-    public init(exerciseId: String, lastSetLogs: [SetLog], prescriptionJson: String? = nil) {
+    public init(exerciseId: String, lastSetLogs: [PrimitiveSetLog]) {
         self.exerciseId = exerciseId
         self.lastSetLogs = lastSetLogs
-        self.prescriptionJson = prescriptionJson
     }
 }
 

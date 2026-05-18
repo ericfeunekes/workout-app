@@ -6,6 +6,7 @@ future change that reintroduces N+1 fails the build.
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 
 from sqlalchemy import event
@@ -31,6 +32,41 @@ def _seed_workout_with_exercises(engine, user_id: str, n_exercises: int = 5) -> 
     """Seed a completed workout that has N exercises, each with 3 set_logs."""
     with Session(engine) as session:
         exercise_ids: list[str] = []
+
+        def _uuid(suffix: int) -> str:
+            return f"00000000-0000-4000-8000-{suffix:012d}"
+
+        def _primitive_blocks(exercise_ids: list[str]) -> str:
+            return json.dumps(
+                [
+                    {
+                        "id": _uuid(90_000),
+                        "sets": [
+                            {
+                                "id": _uuid(91_000),
+                                "timing": {"mode": "set_bounded"},
+                                "traversal": "sequential",
+                                "slots": [
+                                    {
+                                        "id": _uuid(92_000 + i),
+                                        "exercise_id": exercise_id,
+                                        "work_target": [
+                                            {
+                                                "metric": "reps",
+                                                "value_form": "single",
+                                                "value": 5,
+                                                "role": "completion",
+                                            }
+                                        ],
+                                    }
+                                    for i, exercise_id in enumerate(exercise_ids)
+                                ],
+                            }
+                        ],
+                    }
+                ]
+            )
+
         workout = Workout(
             user_id=user_id,
             name="Past",
@@ -50,7 +86,7 @@ def _seed_workout_with_exercises(engine, user_id: str, n_exercises: int = 5) -> 
         session.flush()
 
         for i in range(n_exercises):
-            exercise = Exercise(id=f"ex-{i}", name=f"Exercise {i}")
+            exercise = Exercise(id=_uuid(i + 1), name=f"Exercise {i}")
             session.add(exercise)
             exercise_ids.append(exercise.id)
             item = WorkoutItem(
@@ -73,6 +109,8 @@ def _seed_workout_with_exercises(engine, user_id: str, n_exercises: int = 5) -> 
                     )
                 )
 
+        workout.primitive_blocks_json = _primitive_blocks(exercise_ids)
+
         # Add a future planned workout referencing the same exercises — triggers last_performed.
         future = Workout(
             user_id=user_id,
@@ -83,6 +121,7 @@ def _seed_workout_with_exercises(engine, user_id: str, n_exercises: int = 5) -> 
         )
         session.add(future)
         session.flush()
+        future.primitive_blocks_json = _primitive_blocks(exercise_ids)
         fblock = Block(
             workout_id=future.id,
             position=0,

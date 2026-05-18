@@ -7,18 +7,20 @@
 // from the server.
 //
 // Covers:
-//   • V1 → V6 — pre-006 store opens under the current schema. The
-//     planner chains V1→V2→V3→V4→V5→V6 lightweight stages.
-//   • V2 → V6 — post-006, pre-R1.4 store opens under V6 AND the SetLog
+//   • V1 → V7 — pre-006 store opens under the current schema. The
+//     planner chains V1→V2→V3→V4→V5→V6→V7 lightweight stages.
+//   • V2 → V7 — post-006, pre-R1.4 store opens under V7 AND the SetLog
 //     denormalization backfill resolves `workoutID` + `plannedExerciseID`
 //     from the parent WorkoutItem → Block chain for rows that predate
 //     the column.
-//   • V3 → V6 — R1.4-era store opens under the current schema AND the
+//   • V3 → V7 — R1.4-era store opens under the current schema AND the
 //     PushItem priority + dedupKey backfill populates the new columns
 //     from each row's decoded envelope.
-//   • V4 → V6 — perf-002-era store opens with skipped/side/intent defaults.
-//   • V5 → V6 — the primitive-workout cache table is introduced without
+//   • V4 → V7 — perf-002-era store opens with skipped/side/intent defaults.
+//   • V5 → V7 — the primitive-workout cache table is introduced without
 //     stranding existing workout logs.
+//   • V6 → V7 — the first-class primitive result table is introduced;
+//     V6 QA primitive result data is intentionally reset.
 //
 // Strategy per test: spin up an on-disk ModelContainer scoped to the old
 // version, insert a few rows via the shadow types, tear the container
@@ -96,10 +98,10 @@ final class SchemaMigrationTests: XCTestCase {
 
     /// Build a current ModelContainer pointing at the same on-disk URL, with
     /// the full migration plan so the appropriate stage(s) fire at open.
-    /// V6 is the current runtime schema (per `SchemaVersions.swift`);
+    /// V7 is the current runtime schema (per `SchemaVersions.swift`);
     /// older stores chain forward through the plan.
     private func makeCurrentContainer(at url: URL) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV6.self)
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV7.self)
         let configuration = ModelConfiguration(schema: schema, url: url)
         return try ModelContainer(
             for: schema,
@@ -579,6 +581,18 @@ final class SchemaMigrationTests: XCTestCase {
         )
     }
 
+    /// Build a V6-only ModelContainer (no migration plan). Simulates the
+    /// primitive-workout-cache build before primitive logs became first-class.
+    private func makeV6OnlyContainer(at url: URL) throws -> ModelContainer {
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV6.self)
+        let configuration = ModelConfiguration(schema: schema, url: url)
+        return try ModelContainer(
+            for: schema,
+            migrationPlan: nil,
+            configurations: [configuration]
+        )
+    }
+
     /// Seed a V3-shaped store with three `PushItemModel` rows — one for
     /// each dedup class (single-log setLog, statusUpdate, userParameter)
     /// — plus one batch setLog and one telemetry event to exercise the
@@ -998,6 +1012,89 @@ final class SchemaMigrationTests: XCTestCase {
             1,
             "New V6 primitive cache table must be writable after migration"
         )
-        XCTAssertEqual(primitiveRowsAfterInsert.first?.primitiveSetLogsJSON, "[]")
     }
+
+    // MARK: - V6 → V7 primitive set log rows
+
+    private func seedV6PrimitiveWorkoutStore(at url: URL, ids: FixtureIDs) throws {
+        let container = try makeV6OnlyContainer(at: url)
+        let context = ModelContext(container)
+        let primitive = PrimitiveWorkout(
+            id: ids.workoutID,
+            name: "Primitive workout",
+            blocks: []
+        )
+        let model = WorkoutDBSchemaV6.PrimitiveWorkoutModel(
+            id: ids.workoutID,
+            name: primitive.name,
+            payloadJSON: try encodePrimitiveWorkout(primitive),
+            primitiveSetLogsJSON: """
+            [{
+              "id":"\(ids.setLogID.uuidString)",
+              "role":"slot",
+              "slotID":"\(ids.itemID.uuidString)",
+              "workoutID":"\(ids.workoutID.uuidString)",
+              "plannedExerciseID":"\(ids.exerciseID.uuidString)",
+              "setIndex":0,
+              "setRepeatIndex":0,
+              "blockRepeatIndex":0,
+              "reps":5,
+              "completedAt":"2026-05-18T12:00:00Z"
+            }]
+            """
+        )
+        context.insert(model)
+        try context.save()
+    }
+
+    private func encodePrimitiveWorkout(_ workout: PrimitiveWorkout) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        let data = try encoder.encode(workout)
+        return try XCTUnwrap(String(data: data, encoding: .utf8))
+    }
+
+    @MainActor
+    func testV6toV7UpgradeIntroducesPrimitiveSetLogTable() async throws {
+        let url = try XCTUnwrap(storeURL)
+        let ids = FixtureIDs.make()
+
+        do {
+            try seedV6PrimitiveWorkoutStore(at: url, ids: ids)
+        }
+
+        let currentContainer = try makeCurrentContainer(at: url)
+        let context = ModelContext(currentContainer)
+
+        let rows = try context.fetch(FetchDescriptor<PrimitiveSetLogModel>())
+        XCTAssertTrue(
+            rows.isEmpty,
+            "V6 QA primitive result data is intentionally reset by the V7 cutover"
+        )
+
+        context.insert(PrimitiveSetLogModel.from(
+            PrimitiveSetLog(
+                id: ids.setLogID,
+                role: .slot,
+                slotID: ids.itemID,
+                blockID: ids.blockID,
+                workoutID: ids.workoutID,
+                plannedExerciseID: ids.exerciseID,
+                setIndex: 1,
+                setRepeatIndex: 0,
+                blockRepeatIndex: 0,
+                reps: 5,
+                weight: 100.0,
+                weightUnit: .kg,
+                rir: 2,
+                completedAt: ids.baseDate.addingTimeInterval(60)
+            ),
+            workoutID: ids.workoutID
+        ))
+        try context.save()
+
+        let rowsAfterInsert = try context.fetch(FetchDescriptor<PrimitiveSetLogModel>())
+        XCTAssertEqual(rowsAfterInsert.count, 1, "V7 primitive set log table must be writable")
+    }
+
 }

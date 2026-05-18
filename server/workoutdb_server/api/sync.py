@@ -17,22 +17,19 @@ from workoutdb_server.api.deps import CurrentUserId, DbSession
 from workoutdb_server.api.schemas import (
     ExerciseLastPerformed,
     PrimitiveSetLogIn,
-    SetLogIn,
-    SetLogRead,
+    PrimitiveSetLogRead,
     SyncPullOut,
     SyncResultsIn,
+    SyncResultsOut,
     UserParameterRead,
     WorkoutReset,
 )
 from workoutdb_server.api.workouts import workout_tree_loader
 from workoutdb_server.models import (
-    Block,
     Exercise,
     PrimitiveSetLog,
-    SetLog,
     UserParameter,
     Workout,
-    WorkoutItem,
 )
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
@@ -94,132 +91,60 @@ def _build_last_performed(
     db: DbSession,
     user_id: str,
 ) -> list[ExerciseLastPerformed]:
-    """For every exercise present in any of the user's workouts, attach the user's most
-    recent set_logs.
-
-    The snapshot is authoritative: the app overwrites its local chip map with whatever this
-    returns, so an incremental pull (with `since`) must still cover every exercise the UI needs
-    to render, not just those touched by the delta.
-
-    qa-001 regression: earlier versions scoped exercise_ids to the `pulled_workouts` list
-    (the same delta used for the `workouts` response); when the delta was empty (nothing
-    changed since last sync) the snapshot came back `[]` and the app cheerfully overwrote
-    its store with nothing, erasing every "LAST · …" chip on next launch. Scoping the
-    exercise set to the full user catalog fixes that without changing the incremental
-    workouts-delta behaviour.
-
-    Two queries total regardless of exercise count:
-      1. A ranked join finds the latest completed workout_item per exercise_id.
-      2. A single IN query fetches all relevant set_logs.
-    """
-    # Include exercises referenced both directly and via alternatives — the app must
-    # be able to display history for any exercise the user can swap to mid-workout.
-    # Scope to every user workout regardless of status: the client overwrites its
-    # chip map with whatever we return, so a pull right after the user's only planned
-    # workout is completed (no more planned/active rows, but the just-written history
-    # is still interesting) must still produce a non-empty snapshot. The ranked join
-    # below already filters set_logs to completed workouts only.
-    all_workouts_stmt = (
-        select(Workout).options(workout_tree_loader()).where(Workout.user_id == user_id)
-    )
-    all_workouts = list(db.execute(all_workouts_stmt).scalars().all())
-
-    exercise_ids: set[str] = set()
-    for workout in all_workouts:
-        for block in workout.blocks:
-            for item in block.workout_items:
-                exercise_ids.add(item.exercise_id)
-                for alt in item.alternatives:
-                    exercise_ids.add(alt.exercise_id)
-
-    if not exercise_ids:
-        return []
-
-    # Query 1: latest WorkoutItem per exercise_id via ROW_NUMBER window.
-    ranked = (
-        select(
-            WorkoutItem.id.label("item_id"),
-            WorkoutItem.exercise_id.label("exercise_id"),
-            WorkoutItem.prescription_json.label("prescription_json"),
-            func.row_number()
-            .over(
-                partition_by=WorkoutItem.exercise_id,
-                order_by=Workout.completed_at.desc(),
-            )
-            .label("rn"),
-        )
-        .join(Block, Block.id == WorkoutItem.block_id)
-        .join(Workout, Workout.id == Block.workout_id)
-        .where(Workout.user_id == user_id)
-        .where(Workout.status == "completed")
-        .where(WorkoutItem.exercise_id.in_(exercise_ids))
-        .subquery()
-    )
-    latest = list(db.execute(select(ranked).where(ranked.c.rn == 1)).all())
-    if not latest:
-        return []
-
-    item_to_exercise = {row.item_id: row.exercise_id for row in latest}
-    item_to_prescription = {row.item_id: row.prescription_json for row in latest}
-
-    # Query 2: all set_logs for those items in one shot.
-    set_logs = (
+    """Build last-performed chips from primitive slot-result logs only."""
+    rows = (
         db.execute(
-            select(SetLog)
-            .where(SetLog.workout_item_id.in_(item_to_exercise.keys()))
-            .order_by(SetLog.workout_item_id, SetLog.set_index)
+            select(PrimitiveSetLog)
+            .join(Workout, Workout.id == PrimitiveSetLog.workout_id)
+            .where(Workout.user_id == user_id)
+            .where(Workout.status == "completed")
+            .where(PrimitiveSetLog.role == "slot")
+            .order_by(
+                Workout.completed_at.desc(),
+                PrimitiveSetLog.completed_at.desc(),
+            )
         )
         .scalars()
         .all()
     )
-
-    logs_by_item: dict[str, list[SetLog]] = {}
-    for log in set_logs:
-        logs_by_item.setdefault(log.workout_item_id, []).append(log)
-
+    latest_workout_by_exercise: dict[str, str] = {}
+    logs_by_exercise: dict[str, list[PrimitiveSetLog]] = {}
+    for row in rows:
+        exercise_id = row.performed_exercise_id or row.planned_exercise_id
+        if exercise_id is None:
+            continue
+        latest_workout_id = latest_workout_by_exercise.setdefault(exercise_id, row.workout_id)
+        if row.workout_id != latest_workout_id:
+            continue
+        logs_by_exercise.setdefault(exercise_id, []).append(row)
     return [
         ExerciseLastPerformed(
             exercise_id=exercise_id,
-            last_set_logs=[SetLogRead.model_validate(log) for log in logs_by_item.get(item_id, [])],
-            prescription_json=item_to_prescription[item_id],
+            last_set_logs=[
+                PrimitiveSetLogRead.model_validate(log)
+                for log in sorted(
+                    logs,
+                    key=lambda log: (
+                        log.block_repeat_index,
+                        log.set_repeat_index,
+                        log.set_index,
+                        log.completed_at,
+                    ),
+                )[:10]
+            ],
         )
-        for item_id, exercise_id in item_to_exercise.items()
+        for exercise_id, logs in logs_by_exercise.items()
     ]
 
 
-@router.post("/results", response_model=dict)
-def sync_results(payload: SyncResultsIn, db: DbSession, user_id: CurrentUserId) -> dict:
+@router.post("/results", response_model=SyncResultsOut)
+def sync_results(payload: SyncResultsIn, db: DbSession, user_id: CurrentUserId) -> SyncResultsOut:
     """App pushes completed workout data. Idempotent — UUIDs prevent duplicates.
 
     Every set_log and status update is scoped to the authenticated user. Set logs
     for workout_items belonging to another user are rejected; status updates for
     another user's workouts 404.
     """
-    # Resolve every referenced workout_item's owner in a single query instead of
-    # one `db.get(WorkoutItem, ...)` per set_log (which also lazy-loaded
-    # Block.workout per row). For a 50-set_log payload that's 50+ extra
-    # roundtrips; with this map it stays at one SELECT regardless of batch size.
-    referenced_item_ids = {log.workout_item_id for log in payload.set_logs}
-    if referenced_item_ids:
-        ownership_rows = db.execute(
-            select(WorkoutItem.id, Workout.user_id)
-            .join(Block, Block.id == WorkoutItem.block_id)
-            .join(Workout, Workout.id == Block.workout_id)
-            .where(WorkoutItem.id.in_(referenced_item_ids))
-        ).all()
-        item_owner_by_id: dict[str, str] = {row[0]: row[1] for row in ownership_rows}
-    else:
-        item_owner_by_id = {}
-
-    for log in payload.set_logs:
-        owner = item_owner_by_id.get(log.workout_item_id)
-        if owner is None or owner != user_id:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"workout_item {log.workout_item_id} not found",
-            )
-        _upsert_set_log(db, log)
-
     _upsert_primitive_set_logs(db, payload.primitive_set_logs, user_id)
 
     for update in payload.status_updates:
@@ -244,32 +169,79 @@ def sync_results(payload: SyncResultsIn, db: DbSession, user_id: CurrentUserId) 
         _reset_workout(db, reset, user_id)
 
     db.commit()
-    return {
-        "set_logs_received": len(payload.set_logs),
-        "primitive_set_logs_received": len(payload.primitive_set_logs),
-        "status_updates_received": len(payload.status_updates),
-        "workout_resets_received": len(payload.workout_resets),
-    }
+    return SyncResultsOut(
+        primitive_set_logs_received=len(payload.primitive_set_logs),
+        status_updates_received=len(payload.status_updates),
+        workout_resets_received=len(payload.workout_resets),
+    )
 
 
 def _upsert_primitive_set_logs(db: DbSession, logs: list[PrimitiveSetLogIn], user_id: str) -> None:
     referenced_workout_ids = {log.workout_id for log in logs}
     if referenced_workout_ids:
-        owner_rows = db.execute(
-            select(Workout.id, Workout.user_id).where(Workout.id.in_(referenced_workout_ids))
-        ).all()
-        owner_by_workout: dict[str, str] = {row[0]: row[1] for row in owner_rows}
+        workouts = (
+            db.execute(select(Workout).where(Workout.id.in_(referenced_workout_ids)))
+            .scalars()
+            .all()
+        )
+        workout_by_id: dict[str, Workout] = {workout.id: workout for workout in workouts}
     else:
-        owner_by_workout = {}
+        workout_by_id = {}
 
     for log in logs:
-        owner = owner_by_workout.get(log.workout_id)
-        if owner is None or owner != user_id:
+        workout = workout_by_id.get(log.workout_id)
+        if workout is None or workout.user_id != user_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Workout {log.workout_id} not found",
             )
+        _validate_primitive_log_references(log, workout)
         _upsert_primitive_set_log(db, log)
+
+
+def _validate_primitive_log_references(log: PrimitiveSetLogIn, workout: Workout) -> None:
+    block_ids: set[str] = set()
+    set_to_block: dict[str, str] = {}
+    slot_to_set: dict[str, str] = {}
+    slot_to_exercise: dict[str, str] = {}
+    for block in workout.primitive_blocks:
+        block_id = block["id"]
+        block_ids.add(block_id)
+        for primitive_set in block.get("sets", []):
+            set_id = primitive_set["id"]
+            set_to_block[set_id] = block_id
+            for slot in primitive_set.get("slots", []):
+                slot_id = slot["id"]
+                slot_to_set[slot_id] = set_id
+                slot_to_exercise[slot_id] = slot["exercise_id"]
+
+    if log.role == "block_result":
+        if log.block_id not in block_ids:
+            _raise_invalid_primitive_log("block_id", log)
+        return
+
+    if log.set_id is None or set_to_block.get(log.set_id) != log.block_id:
+        _raise_invalid_primitive_log("set_id", log)
+
+    if log.role == "set_result":
+        return
+
+    if log.slot_id is None or slot_to_set.get(log.slot_id) != log.set_id:
+        _raise_invalid_primitive_log("slot_id", log)
+    if (
+        log.planned_exercise_id is not None
+        and slot_to_exercise.get(log.slot_id) != log.planned_exercise_id
+    ):
+        _raise_invalid_primitive_log("planned_exercise_id", log)
+
+
+def _raise_invalid_primitive_log(field: str, log: PrimitiveSetLogIn) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        detail=(
+            f"primitive log {log.id} has {field} outside workout {log.workout_id}'s primitive tree"
+        ),
+    )
 
 
 def _reset_workout(db: DbSession, payload: WorkoutReset, user_id: str) -> None:
@@ -280,21 +252,6 @@ def _reset_workout(db: DbSession, payload: WorkoutReset, user_id: str) -> None:
             detail=f"Workout {payload.workout_id} not found",
         )
 
-    item_ids = (
-        db.execute(
-            select(WorkoutItem.id)
-            .join(Block, Block.id == WorkoutItem.block_id)
-            .where(Block.workout_id == workout.id)
-        )
-        .scalars()
-        .all()
-    )
-    if item_ids:
-        logs = (
-            db.execute(select(SetLog).where(SetLog.workout_item_id.in_(item_ids))).scalars().all()
-        )
-        for log in logs:
-            db.delete(log)
     primitive_logs = (
         db.execute(select(PrimitiveSetLog).where(PrimitiveSetLog.workout_id == workout.id))
         .scalars()
@@ -309,57 +266,6 @@ def _reset_workout(db: DbSession, payload: WorkoutReset, user_id: str) -> None:
     # value other than status/completed_at changed under SQLAlchemy's
     # onupdate machinery.
     workout.updated_at = datetime.now(UTC)
-
-
-def _upsert_set_log(db: DbSession, payload: SetLogIn) -> SetLog:
-    row = db.get(SetLog, payload.id)
-    if row is None:
-        row = SetLog(
-            id=payload.id,
-            workout_item_id=payload.workout_item_id,
-            performed_exercise_id=payload.performed_exercise_id,
-            set_index=payload.set_index,
-            reps=payload.reps,
-            weight=payload.weight,
-            weight_unit=payload.weight_unit,
-            duration_sec=payload.duration_sec,
-            distance_m=payload.distance_m,
-            rir=payload.rir,
-            is_warmup=payload.is_warmup,
-            skipped=payload.skipped,
-            side=payload.side,
-            started_at=payload.started_at,
-            completed_at=payload.completed_at,
-            hr_avg_bpm=payload.hr_avg_bpm,
-            hr_max_bpm=payload.hr_max_bpm,
-            cadence_avg_spm=payload.cadence_avg_spm,
-            motion_samples_ref=payload.motion_samples_ref,
-            notes=payload.notes,
-        )
-        db.add(row)
-    else:
-        for field in (
-            "performed_exercise_id",
-            "set_index",
-            "reps",
-            "weight",
-            "weight_unit",
-            "duration_sec",
-            "distance_m",
-            "rir",
-            "is_warmup",
-            "skipped",
-            "side",
-            "started_at",
-            "completed_at",
-            "hr_avg_bpm",
-            "hr_max_bpm",
-            "cadence_avg_spm",
-            "motion_samples_ref",
-            "notes",
-        ):
-            setattr(row, field, getattr(payload, field))
-    return row
 
 
 def _upsert_primitive_set_log(db: DbSession, payload: PrimitiveSetLogIn) -> PrimitiveSetLog:

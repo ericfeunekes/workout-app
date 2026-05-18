@@ -105,8 +105,7 @@ gap in the owning docs. Git history is the archive.
 | `APPINTENT-GAP-002` | `docs/features/app-intents.md` | Handoff routes for Today, Active, and History are not specified in app routing or debug launch terms. | `requirements` |
 | `APPINTENT-GAP-003` | `docs/features/app-intents.md` | Mutation intents are deferred until offline, auth, persistence, telemetry, and confirmation semantics are defined. | `requirements` |
 | `APPINTENT-GAP-004` | `docs/features/app-intents.md` | App entity identity for workouts/sessions is not specified. | `requirements` |
-| `WATCHKIT-GAP-001` | `docs/features/watch-workoutkit-handoff.md` | Final per-archetype WorkoutKit mapping table is missing. | `spike` |
-| `WATCHKIT-GAP-002` | `docs/features/watch-workoutkit-handoff.md` | Real-device open/schedule proof is missing. | `spike` |
+| `WATCHKIT-GAP-002` | `docs/features/watch-workoutkit-handoff.md` | Local watch simulator build/install/launch and iOS-to-Watch custom content push proof exist; real-device WorkoutKit open/schedule proof is missing. | `spike` |
 | `WATCHKIT-GAP-003` | `docs/features/watch-workoutkit-handoff.md` | Completion reconciliation identity path is unsettled. | `spike` |
 | `WATCHCUSTOM-GAP-001` | `docs/features/watch-primary-execution.md` | Custom Watch protocol/platform identity, stale-action rejection, and phone inbox need future proof if custom Watch is promoted. | `spike` |
 | `WATCHCUSTOM-GAP-002` | `docs/features/watch-primary-execution.md` | Watch-primary offline event replay and reconnect idempotency are unimplemented. | `implementation` |
@@ -118,13 +117,13 @@ gap in the owning docs. Git history is the archive.
 | `MOD-GAP-002` | `docs/modifier-equipment.md` | Canonical examples across strength, carries, substitutions, unilateral variants, and labels are incomplete. | `requirements` |
 | `MOD-GAP-003` | `docs/modifier-equipment.md` | Cross-variant history aggregation is undefined. | `decision` |
 | `MOD-GAP-004` | `docs/modifier-equipment.md` | No schema change is justified until a concrete query/sync/UI behavior requires it. | `decision` |
-| `PDM-GAP-001` | `docs/specs/primitives-data-model.md` | Primitive data model is accepted but not implemented. | `implementation` |
 | `PDM-GAP-002` | `docs/specs/primitives-data-model/authoring-shape.md` | Authoring-shape open questions need disposition before code relies on them. | `decision` |
 | `PDM-GAP-003` | `docs/specs/primitives-data-model/log-shape.md` | Log/result roles must stay query-safe without competing aggregates from slot rows. | `proof` |
 | `PDM-GAP-004` | `docs/specs/primitives-data-model/runtime-resolution.md` | Runtime resolution must preserve offline execution and seed-time parameter pinning. | `proof` |
-| `PDM-GAP-005` | `docs/specs/primitives-data-model/cutover.md` | Completed local workout logs are the preservation constraint during cutover. | `proof` |
+| `PDM-GAP-005` | `docs/specs/primitives-data-model/cutover.md` | Primitive cutover reset semantics must prove old QA workout/result rows are removed while catalog/profile/config data survive. | `proof` |
 | `PDM-GAP-006` | `docs/specs/primitives-data-model/log-shape.md` | Partial-result controls and completion summaries still collapse non-rep primitive metrics such as distance, duration, and carried load. | `implementation` |
 | `PDM-GAP-007` | `docs/specs/primitives-data-model.md` | Primitive composition semantics are not centralized across seeding, projection, result entry, completion summaries, correction, persistence grouping, sync payloads, and server validation. Active cluster narrows this to CoreSession app-runtime semantics plus server legality parity; residual scope must name History correction, correction UI outside execution completion, and any untouched sync/persistence consumers. | `implementation` |
+| `PDM-GAP-008` | `docs/specs/primitives-data-model.md`, `docs/specs/primitives-data-model/authoring-shape.md`, `docs/specs/primitives-data-model/runtime-resolution.md` | Primitive composition legality is not fully enforced beyond timing/traversal cells; timer-only workouts, timer-only blocks, unsupported zero-slot sets, and aggregate result targets on no-work scopes must be rejected. | `implementation` |
 
 ## Maintenance
 

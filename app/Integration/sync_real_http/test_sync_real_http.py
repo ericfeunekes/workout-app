@@ -116,7 +116,6 @@ def seed_server(base_url: str) -> None:
             "scheduled_date": "2026-05-18",
             "status": "planned",
             "source": "claude",
-            "blocks": [],
             "primitive_blocks": [primitive_block()],
         },
     )

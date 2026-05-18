@@ -354,7 +354,7 @@ final class TodayLoaderTests: XCTestCase {
         }
     }
 
-    func testLoadPlanFailsWhenAnyPrimitivePlanIsInvalid() async throws {
+    func testLoadPlanContainsInvalidPrimitivePlanForNonSelectedWorkout() async throws {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let selected = makeWorkout(name: "Selected", scheduledDate: now)
         let nonSelected = makeWorkout(name: "Non selected", scheduledDate: now.addingTimeInterval(3600))
@@ -385,15 +385,14 @@ final class TodayLoaderTests: XCTestCase {
         )
         let loader = TodayLoader(cache: fake, clock: { now })
 
-        do {
-            _ = try await loader.loadPlan()
-            XCTFail("loadPlan must surface invalid non-selected primitive workouts")
-        } catch {
-            XCTAssertTrue(error is PrimitiveSemanticError)
-        }
+        let plan = try await loader.loadPlan()
+        let context = try XCTUnwrap(plan?.workouts.first { $0.workout.id == nonSelected.id })
+
+        XCTAssertEqual(context.primitiveWorkout, invalidPrimitive)
+        XCTAssertNil(context.primitiveExecutionPlan)
     }
 
-    func testLoadPlanFailsWhenUserParameterReadFails() async throws {
+    func testLoadPlanSurfacesUserParameterReadFailureForSelectedWorkout() async throws {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let workout = makeWorkout(name: "Selected", scheduledDate: now)
         let block = makeBlock(workoutID: workout.id, name: "Selected block")
@@ -431,9 +430,9 @@ final class TodayLoaderTests: XCTestCase {
 
         do {
             _ = try await loader.loadPlan()
-            XCTFail("loadPlan must surface user-parameter storage read failures")
+            XCTFail("loadPlan must keep selected primitive execution aligned with start")
         } catch {
-            XCTAssertTrue(error is TestError)
+            XCTAssertEqual(error as? TestError, .userParameters)
         }
     }
 
@@ -596,6 +595,6 @@ private final class FakeCache: WorkoutCache, @unchecked Sendable {
     func clear() async throws {}
 }
 
-private enum TestError: Error {
+private enum TestError: Error, Equatable {
     case userParameters
 }

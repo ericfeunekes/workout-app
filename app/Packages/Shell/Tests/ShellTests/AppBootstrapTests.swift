@@ -55,8 +55,8 @@ final class AppBootstrapTests: XCTestCase {
         XCTAssertEqual(todayVM.exercises.count, 2)
         let executionVM = try XCTUnwrap(executionHolder.vm)
         XCTAssertEqual(executionVM.context.workout.name, "Push A")
-        XCTAssertEqual(executionVM.context.blocks.count, 1)
-        XCTAssertEqual(executionVM.context.itemsByBlock.first?.count, 2)
+        XCTAssertEqual(executionVM.context.primitiveExecutionPlan?.blocks.count, 1)
+        XCTAssertEqual(executionVM.context.primitiveExecutionPlan?.blocks.first?.sets.count, 2)
 
         // lastSyncAt must be recorded for the next launch's `since`.
         let stored = await factory.syncMetadataStore.getLastSyncAt()
@@ -685,10 +685,10 @@ final class AppBootstrapTests: XCTestCase {
 
     // MARK: - Push path wired through the bootstrap
 
-    /// The wired ExecutionViewModel must route a logged set into the
+    /// The wired ExecutionViewModel must route a logged primitive set into the
     /// shared PushQueueStore via its injected enqueuer. We observe the
     /// store directly — a single enqueue per logSet, with the
-    /// corresponding SetLog shape.
+    /// corresponding PrimitiveSetLog shape.
     func testWiredExecutionViewModelEnqueuesSetLogOnLog() async throws {
         let factory = try PersistenceFactory.makeInMemory(
             tokenServiceName: uniqueService()
@@ -720,12 +720,13 @@ final class AppBootstrapTests: XCTestCase {
         let pending = try await factory.pushQueueStore.peek(max: 8)
         XCTAssertEqual(pending.count, 1)
         let item = try XCTUnwrap(pending.first)
-        guard case .setLogs(let logs) = item.payload else {
-            return XCTFail("expected setLogs payload, got \(item.payload)")
+        guard case .primitiveSetLogs(let logs) = item.payload else {
+            return XCTFail("expected primitiveSetLogs payload, got \(item.payload)")
         }
         XCTAssertEqual(logs.count, 1)
         let log = try XCTUnwrap(logs.first)
-        XCTAssertEqual(log.setIndex, 1)
+        XCTAssertEqual(log.role, .slot)
+        XCTAssertEqual(log.setIndex, 0)
         XCTAssertEqual(log.reps, 5)
         XCTAssertEqual(log.rir, 2)
         XCTAssertEqual(log.weight, 102.5)
@@ -801,14 +802,14 @@ final class AppBootstrapTests: XCTestCase {
             try? JSONDecoder.workoutDB().decode(SyncResultsPayload.self, from: body)
         }
         XCTAssertEqual(
-            syncResultsPayloads.filter { $0.setLogs.isEmpty && !$0.statusUpdates.isEmpty }.count,
+            syncResultsPayloads.filter { $0.primitiveSetLogs.isEmpty && !$0.statusUpdates.isEmpty }.count,
             0,
             "Save & Done must not emit a second standalone status-only results push"
         )
         let completionPayload = try XCTUnwrap(
-            syncResultsPayloads.first { !$0.setLogs.isEmpty && !$0.statusUpdates.isEmpty }
+            syncResultsPayloads.first { !$0.primitiveSetLogs.isEmpty && !$0.statusUpdates.isEmpty }
         )
-        XCTAssertEqual(completionPayload.setLogs.count, 7)
+        XCTAssertEqual(completionPayload.primitiveSetLogs.count, 7)
         XCTAssertEqual(completionPayload.statusUpdates.count, 1)
         XCTAssertEqual(
             completionPayload.statusUpdates[0].workoutId,
@@ -836,7 +837,7 @@ final class AppBootstrapTests: XCTestCase {
         let workoutID = fixture.domainWorkout.id.uuidString.lowercased()
         XCTAssertTrue(payloads.allSatisfy { $0["workout_id"] as? String == workoutID })
         XCTAssertTrue(payloads.allSatisfy { $0["set_log_count"] as? Int == 7 })
-        XCTAssertTrue(payloads.allSatisfy { $0["primitive_set_log_count"] as? Int == 0 })
+        XCTAssertTrue(payloads.allSatisfy { $0["primitive_set_log_count"] as? Int == 7 })
         XCTAssertTrue(payloads.allSatisfy { $0["has_note"] as? Bool == false })
         XCTAssertEqual(payloads[1]["publisher_installed"] as? Bool, true)
     }
@@ -1105,8 +1106,8 @@ final class AppBootstrapTests: XCTestCase {
             "dropping it is the qa-030 regression hazard"
         )
         XCTAssertNotNil(
-            vmB.push.onSetLogged,
-            "rebuilt VM must retain onSetLogged (sanity: the whole hooks " +
+            vmB.push.onPrimitiveSetLogged,
+            "rebuilt VM must retain onPrimitiveSetLogged (sanity: the whole hooks " +
             "bundle must survive the rebuild, not just one field)"
         )
         XCTAssertNotNil(

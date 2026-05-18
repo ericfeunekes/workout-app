@@ -1,494 +1,123 @@
-"""/api/sync — pull (server → app) and results (app → server).
-
-The authenticated user_id is the conftest's test_user_id; tests seed workouts
-owned by that user and call endpoints without passing user_id in the request.
-"""
+"""/api/sync primitive-only pull/results tests."""
 
 from datetime import datetime
 
 import pytest
+from fastapi.exceptions import ResponseValidationError
 from pydantic import ValidationError
 from sqlalchemy.orm import Session
-from workoutdb_server.models import (
-    AppUser,
-    Block,
-    Exercise,
-    PrimitiveSetLog,
-    SetLog,
-    UserParameter,
-    Workout,
-    WorkoutItem,
-)
+from workoutdb_server.models import AppUser, Exercise, PrimitiveSetLog, UserParameter, Workout
 
-# Canonical test UUIDs. Per docs/specs/v2-architecture.md, all entity ids are UUIDs.
 _BACK_SQUAT = "e0000001-0000-4000-8000-000000000001"
-_FRONT_SQUAT = "e0000002-0000-4000-8000-000000000002"
-_OHP = "e0000004-0000-4000-8000-000000000004"
+_PULLUP = "e0000002-0000-4000-8000-000000000002"
 _OTHER_USER = "e0000009-0000-4000-8000-000000000009"
-_NONEXISTENT_WORKOUT = "00000000-0000-4000-8000-000000000000"
 
 
-def _seed_completed_workout(engine, user_id: str) -> tuple[str, str]:
-    """Returns (exercise_id, workout_item_id). `user_id` is the auth'd user."""
+def _seed_exercise(engine, exercise_id: str = _BACK_SQUAT, name: str = "Back Squat") -> str:
     with Session(engine) as session:
-        exercise = Exercise(id=_BACK_SQUAT, name="Back Squat")
-        session.add(exercise)
-        session.flush()
-
-        workout = Workout(
-            user_id=user_id,
-            name="Past",
-            status="completed",
-            source="claude",
-            completed_at=datetime(2026, 4, 10, 7),
-        )
-        session.add(workout)
-        session.flush()
-
-        block = Block(
-            workout_id=workout.id,
-            position=0,
-            timing_mode="straight_sets",
-            timing_config_json="{}",
-        )
-        session.add(block)
-        session.flush()
-
-        item = WorkoutItem(
-            block_id=block.id,
-            position=0,
-            exercise_id=exercise.id,
-            prescription_json='{"sets": 5, "reps": 5, "load_kg": 100}',
-        )
-        session.add(item)
-        session.flush()
-
-        session.add(
-            SetLog(
-                workout_item_id=item.id,
-                set_index=1,
-                reps=5,
-                weight=100.0,
-                weight_unit="kg",
-                completed_at=datetime(2026, 4, 10, 7, 15),
-            )
-        )
-        session.add(
-            UserParameter(
-                user_id=user_id,
-                key="bodyweight_kg",
-                value="82",
-                updated_at=datetime(2026, 4, 1),
-                source="claude",
-            )
-        )
+        session.add(Exercise(id=exercise_id, name=name))
         session.commit()
-        return exercise.id, item.id
+    return exercise_id
 
 
-def _create_future_workout(client, exercise_id: str) -> str:
-    """A planned workout referencing the same exercise, so last_performed fires."""
-    payload = {
-        "name": "Future",
+def _primitive_workout_payload(
+    exercise_id: str,
+    *,
+    workout_id: str = "10000000-0000-4000-8000-000000000001",
+    block_id: str = "20000000-0000-4000-8000-000000000001",
+    set_id: str = "30000000-0000-4000-8000-000000000001",
+    slot_id: str = "40000000-0000-4000-8000-000000000001",
+    status: str = "planned",
+) -> dict:
+    return {
+        "id": workout_id,
+        "name": "Future primitive",
         "scheduled_date": "2026-04-20",
-        "status": "planned",
+        "status": status,
         "source": "claude",
-        "blocks": [
+        "primitive_blocks": [
             {
-                "position": 0,
-                "timing_mode": "straight_sets",
-                "timing_config_json": "{}",
-                "workout_items": [
+                "id": block_id,
+                "sets": [
                     {
-                        "position": 0,
-                        "exercise_id": exercise_id,
-                        "prescription_json": '{"sets": 5, "reps": 5, "load_kg": 105}',
+                        "id": set_id,
+                        "timing": {"mode": "set_bounded"},
+                        "slots": [
+                            {
+                                "id": slot_id,
+                                "exercise_id": exercise_id,
+                                "work_target": [
+                                    {
+                                        "metric": "reps",
+                                        "value_form": "single",
+                                        "value": 5,
+                                        "role": "completion",
+                                    }
+                                ],
+                            }
+                        ],
                     }
                 ],
             }
         ],
     }
-    response = client.post("/api/workouts", json=payload)
-    assert response.status_code == 200
-    return response.json()["id"]
 
 
-def test_pull_returns_workouts_and_last_performed(client, test_engine, test_user_id) -> None:
-    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
-    _create_future_workout(client, exercise_id)
-    one_rm_key = f"one_rep_max_{exercise_id}_kg"
-    client.post(
-        "/api/user-parameters",
-        json=[{"key": one_rm_key, "value": "150", "source": "claude"}],
-    )
-
-    response = client.get("/api/sync/pull")
-    assert response.status_code == 200
-    body = response.json()
-
-    assert len(body["workouts"]) == 2  # completed + future
-    assert len(body["exercises"]) == 1
-    assert body["exercises"][0]["id"] == _BACK_SQUAT
-    params_by_key = {p["key"]: p["value"] for p in body["user_parameters"]}
-    assert params_by_key["bodyweight_kg"] == "82"
-    assert params_by_key[one_rm_key] == "150"
-
-    # last_performed contains the completed session's logs
-    assert len(body["last_performed"]) == 1
-    last = body["last_performed"][0]
-    assert last["exercise_id"] == _BACK_SQUAT
-    assert len(last["last_set_logs"]) == 1
-    assert last["last_set_logs"][0]["weight"] == 100.0
-
-
-def test_pull_rejects_invalid_persisted_primitive_blocks(client, test_engine, test_user_id) -> None:
-    with Session(test_engine) as session:
-        workout = Workout(
-            user_id=test_user_id,
-            name="Persisted primitive drift",
-            scheduled_date="2026-04-20",
-            status="planned",
-            source="claude",
-            primitive_blocks_json=(
-                '[{"id":"20000000-0000-4000-8000-000000000021",'
-                '"sets":[{"id":"30000000-0000-4000-8000-000000000021",'
-                '"timing":{"mode":"future_mode"},'
-                '"slots":[{"load":{"unit":"bodyweight","value":null}}]}]}]'
-            ),
-        )
-        session.add(workout)
-        session.commit()
-
-    with pytest.raises(ValidationError):
-        client.get("/api/sync/pull")
-
-
-def test_push_set_logs_and_status(client, test_engine, test_user_id) -> None:
-    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
-    future_id = _create_future_workout(client, exercise_id)
-
-    # Get the workout_item_id from the future workout
-    detail = client.get(f"/api/workouts/{future_id}").json()
-    item_id = detail["blocks"][0]["workout_items"][0]["id"]
-
+def _create_primitive_workout(client, exercise_id: str, **kwargs) -> dict:
     response = client.post(
-        "/api/sync/results",
-        json={
-            "set_logs": [
-                {
-                    "id": "88888888-8888-8888-8888-888888888888",
-                    "workout_item_id": item_id,
-                    "set_index": 1,
-                    "reps": 5,
-                    "weight": 105.0,
-                    "weight_unit": "kg",
-                    "rir": 2,
-                    "skipped": True,
-                    "side": "left",
-                    "completed_at": "2026-04-20T07:30:00Z",
-                }
-            ],
-            "status_updates": [
-                {
-                    "workout_id": future_id,
-                    "status": "completed",
-                    "completed_at": "2026-04-20T08:00:00Z",
-                }
-            ],
-        },
+        "/api/workouts",
+        json=_primitive_workout_payload(exercise_id, **kwargs),
     )
-    assert response.status_code == 200
-    body = response.json()
-    assert body == {
-        "set_logs_received": 1,
-        "primitive_set_logs_received": 0,
-        "status_updates_received": 1,
-        "workout_resets_received": 0,
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+def _primitive_slot_log(
+    *,
+    workout_id: str = "10000000-0000-4000-8000-000000000001",
+    log_id: str = "88888888-8888-4888-8888-888888888888",
+    exercise_id: str = _BACK_SQUAT,
+    block_id: str = "20000000-0000-4000-8000-000000000001",
+    set_id: str = "30000000-0000-4000-8000-000000000001",
+    slot_id: str = "40000000-0000-4000-8000-000000000001",
+    reps: int | None = 5,
+    weight: float | None = 100,
+    completed_at: str = "2026-04-20T07:30:00Z",
+) -> dict:
+    return {
+        "id": log_id,
+        "role": "slot",
+        "slot_id": slot_id,
+        "set_id": set_id,
+        "block_id": block_id,
+        "workout_id": workout_id,
+        "planned_exercise_id": exercise_id,
+        "set_index": 0,
+        "reps": reps,
+        "weight": weight,
+        "weight_unit": "kg" if weight is not None else None,
+        "completed_at": completed_at,
     }
 
-    # Verify
-    detail = client.get(f"/api/workouts/{future_id}").json()
-    assert detail["status"] == "completed"
 
-    with Session(test_engine) as session:
-        row = session.get(SetLog, "88888888-8888-8888-8888-888888888888")
-        assert row is not None
-        assert row.skipped is True
-        assert row.side == "left"
-
-    pulled = client.get("/api/sync/pull").json()
-    last = next(lp for lp in pulled["last_performed"] if lp["exercise_id"] == exercise_id)
-    pushed_log = next(
-        log for log in last["last_set_logs"] if log["id"] == "88888888-8888-8888-8888-888888888888"
-    )
-    assert pushed_log["skipped"] is True
-    assert pushed_log["side"] == "left"
-
-
-def test_workout_reset_deletes_logs_and_replans_workout(client, test_engine, test_user_id) -> None:
-    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
-    future_id = _create_future_workout(client, exercise_id)
-    item_id = client.get(f"/api/workouts/{future_id}").json()["blocks"][0]["workout_items"][0]["id"]
-
-    logged = client.post(
-        "/api/sync/results",
-        json={
-            "set_logs": [
-                {
-                    "id": "88888888-8888-8888-8888-888888888888",
-                    "workout_item_id": item_id,
-                    "set_index": 1,
-                    "reps": 5,
-                    "weight": 105.0,
-                    "weight_unit": "kg",
-                    "rir": 2,
-                    "completed_at": "2026-04-20T07:30:00Z",
-                }
-            ],
-            "status_updates": [
-                {
-                    "workout_id": future_id,
-                    "status": "completed",
-                    "completed_at": "2026-04-20T08:00:00Z",
-                    "notes": "accidental log",
-                }
-            ],
-        },
-    )
-    assert logged.status_code == 200
-
-    reset = client.post(
-        "/api/sync/results",
-        json={
-            "set_logs": [],
-            "status_updates": [],
-            "workout_resets": [{"workout_id": future_id}],
-        },
-    )
-    assert reset.status_code == 200
-    assert reset.json() == {
-        "set_logs_received": 0,
-        "primitive_set_logs_received": 0,
-        "status_updates_received": 0,
-        "workout_resets_received": 1,
-    }
-
-    detail = client.get(f"/api/workouts/{future_id}").json()
-    assert detail["status"] == "planned"
-    assert detail["completed_at"] is None
-    assert detail["blocks"][0]["workout_items"][0].get("set_logs") is None
-
-    with Session(test_engine) as session:
-        assert session.get(SetLog, "88888888-8888-8888-8888-888888888888") is None
-
-
-def test_push_accepts_primitive_set_result_shape(client, test_engine, test_user_id) -> None:
-    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
-    workout_id = _create_future_workout(client, exercise_id)
-    response = client.post(
-        "/api/sync/results",
-        json={
-            "set_logs": [],
-            "primitive_set_logs": [
-                {
-                    "id": "99999999-9999-4999-8999-999999999999",
-                    "role": "set_result",
-                    "slot_id": None,
-                    "set_id": "30000000-0000-4000-8000-000000000002",
-                    "block_id": "20000000-0000-4000-8000-000000000002",
-                    "workout_id": workout_id,
-                    "set_index": 0,
-                    "set_repeat_index": 0,
-                    "block_repeat_index": 0,
-                    "rounds": 7,
-                    "duration_sec": 300,
-                    "completed_at": "2026-04-20T07:30:00Z",
-                }
-            ],
-            "status_updates": [],
-            "workout_resets": [],
-        },
-    )
-    assert response.status_code == 200
-    assert response.json()["primitive_set_logs_received"] == 1
-
-    with Session(test_engine) as session:
-        row = session.get(PrimitiveSetLog, "99999999-9999-4999-8999-999999999999")
-        assert row is not None
-        assert row.workout_id == workout_id
-        assert row.rounds == 7
-
-
-def test_push_accepts_primitive_slot_distance_and_carried_load(
+def test_pull_returns_primitive_workouts_user_parameters_and_last_performed(
     client, test_engine, test_user_id
 ) -> None:
-    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
-    workout_id = _create_future_workout(client, exercise_id)
-    response = client.post(
-        "/api/sync/results",
-        json={
-            "primitive_set_logs": [
-                {
-                    "id": "99999999-9999-4999-8999-999999999997",
-                    "role": "slot",
-                    "slot_id": "40000000-0000-4000-8000-000000000002",
-                    "set_id": "30000000-0000-4000-8000-000000000002",
-                    "block_id": "20000000-0000-4000-8000-000000000002",
-                    "workout_id": workout_id,
-                    "planned_exercise_id": exercise_id,
-                    "set_index": 0,
-                    "set_repeat_index": 0,
-                    "block_repeat_index": 0,
-                    "weight": 27.2155422,
-                    "weight_unit": "kg",
-                    "duration_sec": 360,
-                    "distance_m": 1000,
-                    "completed_at": "2026-04-20T07:30:00Z",
-                }
-            ],
-            "status_updates": [],
-            "workout_resets": [],
-        },
-    )
-    assert response.status_code == 200
-    assert response.json()["primitive_set_logs_received"] == 1
-
-    with Session(test_engine) as session:
-        row = session.get(PrimitiveSetLog, "99999999-9999-4999-8999-999999999997")
-        assert row is not None
-        assert row.workout_id == workout_id
-        assert row.distance_m == 1000
-        assert row.duration_sec == 360
-        assert row.weight == 27.2155422
-
-
-def test_push_rejects_malformed_primitive_log_role_scope(client, test_engine, test_user_id) -> None:
-    response = client.post(
-        "/api/sync/results",
-        json={
-            "primitive_set_logs": [
-                {
-                    "id": "99999999-9999-4999-8999-999999999998",
-                    "role": "set_result",
-                    "slot_id": "40000000-0000-4000-8000-000000000002",
-                    "set_id": "30000000-0000-4000-8000-000000000002",
-                    "block_id": "20000000-0000-4000-8000-000000000002",
-                    "set_index": 0,
-                    "completed_at": "2026-04-20T07:30:00Z",
-                }
-            ]
-        },
-    )
-    assert response.status_code == 422
-
-
-def test_workout_status_update_persists_notes(client, test_engine, test_user_id) -> None:
-    """Terminal status push must persist `notes` so the server is authoritative.
-
-    Regression: the iOS Complete screen's note used to land ONLY in the
-    local cache. The workout's `updated_at` still bumped (status flipped to
-    completed), so the next incremental sync_pull re-materialized the
-    Workout with the server's nil `notes` and DomainMapping overwrote the
-    cache's freshly-typed note. Fix: carry `notes` on WorkoutStatusUpdate
-    so the server stores it, which keeps the next pull aligned with what
-    the user typed.
-    """
-    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
-    future_id = _create_future_workout(client, exercise_id)
-
-    response = client.post(
-        "/api/sync/results",
-        json={
-            "set_logs": [],
-            "status_updates": [
-                {
-                    "workout_id": future_id,
-                    "status": "completed",
-                    "completed_at": "2026-04-20T08:00:00Z",
-                    "notes": "leg day PR!",
-                }
-            ],
-        },
-    )
-    assert response.status_code == 200
-
-    detail = client.get(f"/api/workouts/{future_id}").json()
-    assert detail["status"] == "completed"
-    assert detail["notes"] == "leg day PR!"
-
-    # A second pull of the same workout must still carry the note —
-    # previous bug was the pull overwriting the local cache's value.
-    pulled = client.get("/api/sync/pull").json()
-    pulled_workout = next(w for w in pulled["workouts"] if w["id"] == future_id)
-    assert pulled_workout["notes"] == "leg day PR!"
-
-
-def test_workout_status_update_none_notes_leaves_existing_alone(
-    client, test_engine, test_user_id
-) -> None:
-    """Status push without `notes` (or with `notes=null`) MUST NOT clobber
-    an existing server-side note. Non-terminal flips (e.g. `active`) pass
-    nil; those must be no-ops on the notes column.
-    """
-    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
-    future_id = _create_future_workout(client, exercise_id)
-
-    # First push: record a note via the completed push.
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(client, exercise_id)
     client.post(
         "/api/sync/results",
         json={
-            "set_logs": [],
+            "primitive_set_logs": [_primitive_slot_log()],
             "status_updates": [
                 {
-                    "workout_id": future_id,
+                    "workout_id": workout["id"],
                     "status": "completed",
                     "completed_at": "2026-04-20T08:00:00Z",
-                    "notes": "felt strong",
                 }
             ],
         },
     )
-    assert client.get(f"/api/workouts/{future_id}").json()["notes"] == "felt strong"
-
-    # Second push without `notes` in the body — server keeps the existing value.
-    response = client.post(
-        "/api/sync/results",
-        json={
-            "set_logs": [],
-            "status_updates": [
-                {
-                    "workout_id": future_id,
-                    "status": "completed",
-                    "completed_at": "2026-04-20T08:05:00Z",
-                }
-            ],
-        },
-    )
-    assert response.status_code == 200
-    assert client.get(f"/api/workouts/{future_id}").json()["notes"] == "felt strong"
-
-    # Explicit null behaves the same — "not provided" and "null" both mean
-    # "don't touch the existing value".
-    response = client.post(
-        "/api/sync/results",
-        json={
-            "set_logs": [],
-            "status_updates": [
-                {
-                    "workout_id": future_id,
-                    "status": "completed",
-                    "completed_at": "2026-04-20T08:06:00Z",
-                    "notes": None,
-                }
-            ],
-        },
-    )
-    assert response.status_code == 200
-    assert client.get(f"/api/workouts/{future_id}").json()["notes"] == "felt strong"
-
-
-def test_pull_since_skips_user_parameters_already_seen(client, test_engine, test_user_id) -> None:
-    """user_parameters sync must respect `since` — the app already has older rows."""
     with Session(test_engine) as session:
         session.add(
             UserParameter(
@@ -501,615 +130,413 @@ def test_pull_since_skips_user_parameters_already_seen(client, test_engine, test
         )
         session.commit()
 
-    # Initial pull returns the bodyweight row.
-    baseline = client.get("/api/sync/pull").json()["server_time"]
-
-    # Subsequent pull with since=baseline returns nothing new.
-    body = client.get(f"/api/sync/pull?since={baseline}").json()
-    assert body["user_parameters"] == []
-
-    # Claude pushes a new row for the same key — app pulls it next time.
-    client.post(
-        "/api/user-parameters",
-        json=[{"key": "bodyweight_kg", "value": "81", "source": "claude"}],
-    )
-    body = client.get(f"/api/sync/pull?since={baseline}").json()
-    assert len(body["user_parameters"]) == 1
-    assert body["user_parameters"][0]["value"] == "81"
-
-
-def test_pull_since_returns_workouts_edited_after_creation(client, test_engine) -> None:
-    """Regression: PUT /api/workouts/:id must bump updated_at so the app sees edits.
-
-    Before the updated_at column was added, sync filtered on created_at, which meant
-    Claude could edit a planned workout (e.g. change a load target) and the app would
-    never pull the change.
-    """
-    with Session(test_engine) as session:
-        session.add(Exercise(id=_BACK_SQUAT, name="Back Squat"))
-        session.commit()
-
-    payload = {
-        "name": "Draft",
-        "scheduled_date": "2026-04-20",
-        "status": "planned",
-        "source": "claude",
-        "blocks": [
-            {
-                "position": 0,
-                "timing_mode": "straight_sets",
-                "timing_config_json": "{}",
-                "workout_items": [
-                    {
-                        "position": 0,
-                        "exercise_id": _BACK_SQUAT,
-                        "prescription_json": '{"sets": 5, "reps": 5, "load_kg": 100}',
-                    }
-                ],
-            }
-        ],
-    }
-    created = client.post("/api/workouts", json=payload).json()
-    workout_id = created["id"]
-    created_at = created["created_at"]
-
-    # App pulls up through creation time, then the baseline moves to server_time.
-    baseline = client.get("/api/sync/pull").json()["server_time"]
-    assert client.get(f"/api/sync/pull?since={baseline}").json()["workouts"] == []
-
-    # Claude edits the workout — bumps load from 100 to 110.
-    put_payload = {
-        "blocks": [
-            {
-                "position": 0,
-                "timing_mode": "straight_sets",
-                "timing_config_json": "{}",
-                "workout_items": [
-                    {
-                        "position": 0,
-                        "exercise_id": _BACK_SQUAT,
-                        "prescription_json": '{"sets": 5, "reps": 5, "load_kg": 110}',
-                    }
-                ],
-            }
-        ]
-    }
-    edited = client.put(f"/api/workouts/{workout_id}", json=put_payload).json()
-    assert edited["updated_at"] > created_at
-
-    # App re-pulls with the same baseline and must see the edit.
-    body = client.get(f"/api/sync/pull?since={baseline}").json()
-    assert len(body["workouts"]) == 1
-    assert body["workouts"][0]["id"] == workout_id
-    pj = body["workouts"][0]["blocks"][0]["workout_items"][0]["prescription_json"]
-    # Smart-defaults merge re-serializes with sort_keys + compact separators;
-    # assert on the key/value pair rather than a whitespace-specific literal.
-    assert '"load_kg":110' in pj
-
-
-def test_push_set_logs_is_idempotent_by_id(client, test_engine, test_user_id) -> None:
-    """Pushing the same set_log UUID twice must update in place — no duplicate rows.
-
-    The app can retry failed pushes freely; the server trusts the UUID the app assigned.
-    """
-    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
-    future_id = _create_future_workout(client, exercise_id)
-    item_id = client.get(f"/api/workouts/{future_id}").json()["blocks"][0]["workout_items"][0]["id"]
-
-    log_id = "99999999-9999-9999-9999-999999999999"
-    payload = {
-        "set_logs": [
-            {
-                "id": log_id,
-                "workout_item_id": item_id,
-                "set_index": 1,
-                "reps": 5,
-                "weight": 100.0,
-                "weight_unit": "kg",
-                "completed_at": "2026-04-20T07:30:00Z",
-            }
-        ],
-        "status_updates": [],
-    }
-    assert client.post("/api/sync/results", json=payload).status_code == 200
-
-    # Retry with a different weight — should update, not insert.
-    payload["set_logs"][0]["weight"] = 102.5
-    assert client.post("/api/sync/results", json=payload).status_code == 200
-
-    with Session(test_engine) as session:
-        rows = session.query(SetLog).filter_by(workout_item_id=item_id).all()
-        assert len(rows) == 1
-        assert rows[0].id == log_id
-        assert rows[0].weight == 102.5
-
-
-def test_set_log_round_trips_duration_distance_hr_cadence(
-    client, test_engine, test_user_id
-) -> None:
-    """Cardio fields (`duration_sec`, `distance_m`, `hr_avg_bpm`, `cadence_avg_spm`,
-    `started_at`) must round-trip cleanly through /api/sync/results and
-    /api/sync/pull. These are the columns the iOS `IntervalsDriver` /
-    `ContinuousDriver` now populate via `.logCardioSet`.
-    """
-    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
-    future_id = _create_future_workout(client, exercise_id)
-    item_id = client.get(f"/api/workouts/{future_id}").json()["blocks"][0]["workout_items"][0]["id"]
-
-    log_id = "cadec1a0-0000-4000-8000-000000000001"
-    response = client.post(
-        "/api/sync/results",
-        json={
-            "set_logs": [
-                {
-                    "id": log_id,
-                    "workout_item_id": item_id,
-                    "set_index": 1,
-                    # No reps / weight / rir — cardio row.
-                    "duration_sec": 96.5,
-                    "distance_m": 400.0,
-                    "hr_avg_bpm": 165,
-                    "cadence_avg_spm": 184,
-                    "started_at": "2026-04-20T07:29:00Z",
-                    "completed_at": "2026-04-20T07:30:36Z",
-                }
-            ],
-            "status_updates": [
-                {
-                    "workout_id": future_id,
-                    "status": "completed",
-                    "completed_at": "2026-04-20T08:00:00Z",
-                }
-            ],
-        },
-    )
-    assert response.status_code == 200
-
-    with Session(test_engine) as session:
-        row = session.query(SetLog).filter_by(id=log_id).one()
-        assert row.duration_sec == 96.5
-        assert row.distance_m == 400.0
-        assert row.hr_avg_bpm == 165
-        assert row.cadence_avg_spm == 184
-        assert row.reps is None
-        assert row.weight is None
-        assert row.rir is None
-        assert row.started_at is not None
-
-    # The pull path must surface every cardio column. `last_performed`
-    # is the path the iOS `LastPerformed` UI reads — if cardio columns
-    # dropped anywhere between ORM and wire this test would fail on
-    # the Read-side schema.
-    body = client.get("/api/sync/pull").json()
-    last = next(lp for lp in body["last_performed"] if lp["exercise_id"] == exercise_id)
-    log = next(sl for sl in last["last_set_logs"] if sl["id"] == log_id)
-    assert log["duration_sec"] == 96.5
-    assert log["distance_m"] == 400.0
-    assert log["hr_avg_bpm"] == 165
-    assert log["cadence_avg_spm"] == 184
-    assert log["reps"] is None
-    assert log["weight"] is None
-    assert log["started_at"] == "2026-04-20T07:29:00Z"
-
-
-def test_pull_last_performed_covers_alternatives(client, test_engine, test_user_id) -> None:
-    """A user can swap to an alternative mid-workout; the app needs its history too."""
-    # Seed: a completed front-squat session (this will be the alternative).
-    with Session(test_engine) as session:
-        back_squat = Exercise(id=_BACK_SQUAT, name="Back Squat")
-        front_squat = Exercise(id=_FRONT_SQUAT, name="Front Squat")
-        session.add_all([back_squat, front_squat])
-        session.flush()
-
-        workout = Workout(
-            user_id=test_user_id,
-            name="Past front-squat day",
-            status="completed",
-            source="claude",
-            completed_at=datetime(2026, 4, 10, 7),
-        )
-        session.add(workout)
-        session.flush()
-
-        block = Block(
-            workout_id=workout.id,
-            position=0,
-            timing_mode="straight_sets",
-            timing_config_json="{}",
-        )
-        session.add(block)
-        session.flush()
-
-        item = WorkoutItem(
-            block_id=block.id,
-            position=0,
-            exercise_id=front_squat.id,
-            prescription_json="{}",
-        )
-        session.add(item)
-        session.flush()
-
-        session.add(
-            SetLog(
-                workout_item_id=item.id,
-                set_index=1,
-                reps=5,
-                weight=90.0,
-                weight_unit="kg",
-                completed_at=datetime(2026, 4, 10, 7, 15),
-            )
-        )
-        session.commit()
-
-    # New planned workout: back-squat with front-squat as an alternative.
-    client.post(
-        "/api/workouts",
-        json={
-            "name": "Upcoming",
-            "scheduled_date": "2026-04-20",
-            "status": "planned",
-            "source": "claude",
-            "blocks": [
-                {
-                    "position": 0,
-                    "timing_mode": "straight_sets",
-                    "timing_config_json": "{}",
-                    "workout_items": [
-                        {
-                            "position": 0,
-                            "exercise_id": _BACK_SQUAT,
-                            "prescription_json": "{}",
-                            "alternatives": [
-                                {
-                                    "exercise_id": _FRONT_SQUAT,
-                                    "reason": "bar taken",
-                                }
-                            ],
-                        }
-                    ],
-                }
-            ],
-        },
-    )
-
-    body = client.get("/api/sync/pull").json()
-    exercise_ids = {lp["exercise_id"] for lp in body["last_performed"]}
-    assert _FRONT_SQUAT in exercise_ids, (
-        "sync/pull must include last_performed for exercises referenced only as alternatives"
-    )
-
-
-def test_incremental_pull_still_returns_last_performed(client, test_engine, test_user_id) -> None:
-    """qa-001 regression: an incremental pull with no delta workouts must still include
-    `last_performed` for every exercise in the user's catalog.
-
-    Earlier the snapshot was scoped to the workouts returned by the delta, so a pull
-    with `since >= latest_updated_at` (the steady state when the user hasn't asked
-    Claude for new work yet) returned an empty list. The iOS client's cold-launch
-    save path overwrote its local store with that empty list, erasing every "LAST · …"
-    chip until a full pull was forced.
-    """
-    # Seed one completed workout so there's history to surface.
-    exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
-
-    # Full pull establishes a baseline `server_time`.
-    first = client.get("/api/sync/pull").json()
-    assert any(lp["exercise_id"] == exercise_id for lp in first["last_performed"])
-    baseline_server_time = first["server_time"]
-
-    # Incremental pull with `since = server_time`. No workouts changed in the
-    # interval, so `workouts` should be empty. `last_performed` must NOT be —
-    # the client relies on this snapshot to rebuild its chip map every launch.
-    second = client.get(f"/api/sync/pull?since={baseline_server_time}").json()
-    assert second["workouts"] == [], (
-        "setup sanity: with no updates since baseline, the delta must be empty"
-    )
-    assert any(lp["exercise_id"] == exercise_id for lp in second["last_performed"]), (
-        "incremental pull must still include last_performed for prior exercises; "
-        "returning [] erases every LAST · chip on the client"
-    )
-
-
-def test_push_set_log_for_missing_workout_item_404(client) -> None:
-    """A set_log referencing a non-existent workout_item_id must 404, not silently drop."""
-    response = client.post(
-        "/api/sync/results",
-        json={
-            "set_logs": [
-                {
-                    "id": "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
-                    "workout_item_id": _NONEXISTENT_WORKOUT,
-                    "set_index": 1,
-                    "completed_at": "2026-04-20T07:30:00Z",
-                }
-            ],
-            "status_updates": [],
-        },
-    )
-    assert response.status_code == 404
-    # Detail mentions the offending workout_item_id so the app can surface a useful error.
-    assert _NONEXISTENT_WORKOUT in response.json()["detail"]
-
-
-def test_push_results_malformed_input_422(client) -> None:
-    """Malformed sync/results payload returns 422 (FastAPI default) with structured detail."""
-    response = client.post(
-        "/api/sync/results",
-        json={"set_logs": "not-a-list", "status_updates": []},
-    )
-    assert response.status_code == 422
-    assert "detail" in response.json()
-
-
-def test_push_status_for_missing_workout_404(client) -> None:
-    response = client.post(
-        "/api/sync/results",
-        json={
-            "set_logs": [],
-            "status_updates": [
-                {"workout_id": _NONEXISTENT_WORKOUT, "status": "completed"},
-            ],
-        },
-    )
-    assert response.status_code == 404
-
-
-def test_push_rejects_cross_tenant_set_log(client, test_engine) -> None:
-    """A set_log for another user's workout_item must 404 — tenant isolation."""
-    with Session(test_engine) as session:
-        other = AppUser(id=_OTHER_USER, name="Other")
-        exercise = Exercise(id=_OHP, name="OHP")
-        session.add_all([other, exercise])
-        session.flush()
-        workout = Workout(
-            user_id=_OTHER_USER,
-            name="Other's workout",
-            status="planned",
-            source="claude",
-        )
-        session.add(workout)
-        session.flush()
-        block = Block(
-            workout_id=workout.id,
-            position=0,
-            timing_mode="straight_sets",
-            timing_config_json="{}",
-        )
-        session.add(block)
-        session.flush()
-        item = WorkoutItem(
-            block_id=block.id,
-            position=0,
-            exercise_id=exercise.id,
-            prescription_json="{}",
-        )
-        session.add(item)
-        session.commit()
-        other_item_id = item.id
-
-    response = client.post(
-        "/api/sync/results",
-        json={
-            "set_logs": [
-                {
-                    "id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
-                    "workout_item_id": other_item_id,
-                    "set_index": 1,
-                    "completed_at": "2026-04-20T07:30:00Z",
-                }
-            ],
-            "status_updates": [],
-        },
-    )
-    assert response.status_code == 404
-
-
-def test_sync_results_mixed_ownership_rejects_foreign_items(
-    client, test_engine, test_user_id
-) -> None:
-    """A late foreign status update rolls back earlier own result mutations.
-
-    Completion pushes send final set_logs and terminal status in one
-    `/api/sync/results` request. If a later row in that request fails tenant
-    validation, the earlier successful log upsert and workout mutation must
-    roll back as one transaction.
-    """
-    _own_exercise_id, own_item_id = _seed_completed_workout(test_engine, test_user_id)
-    with Session(test_engine) as session:
-        own_item = session.get(WorkoutItem, own_item_id)
-        assert own_item is not None
-        own_workout_id = own_item.block.workout_id
-
-    # Seed a workout for a different user with its own workout_item.
-    with Session(test_engine) as session:
-        session.add(AppUser(id=_OTHER_USER, name="Other"))
-        session.add(Exercise(id=_OHP, name="OHP"))
-        session.flush()
-        foreign_workout = Workout(
-            user_id=_OTHER_USER,
-            name="Other's workout",
-            status="planned",
-            source="claude",
-        )
-        session.add(foreign_workout)
-        session.flush()
-        foreign_block = Block(
-            workout_id=foreign_workout.id,
-            position=0,
-            timing_mode="straight_sets",
-            timing_config_json="{}",
-        )
-        session.add(foreign_block)
-        session.flush()
-        foreign_item = WorkoutItem(
-            block_id=foreign_block.id,
-            position=0,
-            exercise_id=_OHP,
-            prescription_json="{}",
-        )
-        session.add(foreign_item)
-        session.commit()
-        foreign_workout_id = foreign_workout.id
-
-    own_log_id = "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
-
-    response = client.post(
-        "/api/sync/results",
-        json={
-            "set_logs": [
-                {
-                    "id": own_log_id,
-                    "workout_item_id": own_item_id,
-                    "set_index": 1,
-                    "reps": 5,
-                    "weight": 100.0,
-                    "weight_unit": "kg",
-                    "completed_at": "2026-04-20T07:30:00Z",
-                },
-            ],
-            "status_updates": [
-                {
-                    "workout_id": own_workout_id,
-                    "status": "completed",
-                    "completed_at": "2026-04-20T08:00:00Z",
-                    "notes": "atomic note must not land",
-                },
-                {
-                    "workout_id": foreign_workout_id,
-                    "status": "completed",
-                    "completed_at": "2026-04-20T08:01:00Z",
-                    "notes": "foreign update must reject",
-                },
-            ],
-        },
-    )
-    assert response.status_code == 404, response.text
-    assert foreign_workout_id in response.json()["detail"]
-
-    # The own log and own status update ran before the foreign status failed.
-    # SQLAlchemy's rollback on the raised HTTPException must still discard
-    # both earlier mutations.
-    with Session(test_engine) as session:
-        assert session.get(SetLog, own_log_id) is None
-        own_workout = session.get(Workout, own_workout_id)
-        assert own_workout is not None
-        assert own_workout.notes is None
-        assert own_workout.completed_at == datetime(2026, 4, 10, 7)
-
-
-def test_sync_results_rejects_malformed_uuid(client, test_user_id):
-    """bug-030 regression: posting a non-UUID string in `id` must 422, not silently insert.
-
-    Before the fix, the UUID-normalizing base lowercased the string but did
-    not validate UUID format — so `"id": "not-a-uuid"` returned 200 and
-    inserted the raw string as primary key, corrupting the event_log /
-    set_log table. Input-side schemas now inherit `_UuidInputBase`, which
-    enforces format.
-    """
-    response = client.post(
-        "/api/sync/results",
-        json={
-            "set_logs": [
-                {
-                    "id": "not-a-uuid",
-                    "workout_item_id": "c0000001-0000-4000-8000-000000000001",
-                    "set_index": 1,
-                    "reps": 5,
-                    "weight": 100.0,
-                    "weight_unit": "kg",
-                    "completed_at": "2026-04-20T07:30:00Z",
-                }
-            ],
-            "status_updates": [],
-        },
-    )
-    assert response.status_code == 422, response.text
-    assert "not a valid UUID" in response.text.lower() or "uuid" in response.text.lower()
-
-
-def test_sync_pull_tolerates_legacy_non_uuid_exercise_id(client, test_engine, test_user_id):
-    """bug-031 regression: Read-side schemas must trust the DB, not revalidate UUIDs.
-
-    bug-030's fix (reject malformed UUIDs at ingest) accidentally also ran on
-    ORM → Pydantic conversions during sync_pull. Any pre-existing non-UUID
-    id in the DB (seed data, legacy imports, test fixtures) 500'd the pull
-    with `ValidationError: exercise_id is not a valid UUID: 'ex-0'`. The fix
-    split the base class: `_UuidInputBase` enforces format at write time,
-    `_UuidReadBase` only lowercases on read — the DB is trusted.
-    """
-    legacy_exercise_id = "ex-0"
-    with Session(test_engine) as session:
-        session.add(Exercise(id=legacy_exercise_id, name="Legacy Exercise"))
-        session.flush()
-        workout = Workout(
-            user_id=test_user_id,
-            name="Past",
-            status="completed",
-            source="claude",
-            completed_at=datetime(2026, 4, 10, 7),
-        )
-        session.add(workout)
-        session.flush()
-        block = Block(
-            workout_id=workout.id,
-            position=0,
-            timing_mode="straight_sets",
-            timing_config_json="{}",
-        )
-        session.add(block)
-        session.flush()
-        item = WorkoutItem(
-            block_id=block.id,
-            position=0,
-            exercise_id=legacy_exercise_id,
-            prescription_json="{}",
-        )
-        session.add(item)
-        session.flush()
-        session.add(
-            SetLog(
-                workout_item_id=item.id,
-                set_index=1,
-                reps=5,
-                weight=100.0,
-                weight_unit="kg",
-                completed_at=datetime(2026, 4, 10, 7, 15),
-            )
-        )
-        session.commit()
-
     response = client.get("/api/sync/pull")
     assert response.status_code == 200, response.text
     body = response.json()
 
-    # Legacy id round-trips unchanged (already lowercase, not rejected).
-    exercise_ids = {e["id"] for e in body["exercises"]}
-    assert legacy_exercise_id in exercise_ids
-    last_performed_ids = {lp["exercise_id"] for lp in body["last_performed"]}
-    assert legacy_exercise_id in last_performed_ids
+    assert (
+        body["workouts"][0]["primitive_blocks"][0]["sets"][0]["slots"][0]["exercise_id"]
+        == exercise_id
+    )
+    assert body["exercises"][0]["id"] == exercise_id
+    assert {p["key"]: p["value"] for p in body["user_parameters"]}["bodyweight_kg"] == "82"
+    assert body["last_performed"][0]["exercise_id"] == exercise_id
+    assert body["last_performed"][0]["last_set_logs"][0]["weight"] == 100.0
+    assert "prescription_json" not in body["last_performed"][0]
 
 
-def test_sync_results_rejects_malformed_workout_item_id(client, test_user_id):
-    """Same class as test_sync_results_rejects_malformed_uuid but for a *_id field.
+def test_pull_rejects_invalid_persisted_primitive_block(client, test_engine, test_user_id) -> None:
+    with Session(test_engine) as session:
+        session.add(
+            Workout(
+                id="10000000-0000-4000-8000-000000000010",
+                user_id=test_user_id,
+                name="Future primitive",
+                status="planned",
+                source="claude",
+                primitive_blocks_json=(
+                    '[{"id":"20000000-0000-4000-8000-000000000010",'
+                    '"sets":[{"id":"30000000-0000-4000-8000-000000000010",'
+                    '"timing":{"mode":"future_mode"},"slots":"not-a-list"}]}]'
+                ),
+            )
+        )
+        session.commit()
 
-    Any UUID-typed field the `_UuidInputBase` validator covers must reject
-    malformed strings identically, not just the primary `id` column.
-    """
+    with pytest.raises((ResponseValidationError, ValidationError)):
+        client.get("/api/sync/pull")
+
+
+def test_pull_rejects_empty_persisted_primitive_json(client, test_engine, test_user_id) -> None:
+    with Session(test_engine) as session:
+        session.add(
+            Workout(
+                id="10000000-0000-4000-8000-000000000012",
+                user_id=test_user_id,
+                name="Empty primitive",
+                status="planned",
+                source="claude",
+                primitive_blocks_json="",
+            )
+        )
+        session.commit()
+
+    with pytest.raises((ResponseValidationError, ValidationError)):
+        client.get("/api/sync/pull")
+
+
+def test_pull_rejects_empty_persisted_primitive_array(client, test_engine, test_user_id) -> None:
+    with Session(test_engine) as session:
+        session.add(
+            Workout(
+                id="10000000-0000-4000-8000-000000000013",
+                user_id=test_user_id,
+                name="Empty primitive array",
+                status="planned",
+                source="claude",
+                primitive_blocks_json="[]",
+            )
+        )
+        session.commit()
+
+    with pytest.raises((ResponseValidationError, ValidationError)):
+        client.get("/api/sync/pull")
+
+
+def test_pull_last_performed_uses_latest_completed_workout_only(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    older = _create_primitive_workout(
+        client,
+        exercise_id,
+        workout_id="10000000-0000-4000-8000-000000000011",
+        slot_id="40000000-0000-4000-8000-000000000011",
+    )
+    newer = _create_primitive_workout(
+        client,
+        exercise_id,
+        workout_id="10000000-0000-4000-8000-000000000012",
+        slot_id="40000000-0000-4000-8000-000000000012",
+    )
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                _primitive_slot_log(
+                    workout_id=older["id"],
+                    log_id="88888888-8888-4888-8888-888888888881",
+                    slot_id="40000000-0000-4000-8000-000000000011",
+                    weight=95,
+                    completed_at="2026-04-19T07:30:00Z",
+                ),
+                _primitive_slot_log(
+                    workout_id=newer["id"],
+                    log_id="88888888-8888-4888-8888-888888888882",
+                    slot_id="40000000-0000-4000-8000-000000000012",
+                    weight=105,
+                    completed_at="2026-04-20T07:30:00Z",
+                ),
+            ],
+            "status_updates": [
+                {
+                    "workout_id": older["id"],
+                    "status": "completed",
+                    "completed_at": "2026-04-19T08:00:00Z",
+                },
+                {
+                    "workout_id": newer["id"],
+                    "status": "completed",
+                    "completed_at": "2026-04-20T08:00:00Z",
+                },
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    pull = client.get("/api/sync/pull")
+    assert pull.status_code == 200, pull.text
+    logs = pull.json()["last_performed"][0]["last_set_logs"]
+    assert len(logs) == 1
+    assert logs[0]["workout_id"] == newer["id"]
+    assert logs[0]["weight"] == 105
+
+
+def test_sync_results_rejects_legacy_set_logs_payload(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    _create_primitive_workout(client, exercise_id)
+
     response = client.post(
         "/api/sync/results",
         json={
             "set_logs": [
                 {
-                    "id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
-                    "workout_item_id": "this-is-not-a-uuid-either",
-                    "set_index": 1,
-                    "reps": 5,
-                    "weight": 100.0,
-                    "weight_unit": "kg",
+                    "id": "99999999-9999-4999-9999-999999999999",
+                    "workout_item_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+                    "set_index": 0,
                     "completed_at": "2026-04-20T07:30:00Z",
                 }
-            ],
-            "status_updates": [],
+            ]
         },
     )
-    assert response.status_code == 422, response.text
+    assert response.status_code == 422
+
+
+def test_push_primitive_slot_log_and_status(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(client, exercise_id)
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [_primitive_slot_log()],
+            "status_updates": [
+                {
+                    "workout_id": workout["id"],
+                    "status": "completed",
+                    "completed_at": "2026-04-20T08:00:00Z",
+                    "notes": "good session",
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "primitive_set_logs_received": 1,
+        "status_updates_received": 1,
+        "workout_resets_received": 0,
+    }
+
+    with Session(test_engine) as session:
+        row = session.get(PrimitiveSetLog, "88888888-8888-4888-8888-888888888888")
+        assert row is not None
+        assert row.role == "slot"
+        assert row.planned_exercise_id == exercise_id
+        workout_row = session.get(Workout, workout["id"])
+        assert workout_row is not None
+        assert workout_row.status == "completed"
+        assert workout_row.notes == "good session"
+
+
+def test_push_primitive_set_result_and_distance_slot(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(client, exercise_id)
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                _primitive_slot_log(
+                    log_id="88888888-8888-4888-8888-888888888889",
+                    reps=None,
+                    weight=None,
+                )
+                | {"distance_m": 1000, "duration_sec": 360},
+                {
+                    "id": "88888888-8888-4888-8888-88888888888a",
+                    "role": "set_result",
+                    "set_id": "30000000-0000-4000-8000-000000000001",
+                    "block_id": "20000000-0000-4000-8000-000000000001",
+                    "workout_id": workout["id"],
+                    "set_index": 0,
+                    "rounds": 3,
+                    "completed_at": "2026-04-20T07:40:00Z",
+                },
+            ]
+        },
+    )
+    assert response.status_code == 200, response.text
+
+    with Session(test_engine) as session:
+        distance = session.get(PrimitiveSetLog, "88888888-8888-4888-8888-888888888889")
+        aggregate = session.get(PrimitiveSetLog, "88888888-8888-4888-8888-88888888888a")
+        assert distance is not None
+        assert distance.distance_m == 1000
+        assert aggregate is not None
+        assert aggregate.role == "set_result"
+        assert aggregate.rounds == 3
+
+
+def test_push_rejects_primitive_log_referencing_wrong_slot(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    _create_primitive_workout(client, exercise_id)
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                _primitive_slot_log(slot_id="40000000-0000-4000-8000-000000000099")
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "slot_id outside workout" in response.text
+
+
+def test_push_rejects_primitive_log_referencing_wrong_exercise(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    _create_primitive_workout(client, exercise_id)
+
+    response = client.post(
+        "/api/sync/results",
+        json={"primitive_set_logs": [_primitive_slot_log(exercise_id=_PULLUP)]},
+    )
+
+    assert response.status_code == 422
+    assert "planned_exercise_id outside workout" in response.text
+
+
+def test_push_rejects_primitive_aggregate_referencing_wrong_set(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(client, exercise_id)
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                {
+                    "id": "88888888-8888-4888-8888-88888888888b",
+                    "role": "set_result",
+                    "set_id": "30000000-0000-4000-8000-000000000099",
+                    "block_id": "20000000-0000-4000-8000-000000000001",
+                    "workout_id": workout["id"],
+                    "set_index": 0,
+                    "rounds": 3,
+                    "completed_at": "2026-04-20T07:40:00Z",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "set_id outside workout" in response.text
+
+
+def test_push_primitive_log_is_idempotent_by_id(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    _create_primitive_workout(client, exercise_id)
+    first = _primitive_slot_log(weight=100)
+    second = _primitive_slot_log(weight=105)
+
+    assert client.post("/api/sync/results", json={"primitive_set_logs": [first]}).status_code == 200
+    assert (
+        client.post("/api/sync/results", json={"primitive_set_logs": [second]}).status_code == 200
+    )
+
+    with Session(test_engine) as session:
+        rows = session.query(PrimitiveSetLog).all()
+        assert len(rows) == 1
+        assert rows[0].weight == 105
+
+
+def test_workout_reset_deletes_primitive_logs_and_replans(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(client, exercise_id)
+    client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [_primitive_slot_log()],
+            "status_updates": [
+                {
+                    "workout_id": workout["id"],
+                    "status": "completed",
+                    "completed_at": "2026-04-20T08:00:00Z",
+                }
+            ],
+        },
+    )
+
+    response = client.post(
+        "/api/sync/results",
+        json={"workout_resets": [{"workout_id": workout["id"]}]},
+    )
+    assert response.status_code == 200, response.text
+
+    with Session(test_engine) as session:
+        assert session.query(PrimitiveSetLog).count() == 0
+        workout_row = session.get(Workout, workout["id"])
+        assert workout_row is not None
+        assert workout_row.status == "planned"
+        assert workout_row.completed_at is None
+
+
+def test_push_primitive_log_for_missing_workout_404(client) -> None:
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                _primitive_slot_log(workout_id="00000000-0000-4000-8000-000000000000")
+            ]
+        },
+    )
+    assert response.status_code == 404
+
+
+def test_push_rejects_cross_tenant_primitive_log(client, test_engine) -> None:
+    with Session(test_engine) as session:
+        session.add(AppUser(id=_OTHER_USER, name="Other"))
+        session.add(Exercise(id=_PULLUP, name="Pull-up"))
+        session.add(
+            Workout(
+                id="10000000-0000-4000-8000-000000000009",
+                user_id=_OTHER_USER,
+                name="Other",
+                status="planned",
+                source="claude",
+                primitive_blocks_json="[]",
+            )
+        )
+        session.commit()
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                _primitive_slot_log(workout_id="10000000-0000-4000-8000-000000000009")
+            ]
+        },
+    )
+    assert response.status_code == 404
+
+
+def test_sync_results_rollback_on_late_foreign_status(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(client, exercise_id)
+    with Session(test_engine) as session:
+        session.add(AppUser(id=_OTHER_USER, name="Other"))
+        session.add(
+            Workout(
+                id="10000000-0000-4000-8000-000000000009",
+                user_id=_OTHER_USER,
+                name="Other",
+                status="planned",
+                source="claude",
+                primitive_blocks_json="[]",
+            )
+        )
+        session.commit()
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [_primitive_slot_log()],
+            "status_updates": [
+                {
+                    "workout_id": workout["id"],
+                    "status": "completed",
+                    "completed_at": "2026-04-20T08:00:00Z",
+                },
+                {
+                    "workout_id": "10000000-0000-4000-8000-000000000009",
+                    "status": "completed",
+                    "completed_at": "2026-04-20T08:01:00Z",
+                },
+            ],
+        },
+    )
+    assert response.status_code == 404
+
+    with Session(test_engine) as session:
+        assert session.get(PrimitiveSetLog, "88888888-8888-4888-8888-888888888888") is None
+        workout_row = session.get(Workout, workout["id"])
+        assert workout_row is not None
+        assert workout_row.status == "planned"

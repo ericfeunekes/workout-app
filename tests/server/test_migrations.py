@@ -1,11 +1,14 @@
 """Unit tests for the migration runner."""
 
 from pathlib import Path
+from shutil import copy2
 
 import pytest
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import Session
 from workoutdb_server.migrations import apply_migrations
+
+MIGRATIONS_DIR = Path(__file__).resolve().parents[2] / "server" / "db" / "migrations"
 
 
 @pytest.fixture
@@ -114,3 +117,153 @@ def test_apply_custom_directory(tmp_engine, tmp_path: Path) -> None:
             for row in session.execute(text("SELECT name FROM sqlite_master WHERE type='table'"))
         }
     assert "noop" in tables
+
+
+def test_primitive_reset_migration_clears_execution_state_only(tmp_engine, tmp_path: Path) -> None:
+    staged_dir = tmp_path / "migrations"
+    staged_dir.mkdir()
+    for path in sorted(MIGRATIONS_DIR.glob("*.sql")):
+        if path.name <= "010_primitive_distance_metric.sql":
+            copy2(path, staged_dir / path.name)
+
+    apply_migrations(tmp_engine, migrations_dir=staged_dir)
+
+    timestamp = "2026-05-18T12:00:00Z"
+    ids = {
+        "user_id": "00000000-0000-4000-8000-000000000001",
+        "exercise_id": "00000000-0000-4000-8000-000000000002",
+        "workout_id": "00000000-0000-4000-8000-000000000003",
+        "block_id": "00000000-0000-4000-8000-000000000004",
+        "item_id": "00000000-0000-4000-8000-000000000005",
+        "alternative_id": "00000000-0000-4000-8000-000000000006",
+        "set_log_id": "00000000-0000-4000-8000-000000000007",
+        "primitive_log_id": "00000000-0000-4000-8000-000000000008",
+        "parameter_id": "00000000-0000-4000-8000-000000000009",
+    }
+    with Session(tmp_engine) as session:
+        session.execute(
+            text("INSERT INTO app_user (id, name, created_at) VALUES (:id, :name, :at)"),
+            {"id": ids["user_id"], "name": "Eric", "at": timestamp},
+        )
+        session.execute(
+            text("INSERT INTO exercise (id, name) VALUES (:id, :name)"),
+            {"id": ids["exercise_id"], "name": "Bench"},
+        )
+        session.execute(
+            text(
+                """
+                INSERT INTO workout (
+                    id, user_id, name, scheduled_date, status, source, created_at, updated_at
+                )
+                VALUES (:id, :user_id, :name, :scheduled, 'planned', 'claude', :at, :at)
+                """
+            ),
+            {
+                "id": ids["workout_id"],
+                "user_id": ids["user_id"],
+                "name": "Legacy workout",
+                "scheduled": "2026-05-18",
+                "at": timestamp,
+            },
+        )
+        session.execute(
+            text(
+                """
+                INSERT INTO block (id, workout_id, position, timing_mode, timing_config_json)
+                VALUES (:id, :workout_id, 0, 'straight_sets', '{}')
+                """
+            ),
+            {"id": ids["block_id"], "workout_id": ids["workout_id"]},
+        )
+        session.execute(
+            text(
+                """
+                INSERT INTO workout_item (id, block_id, position, exercise_id, prescription_json)
+                VALUES (:id, :block_id, 0, :exercise_id, '{}')
+                """
+            ),
+            {
+                "id": ids["item_id"],
+                "block_id": ids["block_id"],
+                "exercise_id": ids["exercise_id"],
+            },
+        )
+        session.execute(
+            text(
+                """
+                INSERT INTO exercise_alternative (id, workout_item_id, exercise_id, reason)
+                VALUES (:id, :item_id, :exercise_id, 'qa')
+                """
+            ),
+            {
+                "id": ids["alternative_id"],
+                "item_id": ids["item_id"],
+                "exercise_id": ids["exercise_id"],
+            },
+        )
+        session.execute(
+            text(
+                """
+                INSERT INTO set_log (
+                    id, workout_item_id, set_index, reps, completed_at, rir
+                )
+                VALUES (:id, :item_id, 1, 5, :at, 2)
+                """
+            ),
+            {"id": ids["set_log_id"], "item_id": ids["item_id"], "at": timestamp},
+        )
+        session.execute(
+            text(
+                """
+                INSERT INTO primitive_set_log (
+                    id, role, slot_id, workout_id, planned_exercise_id, set_index,
+                    set_repeat_index, block_repeat_index, reps, completed_at
+                )
+                VALUES (
+                    :id, 'slot', :slot_id, :workout_id, :exercise_id, 0, 0, 0, 5, :at
+                )
+                """
+            ),
+            {
+                "id": ids["primitive_log_id"],
+                "slot_id": ids["item_id"],
+                "workout_id": ids["workout_id"],
+                "exercise_id": ids["exercise_id"],
+                "at": timestamp,
+            },
+        )
+        session.execute(
+            text(
+                """
+                INSERT INTO user_parameters (id, user_id, key, value, updated_at, source)
+                VALUES (:id, :user_id, 'bodyweight_kg', '90', :at, 'manual')
+                """
+            ),
+            {"id": ids["parameter_id"], "user_id": ids["user_id"], "at": timestamp},
+        )
+        session.commit()
+
+    copy2(
+        MIGRATIONS_DIR / "011_primitive_only_reset.sql",
+        staged_dir / "011_primitive_only_reset.sql",
+    )
+    applied = apply_migrations(tmp_engine, migrations_dir=staged_dir)
+
+    assert applied == ["011_primitive_only_reset.sql"]
+    with Session(tmp_engine) as session:
+        cleared_tables = [
+            "set_log",
+            "exercise_alternative",
+            "workout_item",
+            "block",
+            "primitive_set_log",
+            "workout",
+        ]
+        for table in cleared_tables:
+            count = session.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar_one()
+            assert count == 0, table
+
+        preserved_tables = ["app_user", "exercise", "user_parameters"]
+        for table in preserved_tables:
+            count = session.execute(text(f"SELECT COUNT(*) FROM {table}")).scalar_one()
+            assert count == 1, table

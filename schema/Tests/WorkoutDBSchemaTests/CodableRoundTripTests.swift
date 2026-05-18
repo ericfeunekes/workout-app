@@ -117,7 +117,7 @@ struct CodableRoundTripTests {
         )
     }
 
-    @Test func nestedWorkoutRoundTrip() throws {
+    @Test func primitiveWorkoutRoundTrip() throws {
         let createdAt = Date(timeIntervalSince1970: 1_744_000_000)  // 2025-04-07
         let workout = Workout(
             id: kWorkoutID,
@@ -129,29 +129,28 @@ struct CodableRoundTripTests {
             tagsJson: #"["hypertrophy_block_2"]"#,
             createdAt: createdAt,
             updatedAt: createdAt,
-            blocks: [
-                Block(
-                    id: kBlockID,
-                    position: 0,
-                    timingMode: .straightSets,
-                    timingConfigJson: #"{"rest_between_sets_sec":180}"#,
-                    intent: "Keep the main lift crisp",
-                    workoutItems: [
-                        WorkoutItem(
-                            id: kWorkoutItemID,
-                            position: 0,
-                            exerciseId: kExerciseBackSquat,
-                            prescriptionJson: #"{"sets":5,"reps":5,"load_kg":100}"#,
-                            alternatives: [
-                                ExerciseAlternative(
-                                    id: kAlternativeID,
-                                    exerciseId: kExerciseFrontSquat,
-                                    reason: "bar taken"
-                                )
-                            ]
-                        )
-                    ]
-                )
+            primitiveBlocks: [
+                PrimitiveBlock(id: kBlockID, sets: [
+                    PrimitiveSet(
+                        id: kWorkoutItemID,
+                        timing: .init(mode: .setBounded),
+                        slots: [
+                            PrimitiveSlot(
+                                id: kAlternativeID,
+                                exerciseId: kExerciseBackSquat,
+                                workTarget: [
+                                    .init(
+                                        metric: .reps,
+                                        valueForm: .single,
+                                        value: 5,
+                                        role: .completion
+                                    ),
+                                ],
+                                load: .init(value: 100, unit: .kg, unitType: .absolute)
+                            ),
+                        ]
+                    ),
+                ])
             ]
         )
         let data = try encoder.encode(workout)

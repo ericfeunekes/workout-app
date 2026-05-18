@@ -45,9 +45,17 @@ similarity decisions belong in separate taxonomy or adapter-profile layers.
 
 ## Data model
 
-> **Status (2026-05-17):** This section records the current implemented pre-primitives data model. It is **superseded for target planning by `docs/specs/primitives-data-model.md`**. That spec replaces the per-timing-mode prescription/log model described below with a 7-primitive composition over a Block > Set > Slot hierarchy. Use this section to understand the current shipped baseline; use the primitives spec for the accepted target data shape and cutover requirements. The sections that follow (Persistence architecture, API contract, Sync, What Claude pushes, Watch integration) remain authoritative except where they name the superseded prescription/log data shape or have been explicitly narrowed by newer feature docs.
+> **Status (2026-05-18):** The primitive-only contract is now the active
+> cutover target. `docs/specs/primitives-data-model.md` and its aspect docs are
+> canonical for the Block > Set > Slot authoring shape, primitive result roles,
+> runtime legality, QA-data reset, and adapter-readiness rules. The older
+> timing-mode/block-item description below is retained only as migration context
+> for surfaces that still project primitives into existing app execution code
+> during the cutover.
 >
-> The content below is retained for historical context until the primitives cutover lands. After cutover, this section will be rewritten to point at the primitives spec as the canonical data model.
+> The durable wire contract is primitive-only: workout create/update/read and
+> sync pull expose `primitive_blocks`, and result pushes use
+> `primitive_set_logs`.
 
 ### Core principle: composition with timing
 
@@ -336,12 +344,16 @@ GET    /api/user-parameters?key=X&since=Y     — Full history for a key since t
 
 ```
 POST   /api/sync/results       — Push completed workout data or same-day reset requests
-                                 Body: { set_logs: [...], status_updates: [...],
+                                 Body: { primitive_set_logs: [...],
+                                         status_updates: [...],
                                          workout_resets: [...] }
-                                 Each set_log MUST carry the UUID the app assigned; re-pushing
-                                 the same id updates in place (idempotent). Status updates bump
+                                 Each primitive_set_log MUST carry the UUID the app assigned;
+                                 re-pushing the same id updates in place (idempotent).
+                                 Slot, set_result, and block_result rows must reference IDs
+                                 that belong to the pushed workout's primitive tree.
+                                 Status updates bump
                                  workout.updated_at so a subsequent /api/sync/pull sees them.
-                                 Workout resets delete the workout's set_logs and return it
+                                 Workout resets delete the workout's primitive_set_logs and return it
                                  to planned so accidental same-day logs can be started over.
 ```
 
@@ -351,7 +363,7 @@ POST   /api/sync/results       — Push completed workout data or same-day reset
 GET    /api/sync/pull?since=<timestamp>
                                 — Get everything changed since last sync. user_id is
                                   resolved from the bearer token (ADR-2026-04-17).
-                                  Returns workouts with nested blocks/items/alternatives,
+                                  Returns workouts with primitive_blocks,
                                   the full exercise library, and latest-per-key user_parameters
                                   whose newest row is after `since`. Omit `since` for a full pull.
                                   The response's `server_time` is what the app should send
@@ -406,11 +418,12 @@ Watch delivery now has two separate lanes:
 
 1. **Early WorkoutKit handoff.** `docs/features/watch-workoutkit-handoff.md`
    is the shorter path for getting eligible Setmark workouts onto Apple Watch.
-   The iPhone maps a narrow subset of Setmark workouts into Apple's Workout app
-   through WorkoutKit, then reconciles only the completion/result facts the
-   platform actually exposes. Apple's Workout app owns the live Watch
-   experience in this lane; Setmark remains the authoring, planning, history,
-   and analysis surface.
+   The iPhone maps a narrow subset of Setmark workouts into WorkoutKit plans,
+   then schedules or hands them off through the platform path proven by the
+   WorkoutKit spike. Setmark reconciles only the completion/result facts the
+   platform actually exposes. Apple's Workout app owns the live Watch experience
+   in this lane; Setmark remains the authoring, planning, history, and analysis
+   surface.
 2. **Later custom watch-primary execution.**
    `docs/features/watch-primary-execution.md` and `docs/watch-metrics.md`
    remain the target for Setmark-owned Watch execution: custom Watch UI,

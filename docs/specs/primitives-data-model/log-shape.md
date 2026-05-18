@@ -303,7 +303,7 @@ Six slot rows (two slot_ids × set_repeat 0..2), interleaved by commit timestamp
 
 ### 3. Percent of 1RM (5 × 8-12 @ 80% 1RM, RIR 1-2)
 
-Five slot rows. Load resolved at seed to absolute kg from `user_parameters.one_rep_max_back_squat_kg × 0.80`. Log writes resolved value (e.g. `weight: 96, weight_unit: "kg"`). Stimulus captured within authored range.
+Five slot rows. Load resolved at seed to absolute kg from `user_parameters.one_rep_max_<exercise_id>_kg × 0.80`. Log writes resolved value (e.g. `weight: 96, weight_unit: "kg"`). Stimulus captured within authored range.
 
 ### 4. Continuous cardio (30 min, zone 2)
 

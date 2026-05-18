@@ -139,6 +139,7 @@ extension RootView {
 
         let dataset = PulledDataset(
             workouts: contexts.map(\.workout),
+            primitiveWorkouts: contexts.compactMap(\.primitiveWorkout),
             blocks: contexts.flatMap(\.blocks),
             items: contexts.flatMap { $0.itemsByBlock.flatMap { $0 } },
             exercises: Array(contexts.flatMap { $0.exercises.values })
@@ -187,12 +188,12 @@ extension RootView {
 
     private func debugTodayPlanContexts(now: Date) -> [WorkoutContext] {
         let calendar = Calendar(identifier: .gregorian)
-        let today = ExecutionPreviewSeed.qaScenario("timer_gauntlet_strength")
+        let today = ExecutionPreviewSeed.qaScenario("primitive_strength_density")
             ?? ExecutionPreviewSeed.pushA()
-        let missed = ExecutionPreviewSeed.qaScenario("timer_gauntlet_endurance")
-            ?? ExecutionPreviewSeed.timingMode(.intervals)
-        let upcoming = ExecutionPreviewSeed.qaScenario("timer_gauntlet_clocked")
-            ?? ExecutionPreviewSeed.timingMode(.emom)
+        let missed = ExecutionPreviewSeed.qaScenario("primitive_intervals")
+            ?? ExecutionPreviewSeed.pushA()
+        let upcoming = ExecutionPreviewSeed.qaScenario("primitive_carry_circuit")
+            ?? ExecutionPreviewSeed.pushA()
 
         return [
             retitle(
@@ -211,10 +212,10 @@ extension RootView {
             ),
             retitle(
                 upcoming,
-                name: "Tomorrow Intervals",
+                name: "Tomorrow Carries",
                 scheduledDate: calendar.date(byAdding: .day, value: 1, to: now) ?? now,
-                tagsJSON: #"["intervals","conditioning","tomorrow"]"#,
-                notes: "Clock-led conditioning with clear work and rest boundaries."
+                tagsJSON: #"["carries","conditioning","tomorrow"]"#,
+                notes: "Loaded carry conditioning with clear bounded current-block progress."
             ),
         ]
     }
@@ -241,6 +242,8 @@ extension RootView {
         )
         return WorkoutContext(
             workout: workout,
+            primitiveWorkout: context.primitiveWorkout,
+            primitiveExecutionPlan: context.primitiveExecutionPlan,
             blocks: context.blocks,
             itemsByBlock: context.itemsByBlock,
             exercises: context.exercises,
@@ -256,12 +259,15 @@ extension RootView {
     ) -> TodayContext {
         TodayContext(
             workout: context.workout,
+            primitiveWorkout: context.primitiveWorkout,
+            primitiveExecutionPlan: context.primitiveExecutionPlan,
             blocks: context.blocks,
             items: context.itemsByBlock.flatMap { $0 },
             exercises: context.exercises,
             lastPerformed: context.lastPerformed,
             lastSessionSummary: "last time: 45 lb × 8",
             programTags: debugProgramTags(from: context),
+            userParameters: context.userParameters,
             sessionStateBinding: binding
         )
     }

@@ -11,17 +11,15 @@
 // Post-seed, we have the full `WorkoutContext` in hand (including the
 // `userParameters` map AppBootstrap populated from the cache). This
 // file walks the seeded `ItemLog`s and, for every `percent_1rm` row
-// with a matching `1rm_<slug>_kg` user_parameter, rewrites the load
+// with a matching `one_rep_max_<exercise_id>_kg` user_parameter, rewrites the load
 // via `latest * percent`. Rows without a matching key stay loadless
 // so the Active view renders "BW" and the user can type a number.
 //
 // Key convention (matches the server + `docs/prescription.md` §
 // "Percentage-based load"):
 //
-//   * `1rm_<exercise_slug>_kg`
-//   * slug = exercise name, lowercased, spaces + punctuation replaced
-//     with underscores, collapsed runs. "Back Squat" → "back_squat";
-//     "Close-Grip Bench Press" → "close_grip_bench_press".
+//   * `one_rep_max_<exercise_id>_kg`
+//   * exercise_id is the lowercase UUID string for the exercise.
 //
 // Value scale: the stored 1RM is always in kg (per the key suffix),
 // regardless of the user's weight-unit preference. The resolved
@@ -55,15 +53,10 @@ extension SessionSeeder {
             else {
                 return itemLog
             }
-            guard let exercise = context.exercises[item.exerciseID] else {
-                return itemLog
-            }
-            let key = oneRMKey(forExerciseName: exercise.name)
+            let key = oneRMKey(forExerciseID: item.exerciseID)
             guard let oneRM = context.userParameters[key] else {
-                // Key missing — the QA report calls this the expected
-                // fallback. Leave loadKg = nil so the hero shows "BW"
-                // and the numpad opens blank. A tighter UX (prompt
-                // for the 1RM inline) is deferred per QA scope.
+                // Key missing. Leave loadKg = nil so the hero shows "BW"
+                // and the numpad opens blank.
                 return itemLog
             }
             let resolved = (oneRM * percent).rounded(toPlaces: 2)
@@ -99,12 +92,10 @@ extension SessionSeeder {
         }
     }
 
-    /// Derive the `1rm_<slug>_kg` user_parameter key for an exercise
-    /// name. Matches the server's slug convention (lowercase, ASCII
-    /// word chars only, runs collapsed to a single underscore).
+    /// Derive the `one_rep_max_<exercise_id>_kg` user_parameter key.
     /// Exposed `static` + `internal` so tests can pin the contract.
-    static func oneRMKey(forExerciseName name: String) -> String {
-        "1rm_\(slugify(name))_kg"
+    static func oneRMKey(forExerciseID exerciseID: ExerciseID) -> String {
+        "one_rep_max_\(exerciseID.uuidString.lowercased())_kg"
     }
 
     // MARK: - Private
@@ -141,27 +132,6 @@ extension SessionSeeder {
         return nil
     }
 
-    /// Lowercase + replace every non-alphanumeric run with a single
-    /// underscore; trim leading/trailing underscores. "Back Squat" →
-    /// "back_squat"; "Close-Grip Bench Press" →
-    /// "close_grip_bench_press"; "  Squat  " → "squat".
-    private static func slugify(_ name: String) -> String {
-        var out = ""
-        var pendingSeparator = false
-        for scalar in name.unicodeScalars {
-            let c = Character(scalar)
-            if c.isLetter || c.isNumber {
-                if pendingSeparator, !out.isEmpty {
-                    out.append("_")
-                }
-                out.append(Character(c.lowercased()))
-                pendingSeparator = false
-            } else {
-                pendingSeparator = true
-            }
-        }
-        return out
-    }
 }
 
 private extension Double {

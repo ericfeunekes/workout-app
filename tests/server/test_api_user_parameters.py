@@ -44,7 +44,7 @@ def test_latest_per_key(client, test_user_id) -> None:
                 "updated_at": "2026-04-17T00:00:00Z",
             },
             {
-                "key": "1rm_back_squat_kg",
+                "key": "one_rep_max_2bc0cb7c-9d20-43c0-938b-8e1a8d75a91d_kg",
                 "value": "150",
                 "updated_at": "2026-04-01T00:00:00Z",
             },
@@ -56,7 +56,10 @@ def test_latest_per_key(client, test_user_id) -> None:
     rows = response.json()
 
     latest_by_key = {r["key"]: r["value"] for r in rows}
-    assert latest_by_key == {"bodyweight_kg": "81.5", "1rm_back_squat_kg": "150"}
+    assert latest_by_key == {
+        "bodyweight_kg": "81.5",
+        "one_rep_max_2bc0cb7c-9d20-43c0-938b-8e1a8d75a91d_kg": "150",
+    }
     assert all(r["user_id"] == test_user_id for r in rows)
 
 
@@ -184,7 +187,7 @@ def test_post_user_parameters_omitted_id_still_inserts(client) -> None:
         "/api/user-parameters",
         json=[
             {
-                "key": "1rm_back_squat_kg",
+                "key": "one_rep_max_2bc0cb7c-9d20-43c0-938b-8e1a8d75a91d_kg",
                 "value": "150",
                 "source": "claude",
             }

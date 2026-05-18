@@ -306,7 +306,7 @@ public enum AppBootstrap {
         // qa-045: load latest-per-key user_parameters so the
         // `percent_1rm` resolver in `SessionSeeder` can convert
         // `{sets:3, reps:5, percent_1rm:0.6}` into a concrete load
-        // via `1rm_<slug>_kg * percent`. Keeping the numeric coercion
+        // via `one_rep_max_<exercise_id>_kg * percent`. Keeping the numeric coercion
         // local (rather than handing raw `UserParameter` rows through)
         // lets the seeder stay ignorant of the UserParameter shape
         // and tolerant of unparseable values — a bad row just drops

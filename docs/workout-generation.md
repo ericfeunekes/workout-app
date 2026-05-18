@@ -522,7 +522,7 @@ Adjust the step by exercise. A squat can often move in larger jumps than a later
 
 ### Percent-based loads
 
-Use `percent_1rm` when the workout should resolve load from a user parameter such as `1rm_back_squat_kg`.
+Use `percent_1rm` when the workout should resolve load from a user parameter such as `one_rep_max_<exercise_id>_kg`.
 
 Rules:
 

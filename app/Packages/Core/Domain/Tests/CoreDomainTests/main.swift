@@ -306,12 +306,12 @@ runCase("UserParameter carries a single key/value pair") {
     let p = UserParameter(
         id: UUID(),
         userID: UUID(),
-        key: "1rm_back_squat_kg",
+        key: "one_rep_max_2bc0cb7c-9d20-43c0-938b-8e1a8d75a91d_kg",
         value: "140",
         updatedAt: Date(timeIntervalSince1970: 0),
         source: .claude
     )
-    try expectEqual(p.key, "1rm_back_squat_kg")
+    try expectEqual(p.key, "one_rep_max_2bc0cb7c-9d20-43c0-938b-8e1a8d75a91d_kg")
     try expectEqual(p.value, "140")
     try expectEqual(p.source, .claude)
 }

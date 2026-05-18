@@ -634,13 +634,32 @@ public final class TodayViewModel {
     }
 
     private static func previewDetail(for work: SessionPreviewWork) -> String? {
-        var parts: [String] = []
-        if let load = loadText(for: work) {
-            parts.append(load)
+        [primaryMetric(for: work), secondaryMetric(for: work)]
+            .compactMap { $0 }
+            .removingAdjacentDuplicates()
+            .joined(separator: " · ")
+            .nilIfEmpty
+    }
+
+    private static func primaryMetric(for work: SessionPreviewWork) -> String? {
+        guard let target = work.primaryDisplayTarget else {
+            return loadText(for: work)
         }
-        if let primary = work.primaryDisplayTarget,
-           let text = targetText(primary, loadUnit: work.loadUnit) {
-            parts.append(text)
+        if target.metric == .reps || target.metric == .completion {
+            return loadText(for: work)
+        }
+        return targetText(target, loadUnit: work.loadUnit)
+    }
+
+    private static func secondaryMetric(for work: SessionPreviewWork) -> String? {
+        guard let primary = work.primaryDisplayTarget else { return nil }
+        var parts: [String] = []
+        if primary.metric == .reps || primary.metric == .completion {
+            if let text = targetText(primary, loadUnit: work.loadUnit) {
+                parts.append(text)
+            }
+        } else if let load = loadText(for: work) {
+            parts.append(load)
         }
         parts.append(contentsOf: work.secondaryDisplayTargets.compactMap {
             targetText($0, loadUnit: work.loadUnit)

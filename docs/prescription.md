@@ -531,7 +531,7 @@ Shapes that layer onto any mode with the right item keys.
 { "sets": 5, "reps": 3, "percent_1rm": 0.85, "target_rir": 1 }
 ```
 
-App resolves the load by reading the latest `1rm_<exercise_slug>_kg` user_parameter and multiplying. If the parameter is missing, the app displays "— kg" and asks the user to enter the resolved load manually; the entered value is logged on the set.
+App resolves the load by reading the latest `one_rep_max_<exercise_id>_kg` user_parameter and multiplying. If the parameter is missing, the app displays "— kg" and asks the user to enter the resolved load manually; the entered value is logged on the set.
 
 ### Rep range
 

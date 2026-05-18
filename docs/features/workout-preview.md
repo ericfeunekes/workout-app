@@ -84,8 +84,13 @@ handoff instead of inventing a local plan mutation.
   `TodayViewModelTests.testWorkoutDetailUsesPrimitiveProjectionForPreviewSummary`).
   It also shares CoreSession primitive seed/load-resolution semantics with
   Execution. Today does not import FeaturesExecution.
-- `TODAY-GAP-002`: Simulator proof is required before any preview tap target or
-  layout claim is marked `verified`.
+- Fixture-driven simulator proof for the read-only preview entry path was run
+  on 2026-05-17 with XcodeBuildMCP on iPhone 16 using `--debug-today-plan`.
+  The run covered card tap -> preview, dismiss -> reopen, explicit Start ->
+  Execution, open-ended remaining-work rendering, bounded remaining-work
+  rendering, screenshots, recordings, and `img ask --video` review. The
+  production cache/loading seam is covered by automated loader/bootstrap tests,
+  not by this debug fixture path.
 
 ## QA scenarios
 

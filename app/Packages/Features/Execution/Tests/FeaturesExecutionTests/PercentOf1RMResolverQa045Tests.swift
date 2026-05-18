@@ -1,7 +1,7 @@
 // PercentOf1RMResolverQa045Tests.swift
 //
 // qa-045 — `percent_1rm` prescriptions must resolve to a concrete
-// `loadKg` at seed time when `user_parameters.1rm_<slug>_kg` is
+// `loadKg` at seed time when `user_parameters.one_rep_max_<exercise_id>_kg` is
 // populated. Before the fix, `percent_1rm` rows landed with `loadKg
 // = nil`, so the Active hero rendered "BW" even though Today's
 // formatter correctly showed "3 × 5 @ 60% 1RM".
@@ -23,14 +23,16 @@ final class PercentOf1RMResolverQa045Tests: XCTestCase {
 
     func testPercentOneRmResolvesAgainstUserParameters() {
         // Back Squat, `{sets:3, reps:5, percent_1rm:0.6}`, with a
-        // populated `1rm_back_squat_kg = 160`. Resolver must set
+        // populated `one_rep_max_<exercise_id>_kg = 160`. Resolver must set
         // loadKg = 96.0 on every pending row and unit = .kg.
         let exerciseID = UUID()
         let context = makeContext(
             exerciseID: exerciseID,
             exerciseName: "Back Squat",
             prescriptionJSON: #"{"sets":3,"reps":5,"percent_1rm":0.6}"#,
-            userParameters: ["1rm_back_squat_kg": 160.0]
+            userParameters: [
+                "one_rep_max_\(exerciseID.uuidString.lowercased())_kg": 160.0,
+            ]
         )
 
         let state = SessionSeeder.seed(context: context)
@@ -51,7 +53,7 @@ final class PercentOf1RMResolverQa045Tests: XCTestCase {
     }
 
     func testPercentOneRmFallsBackToNilWhenNoParameter() {
-        // Same prescription, no `1rm_back_squat_kg` in the user_parameters
+        // Same prescription, no matching UUID-keyed 1RM in the user_parameters
         // map. Resolver must leave loadKg = nil — the Active hero then
         // renders "BW" and the numpad opens blank.
         let exerciseID = UUID()
@@ -68,25 +70,16 @@ final class PercentOf1RMResolverQa045Tests: XCTestCase {
         XCTAssertEqual(itemLog?.sets.count, 3)
         XCTAssertTrue(
             itemLog?.sets.allSatisfy { $0.loadKg == nil } ?? false,
-            "missing 1RM key falls back to nil (BW) per spec"
+            "missing 1RM key leaves load unset"
         )
     }
 
-    func testOneRMKeyDerivesSlugFromExerciseName() {
-        // Pin the key convention against a few canonical names so a
-        // future rename doesn't silently diverge from the server's
-        // `1rm_<slug>_kg` shape.
+    func testOneRMKeyUsesExerciseID() {
+        let exerciseID = UUID(uuidString: "D58104B7-9A6D-4B6A-A6EC-055817D1B725")!
+
         XCTAssertEqual(
-            SessionSeeder.oneRMKey(forExerciseName: "Back Squat"),
-            "1rm_back_squat_kg"
-        )
-        XCTAssertEqual(
-            SessionSeeder.oneRMKey(forExerciseName: "Close-Grip Bench Press"),
-            "1rm_close_grip_bench_press_kg"
-        )
-        XCTAssertEqual(
-            SessionSeeder.oneRMKey(forExerciseName: "  Deadlift  "),
-            "1rm_deadlift_kg"
+            SessionSeeder.oneRMKey(forExerciseID: exerciseID),
+            "one_rep_max_d58104b7-9a6d-4b6a-a6ec-055817d1b725_kg"
         )
     }
 

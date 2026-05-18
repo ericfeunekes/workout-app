@@ -53,7 +53,7 @@ public struct WorkoutContext: Sendable {
     public let alternativesByItem: [UUID: [ExerciseAlternative]]
 
     /// Latest-per-key numeric user_parameters. Keys follow the server
-    /// convention (`1rm_<slug>_kg`, `bodyweight_kg`, …); values are
+    /// convention (`one_rep_max_<exercise_id>_kg`, `bodyweight_kg`, …); values are
     /// parsed from the append-only `user_parameters` log's latest row
     /// for each key. Populated by `AppBootstrap.buildWorkoutContext`
     /// from `WorkoutCache.loadUserParametersLatest()`.

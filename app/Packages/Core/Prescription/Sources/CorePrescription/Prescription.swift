@@ -55,7 +55,7 @@ public enum Prescription: Equatable, Sendable, Hashable {
     )
 
     /// `{ "sets": n, "reps": r, "percent_1rm": 0.85, "target_rir": rir? }`
-    /// — load resolves at execution time by reading `1rm_<slug>_kg` from
+    /// — load resolves at execution time by reading `one_rep_max_<exercise_id>_kg` from
     /// user_parameters.
     case percentOf1RM(
         sets: Int,

@@ -37,7 +37,6 @@ gap in the owning docs. Git history is the archive.
 
 | gap_id | owning_docs | gap | gap_kind |
 | --- | --- | --- | --- |
-| `TODAY-GAP-002` | `docs/features/today.md` | Preview tap targets and Start affordance need simulator proof. | `proof` |
 | `PREVIEW-GAP-001` | `docs/features/workout-preview.md` | Preview editability is not proven for every target field. | `proof` |
 | `PREVIEW-GAP-002` | `docs/features/workout-preview.md` | Preview edit persistence is not implemented and must respect whole-tree server replacement semantics. | `implementation` |
 | `SWAP-GAP-001` | `docs/features/exercise-swap.md` | Exercise swap is item-scoped; there is no per-set swap behavior. | `implementation` |

@@ -808,6 +808,102 @@ final class ExecutionProjectionTests: XCTestCase {
         XCTAssertEqual(projection.currentTask.secondaryMetric, "8 reps")
     }
 
+    func testTodayRouteUsesPrimitivePreviewProjectionBeforeStart() throws {
+        let deadlift = UUID()
+        let carry = UUID()
+        let deadliftItem = Self.item(
+            blockID: Self.blockID,
+            exerciseID: deadlift,
+            position: 0,
+            prescriptionJSON: #"{"reps":3,"load_kg":140,"weight_unit":"kg"}"#
+        )
+        let carryItem = Self.item(
+            blockID: Self.blockID,
+            exerciseID: carry,
+            position: 1,
+            prescriptionJSON: #"{"distance_m":50,"load_kg":32,"weight_unit":"kg"}"#
+        )
+        var (context, _) = Self.context(
+            timingMode: .straightSets,
+            blockName: "Strength",
+            blockIntent: "Prime the hinge before carries",
+            timingConfigJSON: #"{"rest_between_sets_sec":90,"rest_between_exercises_sec":90}"#,
+            items: [deadliftItem, carryItem],
+            exercises: [
+                deadlift: "Deadlift",
+                carry: "Farmer Carry",
+            ]
+        )
+        let primitiveWorkout = PrimitiveWorkout(
+            id: context.workout.id,
+            name: context.workout.name,
+            blocks: [
+                PrimitiveBlock(id: Self.blockID, sets: [
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: PrimitiveTiming(mode: .setBounded),
+                        repeatCount: 2,
+                        slots: [
+                            PrimitiveSlot(
+                                id: UUID(),
+                                exerciseID: deadlift,
+                                workTargets: [
+                                    PrimitiveWorkTarget(
+                                        metric: .reps,
+                                        valueForm: .single,
+                                        value: 3,
+                                        role: .completion
+                                    ),
+                                ],
+                                load: PrimitiveLoad(value: 140, unit: .kg, unitType: .absolute)
+                            ),
+                            PrimitiveSlot(
+                                id: UUID(),
+                                exerciseID: carry,
+                                workTargets: [
+                                    PrimitiveWorkTarget(
+                                        metric: .distance,
+                                        valueForm: .single,
+                                        value: 50,
+                                        role: .completion
+                                    ),
+                                    PrimitiveWorkTarget(
+                                        metric: .loadCarried,
+                                        valueForm: .single,
+                                        value: 32,
+                                        role: .observation
+                                    ),
+                                ],
+                                load: PrimitiveLoad(value: 32, unit: .kg, unitType: .absolute)
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        context = WorkoutContext(
+            workout: context.workout,
+            primitiveWorkout: primitiveWorkout,
+            primitiveExecutionPlan: try ExecutionPlan.validated(workout: primitiveWorkout),
+            blocks: context.blocks,
+            itemsByBlock: context.itemsByBlock,
+            exercises: context.exercises
+        )
+        let vm = ExecutionViewModel(context: context, clock: FixedClock(now: now))
+
+        let projection = vm.executionProjection(now: now)
+
+        XCTAssertEqual(projection.currentTask.kind, .today)
+        XCTAssertEqual(projection.currentTask.title, "Deadlift")
+        XCTAssertEqual(projection.currentTask.blockIntent, "Prime the hinge before carries")
+        XCTAssertEqual(projection.currentTask.primaryMetric, "140 kg")
+        XCTAssertEqual(projection.currentTask.secondaryMetric, "3 reps")
+        XCTAssertEqual(projection.remainingWork.completedSets, 0)
+        XCTAssertEqual(projection.remainingWork.totalSets, 2)
+        XCTAssertEqual(projection.workQueue.first?.title, "Farmer Carry")
+        XCTAssertEqual(projection.workQueue.first?.detail, "50 m · 32 kg")
+    }
+
     // MARK: - Fixtures
 
     private static let workoutID = UUID()

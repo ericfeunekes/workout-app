@@ -10,7 +10,7 @@ import WorkoutCoreFoundation
 /// history drives longitudinal analysis.
 ///
 /// `value` is stored as a `String` and interpreted in context — e.g. the key
-/// `1rm_back_squat_kg` implies "numeric in kg". Unknown keys are kept but
+/// `one_rep_max_<exercise_id>_kg` implies "numeric in kg". Unknown keys are kept but
 /// ignored by the app until it's taught to use them.
 public struct UserParameter: Sendable, Hashable {
     public var id: UserParameterID

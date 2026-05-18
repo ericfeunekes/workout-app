@@ -333,7 +333,7 @@ This dual mode is optional and not a v1 blocker. v1 plan: ship our WatchKit app 
 - `cadence_avg_spm Integer?` — for runs and rides (null otherwise)
 
 ### Add to `user_parameters` keys (known)
-- `resting_hr_bpm`, `max_hr_bpm`, `1rm_<exercise_slug>_kg`, `easy_pace_sec_per_km`, `threshold_pace_sec_per_km`, `5k_pr_sec`, `preferred_cadence_spm`
+- `resting_hr_bpm`, `max_hr_bpm`, `one_rep_max_<exercise_id>_kg`, `easy_pace_sec_per_km`, `threshold_pace_sec_per_km`, `5k_pr_sec`, `preferred_cadence_spm`
 
 (Not schema — just known keys the app knows how to resolve.)
 

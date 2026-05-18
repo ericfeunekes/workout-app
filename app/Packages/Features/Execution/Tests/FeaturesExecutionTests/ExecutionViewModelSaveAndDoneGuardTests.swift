@@ -117,7 +117,9 @@ final class ExecutionViewModelSaveAndDoneGuardTests: XCTestCase {
         XCTAssertNotEqual(a1, b1, "different user → different id")
 
         let aOther = ExecutionViewModel.userParameterID(
-            userID: userA, key: "1rm_back_squat_kg", observedAt: t1
+            userID: userA,
+            key: "one_rep_max_2bc0cb7c-9d20-43c0-938b-8e1a8d75a91d_kg",
+            observedAt: t1
         )
         XCTAssertNotEqual(a1, aOther, "different key → different id")
     }

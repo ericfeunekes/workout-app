@@ -72,8 +72,18 @@ feature cross-import.
 
 ## Current gaps
 
-- `TODAY-GAP-002`: Preview tap targets and Start affordance need simulator
-  proof before the feature can be marked `verified`.
+No Today-specific preview entry gaps are currently tracked. Preview editability
+and edit persistence remain in `docs/features/workout-preview.md`.
+
+Fixture-driven simulator proof for the preview entry path was run on
+2026-05-17 with XcodeBuildMCP on iPhone 16 using `--debug-today-plan`: open
+Today, tap card body into preview, confirm primitive projection, dismiss,
+reopen, tap explicit Start, and land in Execution on the same primitive first
+task. A follow-up recording covered the bounded remaining-work preview state
+(`1 set left in current block of 1`). Both recordings were reviewed with
+`img ask --video`; no blank screens, crashes, clipping, overlap, or confusing
+disabled controls were observed. The production cache/loading seam is covered
+by automated loader/bootstrap tests, not by this debug fixture path.
 
 ## Deliberate non-goals
 

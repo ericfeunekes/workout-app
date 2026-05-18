@@ -31,18 +31,20 @@ public struct SessionPreviewProjection: Equatable, Sendable {
         cursor: SessionState.Cursor = SessionState.Cursor(blockIndex: 0, itemIndex: 0, setIndex: 1),
         upcomingLimit: Int = 3
     ) {
-        let blockIndex = max(0, cursor.blockIndex)
-        let block = plan.blocks[safe: blockIndex]
+        let cursorBlockIndex = max(0, cursor.blockIndex)
         let rows = plan.previewWorks()
         let currentIndex = rows.firstIndex { row in
-            row.blockIndex == blockIndex
+            row.blockIndex == cursorBlockIndex
                 && row.setIndexInBlock >= max(0, cursor.setIndex - 1)
-        } ?? rows.firstIndex { $0.blockIndex >= blockIndex }
+        } ?? rows.firstIndex { $0.blockIndex >= cursorBlockIndex }
+        let activeBlockIndex = currentIndex.map { rows[$0].blockIndex } ?? cursorBlockIndex
+        let block = plan.blocks[safe: activeBlockIndex]
+        let completedSets = activeBlockIndex == cursorBlockIndex ? max(0, cursor.setIndex - 1) : 0
 
         self.current = currentIndex.map { rows[$0] }
         self.currentBlock = block.map {
             SessionPreviewBlock(
-                blockIndex: blockIndex,
+                blockIndex: activeBlockIndex,
                 blockID: $0.blockID,
                 blockCount: plan.blocks.count,
                 title: nil,
@@ -50,7 +52,7 @@ public struct SessionPreviewProjection: Equatable, Sendable {
                 workTargets: $0.workTargets
             )
         }
-        self.remaining = block.map { SessionPreviewRemaining(block: $0, completedSets: 0) }
+        self.remaining = block.map { SessionPreviewRemaining(block: $0, completedSets: completedSets) }
             ?? .bounded(completed: 0, total: 0)
         if let currentIndex {
             self.upcoming = Array(rows.dropFirst(currentIndex + 1).prefix(max(0, upcomingLimit)))

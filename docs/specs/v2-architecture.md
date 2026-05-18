@@ -215,7 +215,7 @@ User-specific data that Claude pushes so the app can resolve things like percent
 |---|---|---|
 | `id` | UUID | |
 | `user_id` | UUID | FK |
-| `key` | String | e.g. `1rm_back_squat_kg`, `resting_hr_bpm`, `5k_pr_sec`, `training_age_years`, `preference_rep_range`, `bodyweight_kg`, `sleep_hours_7d_avg`. The app pushes `bodyweight_kg` on workout completion when the user records it — body weight is a user_parameter, not a column on `workout`. |
+| `key` | String | e.g. `one_rep_max_<exercise_id>_kg`, `resting_hr_bpm`, `5k_pr_sec`, `training_age_years`, `preference_rep_range`, `bodyweight_kg`, `sleep_hours_7d_avg`. The app pushes `bodyweight_kg` on workout completion when the user records it — body weight is a user_parameter, not a column on `workout`. |
 | `value` | String | Stored as string, interpreted by context |
 | `updated_at` | Timestamp | |
 | `source` | String | `claude`, `app_log`, `manual` |

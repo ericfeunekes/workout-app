@@ -97,7 +97,7 @@ public enum SessionSeeder {
         // they read prescriptions in isolation so they stay
         // context-free + unit-testable. The resolver walks the seeded
         // ItemLogs with the full context in hand and rewrites load
-        // on `percentOf1RM` rows where `1rm_<slug>_kg` is populated.
+        // on `percentOf1RM` rows where `one_rep_max_<exercise_id>_kg` is populated.
         // Keys that are missing leave loadKg = nil so the UI falls
         // back to "BW" — the user can still log the set by hand.
         accum.items = resolvePercentOf1RM(

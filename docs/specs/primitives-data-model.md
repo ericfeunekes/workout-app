@@ -126,11 +126,11 @@ simulator QA is used as confirmation.
 
 ## Primitive semantics foundation
 
-The next implementation cluster must introduce a shared primitive semantics
-layer before broadening the matrix. The problem is not only that AMRAP partial
-results need distance or carried-load controls; the broader issue is that
+The completed foundation cluster introduced a shared primitive semantics layer
+before broadening the matrix. The problem was not only that AMRAP partial
+results needed distance or carried-load controls; the broader issue was that
 seeding, projection, result entry, completion summaries, correction, and sync
-currently have to infer primitive meaning independently.
+could infer primitive meaning independently.
 
 The durable contract is:
 
@@ -161,40 +161,67 @@ one move, introduce an in-app primitive editor, or generalize beyond the
 accepted seven primitives. It is the smallest foundation needed so the next
 bug fixes and proof matrix assert one set of primitive composition rules.
 
-### Current implementation cluster
+### Completed foundation cluster
 
-The active implementation cluster is intentionally narrower than full
-primitive-lane closeout. It must deliver the app-runtime semantics foundation
-with proof, not every downstream consumer in one move.
+The first implementation cluster was intentionally narrower than full
+primitive-lane closeout. It delivered the app-runtime semantics foundation with
+proof, not every downstream consumer in one move.
 
-In scope:
+Delivered:
 
-- Add narrow CoreSession-owned computed semantics on the existing primitive
+- CoreSession-owned computed semantics on the existing primitive
   execution types for timing/traversal legality, visible-progress policy,
   completion vs observation target lookup, metric display ordering,
   partial-result input fields, and aggregate result row policy.
-- Route production primitive seeding, execution projection, AMRAP/aggregate
+- Production primitive seeding, execution projection, AMRAP/aggregate
   result entry, completion summaries, and the `bug-090` sentinel-progress fix
-  through those semantics.
-- Fix `bug-089` in the same implementation cluster as execution
-  route/sheet lifecycle work, with deterministic proof plus simulator
-  confirmation.
-- Prove narrow app/server legality parity for the primitive timing/traversal
-  and aggregate-target rules that this cluster centralizes.
+  route through those semantics.
+- `bug-089` route/sheet lifecycle handling, with deterministic proof plus
+  simulator confirmation.
+- Narrow app/server legality parity for the primitive timing/traversal and
+  aggregate-target rules centralized by this cluster.
 
-Out of scope for this cluster:
+Residual scope after this cluster:
 
 - History correction and any correction UI outside execution completion.
 - Full closure of every `PDM-GAP-007` consumer, including untouched
   sync/persistence consumers when no encoding or payload behavior changes.
 - New primitive wire fields, new SwiftData migrations, and new sync payload
   semantics unless implementation exposes a real encoding gap.
-- Cross-runtime server/app sync proof unless this cluster changes behavior at
-  the real URLSession/FastAPI/SQLite boundary. If it does cross that seam, the
-  missing realistic-local sync harness is a testing capability gap, not a
-  simulator-QA substitute.
+- Cross-runtime server/app sync proof, which belongs to the next contract
+  cutover cluster because it must exercise the real URLSession/FastAPI/SQLite
+  boundary.
 
-The proof bar for this cluster is:
+### Next implementation cluster
+
+The next cluster is the primitive contract cutover and sync/readback proof. It
+must prove that primitive workouts can move through the real system, not only
+that the app runtime can reason about primitive fixtures.
+
+In scope:
+
+- Replace remaining old-shape wire/schema surfaces with the primitive
+  authoring/log contract where this lane owns them: server API models,
+  OpenAPI/shared Swift DTOs, SwiftData cache shape, fixtures, and docs.
+- Implement the explicit destructive reset of old local/server QA workout data
+  required by `cutover.md`.
+- Prove pull -> local cache -> `ExecutionPlan` seed -> execution log/result
+  grouping -> push -> server readback for representative primitive workouts.
+- Close or narrow `PDM-GAP-003`, `PDM-GAP-004`, `PDM-GAP-005`,
+  `PDM-GAP-006`, and residual `PDM-GAP-007` only where the implementation
+  actually touches those consumers.
+- Keep `EXEC-GAP-008` separate unless the cutover work naturally exposes the
+  expanded per-slot editing seam.
+
+Out of scope unless the architecture review says otherwise:
+
+- In-app primitive authoring/editor UI.
+- History analytics redesign beyond the query-safety/readback proof needed for
+  primitive result roles.
+- Production data migration compatibility; current workouts are QA data and may
+  be reset explicitly.
+
+The foundation-cluster proof bar was:
 
 - CoreSession semantic-helper tests over the shared legality matrix, metric
   roles, aggregate-result policy, deterministic result identity, and sentinel
@@ -272,21 +299,20 @@ already cover.
   implementation planning must start from this accepted contract and cite the
   aspect gaps below for the specific proof obligations it intends to close.
 
-- The current implementation phase has proved the visible primitive execution
-  slice through automated gates and simulator QA, but it does not close the
-  cutover. Remaining material items are `PDM-GAP-006`, `bug-089`, and
-  `bug-090`, plus the full proof matrix above.
+- The completed foundation phase proved the visible primitive execution slice,
+  CoreSession semantics, narrow server legality parity, Today preview
+  projection, and the `bug-089`/`bug-090` regressions through automated gates
+  and simulator QA. It does not close the full cutover. Remaining material
+  items are the full wire/schema/cache/sync/reset cutover, `PDM-GAP-006`
+  residual readback and correction consumers, and the proof matrix above.
 
-- `PDM-GAP-007`: Primitive composition semantics are not centralized. Result
-  UI, completion summaries, projection, persistence grouping, sync payloads,
-  and server validation can still infer completion metrics, primary display,
-  aggregate row roles, and sentinel counts through separate timing-mode or
-  UI-specific logic. The next phase must create the CoreSession semantics
-  foundation above and route the `PDM-GAP-006` result fixes through it. The
-  active cluster should narrow this gap to the residual surfaces it does not
-  touch: History correction, correction UI outside execution completion, and
-  any sync/persistence consumer left untouched because no encoding gap was
-  found.
+- `PDM-GAP-007`: Primitive composition semantics are now centralized for
+  CoreSession app-runtime seeding/projection/result rules and narrow server
+  legality parity. Residual surfaces remain open wherever primitive meaning can
+  still be inferred outside that contract: History correction, correction UI
+  outside execution completion, persistence grouping, sync payload
+  construction, server readback/query semantics, and any feature consumer
+  touched by the full cutover.
 
 ## Open questions
 

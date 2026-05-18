@@ -81,9 +81,11 @@ Today, tap card body into preview, confirm primitive projection, dismiss,
 reopen, tap explicit Start, and land in Execution on the same primitive first
 task. A follow-up recording covered the bounded remaining-work preview state
 (`1 set left in current block of 1`). Both recordings were reviewed with
-`img ask --video`; no blank screens, crashes, clipping, overlap, or confusing
-disabled controls were observed. The production cache/loading seam is covered
-by automated loader/bootstrap tests, not by this debug fixture path.
+`img ask --video`; once the debug Today plan was loaded, the preview
+interaction showed no crashes, clipping, overlap, or confusing disabled
+controls. Debug-launch blank-screen behavior is tracked separately as
+`bug-091`. The production cache/loading/start seam is covered by automated
+loader/bootstrap tests, not by this debug fixture path.
 
 ## Deliberate non-goals
 

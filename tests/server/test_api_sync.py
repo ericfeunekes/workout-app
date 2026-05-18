@@ -114,6 +114,11 @@ def _create_future_workout(client, exercise_id: str) -> str:
 def test_pull_returns_workouts_and_last_performed(client, test_engine, test_user_id) -> None:
     exercise_id, _ = _seed_completed_workout(test_engine, test_user_id)
     _create_future_workout(client, exercise_id)
+    one_rm_key = f"one_rep_max_{exercise_id}_kg"
+    client.post(
+        "/api/user-parameters",
+        json=[{"key": one_rm_key, "value": "150", "source": "claude"}],
+    )
 
     response = client.get("/api/sync/pull")
     assert response.status_code == 200
@@ -122,8 +127,9 @@ def test_pull_returns_workouts_and_last_performed(client, test_engine, test_user
     assert len(body["workouts"]) == 2  # completed + future
     assert len(body["exercises"]) == 1
     assert body["exercises"][0]["id"] == _BACK_SQUAT
-    assert len(body["user_parameters"]) == 1
-    assert body["user_parameters"][0]["key"] == "bodyweight_kg"
+    params_by_key = {p["key"]: p["value"] for p in body["user_parameters"]}
+    assert params_by_key["bodyweight_kg"] == "82"
+    assert params_by_key[one_rm_key] == "150"
 
     # last_performed contains the completed session's logs
     assert len(body["last_performed"]) == 1

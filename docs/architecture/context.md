@@ -60,8 +60,8 @@ Five bounded contexts. Each owns a coherent set of concepts and operations; chan
 
 | Domain | Owns | Lives in |
 |---|---|---|
-| **Prescription** | What Claude authored: the shape of a workout (blocks, items, timing, load, autoreg config). Parsing prescription_json, resolving percent_1rm, applying autoreg rules. | `app/Packages/Core/Prescription`, `app/Packages/Core/Autoreg` (and on the server: `server/workoutdb_server/models.py` + `api/schemas.py`) |
-| **Session** | The live-in-flight workout: cursor, route, log, autoregHeld, adjust glyphs, rest timer state. | `app/Packages/Core/Session` |
+| **Prescription** | What Claude authored: the shape of a workout (blocks, items, timing, load, autoreg config). Parsing `prescription_json` and applying autoreg rules. | `app/Packages/Core/Prescription`, `app/Packages/Core/Autoreg` (and on the server: `server/workoutdb_server/models.py` + `api/schemas.py`) |
+| **Session** | The executable workout: cursor, route, log, primitive seed-time load resolution, pre-start preview projection, autoregHeld, adjust glyphs, rest timer state. | `app/Packages/Core/Session` |
 | **Persistence** | SwiftData stack, migrations, local cache management, keychain for the bearer token. | `app/Packages/Persistence` |
 | **Sync** | Talking to the server: Pull, Push Queue, Connection, 401 handling. | `app/Packages/Sync` |
 | **Presentation** | SwiftUI views per feature (Today, Execution, History, Settings, FirstRun). Plus Watch faces. | `app/Packages/Features/*` |

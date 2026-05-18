@@ -896,6 +896,86 @@ final class AppBootstrapTests: XCTestCase {
         XCTAssertNotNil(vmB.activeContent)
     }
 
+    func testTodayStartNonSelectedPlannedWorkoutRebuildsPrimitivePlanFromCache() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let (workoutA, workoutB) = Fixtures.twoPlannedWorkouts()
+        let parameterKey = "one_rep_max_\(workoutB.exercises[0].id.uuidString.lowercased())_kg"
+        let primitiveB = PrimitiveWorkout(
+            id: workoutB.workout.id,
+            name: workoutB.workout.name,
+            blocks: [
+                PrimitiveBlock(id: workoutB.blocks[0].id, sets: [
+                    PrimitiveSet(
+                        id: UUID(uuidString: "b4000000-0000-0000-0000-000000000000")!,
+                        timing: PrimitiveTiming(mode: .setBounded),
+                        slots: [
+                            PrimitiveSlot(
+                                id: UUID(uuidString: "b5000000-0000-0000-0000-000000000000")!,
+                                exerciseID: workoutB.exercises[0].id,
+                                workTargets: [
+                                    PrimitiveWorkTarget(
+                                        metric: .reps,
+                                        valueForm: .single,
+                                        value: 3,
+                                        role: .completion
+                                    ),
+                                ],
+                                load: PrimitiveLoad(value: 0.8, unit: .oneRepMax, unitType: .relative)
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        try await factory.workoutCache.save(
+            PulledDataset(
+                workouts: [workoutA.workout, workoutB.workout],
+                primitiveWorkouts: [primitiveB],
+                blocks: workoutA.blocks + workoutB.blocks,
+                items: workoutA.items + workoutB.items,
+                alternatives: [],
+                exercises: workoutA.exercises + workoutB.exercises,
+                userParameters: [
+                    UserParameter(
+                        id: UUID(uuidString: "b6000000-0000-0000-0000-000000000000")!,
+                        userID: workoutB.workout.userID,
+                        key: parameterKey,
+                        value: "140",
+                        updatedAt: workoutB.workout.scheduledDate ?? Date(timeIntervalSince1970: 0),
+                        source: .manual
+                    ),
+                ]
+            )
+        )
+
+        let transport = ScriptedTransport(getOutcomes: [.error(.network("dns"))])
+        let result = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: workoutA.workout.scheduledDate!,
+            transportBuilder: { _ in transport }
+        )
+        guard case let .ready(todayVM, holder, _) = result else {
+            return XCTFail("expected .ready, got \(result)")
+        }
+        let vmA = try XCTUnwrap(holder.vm)
+        XCTAssertEqual(vmA.context.workout.id, workoutA.workout.id)
+
+        await todayVM.start(workoutID: workoutB.workout.id)
+
+        let vmB = try XCTUnwrap(holder.vm)
+        XCTAssertFalse(vmB === vmA)
+        XCTAssertEqual(vmB.context.workout.id, workoutB.workout.id)
+        XCTAssertEqual(vmB.context.primitiveWorkout, primitiveB)
+        XCTAssertEqual(vmB.context.primitiveExecutionPlan?.workoutID, workoutB.workout.id)
+        XCTAssertEqual(vmB.context.primitiveExecutionPlan?.blocks[0].sets[0].slots[0].loadKg, 112)
+        XCTAssertEqual(vmB.context.primitiveExecutionPlan?.blocks[0].sets[0].slots[0].loadUnit, .kg)
+        XCTAssertEqual(vmB.state.route, .active)
+        XCTAssertNotNil(vmB.activeContent)
+    }
+
     /// qa-030 root-cause regression: after the post-save VM rebuild, the
     /// newly-installed `ExecutionViewModel` must still carry the
     /// `onUserParameterChanged` hook so a bodyweight typed on workout

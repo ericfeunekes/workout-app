@@ -88,9 +88,12 @@ handoff instead of inventing a local plan mutation.
   on 2026-05-17 with XcodeBuildMCP on iPhone 16 using `--debug-today-plan`.
   The run covered card tap -> preview, dismiss -> reopen, explicit Start ->
   Execution, open-ended remaining-work rendering, bounded remaining-work
-  rendering, screenshots, recordings, and `img ask --video` review. The
-  production cache/loading seam is covered by automated loader/bootstrap tests,
-  not by this debug fixture path.
+  rendering, screenshots, recordings, and `img ask --video` review. Once the
+  debug Today plan was loaded, the preview interaction showed no crashes,
+  clipping, overlap, or confusing disabled controls; debug-launch blank-screen
+  behavior is tracked separately as `bug-091`. The production
+  cache/loading/start seam is covered by automated loader/bootstrap tests, not
+  by this debug fixture path.
 
 ## QA scenarios
 

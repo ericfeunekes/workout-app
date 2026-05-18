@@ -61,7 +61,7 @@ ExecutionPlan
             ├── load_display_value: Double?   -- authored value in authored unit (for UI round-trip)
             ├── load_reference: {kind: "1rm" | "bodyweight", key: String, value: Double}?
                                      -- if relative, the resolved reference: key is the user_parameters key, value is the absolute kg
-            ├── resolved_from_user_param_id: UUID?  -- pinned user_parameters row used to resolve load; nil for bodyweight or absolute loads
+            ├── resolved_from_user_param_id: UUID?  -- future optional audit field; not implemented in current app runtime
             ├── effective_stimuli: [Stimulus]  -- resolved at slot scope
             ├── post_rest_sec: Int
             ├── is_warmup: Bool
@@ -89,14 +89,14 @@ The result is cached on the slot. Block-scope and set-scope `effective_stimuli` 
 
 Rationale:
 - **Stability.** A `(0.85, "1rm", relative)` slot resolves when the app seeds the pulled workout into an `ExecutionPlan`, using the local `user_parameters` row (key: `one_rep_max_<exercise_id>_kg`) with the latest `updated_at` visible in the local mirror at seed time. If the user tests a new 1RM mid-session, pre-seeded slots keep the seed-time target; newly-seeded workouts use the new 1RM.
-- **Single-read.** Resolve once during app seed from the local `user_parameters` mirror and record the pinned `resolved_from_user_param_id` on `ExecutionSlot` for auditing. No repeated DB hits during the session.
-- **Audit trail.** If a future session asks "what 1RM did this workout use to set my load?", the cached `load_reference.value` and the pinned `resolved_from_user_param_id` answer directly.
+- **Single-read.** Resolve once during app seed from the local `user_parameters` mirror and cache the absolute load on `ExecutionSlot`. No repeated DB hits during the session.
+- **Audit trail.** If a future session asks "what 1RM did this workout use to set my load?", the cached absolute load and authored relative-load reference answer the execution question. Pinning the source `user_parameters` row id is not implemented in the current app runtime; add it only with a coordinated execution-plan/schema cutover.
 
 **Resolver contract.**
 
-- `unit: "1rm"` → look up `user_parameters` in the app's local mirror where `key = "one_rep_max_<slot.exercise_id>_kg"`, taking the most recent row by `updated_at` at seed time. Multiply `load.value` by the parameter value to get `load_kg`. Pin that parameter row's `id` on `ExecutionSlot.resolved_from_user_param_id`.
+- `unit: "1rm"` → look up `user_parameters` in the app's local mirror where `key = "one_rep_max_<slot.exercise_id>_kg"`, taking the most recent row by `updated_at` at seed time. Multiply `load.value` by the parameter value to get `load_kg`.
 - `unit: "bodyweight"` → look up `key = "bodyweight_kg"` the same way. Multiply `load.value` by the parameter value to get `load_kg`.
-- `unit: "kg"` or `"lb"` with `unit_type: "absolute"` → no resolution. `load_kg` is the raw value converted to kg if authored in lb; `resolved_from_user_param_id` stays nil.
+- `unit: "kg"` or `"lb"` with `unit_type: "absolute"` → no resolution. `load_kg` is the raw value converted to kg if authored in lb.
 
 If a required `user_parameter` is missing from the local mirror at seed time, the slot's `load_kg` is left nil and a warning is raised to the sync layer. Execution falls back to the authored absolute if one was given alongside the relative (not currently authored — flagged for future authoring-surface extension).
 

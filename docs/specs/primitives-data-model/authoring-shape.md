@@ -698,7 +698,7 @@ Warm-up ramp is a set with multiple slots (same exercise, ascending load, `is_wa
 
 **Q-C. `progressive` value-form for drop sets.** A drop set (225 × 5 → 185 × 8 → 155 × AMRAP) can be authored as one set with three slots (same exercise, descending load, `post_rest_sec: 0`) or as one slot with a `progressive` load value-form. **Preference: structural multi-slot** — the hierarchy already expresses it; adding `progressive` as a value-form creates a second way to say the same thing.
 
-**Q-F. Relative-load resolution timing.** Resolved in runtime-resolution.md: cache once at seed against the local `user_parameters` mirror by `updated_at`-latest-before-pull; pin `resolved_from_user_param_id` on `ExecutionSlot`.
+**Q-F. Relative-load resolution timing.** Resolved in runtime-resolution.md: cache once at seed against the local `user_parameters` mirror by `updated_at`-latest-before-pull. Pinning the source `user_parameters` row id on `ExecutionSlot` is deferred until a coordinated execution-plan/schema cutover needs that provenance.
 
 **Q-H. Cluster authoring at seed-time.** Two valid authorings of a cluster (15 total reps across 4 sub-sets with 20s intra-set rest):
 - **One slot with `sub_sets` metadata and total reps** — ergonomic; driver expands.

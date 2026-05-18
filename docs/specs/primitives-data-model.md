@@ -100,7 +100,7 @@ Proof: integration tests under `app/Packages/Features/Execution/Tests/` pass for
 
 Proof: fixture file per example under `tests/contract/` or `schema/fixtures/`, plus a round-trip test that asserts each stage's output.
 
-**A3. App seed-time relative-load resolution is deterministic and pinned.** Given locally mirrored `user_parameters` rows with `updated_at` timestamps, a slot with `load: { value: 0.85, unit: "1rm", unit_type: "relative" }` resolves against the latest-by-updated_at row when the app seeds the pulled workout, caches absolute kg on `ExecutionSlot.load_kg`, and pins `resolved_from_user_param_id` when the sync contract exposes it.
+**A3. App seed-time relative-load resolution is deterministic.** Given locally mirrored `user_parameters` rows with `updated_at` timestamps, a slot with `load: { value: 0.85, unit: "1rm", unit_type: "relative" }` resolves against the latest-by-updated_at row when the app seeds the pulled workout and caches absolute kg on `ExecutionSlot.load_kg`. Source-row id provenance is deferred until a coordinated execution-plan/schema cutover needs it.
 
 Proof: a unit test with two `user_parameters` updates (bodyweight_kg changes between session A and session B) produces two different cached absolute loads when two sessions are seeded with the same relative-load slot.
 
@@ -173,11 +173,13 @@ Delivered:
   execution types for timing/traversal legality, visible-progress policy,
   completion vs observation target lookup, metric display ordering,
   partial-result input fields, and aggregate result row policy.
-- Production primitive seeding, execution projection, AMRAP/aggregate
-  result entry, completion summaries, and the `bug-090` sentinel-progress fix
-  route through those semantics.
-- `bug-089` route/sheet lifecycle handling, with deterministic proof plus
-  simulator confirmation.
+- Production primitive seeding, pre-start preview projection,
+  AMRAP/aggregate result entry, and completion summaries route through those
+  semantics. The separate `bug-090` sentinel-progress fix remains open because
+  it needs a dedicated EMOM progress proof slice.
+- Route/sheet lifecycle risk is now separated as `bug-089`, which remains open
+  for deterministic active/rest interval-boundary proof plus simulator
+  confirmation.
 - Narrow app/server legality parity for the primitive timing/traversal and
   aggregate-target rules centralized by this cluster.
 
@@ -300,11 +302,13 @@ already cover.
   aspect gaps below for the specific proof obligations it intends to close.
 
 - The completed foundation phase proved the visible primitive execution slice,
-  CoreSession semantics, narrow server legality parity, Today preview
-  projection, and the `bug-089`/`bug-090` regressions through automated gates
-  and simulator QA. It does not close the full cutover. Remaining material
-  items are the full wire/schema/cache/sync/reset cutover, `PDM-GAP-006`
-  residual readback and correction consumers, and the proof matrix above.
+  CoreSession semantics, narrow server legality parity, and Today preview
+  projection through automated gates and simulator QA. It also produced
+  durable repro rows for `bug-089`, `bug-090`, and `bug-091`; those bugs remain
+  open until their specific route/progress/launch fixes land. This phase does
+  not close the full cutover. Remaining material items are the full
+  wire/schema/cache/sync/reset cutover, `PDM-GAP-006` residual readback and
+  correction consumers, the open bug rows, and the proof matrix above.
 
 - `PDM-GAP-007`: Primitive composition semantics are now centralized for
   CoreSession app-runtime seeding/projection/result rules and narrow server

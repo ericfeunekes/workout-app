@@ -198,6 +198,85 @@ final class TodayLoaderTests: XCTestCase {
         )
     }
 
+    func testLoadPlanAttachesPrimitivePlansAndResolvesNumericUserParameters() async throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let userID = UUID()
+        let exerciseID = UUID()
+        let today = makeWorkout(
+            userID: userID,
+            name: "Today Primitive",
+            scheduledDate: now
+        )
+        let block = Block(
+            id: UUID(),
+            workoutID: today.id,
+            parentBlockID: nil,
+            position: 0,
+            name: "Strength",
+            timingMode: .straightSets,
+            timingConfigJSON: "{}",
+            rounds: nil,
+            roundsRepSchemeJSON: nil,
+            notes: nil
+        )
+        let item = WorkoutItem(
+            id: UUID(),
+            blockID: block.id,
+            position: 0,
+            exerciseID: exerciseID,
+            prescriptionJSON: #"{"sets":3,"reps":5,"percent_1rm":0.8}"#
+        )
+        let primitive = PrimitiveWorkout(
+            id: today.id,
+            name: today.name,
+            blocks: [
+                PrimitiveBlock(id: block.id, sets: [
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: .init(mode: .setBounded),
+                        slots: [
+                            PrimitiveSlot(
+                                id: UUID(),
+                                exerciseID: exerciseID,
+                                workTargets: [
+                                    .init(metric: .reps, valueForm: .single, value: 5, role: .completion),
+                                ],
+                                load: .init(value: 0.8, unit: .oneRepMax, unitType: .relative)
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        let parameterKey = "one_rep_max_\(exerciseID.uuidString.lowercased())_kg"
+        let fake = FakeCache(
+            workouts: [today],
+            blocks: [today.id: [block]],
+            items: [block.id: [item]],
+            exercises: [Exercise(id: exerciseID, name: "Bench")],
+            primitiveWorkouts: [primitive],
+            userParameters: [
+                parameterKey: UserParameter(
+                    id: UUID(),
+                    userID: userID,
+                    key: parameterKey,
+                    value: "150",
+                    updatedAt: now,
+                    source: .manual
+                ),
+            ]
+        )
+        let loader = TodayLoader(cache: fake, clock: { now })
+
+        let plan = try await loader.loadPlan()
+        let selected = try XCTUnwrap(plan?.selected)
+
+        XCTAssertEqual(selected.primitiveWorkout, primitive)
+        XCTAssertEqual(selected.userParameters, [parameterKey: 150])
+        XCTAssertEqual(selected.primitiveExecutionPlan?.blocks[0].sets[0].slots[0].loadKg, 120)
+        XCTAssertEqual(plan?.workouts.first?.primitiveExecutionPlan?.blocks[0].sets[0].slots[0].loadKg, 120)
+    }
+
     func testPickClosest_prefersPastOrTodayOverFuture() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let past = makeWorkout(name: "past", scheduledDate: now.addingTimeInterval(-3 * 86400))

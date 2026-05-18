@@ -124,20 +124,18 @@ public struct PullService: Sendable {
         }
         var workouts: [MappedWorkout] = []
         var primitiveWorkouts: [CoreDomain.PrimitiveWorkout] = []
-        var primitiveWorkoutIDsToDelete: [WorkoutID] = []
         for w in dto.workouts {
+            if w.primitiveBlocks.isEmpty {
+                throw SyncError.decode("Workout \(w.id) has empty primitive_blocks")
+            }
             let mappedWorkout = try unwrap(DTOMapping.mapWorkout(w))
             workouts.append(mappedWorkout)
-            if !w.primitiveBlocks.isEmpty {
-                let primitiveDTO = WorkoutDBSchema.PrimitiveWorkout(
-                    id: w.id,
-                    name: w.name,
-                    primitiveBlocks: w.primitiveBlocks
-                )
-                primitiveWorkouts.append(try unwrap(DTOMapping.mapPrimitiveWorkout(primitiveDTO)))
-            } else {
-                primitiveWorkoutIDsToDelete.append(mappedWorkout.workout.id)
-            }
+            let primitiveDTO = WorkoutDBSchema.PrimitiveWorkout(
+                id: w.id,
+                name: w.name,
+                primitiveBlocks: w.primitiveBlocks
+            )
+            primitiveWorkouts.append(try unwrap(DTOMapping.mapPrimitiveWorkout(primitiveDTO)))
         }
         var lastPerformed: [LastPerformed] = []
         for lp in dto.lastPerformed {
@@ -159,7 +157,6 @@ public struct PullService: Sendable {
             userParameters: params,
             workouts: workouts,
             primitiveWorkouts: primitiveWorkouts,
-            primitiveWorkoutIDsToDelete: primitiveWorkoutIDsToDelete,
             lastPerformed: lastPerformed
         )
     }

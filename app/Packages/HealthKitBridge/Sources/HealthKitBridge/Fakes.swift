@@ -105,3 +105,94 @@ public final class FakeBodyWeightReader: BodyWeightReader, @unchecked Sendable {
         return value
     }
 }
+
+// MARK: - FakeHealthPermissionBroker
+
+public final class FakeHealthPermissionBroker: HealthPermissionBroker, @unchecked Sendable {
+    private let storage = FakeHealthPermissionStorage()
+
+    public init(shouldFailWith: HealthKitError? = nil) {
+        storage.shouldFailWith = shouldFailWith
+    }
+
+    public var requested: [HealthDataRequest] { storage.requested }
+
+    public func requestAuthorization(for requests: [HealthDataRequest]) async throws {
+        if let err = storage.shouldFailWith {
+            throw err
+        }
+        storage.requested.append(contentsOf: requests)
+    }
+}
+
+private final class FakeHealthPermissionStorage: @unchecked Sendable {
+    nonisolated(unsafe) var requested: [HealthDataRequest] = []
+    nonisolated(unsafe) var shouldFailWith: HealthKitError?
+}
+
+// MARK: - FakeHealthBatchDataProvider
+
+public final class FakeHealthBatchDataProvider: HealthBatchDataProvider, @unchecked Sendable {
+    private let result: HealthBatchResult
+    private let shouldFailWith: HealthKitError?
+    private let storage = FakeHealthBatchStorage()
+
+    public init(
+        result: HealthBatchResult = HealthBatchResult(records: []),
+        shouldFailWith: HealthKitError? = nil
+    ) {
+        self.result = result
+        self.shouldFailWith = shouldFailWith
+    }
+
+    public var queries: [HealthBatchQuery] { storage.queries }
+
+    public func fetch(_ query: HealthBatchQuery) async throws -> HealthBatchResult {
+        if let err = shouldFailWith {
+            throw err
+        }
+        storage.queries.append(query)
+        return result
+    }
+}
+
+private final class FakeHealthBatchStorage: @unchecked Sendable {
+    nonisolated(unsafe) var queries: [HealthBatchQuery] = []
+}
+
+// MARK: - FakeHealthLiveDataProvider
+
+public final class FakeHealthLiveDataProvider: HealthLiveDataProvider, @unchecked Sendable {
+    private let records: [HealthDataRecord]
+    private let shouldFailWith: HealthKitError?
+    private let storage = FakeHealthLiveStorage()
+
+    public init(
+        records: [HealthDataRecord] = [],
+        shouldFailWith: HealthKitError? = nil
+    ) {
+        self.records = records
+        self.shouldFailWith = shouldFailWith
+    }
+
+    public var requested: [[HealthDataRequest]] { storage.requested }
+
+    public func stream(for requests: [HealthDataRequest]) async throws
+        -> AsyncThrowingStream<HealthDataRecord, Error> {
+        if let err = shouldFailWith {
+            throw err
+        }
+        storage.requested.append(requests)
+        let scripted = records
+        return AsyncThrowingStream { continuation in
+            for record in scripted {
+                continuation.yield(record)
+            }
+            continuation.finish()
+        }
+    }
+}
+
+private final class FakeHealthLiveStorage: @unchecked Sendable {
+    nonisolated(unsafe) var requested: [[HealthDataRequest]] = []
+}

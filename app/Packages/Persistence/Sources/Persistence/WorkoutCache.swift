@@ -30,6 +30,9 @@ import WorkoutCoreFoundation
 public struct PulledDataset: Sendable {
     public var workouts: [Workout]
     public var primitiveWorkouts: [PrimitiveWorkout]
+    /// Explicit primitive delete signal. Current server pull does not populate
+    /// this from empty `primitive_blocks`; callers may only set it for a real
+    /// future tombstone/delete wire event.
     public var primitiveWorkoutIDsToDelete: [WorkoutID]
     public var blocks: [Block]
     public var items: [WorkoutItem]

@@ -70,6 +70,9 @@ extension HistoryViewModel {
         setLogID: SetLogID,
         intent: SetEditIntent
     ) async {
+        guard let onSetLogEdited else {
+            return
+        }
         guard let session = rawSessions.first(where: { $0.workout.id == workoutID }),
               let existing = session.setLogs.first(where: { $0.id == setLogID }) else {
             return
@@ -148,11 +151,9 @@ extension HistoryViewModel {
 
         emitPastSetEdited(workoutID: workoutID, setLog: edited)
 
-        if let onSetLogEdited {
-            // swiftlint:disable:next no_direct_task_unstructured
-            Task { [onSetLogEdited, edited] in
-                await onSetLogEdited(edited)
-            }
+        // swiftlint:disable:next no_direct_task_unstructured
+        Task { [onSetLogEdited, edited] in
+            await onSetLogEdited(edited)
         }
 
         await load()

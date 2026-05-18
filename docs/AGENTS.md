@@ -16,9 +16,12 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 ## Read first
 
 - `specs/v2-architecture.md` — **accepted** target architecture. Every non-trivial change is evaluated against this. Read in full before working on schema, sync, or the app. **Note:** the Data model section is superseded by `specs/primitives-data-model.md`; everything else in v2 remains authoritative.
-- `specs/primitives-data-model.md` — **accepted target spec (not yet implemented)** for the prescription + log + runtime-resolution data model. Replaces the 12-timing-mode enum with 7 composable primitives under a Block > Set > Slot hierarchy. Aspect files under `specs/primitives-data-model/` cover authoring shape, log shape, runtime resolution, and cutover posture.
-- `workout-generation.md` — canonical workout authoring guide. Start here when generating plans: data model, safe current timing modes, autoreg, result persistence, examples, and generator checklist.
-- `prescription.md` — current pre-primitives authoring vocabulary. What Claude must put in a workout so the app can execute it today. For target primitives work, use `specs/primitives-data-model.md` instead.
+- `specs/primitives-data-model.md` — **active primitive contract** for the prescription + log + runtime-resolution data model. Replaces the 12-timing-mode enum with 7 composable primitives under a Block > Set > Slot hierarchy. Aspect files under `specs/primitives-data-model/` cover authoring shape, log shape, runtime resolution, and cutover posture.
+- `workout-generation.md` — legacy bridge authoring guide for old timing-mode
+  projection surfaces. New primitive workout authoring starts with
+  `specs/primitives-data-model.md`; use this only as historical/bridge context
+  while residual driver projection code remains.
+- `prescription.md` — legacy projection/reference vocabulary while residual bridge code remains. New primitive work uses `specs/primitives-data-model.md`.
 - `workout-taxonomy.md` — bootstrap workout-domain and block-archetype taxonomy. Use this before authoring new workout shapes so training intent maps to the right timing/logging primitive.
 - `workout-execution-requirements.md` — athlete-facing timer, transition, logging, and summary requirements for workout archetypes.
 - `design-system.md` — reusable SwiftUI visual, Dynamic Type, accessibility, hit-target, and material/glass contract.
@@ -42,8 +45,9 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `QA.md` — UX QA guide for app-facing work; match proof to claim, use XcodeBuildMCP and `img ask` when visible UI changes, keep `docs/bugs.md` as the only active issue tracker, and leave `scratch/qa-runs/` as raw evidence only.
 - `design-system.md` — DesignSystem package contract for reusable primitives, Dynamic Type, accessibility metadata, hit targets, and Liquid Glass/material posture.
 - `MIGRATIONS.md` — schema migration mechanics for server SQL + SwiftData, the single-user cutover flow, and recovery procedures.
-- `workout-generation.md` — generator-facing authoring guide that composes the data model, taxonomy, timing modes, prescriptions, autoregulation, support boundaries, and examples into one workflow.
-- `prescription.md` — current pre-primitives prescription authoring vocabulary. Per-timing-mode shapes, RIR + autoreg rules, parametric shapes, authoring checklist. Rewrite during the primitives docs sweep.
+- `workout-generation.md` — legacy bridge authoring guide for old timing-mode
+  projection surfaces. It is not the active primitive authoring contract.
+- `prescription.md` — legacy projection/reference vocabulary. Per-timing-mode shapes, RIR + autoreg rules, parametric shapes, authoring checklist. Rewrite or retire during the remaining primitives docs sweep.
 - `workout-taxonomy.md` — maps workout domains to mutually-exclusive block archetypes and current timing modes.
 - `workout-execution-requirements.md` — documents how each archetype should execute from the athlete perspective before implementation details are chosen.
 - `features.md` — narrative entry point for user-visible feature contracts.

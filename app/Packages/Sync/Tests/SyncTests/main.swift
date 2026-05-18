@@ -319,19 +319,19 @@ runAsyncCase("PullService success — maps DTOs to Domain") {
     try expectEqual(calls[0].bearerToken, "tok")
 }
 
-runAsyncCase("PullService empty primitive_blocks → primitive tombstone") {
+runAsyncCase("PullService empty primitive_blocks → decode error") {
     let transport = FakeTransport(outcomes: [
         .response(HTTPResponse(status: 200, body: try encodedPrimitiveTombstoneFixture()))
     ])
     let service = PullService(transport: transport)
-    let result = try await service.pull(since: nil, bearerToken: "tok")
-
-    try expectEqual(result.workouts.count, 1)
-    try expectEqual(result.primitiveWorkouts.count, 0)
-    try expectEqual(
-        result.primitiveWorkoutIDsToDelete,
-        [uuid("11111111-1111-1111-1111-111111111111")]
-    )
+    do {
+        _ = try await service.pull(since: nil, bearerToken: "tok")
+        try expect(false, "expected decode throw")
+    } catch let err as SyncError {
+        if case .decode = err {} else {
+            try expect(false, "expected .decode, got \(err)")
+        }
+    }
 }
 
 runAsyncCase("PullService invalid primitive_blocks → decode error") {
@@ -736,6 +736,133 @@ runCase("DTOMapping rejects primitive block repeat until bridge supports block-l
         try expect(false, "block repeats must fail closed until the bridge can preserve them")
     case .failure:
         break
+    }
+}
+
+runCase("DTOMapping rejects zero-slot primitive sets at the execution bridge") {
+    let json = """
+    {
+      "id": "11111111-1111-1111-1111-111111111111",
+      "user_id": "22222222-2222-2222-2222-222222222222",
+      "name": "Timer only",
+      "scheduled_date": "2026-04-20",
+      "status": "planned",
+      "source": "claude",
+      "notes": null,
+      "tags_json": null,
+      "created_at": "2026-04-17T08:00:00Z",
+      "updated_at": "2026-04-17T08:00:00Z",
+      "completed_at": null,
+      "primitive_blocks": [
+        {
+          "id": "33333333-3333-4333-8333-333333333333",
+          "repeat": 1,
+          "work_target": [],
+          "sets": [
+            {
+              "id": "44444444-4444-4444-8444-444444444444",
+              "timing": { "mode": "time_bounded", "interval_sec": 60, "rounds": 3 },
+              "traversal": "sequential",
+              "repeat": 1,
+              "work_target": [],
+              "slots": []
+            }
+          ]
+        }
+      ]
+    }
+    """
+    let workout = try JSONDecoder.workoutDB().decode(
+        WorkoutDBSchema.Workout.self,
+        from: Data(json.utf8)
+    )
+    switch DTOMapping.mapWorkout(workout) {
+    case .success:
+        try expect(false, "zero-slot primitive sets must fail closed at the bridge")
+    case .failure:
+        break
+    }
+}
+
+runCase("DTOMapping bridge support matrix fails closed for every unsupported primitive cell") {
+    let emptyWorkTarget = "[]"
+    let roundsWorkTarget = """
+    [
+      { "metric": "rounds", "value_form": "open", "value": null, "role": "observation" }
+    ]
+    """
+    let durationWorkTarget = """
+    [
+      { "metric": "duration", "value_form": "open", "value": null, "role": "observation" }
+    ]
+    """
+    let cells: [(String, String, String, Bool, String)] = [
+        (#""set_bounded""#, "sequential", emptyWorkTarget, true, "straight sets"),
+        (#""set_bounded""#, "round_robin", emptyWorkTarget, true, "circuit"),
+        (#""set_bounded""#, "amrap", emptyWorkTarget, false, "uncapped amrap"),
+        (#""time_bounded", "interval_sec": 60, "rounds": 3"#, "sequential", emptyWorkTarget, false, "emom sequential"),
+        (#""time_bounded", "interval_sec": 60, "rounds": 3"#, "round_robin", emptyWorkTarget, false, "emom alternating"),
+        (#""time_bounded", "interval_sec": 60, "rounds": 3"#, "amrap", roundsWorkTarget, false, "emom amrap"),
+        (#""cap_bounded", "cap_sec": 300"#, "sequential", durationWorkTarget, true, "for time"),
+        (#""cap_bounded", "cap_sec": 300"#, "round_robin", durationWorkTarget, false, "capped circuit"),
+        (#""cap_bounded", "cap_sec": 300"#, "amrap", roundsWorkTarget, true, "amrap"),
+        (#""target_bounded""#, "sequential", emptyWorkTarget, false, "target bounded sequential"),
+        (#""target_bounded""#, "round_robin", emptyWorkTarget, false, "target bounded round robin"),
+        (#""target_bounded""#, "amrap", emptyWorkTarget, false, "target bounded amrap"),
+    ]
+
+    for cell in cells {
+        let json = """
+        {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "user_id": "22222222-2222-2222-2222-222222222222",
+          "name": "Primitive bridge matrix \(cell.4)",
+          "scheduled_date": "2026-04-20",
+          "status": "planned",
+          "source": "claude",
+          "notes": null,
+          "tags_json": null,
+          "created_at": "2026-04-17T08:00:00Z",
+          "updated_at": "2026-04-17T08:00:00Z",
+          "completed_at": null,
+          "primitive_blocks": [
+            {
+              "id": "33333333-3333-4333-8333-333333333333",
+              "repeat": 1,
+              "work_target": [],
+              "sets": [
+                {
+                  "id": "44444444-4444-4444-8444-444444444444",
+                  "timing": { "mode": \(cell.0) },
+                  "traversal": "\(cell.1)",
+                  "repeat": 1,
+                  "work_target": \(cell.2),
+                  "slots": [
+                    {
+                      "id": "55555555-5555-4555-8555-555555555555",
+                      "exercise_id": "e0000001-0000-4000-8000-000000000001",
+                      "work_target": [],
+                      "stimuli": [],
+                      "post_rest_sec": 0,
+                      "is_warmup": false
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+        """
+        let workout = try JSONDecoder.workoutDB().decode(
+            WorkoutDBSchema.Workout.self,
+            from: Data(json.utf8)
+        )
+        switch DTOMapping.mapWorkout(workout) {
+        case .success:
+            try expect(cell.3, "\(cell.4) unexpectedly succeeded through bridge")
+        case .failure:
+            try expect(!cell.3, "\(cell.4) should be supported by the bridge")
+        }
     }
 }
 

@@ -4,18 +4,17 @@
 import PackageDescription
 
 // HealthKitBridge — the only package allowed to import HealthKit (FF-13).
-// Owns:
-//   • `HealthAuthorization`, `HeartRateObserver`, `BodyWeightReader` protocols
-//     exposed for Features to consume without ever importing HealthKit.
+// Owns the typed data-access boundary for batch archive, post-workout
+// readback, and live metric consumers:
+//   • descriptors, request shapes, normalized records, cursors, and unit
+//     carrying value payloads exposed for consumers without HealthKit imports.
+//   • permission broker, batch provider, and live provider protocols.
+//   • legacy narrow wrappers (`HealthAuthorization`, `HeartRateObserver`,
+//     `BodyWeightReader`) while callers migrate onto the general contract.
 //   • Live implementations (`Live…`) that wrap `HKHealthStore`,
 //     `HKLiveWorkoutBuilder`, and `HKSampleQuery`. Guarded with
 //     `#if canImport(HealthKit)` so the package compiles on macOS for tests.
 //   • In-memory fakes (`Fake…`) for Features to use in their tests.
-//
-// Per ADR-2026-04-17-ux-scope §4, v1 only records HR avg + max into `set_log`
-// via `HKLiveWorkoutBuilder` — no sample timeseries are persisted. The stream
-// API exists so Features can read live HR during a set; aggregation into
-// `hr_avg_bpm` / `hr_max_bpm` lives in the consuming layer.
 //
 // Dependencies, per `docs/architecture/swift-packages.md` row "HealthKitBridge":
 //   - Core/Domain

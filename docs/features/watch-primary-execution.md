@@ -16,8 +16,8 @@ covers:
 
 > **Planning note (2026-05-17):** The shorter Apple Watch delivery path is now
 > `watch-workoutkit-handoff.md`: map eligible Setmark workouts into Apple's
-> Workout app through WorkoutKit, then reconcile coarse completion back into
-> Setmark. This custom watch-primary spec remains the later path for Setmark
+> Workout app through WorkoutKit. Completion/result reconciliation is a separate
+> future lane. This custom watch-primary spec remains the later path for Setmark
 > watch-native execution: offline event replay, custom metric slots, watch-side
 > set logging, route ownership, and phone/watch authority handoff.
 

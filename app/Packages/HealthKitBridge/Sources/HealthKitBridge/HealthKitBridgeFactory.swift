@@ -18,15 +18,24 @@ public struct HealthKitBridgeBundle: Sendable {
     public let auth: HealthAuthorization
     public let hr: HeartRateObserver
     public let bw: BodyWeightReader
+    public let permissions: HealthPermissionBroker
+    public let batch: HealthBatchDataProvider
+    public let live: HealthLiveDataProvider
 
     public init(
         auth: HealthAuthorization,
         hr: HeartRateObserver,
-        bw: BodyWeightReader
+        bw: BodyWeightReader,
+        permissions: HealthPermissionBroker,
+        batch: HealthBatchDataProvider,
+        live: HealthLiveDataProvider
     ) {
         self.auth = auth
         self.hr = hr
         self.bw = bw
+        self.permissions = permissions
+        self.batch = batch
+        self.live = live
     }
 }
 
@@ -39,13 +48,19 @@ public enum HealthKitBridgeFactory {
         return HealthKitBridgeBundle(
             auth: LiveHealthKitAuthorization(),
             hr: LiveHeartRateObserver(),
-            bw: LiveBodyWeightReader()
+            bw: LiveBodyWeightReader(),
+            permissions: LiveHealthDataProvider(),
+            batch: LiveHealthDataProvider(),
+            live: LiveHealthDataProvider()
         )
         #else
         return HealthKitBridgeBundle(
             auth: LiveHealthKitAuthorization(),
             hr: LiveHeartRateObserver(),
-            bw: LiveBodyWeightReader()
+            bw: LiveBodyWeightReader(),
+            permissions: LiveHealthDataProvider(),
+            batch: LiveHealthDataProvider(),
+            live: LiveHealthDataProvider()
         )
         #endif
     }
@@ -55,8 +70,18 @@ public enum HealthKitBridgeFactory {
     public static func mock(
         auth: HealthAuthorization = FakeHealthAuthorization(initiallyAuthorized: true),
         hr: HeartRateObserver = FakeHeartRateObserver(),
-        bw: BodyWeightReader = FakeBodyWeightReader(kg: nil)
+        bw: BodyWeightReader = FakeBodyWeightReader(kg: nil),
+        permissions: HealthPermissionBroker = FakeHealthPermissionBroker(),
+        batch: HealthBatchDataProvider = FakeHealthBatchDataProvider(),
+        live: HealthLiveDataProvider = FakeHealthLiveDataProvider()
     ) -> HealthKitBridgeBundle {
-        HealthKitBridgeBundle(auth: auth, hr: hr, bw: bw)
+        HealthKitBridgeBundle(
+            auth: auth,
+            hr: hr,
+            bw: bw,
+            permissions: permissions,
+            batch: batch,
+            live: live
+        )
     }
 }

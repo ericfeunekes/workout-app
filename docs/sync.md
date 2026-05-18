@@ -24,14 +24,13 @@ covers:
 
 | Data | Flows | Owner | Entity |
 |---|---|---|---|
-| Workouts (plans) | Server → App | Claude | `workout`, `block`, `workout_item` |
+| Workouts (plans) | Server → App | Claude | `workout.primitive_blocks` plus legacy bridge projections where still needed |
 | Exercises | Server → App | Claude | `exercise` |
-| Alternatives | Server → App | Claude | `exercise_alternative` |
 | User parameters | Server → App | Claude | `user_parameters` (latest-per-key) |
 | `last_performed` summary | Server → App | Derived | Piggybacked on `/api/sync/pull` |
-| Set logs (results) | App → Server | App | `set_log` |
+| Primitive result rows | App → Server | App | `primitive_set_log` via `/api/sync/results` |
 | Workout status changes | App → Server | App | `workout.status`, `workout.completed_at` |
-| Workout completion record | App → Server / future publisher | App | Local `WorkoutCompletionRecord` published as grouped REST `set_logs` + completed status today |
+| Workout completion record | App → Server / future publisher | App | Local `WorkoutCompletionRecord` published as grouped primitive result rows + completed status today |
 | Body weight at completion | App → Server | App | `user_parameters` row with key `bodyweight_kg` |
 
 **No field is written from both sides.** If a field would be bi-directional (e.g., "preferred rest interval"), it lives in `user_parameters` and Claude owns writes; the app reads.
@@ -188,16 +187,18 @@ Returns (schema owned by `server/workoutdb_server/api/sync.py` and mirrored in `
 ```jsonc
 {
   "server_time": "2026-04-17T19:04:22Z",
-  "workouts": [ /* full workouts with nested blocks, items, alternatives */ ],
+  "workouts": [ /* full primitive workouts with primitive_blocks */ ],
   "exercises": [ /* all known exercises */ ],
   "user_parameters_latest": { /* latest-per-key map */ },
-  "last_performed": { /* per-exercise most recent set_logs + prescription snapshot */ }
+  "last_performed": { /* per-exercise most recent primitive result summary */ }
 }
 ```
 
 **Filter on `workout.updated_at`** — the server uses `updated_at`, not `created_at`, so PUT edits are picked up. The returned `server_time` is what the app sends as the next `since`.
 
-**`last_performed` includes swap targets.** When a workout item has alternatives, the alternative exercises' history is also included — otherwise swapping mid-workout would show "no data" for the substitute.
+**`last_performed` is a history summary, not an authoring payload.** The
+primitive workout tree carries the current prescription. History summaries are
+derived from result rows and are used for display/context only.
 
 ---
 
@@ -206,16 +207,52 @@ Returns (schema owned by `server/workoutdb_server/api/sync.py` and mirrored in `
 ```
 POST /api/sync/results
   Authorization: Bearer <token>
-  Body: { "set_logs": [...], "status_updates": [...], "workout_resets": [...] }
+  Body: {
+    "primitive_set_logs": [...],
+    "status_updates": [...],
+    "workout_resets": [...]
+  }
 ```
 
-Each `set_log` row carries the UUID the app assigned. Re-pushing the same UUID updates in place (idempotent). `status_updates` flip `workout.status` (planned → active → completed / skipped) and bump `workout.updated_at` so a subsequent pull sees the change.
+Each `primitive_set_log` row carries the UUID the app assigned. Re-pushing the
+same UUID updates in place (idempotent). Rows are role-scoped:
 
-`workout_resets` is the same-day History escape hatch: the app deletes local logs immediately, queues `{workout_id}`, and the server deletes all set_logs tied to that workout's items, clears `completed_at`, and returns the workout to `planned`. Without this server-side reset, the next pull would resurrect the completed workout the user just reset locally.
+- `slot` rows identify `block_id`, `set_id`, and `slot_id`, and may carry
+  exercise-specific metrics. `set_index` is required and must match the slot's
+  ordinal inside the authored set.
+- `set_result` rows identify `block_id` and `set_id`, use `set_index = 0` as
+  their aggregate sentinel, and cannot carry `slot_id` or exercise IDs.
+- `block_result` rows identify only `block_id`, use `set_index = 0` and
+  `set_repeat_index = 0` as aggregate sentinels, and cannot carry `set_id`,
+  `slot_id`, or exercise IDs.
 
-**Completion atomicity.** During execution, individual set logs may still queue as single-result pushes. Save & Done builds one app-owned local `WorkoutCompletionRecord` from the completed workout and its final set logs. The current REST publisher durably replaces any still-pending single-log/completed-status rows with one grouped queue item, then serializes that record as one `/api/sync/results` body with both `set_logs` and a completed `status_update`; future publishers such as CloudKit should consume the same local record rather than reconstructing completion from separate queue rows.
+The server validates every row against the persisted primitive tree before
+writing it. Unsupported swaps fail closed today: `performed_exercise_id` may be
+omitted or equal the planned slot exercise, but arbitrary alternate exercise
+IDs wait for the primitive alternatives wire shape.
 
-**Batching.** The app sends pending results in whatever size is convenient — per set after each log write is fine. At workout completion, the final set logs and completed status must publish as one grouped completion result. There is no server-side minimum or maximum.
+`status_updates` flip `workout.status` (planned → active → completed / skipped)
+and bump `workout.updated_at` so a subsequent pull sees the change.
+
+`workout_resets` is the same-day History escape hatch: the app deletes local
+logs immediately, queues `{workout_id}`, and the server deletes primitive
+result rows tied to that workout, clears `completed_at`, and returns the
+workout to `planned`. Without this server-side reset, the next pull would
+resurrect the completed workout the user just reset locally.
+
+**Completion atomicity.** During execution, individual primitive results may
+still queue as single-result pushes. Save & Done builds one app-owned local
+`WorkoutCompletionRecord` from the completed workout and its final result rows.
+The current REST publisher durably replaces any still-pending single-log /
+completed-status rows with one grouped queue item, then serializes that record
+as one `/api/sync/results` body with both primitive result rows and a completed
+`status_update`; future publishers such as CloudKit should consume the same
+local record rather than reconstructing completion from separate queue rows.
+
+**Batching.** The app sends pending results in whatever size is convenient. At
+workout completion, the final primitive result rows and completed status must
+publish as one grouped completion result. There is no server-side minimum or
+maximum.
 
 ---
 
@@ -225,13 +262,13 @@ Each `set_log` row carries the UUID the app assigned. Re-pushing the same UUID u
 |---|---|
 | New prescription arrives mid-session | Live session is frozen. New prescription applies to the next occurrence of that workout. |
 | Server has a newer `workout.updated_at` than the app's cached version | Server version wins. App refreshes on next pull (this is the common case). |
-| App has a set_log the server doesn't | Push on next connectivity (queued). |
-| App has a set_log the server already has (same UUID) | Idempotent update — server accepts and overwrites. |
-| User edits a completed set_log locally | Updated row pushes like any other; server overwrites on UUID. |
-| User deletes a set_log locally | Out of scope for v1 — the app does not offer delete. |
+| App has a primitive result row the server doesn't | Push on next connectivity (queued). |
+| App has a primitive result row the server already has (same UUID) | Idempotent update — server accepts and overwrites. |
+| User edits a completed primitive result locally | Native primitive History correction is not active yet. History edit affordances are disabled unless a push hook is explicitly wired. |
+| User deletes a result locally | Out of scope for v1 — the app does not offer delete. |
 | Workout status transitions | Only `planned → active`, `planned → skipped`, `active → completed`, `active → skipped`, `completed → active` (reopen). Illegal transitions (e.g., `completed → planned`) are rejected server-side. |
-| Exercise renamed while live session cached | Live session uses the cached exercise snapshot (name, notes) for display. On next pull, the updated row replaces the cached one and subsequent sessions render the new name. Historical set_logs render the name that was current when they were logged (cached at log time). |
-| Swap mid-workout (user taps an alternative) | Swap is session-local. `set_log.workout_item_id` still references the original item; the app writes the actually-performed `exercise_id` onto the log row so history is truthful. The workout template is not mutated. |
+| Exercise renamed while live session cached | Live session uses the cached exercise snapshot (name, notes) for display. On next pull, the updated row replaces the cached one and subsequent sessions render the new name. Historical result rows render through the available exercise cache. |
+| Swap mid-workout (user taps an alternative) | Primitive swaps are fail-closed until alternatives exist on the active primitive wire schema. A slot result may omit `performed_exercise_id` or repeat the planned exercise ID; arbitrary alternate IDs are rejected server-side. |
 
 **Rule of thumb:** prescriptions are server-owned; logs are app-owned. Inside the live session, nothing external reaches in.
 
@@ -440,6 +477,6 @@ The watch face grammar (widget-based faces for set / rest / superset / EMOM / AM
   later after newer prescriptions may have arrived. Pick explicit expiry,
   refuse/resume, or never-expire behavior before changing execution/sync around
   long-lived active sessions.
-- **Sync triggers on the watch.** Currently the phone is the only sync actor. If the watch ever writes set_logs independently (not in v1), we'll need a watch → phone → server reconciliation step.
-- **Set-log deletion scope.** v1 only deletes set_logs through `workout_resets` for same-day accidental workout logs. Arbitrary historical set deletion/edit provenance remains out of scope unless the user asks for audit-grade history later.
+- **Sync triggers on the watch.** Currently the phone is the only sync actor. If the watch ever writes primitive result rows independently (not in v1), we'll need a watch → phone → server reconciliation step.
+- **Result deletion scope.** v1 only deletes primitive result rows through `workout_resets` for same-day accidental workout logs. Arbitrary historical result deletion/edit provenance remains out of scope unless the user asks for audit-grade history later.
 - **Multiple active workouts.** The spec allows a user to mark multiple workouts `active`, but the app UX assumes one active workout at a time. Behavior if a second workout is started before the first is completed is undefined; we'd need to decide whether "start workout" auto-completes the prior one or refuses.

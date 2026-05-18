@@ -200,9 +200,9 @@ public enum AppBootstrap {
     }
 
     /// Wire server-backed History hooks onto the shell-owned
-    /// `HistoryViewModel`. Past-set edits are local-only until the
-    /// History surface edits primitive result rows directly; old
-    /// `SetLog` pushes are closed after the primitive result cutover.
+    /// `HistoryViewModel`. Past-set edits are disabled until the History
+    /// surface edits primitive result rows directly; old `SetLog` pushes
+    /// are closed after the primitive result cutover.
     private static func wireHistoryEditHook(
         _ historyViewModel: HistoryViewModel?,
         syncAPI: SyncAPI

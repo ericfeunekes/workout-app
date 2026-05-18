@@ -1,8 +1,8 @@
 ---
 title: Primitives data model
-status: accepted (target spec) — implementation in progress
+status: accepted — active primitive contract with residual runtime gaps
 date: 2026-04-28
-last_reviewed: 2026-05-17
+last_reviewed: 2026-05-18
 purpose: Replace today's per-timing-mode prescription/log model with 7 composable primitives serialized under a Block > Set > Slot hierarchy, so every new workout pattern is a composition of existing primitives rather than a new enum case.
 supersedes:
   - docs/specs/v2-architecture.md § Data model (the primitives model replaces that section; sync + philosophy sections of v2 remain authoritative)
@@ -70,7 +70,7 @@ authority.
 - **Authoring shape** — the wire format for workout / block / set / slot, how each of the 7 primitives serializes, merge rules for library defaults + alternatives + hierarchy walk. See `primitives-data-model/authoring-shape.md`.
 - **Log shape** — the `set_log` row model, three log roles (`slot`, `set_result`, `block_result`), deterministic UUID composition, per-stimulus typed columns, overlay columns, write semantics. See `primitives-data-model/log-shape.md`.
 - **Runtime resolution** — seed-time transform into `ExecutionPlan`, relative-load resolution against `user_parameters`, driver iteration contract over primitive cells, correction semantics via same-UUID upsert. See `primitives-data-model/runtime-resolution.md`.
-- **Cutover posture** — complete primitives cutover with no legacy acceptance path and explicit reset of current local/server QA workout data. See `primitives-data-model/cutover.md`.
+- **Cutover posture** — primitive wire/schema/cache/sync/reset cutover with no legacy acceptance path and explicit reset of current local/server QA workout data; remaining native execution/history gaps stay tracked below. See `primitives-data-model/cutover.md`.
 
 ### Out of scope
 

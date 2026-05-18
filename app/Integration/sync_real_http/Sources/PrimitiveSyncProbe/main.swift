@@ -84,6 +84,7 @@ struct PrimitiveSyncProbe {
         )
         try expect(aggregateLog.role == .setResult, "expected aggregate set-result log")
         try await push(log: aggregateLog, workoutID: workout.id, api: api, persistence: persistence)
+        try await expectInvalidPerformedExerciseRejected(baseURL: baseURL, token: token)
     }
 
     private static func expectBadTokenIsRejected(baseURL: URL) async throws {
@@ -111,6 +112,45 @@ struct PrimitiveSyncProbe {
         let result = try await api.flushPushQueue()
         try expect(result.remaining == 0, "expected empty push queue")
         try expect(result.pushed == 1, "expected one primitive set log push")
+    }
+
+    private static func expectInvalidPerformedExerciseRejected(
+        baseURL: URL,
+        token: String
+    ) async throws {
+        let url = baseURL.appendingPathComponent("api/sync/results")
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.addValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.addValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data("""
+        {
+          "primitive_set_logs": [
+            {
+              "id": "88888888-8888-4888-8888-888888888888",
+              "role": "slot",
+              "slot_id": "66666666-6666-4666-8666-666666666666",
+              "set_id": "55555555-5555-4555-8555-555555555555",
+              "block_id": "44444444-4444-4444-8444-444444444444",
+              "workout_id": "22222222-2222-4222-8222-222222222222",
+              "planned_exercise_id": "33333333-3333-4333-8333-333333333333",
+              "performed_exercise_id": "99999999-9999-4999-8999-999999999999",
+              "set_index": 0,
+              "reps": 7,
+              "weight": 40,
+              "weight_unit": "kg",
+              "rir": 2,
+              "completed_at": "2026-01-15T12:00:00Z"
+            }
+          ]
+        }
+        """.utf8)
+
+        let (_, response) = try await URLSession.shared.data(for: request)
+        guard let http = response as? HTTPURLResponse else {
+            throw ProbeError.failedExpectation("expected HTTP response for invalid primitive log")
+        }
+        try expect(http.statusCode == 422, "expected invalid primitive log to return 422")
     }
 
     private static func makeSetLog(

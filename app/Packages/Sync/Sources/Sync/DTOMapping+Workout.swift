@@ -73,6 +73,11 @@ extension DTOMapping {
                 guard let projectedBlockID = UUID(uuidString: primitiveSet.id) else {
                     return .failure(.decode("PrimitiveSet.id is not a UUID: \(primitiveSet.id)"))
                 }
+                guard !primitiveSet.slots.isEmpty else {
+                    return .failure(.decode(
+                        "Primitive sets require at least one slot for the current execution bridge"
+                    ))
+                }
                 let projectedTimingMode = timingMode(for: primitiveSet)
                 guard projectedTimingMode != .custom else {
                     return .failure(.decode(
@@ -128,12 +133,6 @@ extension DTOMapping {
             return .amrap
         case (.capBounded, .sequential):
             return .forTime
-        case (.timeBounded, .roundRobin):
-            return .intervals
-        case (.timeBounded, .sequential):
-            return .continuous
-        case (.targetBounded, _):
-            return .accumulate
         default:
             return .custom
         }

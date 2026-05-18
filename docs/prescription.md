@@ -1,8 +1,8 @@
 ---
 title: Prescription vocabulary
-status: accepted — current pre-primitives contract
+status: accepted — legacy projection/reference surface
 last_reviewed: 2026-05-17
-purpose: What Claude must author for the app to execute a workout. This is the authoring vocabulary for every timing mode, every prescription shape, and the autoregulation configuration. When we later build a planning CLI for the upstream Claude, it will lean on this doc.
+purpose: Legacy per-timing-mode prescription vocabulary retained for residual bridge/reference work. Active workout authoring uses docs/specs/primitives-data-model.md.
 covers:
   - schema/Sources/WorkoutDBSchema/*.swift
   - server/workoutdb_server/api/schemas.py
@@ -11,12 +11,10 @@ covers:
 
 # Prescription vocabulary
 
-> **Status (2026-05-17):** This is the current implemented pre-primitives
-> authoring contract. It governs workouts the app can run today. It is not the
-> target contract for the accepted primitives cutover; target primitives work
-> uses `docs/specs/primitives-data-model.md` and its aspect docs. The final
-> primitives cutover must rewrite this page rather than treating these
-> per-timing-mode shapes as the future source of truth.
+> **Status (2026-05-18):** This is no longer the active workout authoring
+> contract. It remains only as a legacy projection/reference surface while
+> residual bridge code exists. Active primitive work uses
+> `docs/specs/primitives-data-model.md` and its aspect docs.
 
 Claude authors workouts. The server stores them. The app executes them. This doc tells you what Claude must put into a workout so the app knows what to do.
 

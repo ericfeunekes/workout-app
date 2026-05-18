@@ -115,10 +115,12 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         // the edit into `setLogsByWorkout`, so loading re-pulls the
         // post-edit row.
         let (cache, firstLog) = try makeSingleLogFixture()
+        let hook: HistorySetLogEditHook = { _ in }
         let vm = HistoryViewModel(
             cache: cache,
             calendar: utcCalendar,
-            now: { [now] in now }
+            now: { [now] in now },
+            onSetLogEdited: hook
         )
         await vm.load()
 
@@ -146,6 +148,29 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         XCTAssertEqual(cache.savedSetLogBatches.first?.count, 1)
     }
 
+    func testHistoryEditWithoutPushHookDoesNotWriteLocalOnlyCorrection() async throws {
+        let (cache, firstLog) = try makeSingleLogFixture()
+        let telemetry = HistoryTelemetryRecorder()
+        let vm = HistoryViewModel(
+            cache: cache,
+            calendar: utcCalendar,
+            now: { [now] in now },
+            telemetry: telemetry
+        )
+        await vm.load()
+
+        await vm.editPastSet(
+            workoutID: firstLog.workoutID,
+            setLogID: firstLog.setLog.id,
+            intent: makeIntent(reps: 4, rir: .set(1), load: 97.5, loadUnit: "kg")
+        )
+
+        XCTAssertFalse(vm.canEditPastSets)
+        XCTAssertTrue(cache.savedSetLogBatches.isEmpty)
+        XCTAssertEqual(cache.setLogsByWorkout[firstLog.workoutID]?.first?.reps, 5)
+        XCTAssertTrue(telemetry.events.filter { $0.name == "history.past_set_edited" }.isEmpty)
+    }
+
     func testHistoryEditEmitsTelemetry() async throws {
         // Bug-015 parallel to bug-017 (execution.past_set_edited): every
         // History edit emits a dedicated `history.past_set_edited` event
@@ -166,11 +191,13 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
         let seededSetLogID = UUID(uuidString: "aaaabbbb-1111-4222-8333-444444444444")!
         let (cache, firstLog) = try makeSingleLogFixture(setLogID: seededSetLogID)
         let telemetry = HistoryTelemetryRecorder()
+        let hook: HistorySetLogEditHook = { _ in }
         let vm = HistoryViewModel(
             cache: cache,
             calendar: utcCalendar,
             now: { [now] in now },
-            telemetry: telemetry
+            telemetry: telemetry,
+            onSetLogEdited: hook
         )
         await vm.load()
 
@@ -232,11 +259,13 @@ final class HistoryViewModelEditPastSetTests: XCTestCase {
     func testHistoryPastSetEditedPayloadShape() async throws {
         let (cache, firstLog) = try makeSingleLogFixture()
         let telemetry = HistoryTelemetryRecorder()
+        let hook: HistorySetLogEditHook = { _ in }
         let vm = HistoryViewModel(
             cache: cache,
             calendar: utcCalendar,
             now: { [now] in now },
-            telemetry: telemetry
+            telemetry: telemetry,
+            onSetLogEdited: hook
         )
         await vm.load()
 

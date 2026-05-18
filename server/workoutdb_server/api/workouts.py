@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, HTTPException, Query, status
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
 
@@ -26,6 +27,17 @@ router = APIRouter(prefix="/api/workouts", tags=["workouts"])
 def workout_tree_loader():
     """Compatibility no-op for callers that still request a loader option."""
     return selectinload(Workout.blocks)
+
+
+def read_workout_or_500(workout: Workout) -> WorkoutRead:
+    """Validate persisted primitive workouts before returning them on the wire."""
+    try:
+        return WorkoutRead.model_validate(workout)
+    except (TypeError, ValueError, ValidationError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Persisted primitive workout {workout.id} is invalid",
+        ) from exc
 
 
 def _new_id() -> str:
@@ -216,7 +228,7 @@ def list_workouts(
     tag: str | None = Query(None, description="Matches when tags_json contains this tag."),
     limit: int = Query(100, ge=1, le=500, description="Max rows to return."),
     offset: int = Query(0, ge=0, description="Rows to skip for pagination."),
-) -> list[Workout]:
+) -> list[WorkoutRead]:
     stmt = select(Workout).options(workout_tree_loader()).where(Workout.user_id == user_id)
     if status_filter is not None:
         stmt = stmt.where(Workout.status == status_filter)
@@ -229,14 +241,14 @@ def list_workouts(
     if tag is not None:
         rows = list(db.execute(stmt).scalars().all())
         rows = [w for w in rows if _tags_contains(w.tags_json, tag)]
-        return rows[offset : offset + limit]
+        return [read_workout_or_500(workout) for workout in rows[offset : offset + limit]]
 
     stmt = stmt.offset(offset).limit(limit)
-    return list(db.execute(stmt).scalars().all())
+    return [read_workout_or_500(workout) for workout in db.execute(stmt).scalars().all()]
 
 
 @router.get("/{workout_id}", response_model=WorkoutRead)
-def get_workout(workout_id: str, db: DbSession, user_id: CurrentUserId) -> Workout:
+def get_workout(workout_id: str, db: DbSession, user_id: CurrentUserId) -> WorkoutRead:
     stmt = (
         select(Workout)
         .options(workout_tree_loader())
@@ -245,7 +257,7 @@ def get_workout(workout_id: str, db: DbSession, user_id: CurrentUserId) -> Worko
     workout = db.execute(stmt).scalar_one_or_none()
     if workout is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    return workout
+    return read_workout_or_500(workout)
 
 
 def _tags_contains(tags_json: str | None, tag: str) -> bool:

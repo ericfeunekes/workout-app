@@ -35,7 +35,7 @@ Top-level system map for WorkoutDB. The canonical, detailed reference is `docs/s
 │  FastAPI + SQLite  │
 │  (REST API, sync)  │
 └──────┬─────────▲───┘
- pulls │         │ pushes set_logs,
+ pulls │         │ pushes primitive results,
  plans │         │ status changes
        ▼         │
 ┌────────────────────┐
@@ -58,12 +58,20 @@ See `server/README.md` and spec § "API contract".
 
 ### `app/` — iOS app
 Swift + SwiftData. The "dumb" client. Owns:
-- Workout execution UI (show prescription, drive the right timer per `timing_mode`)
-- Set logging
+- Workout execution UI (show primitive blocks, drive timing from block semantics)
+- Primitive result logging
 - Pull-to-refresh and queued push (works fully offline)
 - Percentage-based load resolution via `user_parameters`
 
-Runs the 12 timing modes: `straight_sets`, `superset`, `circuit`, `emom`, `amrap`, `for_time`, `intervals`, `tabata`, `continuous`, `accumulate`, `custom`, `rest`. Applies client-side autoregulation based on per-item `target_rir` and `autoreg` rules. See `app/README.md` for the in-app behavior contract, `docs/workout-generation.md` for the end-to-end workout authoring workflow, `docs/prescription.md` for the per-mode prescription shapes, and `docs/sync.md` for sync + first-run behavior.
+The active model is primitive composition: authored blocks contain sets, slots,
+timing, traversal, work targets, and result roles. The app supports the
+primitive cells that the current execution bridge can project and fails closed
+for unsupported legal cells instead of guessing a legacy timing mode. Applies
+client-side autoregulation only where the primitive bridge exposes a supported
+strength set. See `app/README.md` for the in-app behavior contract,
+`docs/workout-generation.md` for the end-to-end workout authoring workflow,
+`docs/specs/primitives-data-model.md` for active authoring/result vocabulary,
+and `docs/sync.md` for sync + first-run behavior.
 
 The app is split into local SwiftPM packages. `Core/*` owns pure domain,
 prescription, autoregulation, session, telemetry, and utility logic.
@@ -74,6 +82,11 @@ model wiring, and push-flusher lifecycle. See
 `docs/architecture/swift-packages.md` for the authoritative package graph and
 allowed dependencies.
 
+HealthKit data access is routed through `HealthKitBridge` only. Consumers
+declare typed batch or live data requests; the bridge owns HealthKit
+identifiers, units, permissions, query mechanics, and simulator/device proof
+boundaries. See `docs/healthkit-data-access.md`.
+
 ### `schema/` — Shared schema
 Single source of truth for cross-stack data contracts. Committed `openapi.json` is the wire contract; hand-written Swift Codable DTOs under `Sources/WorkoutDBSchema/` mirror the server's Pydantic schemas. Cross-decoded fixtures live in `fixtures/`. See `schema/README.md`.
 
@@ -82,20 +95,24 @@ Server tests under `tests/server/`. Contract tests that pin cross-stack schema p
 
 ## Data model (summary)
 
-Core principle: **composition with timing**. Everything is blocks; a block has a `timing_mode` and contains exercises or nested blocks.
+Core principle: **primitive composition with explicit result semantics**.
+Workouts carry `primitive_blocks` JSON authored by Claude. Primitive blocks
+compose timing, traversal, work targets, sets, slots, and result roles. Server
+validation accepts only coherent primitive trees and only result rows whose
+role-specific coordinates match the persisted tree.
 
-This is the current implemented pre-primitives baseline. Entities: `app_user`,
-`exercise`, `exercise_alternative`, `block`, `workout_item`, `workout`,
-`set_log`, `user_parameters`. UUIDs everywhere.
-
-See spec § "Data model" for field-level definitions. Target data-model
-planning for new work starts from `docs/specs/primitives-data-model.md`.
+Legacy `block`, `workout_item`, and `set_log` entities still exist where the
+Swift bridge or historical read models consume them, but new primitives-lane
+work starts from `docs/specs/primitives-data-model.md`, not from legacy
+per-timing-mode prescription shapes.
 
 ## Sync model
 
 Direction-based, no conflict resolution:
-- Server → app: workouts, exercises, alternatives, user_parameters, `last_performed` snapshots
-- App → server: set_logs, workout status changes, body-weight-at-completion (as a `user_parameters` row)
+- Server → app: primitive workouts, exercises, user_parameters,
+  `last_performed` summaries
+- App → server: primitive result rows, workout status changes,
+  workout reset requests, body-weight-at-completion as a `user_parameters` row
 
 Cadence: on app open + on log write + ~60s foreground retry. Conflict rule: server wins for prescriptions, app wins for logs, live session is frozen. First-run: connection string (URL + bearer token) via paste or QR — no login surface.
 
@@ -103,15 +120,16 @@ See `docs/sync.md` for the full rules, and the spec § "Persistence architecture
 
 ## Where to go next
 
-- Target architecture → `docs/specs/v2-architecture.md`. Its data-model section is the current pre-primitives baseline; target primitives work uses `docs/specs/primitives-data-model.md`.
+- Target architecture → `docs/specs/v2-architecture.md`. Its data-model section is historical; active primitive data-model work uses `docs/specs/primitives-data-model.md`.
 - Structural contract (boundaries + fitness functions + hotspots + Swift package graph) → `docs/architecture/` (start at `context.md`)
 - DesignSystem contract → `docs/design-system.md`
 - Workout generation workflow → `docs/workout-generation.md` (how Claude/humans compose blocks, timing modes, prescriptions, autoreg, alternatives, and result expectations)
-- Prescription authoring vocabulary → `docs/prescription.md` for the current pre-primitives app; `docs/specs/primitives-data-model.md` for the accepted target primitives contract.
+- Prescription authoring vocabulary → `docs/specs/primitives-data-model.md` for active primitive work; `docs/prescription.md` only for legacy projection/reference surfaces while residual bridge code remains.
 - Modifier/equipment authoring → `docs/modifier-equipment.md`
 - Sync + connectivity + first-run → `docs/sync.md`
 - Early Apple Watch delivery → `docs/features/watch-workoutkit-handoff.md`
 - Later custom Watch execution → `docs/features/watch-primary-execution.md` and `docs/watch-metrics.md`
+- HealthKit batch/live data module → `docs/healthkit-data-access.md`
 - Proof contract → `docs/TESTING.md`
 - Server specifics → `server/README.md`
 - App specifics → `app/README.md` (the in-app behavior contract lives here)

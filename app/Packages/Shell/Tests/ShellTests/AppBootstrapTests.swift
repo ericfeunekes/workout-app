@@ -18,6 +18,7 @@ import XCTest
 import CoreDomain
 import CoreSession
 import CoreTelemetry
+import FeaturesHistory
 import FeaturesToday
 import Persistence
 import Sync
@@ -76,6 +77,69 @@ final class AppBootstrapTests: XCTestCase {
         guard case .ready = second else {
             return XCTFail("expected .ready from cache, got \(second)")
         }
+    }
+
+    func testInvalidPrimitivePullFallsBackWithoutDeletingCachedPrimitiveWorkout() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let fixture = Fixtures.sampleWorkoutPayload()
+        let baseURL = try XCTUnwrap(URL(string: "https://example.test"))
+
+        let initialTransport = ScriptedTransport(getOutcomes: [.ok(fixture.json)])
+        let initial = try await AppBootstrap.bootstrap(
+            connection: (url: baseURL, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in initialTransport }
+        )
+        guard case .ready = initial else {
+            return XCTFail("expected initial .ready, got \(initial)")
+        }
+        let cachedBefore = try await factory.workoutCache.loadPrimitiveWorkouts()
+        XCTAssertEqual(cachedBefore.count, 1)
+
+        let invalidTransport = ScriptedTransport(getOutcomes: [
+            .ok(try emptyPrimitiveBlocksJSON(from: fixture.json)),
+        ])
+        let fallback = try await AppBootstrap.bootstrap(
+            connection: (url: baseURL, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in invalidTransport }
+        )
+        guard case .ready = fallback else {
+            return XCTFail("expected cached .ready after invalid pull, got \(fallback)")
+        }
+
+        let cachedAfter = try await factory.workoutCache.loadPrimitiveWorkouts()
+        XCTAssertEqual(
+            cachedAfter,
+            cachedBefore,
+            "decode failures must not be interpreted as primitive tombstones"
+        )
+    }
+
+    func testBootstrapLeavesHistoryCorrectionDisabledInProductionWiring() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let fixture = Fixtures.sampleWorkoutPayload()
+        let historyVM = HistoryViewModel(cache: factory.workoutCache)
+        let transport = ScriptedTransport(getOutcomes: [.ok(fixture.json)])
+
+        _ = try await AppBootstrap.bootstrap(
+            connection: (url: URL(string: "https://example.test")!, token: "tok"),
+            persistence: factory,
+            now: fixture.scheduledDate,
+            transportBuilder: { _ in transport },
+            historyViewModel: historyVM
+        )
+
+        XCTAssertFalse(
+            historyVM.canEditPastSets,
+            "production bootstrap must not wire legacy SetLog correction during primitive cutover"
+        )
     }
 
     func testTodayRefreshRunsPullAndKeepsReadyState() async throws {
@@ -1771,6 +1835,15 @@ final class AppBootstrapTests: XCTestCase {
           "server_time": "\(serverTimeString)"
         }
         """.data(using: .utf8)!
+    }
+
+    private func emptyPrimitiveBlocksJSON(from payload: Data) throws -> Data {
+        let decoded = try JSONSerialization.jsonObject(with: payload)
+        var root = try XCTUnwrap(decoded as? [String: Any])
+        var workouts = try XCTUnwrap(root["workouts"] as? [[String: Any]])
+        workouts[0]["primitive_blocks"] = []
+        root["workouts"] = workouts
+        return try JSONSerialization.data(withJSONObject: root)
     }
 
     private func assertEmpty(

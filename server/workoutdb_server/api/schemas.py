@@ -313,6 +313,8 @@ class BlockRead(_UuidReadBase):
 
 
 class PrimitiveWorkTargetIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     metric: Literal["reps", "duration", "distance", "rounds", "completion", "load_carried"]
     value_form: Literal["single", "range", "open"]
     value: float | None = None
@@ -328,6 +330,8 @@ class PrimitiveWorkTargetIn(BaseModel):
 
 
 class PrimitiveLoadIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     value: float | None = None
     unit: Literal["kg", "lb", "1rm", "bodyweight"]
     unit_type: Literal["absolute", "relative", "implicit_bodyweight"]
@@ -351,11 +355,15 @@ class PrimitiveLoadIn(BaseModel):
 
 
 class PrimitiveStimulusIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     type: Literal["rir", "hr_zone"]
     target: float | None = None
 
 
 class PrimitiveTimingIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     mode: Literal["set_bounded", "time_bounded", "cap_bounded", "target_bounded"]
     interval_sec: int | None = None
     rounds: int | None = None
@@ -371,6 +379,8 @@ class PrimitiveTimingIn(BaseModel):
 
 
 class PrimitiveSlotIn(_UuidInputBase):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     exercise_id: str
     work_target: list[PrimitiveWorkTargetIn] = Field(default_factory=list)
@@ -388,6 +398,8 @@ class PrimitiveSlotIn(_UuidInputBase):
 
 
 class PrimitiveSetIn(_UuidInputBase):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     title: str | None = None
     timing: PrimitiveTimingIn
@@ -430,6 +442,8 @@ class PrimitiveSetIn(_UuidInputBase):
 
 
 class PrimitiveBlockIn(_UuidInputBase):
+    model_config = ConfigDict(extra="forbid")
+
     id: str
     title: str | None = None
     repeat: int = Field(default=1, ge=1)
@@ -444,7 +458,7 @@ class PrimitiveBlockIn(_UuidInputBase):
 
 
 class WorkoutCreate(_UuidInputBase):
-    """Accepts a full workout tree (blocks → items → alternatives) in one request.
+    """Accepts a full primitive workout tree (blocks → sets → slots) in one request.
 
     user_id is resolved from the bearer token, not the body (ADR-2026-04-17).
     """
@@ -522,6 +536,59 @@ class SetLogIn(_UuidInputBase):
 
 
 class PrimitiveSetLogIn(_UuidInputBase):
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "description": (
+                "Primitive result row. The role selects the coordinate grammar: "
+                "slot rows identify block/set/slot and must include set_index "
+                "as the slot ordinal within the authored set; set_result rows "
+                "identify block/set, use set_index 0 as their aggregate "
+                "sentinel, and cannot carry slot or exercise ids; block_result "
+                "rows identify block, use set_index and set_repeat_index 0 as "
+                "aggregate sentinels, and cannot carry set, slot, or exercise "
+                "ids. Runtime validation also verifies the coordinates against "
+                "the persisted primitive workout tree."
+            ),
+            "oneOf": [
+                {
+                    "required": ["slot_id", "set_id", "block_id", "set_index"],
+                    "properties": {"role": {"const": "slot"}},
+                },
+                {
+                    "required": ["role", "set_id", "block_id"],
+                    "properties": {
+                        "role": {"const": "set_result"},
+                        "set_index": {"const": 0},
+                    },
+                    "not": {
+                        "anyOf": [
+                            {"required": ["slot_id"]},
+                            {"required": ["planned_exercise_id"]},
+                            {"required": ["performed_exercise_id"]},
+                        ],
+                    },
+                },
+                {
+                    "required": ["role", "block_id"],
+                    "properties": {
+                        "role": {"const": "block_result"},
+                        "set_index": {"const": 0},
+                        "set_repeat_index": {"const": 0},
+                    },
+                    "not": {
+                        "anyOf": [
+                            {"required": ["slot_id"]},
+                            {"required": ["set_id"]},
+                            {"required": ["planned_exercise_id"]},
+                            {"required": ["performed_exercise_id"]},
+                        ],
+                    },
+                },
+            ],
+        },
+    )
+
     id: str
     role: Literal["slot", "set_result", "block_result"] = "slot"
     slot_id: str | None = None
@@ -530,7 +597,7 @@ class PrimitiveSetLogIn(_UuidInputBase):
     workout_id: str
     planned_exercise_id: str | None = None
     performed_exercise_id: str | None = None
-    set_index: int = Field(ge=0)
+    set_index: int = Field(default=0, ge=0)
     set_repeat_index: int = Field(default=0, ge=0)
     block_repeat_index: int = Field(default=0, ge=0)
     reps: int | None = None
@@ -548,15 +615,35 @@ class PrimitiveSetLogIn(_UuidInputBase):
         if self.workout_id is None:
             raise ValueError("primitive log rows require workout_id")
         if self.role == "slot":
-            if self.slot_id is None or self.set_id is None or self.block_id is None:
-                raise ValueError("slot primitive log rows require slot_id, set_id, and block_id")
+            self._validate_slot_scope()
         elif self.role == "set_result":
-            if self.slot_id is not None or self.set_id is None or self.block_id is None:
-                raise ValueError("set_result rows require set_id and block_id and no slot_id")
+            self._validate_set_result_scope()
         elif self.role == "block_result":
-            if self.slot_id is not None or self.set_id is not None or self.block_id is None:
-                raise ValueError("block_result rows require block_id only")
+            self._validate_block_result_scope()
         return self
+
+    def _validate_slot_scope(self) -> None:
+        if "set_index" not in self.model_fields_set:
+            raise ValueError("slot primitive log rows require set_index")
+        if self.slot_id is None or self.set_id is None or self.block_id is None:
+            raise ValueError("slot primitive log rows require slot_id, set_id, and block_id")
+
+    def _validate_set_result_scope(self) -> None:
+        if self.set_id is None or self.block_id is None or "slot_id" in self.model_fields_set:
+            raise ValueError(
+                "set_result rows require set_id and block_id and no slot or exercise ids"
+            )
+        if {"planned_exercise_id", "performed_exercise_id"} & self.model_fields_set:
+            raise ValueError("set_result rows cannot carry exercise ids")
+
+    def _validate_block_result_scope(self) -> None:
+        if self.block_id is None or {"slot_id", "set_id"} & self.model_fields_set:
+            raise ValueError(
+                "block_result rows require block_id only and cannot carry set, slot, "
+                "or exercise ids"
+            )
+        if {"planned_exercise_id", "performed_exercise_id"} & self.model_fields_set:
+            raise ValueError("block_result rows cannot carry exercise ids")
 
 
 class PrimitiveSetLogRead(_UuidReadBase):
@@ -667,9 +754,9 @@ class WorkoutStatusUpdate(_UuidInputBase):
 class WorkoutReset(_UuidInputBase):
     """App tells server to erase same-day execution data for a workout.
 
-    This is the inverse of a completed-workout push: delete the set_logs
-    tied to the workout tree and put the workout back into `planned` so a
-    subsequent pull does not resurrect a locally reset History row.
+    This is the inverse of a completed-workout push: delete the primitive_set_logs
+    tied to the workout tree and put the workout back into `planned` so a subsequent
+    pull does not resurrect a locally reset History row.
     """
 
     workout_id: str

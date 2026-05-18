@@ -22,6 +22,7 @@ the planning flow. Quick pointers:
 
 ### Starting work
 - Classify the change: trivial / scoped / non-trivial. Non-trivial → `scoping:requirements-planning` if the durable requirement is missing, stale, or too thin. Use interview only as discovery that feeds requirements.
+- Call something a spike only when a planning-blocking empirical unknown cannot be settled by docs/code reading. Do not label implementation slices or fake-backed scaffolds as spikes.
 - Read `docs/specs/v2-architecture.md` (target architecture, accepted) and `docs/ARCHITECTURE.md` (system map at a glance).
 - Read the affected area's README (`server/README.md`, `app/README.md`, `schema/README.md`).
 - Schema change? Read `docs/MIGRATIONS.md` before touching entity definitions.
@@ -191,6 +192,7 @@ This repo has one user (Eric) and one prod deployment (also Eric). There is no "
 
 - **Boundaries are enforced at lint time, not at review time.** Python server boundaries are checked by `import-linter` contracts in `pyproject.toml` (run `uv run lint-imports`). Contracts run in pre-push and CI.
 - **New architectural boundaries require new contracts.** Adding a module or package? Add an import-linter contract in the same commit. If reaching for an import that would violate an existing contract, extract the shared logic into the right layer — do not loosen the contract. See `docs/WORKFLOW.md` § "Architectural enforcement".
+- **Architecture review means the full `code-analysis:architecture` audit artifact.** Do not call an architecture review complete unless it includes the current-state snapshot, boundary matrix, hotspot register with scores, top interventions, draft ADRs, and smallest next step from the skill.
 
 ## Planning and backlog lifecycle
 
@@ -211,3 +213,5 @@ Do not add durable plan directories under `docs/`. Requirements docs describe ho
 `.claude/` and `.codex/` are checked in so agent harness config (MCP wiring, enabled plugins, project overlays) stays in sync across machines. `.xskills/` and `.claude/settings.local.json` are agent-local and gitignored. `scratch/` is for ephemeral multi-unit work.
 
 For MCP tooling, keep one canonical command path per server. Do not add repo-local wrappers, fallback command chains, or machine-specific MCP variants unless Eric explicitly asks for that split. XcodeBuildMCP is the global `xcodebuildmcp` command; keep machine-specific simulator IDs and home paths out of committed config.
+
+For WorkoutKit handoff work, keep the push lane separate from results reconciliation. Pushing, scheduling, or opening WorkoutKit content is one slice; HealthKit or WorkoutKit completion readback, matching, import, and Setmark reconciliation belong to a later lane unless Eric explicitly asks to combine them.

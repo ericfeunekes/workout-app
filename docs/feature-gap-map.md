@@ -9,6 +9,7 @@ covers:
   - docs/sync.md
   - docs/TESTING.md
   - docs/watch-metrics.md
+  - docs/healthkit-data-access.md
   - docs/specs/primitives-data-model.md
 ---
 
@@ -96,6 +97,9 @@ gap in the owning docs. Git history is the archive.
 | `TEST-GAP-003` | `docs/TESTING.md` | No real-device proof harness exists for Watch, HealthKit, and device-only behavior. | `proof` |
 | `TEST-GAP-004` | `docs/TESTING.md`, `docs/sync.md` | App-sync foreground/background lifecycle has package proof for the Shell coordinator, but no simulator/app-root lifecycle evidence proving the `scenePhase` path in a running app. | `proof` |
 | `TEST-GAP-005` | `docs/TESTING.md`, `docs/QA.md`, `docs/ios-dev-loop.md` | Runtime cost and object-lifetime baselines need ETTrace/memgraph proof lanes. | `proof` |
+| `HKDATA-GAP-001` | `docs/healthkit-data-access.md` | General HealthKit batch/live descriptor-to-query mapping is not implemented beyond the typed contract and fake-backed test surface. | `implementation` |
+| `HKDATA-GAP-002` | `docs/healthkit-data-access.md` | No local app database projection exists for normalized HealthKit archive records, external identities, deleted IDs, or cursors. | `implementation` |
+| `HKDATA-GAP-003` | `docs/healthkit-data-access.md`, `docs/TESTING.md` | Real Watch-backed live metric delivery is unproven until a physical iPhone + Apple Watch diagnostic run succeeds. | `proof` |
 | `DS-GAP-001` | `docs/design-system.md` | Semantic/scalable typography and hero/timer Dynamic Type rules are incomplete. | `implementation` |
 | `DS-GAP-002` | `docs/design-system.md` | Interactive primitives do not centrally guarantee accessibility metadata and 44 pt target expectations. | `implementation` |
 | `DS-GAP-003` | `docs/design-system.md`, `docs/QA.md` | Active, Rest, LogSetSheet, SetEditSheet, and History need Dynamic Type and accessibility proof using `snapshot_ui`. | `proof` |
@@ -104,8 +108,9 @@ gap in the owning docs. Git history is the archive.
 | `APPINTENT-GAP-002` | `docs/features/app-intents.md` | Handoff routes for Today, Active, and History are not specified in app routing or debug launch terms. | `requirements` |
 | `APPINTENT-GAP-003` | `docs/features/app-intents.md` | Mutation intents are deferred until offline, auth, persistence, telemetry, and confirmation semantics are defined. | `requirements` |
 | `APPINTENT-GAP-004` | `docs/features/app-intents.md` | App entity identity for workouts/sessions is not specified. | `requirements` |
-| `WATCHKIT-GAP-002` | `docs/features/watch-workoutkit-handoff.md` | Local watch simulator build/install/launch and iOS-to-Watch custom content push proof exist; real-device WorkoutKit open/schedule proof is missing. | `spike` |
-| `WATCHKIT-GAP-003` | `docs/features/watch-workoutkit-handoff.md` | Completion reconciliation identity path is unsettled. | `spike` |
+| `WATCHKIT-GAP-002` | `docs/features/watch-workoutkit-handoff.md` | No app package wraps real WorkoutKit scheduling/opening. | `implementation` |
+| `WATCHKIT-GAP-003` | `docs/features/watch-workoutkit-handoff.md` | Results/reconciliation is a separate future lane, not part of push-only WorkoutKit handoff. | `requirements` |
+| `WATCHKIT-GAP-004` | `docs/features/watch-workoutkit-handoff.md` | Local watch simulator build/install/launch and iOS-to-Watch custom content push proof exist; scratch real-device WorkoutKit schedule/open probes typecheck, but no physical iPhone/Watch is visible to Xcode yet. | `spike` |
 | `WATCHCUSTOM-GAP-001` | `docs/features/watch-primary-execution.md` | Custom Watch protocol/platform identity, stale-action rejection, and phone inbox need future proof if custom Watch is promoted. | `spike` |
 | `WATCHCUSTOM-GAP-002` | `docs/features/watch-primary-execution.md` | Watch-primary offline event replay and reconnect idempotency are unimplemented. | `implementation` |
 | `WATCHCUSTOM-GAP-003` | `docs/watch-metrics.md` | Custom Watch metric slots, HR slot states, target windows, and route/directions UI are unimplemented. | `implementation` |

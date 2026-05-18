@@ -2,9 +2,6 @@
 
 from datetime import datetime
 
-import pytest
-from fastapi.exceptions import ResponseValidationError
-from pydantic import ValidationError
 from sqlalchemy.orm import Session
 from workoutdb_server.models import AppUser, Exercise, PrimitiveSetLog, UserParameter, Workout
 
@@ -25,7 +22,11 @@ def _primitive_workout_payload(
     *,
     workout_id: str = "10000000-0000-4000-8000-000000000001",
     block_id: str = "20000000-0000-4000-8000-000000000001",
+    block_repeat: int = 1,
+    block_work_target: list[dict] | None = None,
     set_id: str = "30000000-0000-4000-8000-000000000001",
+    set_repeat: int = 1,
+    set_work_target: list[dict] | None = None,
     slot_id: str = "40000000-0000-4000-8000-000000000001",
     status: str = "planned",
 ) -> dict:
@@ -38,10 +39,14 @@ def _primitive_workout_payload(
         "primitive_blocks": [
             {
                 "id": block_id,
+                "repeat": block_repeat,
+                "work_target": block_work_target or [],
                 "sets": [
                     {
                         "id": set_id,
                         "timing": {"mode": "set_bounded"},
+                        "repeat": set_repeat,
+                        "work_target": set_work_target or [],
                         "slots": [
                             {
                                 "id": slot_id,
@@ -80,6 +85,9 @@ def _primitive_slot_log(
     block_id: str = "20000000-0000-4000-8000-000000000001",
     set_id: str = "30000000-0000-4000-8000-000000000001",
     slot_id: str = "40000000-0000-4000-8000-000000000001",
+    set_index: int = 0,
+    set_repeat_index: int = 0,
+    block_repeat_index: int = 0,
     reps: int | None = 5,
     weight: float | None = 100,
     completed_at: str = "2026-04-20T07:30:00Z",
@@ -92,7 +100,9 @@ def _primitive_slot_log(
         "block_id": block_id,
         "workout_id": workout_id,
         "planned_exercise_id": exercise_id,
-        "set_index": 0,
+        "set_index": set_index,
+        "set_repeat_index": set_repeat_index,
+        "block_repeat_index": block_repeat_index,
         "reps": reps,
         "weight": weight,
         "weight_unit": "kg" if weight is not None else None,
@@ -163,8 +173,11 @@ def test_pull_rejects_invalid_persisted_primitive_block(client, test_engine, tes
         )
         session.commit()
 
-    with pytest.raises((ResponseValidationError, ValidationError)):
-        client.get("/api/sync/pull")
+    response = client.get("/api/sync/pull")
+    assert response.status_code == 500
+    assert "Persisted primitive workout 10000000-0000-4000-8000-000000000010 is invalid" in (
+        response.text
+    )
 
 
 def test_pull_rejects_empty_persisted_primitive_json(client, test_engine, test_user_id) -> None:
@@ -181,8 +194,11 @@ def test_pull_rejects_empty_persisted_primitive_json(client, test_engine, test_u
         )
         session.commit()
 
-    with pytest.raises((ResponseValidationError, ValidationError)):
-        client.get("/api/sync/pull")
+    response = client.get("/api/sync/pull")
+    assert response.status_code == 500
+    assert "Persisted primitive workout 10000000-0000-4000-8000-000000000012 is invalid" in (
+        response.text
+    )
 
 
 def test_pull_rejects_empty_persisted_primitive_array(client, test_engine, test_user_id) -> None:
@@ -199,8 +215,50 @@ def test_pull_rejects_empty_persisted_primitive_array(client, test_engine, test_
         )
         session.commit()
 
-    with pytest.raises((ResponseValidationError, ValidationError)):
-        client.get("/api/sync/pull")
+    response = client.get("/api/sync/pull")
+    assert response.status_code == 500
+    assert "Persisted primitive workout 10000000-0000-4000-8000-000000000013 is invalid" in (
+        response.text
+    )
+
+
+def test_push_rejects_invalid_persisted_primitive_block(client, test_engine, test_user_id) -> None:
+    with Session(test_engine) as session:
+        session.add(Exercise(id=_BACK_SQUAT, name="Back Squat"))
+        session.add(
+            Workout(
+                id="10000000-0000-4000-8000-000000000014",
+                user_id=test_user_id,
+                name="Invalid primitive push target",
+                status="planned",
+                source="claude",
+                primitive_blocks_json=(
+                    '[{"id":"20000000-0000-4000-8000-000000000014",'
+                    '"sets":[{"id":"30000000-0000-4000-8000-000000000014",'
+                    '"timing":{"mode":"future_mode"},"slots":"not-a-list"}]}]'
+                ),
+            )
+        )
+        session.commit()
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                _primitive_slot_log(
+                    workout_id="10000000-0000-4000-8000-000000000014",
+                    block_id="20000000-0000-4000-8000-000000000014",
+                    set_id="30000000-0000-4000-8000-000000000014",
+                    slot_id="40000000-0000-4000-8000-000000000014",
+                )
+            ]
+        },
+    )
+
+    assert response.status_code == 500
+    assert "Persisted primitive workout 10000000-0000-4000-8000-000000000014 is invalid" in (
+        response.text
+    )
 
 
 def test_pull_last_performed_uses_latest_completed_workout_only(client, test_engine) -> None:
@@ -316,9 +374,127 @@ def test_push_primitive_slot_log_and_status(client, test_engine) -> None:
         assert workout_row.notes == "good session"
 
 
+def test_push_rejects_extra_fields_inside_primitive_result(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    _create_primitive_workout(client, exercise_id)
+    log = _primitive_slot_log() | {"workoutkit_completion_id": "not-owned-here"}
+
+    response = client.post("/api/sync/results", json={"primitive_set_logs": [log]})
+
+    assert response.status_code == 422
+    assert "workoutkit_completion_id" in response.text
+
+
+def test_push_rejects_aggregate_null_forbidden_coordinates(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(
+        client,
+        exercise_id,
+        set_work_target=[
+            {
+                "metric": "rounds",
+                "value_form": "open",
+                "value": None,
+                "role": "observation",
+            }
+        ],
+    )
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                {
+                    "id": "88888888-8888-4888-8888-888888888893",
+                    "role": "set_result",
+                    "set_id": "30000000-0000-4000-8000-000000000001",
+                    "block_id": "20000000-0000-4000-8000-000000000001",
+                    "slot_id": None,
+                    "workout_id": workout["id"],
+                    "rounds": 3,
+                    "completed_at": "2026-04-20T07:40:00Z",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "set_result rows require set_id and block_id" in response.text
+
+
+def test_push_accepts_aggregate_rows_without_explicit_set_index(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(
+        client,
+        exercise_id,
+        block_work_target=[
+            {
+                "metric": "rounds",
+                "value_form": "open",
+                "value": None,
+                "role": "observation",
+            }
+        ],
+        set_work_target=[
+            {
+                "metric": "rounds",
+                "value_form": "open",
+                "value": None,
+                "role": "observation",
+            }
+        ],
+    )
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                {
+                    "id": "88888888-8888-4888-8888-888888888894",
+                    "role": "set_result",
+                    "set_id": "30000000-0000-4000-8000-000000000001",
+                    "block_id": "20000000-0000-4000-8000-000000000001",
+                    "workout_id": workout["id"],
+                    "rounds": 3,
+                    "completed_at": "2026-04-20T07:40:00Z",
+                },
+                {
+                    "id": "88888888-8888-4888-8888-888888888895",
+                    "role": "block_result",
+                    "block_id": "20000000-0000-4000-8000-000000000001",
+                    "workout_id": workout["id"],
+                    "rounds": 1,
+                    "completed_at": "2026-04-20T07:45:00Z",
+                },
+            ]
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    with Session(test_engine) as session:
+        set_row = session.get(PrimitiveSetLog, "88888888-8888-4888-8888-888888888894")
+        block_row = session.get(PrimitiveSetLog, "88888888-8888-4888-8888-888888888895")
+        assert set_row is not None
+        assert set_row.set_index == 0
+        assert block_row is not None
+        assert block_row.set_index == 0
+        assert block_row.set_repeat_index == 0
+
+
 def test_push_primitive_set_result_and_distance_slot(client, test_engine) -> None:
     exercise_id = _seed_exercise(test_engine)
-    workout = _create_primitive_workout(client, exercise_id)
+    workout = _create_primitive_workout(
+        client,
+        exercise_id,
+        set_work_target=[
+            {
+                "metric": "rounds",
+                "value_form": "open",
+                "value": None,
+                "role": "observation",
+            }
+        ],
+    )
 
     response = client.post(
         "/api/sync/results",
@@ -355,6 +531,192 @@ def test_push_primitive_set_result_and_distance_slot(client, test_engine) -> Non
         assert aggregate.rounds == 3
 
 
+def test_push_rejects_set_result_without_set_work_target(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(client, exercise_id)
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                {
+                    "id": "88888888-8888-4888-8888-88888888888d",
+                    "role": "set_result",
+                    "set_id": "30000000-0000-4000-8000-000000000001",
+                    "block_id": "20000000-0000-4000-8000-000000000001",
+                    "workout_id": workout["id"],
+                    "set_index": 0,
+                    "rounds": 3,
+                    "completed_at": "2026-04-20T07:40:00Z",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "set_result outside workout" in response.text
+
+
+def test_push_rejects_set_result_with_exercise_ids(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(
+        client,
+        exercise_id,
+        set_work_target=[
+            {
+                "metric": "rounds",
+                "value_form": "open",
+                "value": None,
+                "role": "observation",
+            }
+        ],
+    )
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                {
+                    "id": "88888888-8888-4888-8888-888888888890",
+                    "role": "set_result",
+                    "set_id": "30000000-0000-4000-8000-000000000001",
+                    "block_id": "20000000-0000-4000-8000-000000000001",
+                    "workout_id": workout["id"],
+                    "planned_exercise_id": exercise_id,
+                    "set_index": 0,
+                    "rounds": 3,
+                    "completed_at": "2026-04-20T07:40:00Z",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "set_result rows cannot carry exercise ids" in response.text
+
+
+def test_push_rejects_block_result_without_block_work_target(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(client, exercise_id)
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                {
+                    "id": "88888888-8888-4888-8888-888888888891",
+                    "role": "block_result",
+                    "block_id": "20000000-0000-4000-8000-000000000001",
+                    "workout_id": workout["id"],
+                    "set_index": 0,
+                    "rounds": 3,
+                    "completed_at": "2026-04-20T07:40:00Z",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "block_result outside workout" in response.text
+
+
+def test_push_rejects_block_result_with_exercise_ids(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(
+        client,
+        exercise_id,
+        block_work_target=[
+            {
+                "metric": "rounds",
+                "value_form": "open",
+                "value": None,
+                "role": "observation",
+            }
+        ],
+    )
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                {
+                    "id": "88888888-8888-4888-8888-888888888892",
+                    "role": "block_result",
+                    "block_id": "20000000-0000-4000-8000-000000000001",
+                    "workout_id": workout["id"],
+                    "performed_exercise_id": exercise_id,
+                    "set_index": 0,
+                    "rounds": 3,
+                    "completed_at": "2026-04-20T07:40:00Z",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "block_result rows cannot carry exercise ids" in response.text
+
+
+def test_push_rejects_out_of_bounds_primitive_repeat_indexes(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    _create_primitive_workout(client, exercise_id, set_repeat=2)
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                _primitive_slot_log(
+                    log_id="88888888-8888-4888-8888-88888888888e",
+                    set_repeat_index=2,
+                )
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "set_repeat_index outside workout" in response.text
+
+
+def test_push_rejects_out_of_bounds_primitive_block_repeat_index(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    _create_primitive_workout(client, exercise_id, block_repeat=2)
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                _primitive_slot_log(
+                    log_id="88888888-8888-4888-8888-8888888888aa",
+                    block_repeat_index=2,
+                )
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "block_repeat_index outside workout" in response.text
+
+
+def test_push_rejects_slot_log_with_wrong_slot_position(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    _create_primitive_workout(client, exercise_id)
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                _primitive_slot_log(
+                    log_id="88888888-8888-4888-8888-88888888888f",
+                    set_index=1,
+                )
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "set_index outside workout" in response.text
+
+
 def test_push_rejects_primitive_log_referencing_wrong_slot(client, test_engine) -> None:
     exercise_id = _seed_exercise(test_engine)
     _create_primitive_workout(client, exercise_id)
@@ -385,6 +747,33 @@ def test_push_rejects_primitive_log_referencing_wrong_exercise(client, test_engi
     assert "planned_exercise_id outside workout" in response.text
 
 
+def test_push_accepts_slot_log_with_performed_exercise_matching_planned(
+    client, test_engine
+) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    _create_primitive_workout(client, exercise_id)
+    log = _primitive_slot_log() | {"performed_exercise_id": exercise_id}
+
+    response = client.post("/api/sync/results", json={"primitive_set_logs": [log]})
+
+    assert response.status_code == 200, response.text
+    with Session(test_engine) as session:
+        row = session.get(PrimitiveSetLog, log["id"])
+        assert row is not None
+        assert row.performed_exercise_id == exercise_id
+
+
+def test_push_rejects_slot_log_with_unregistered_performed_exercise(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    _create_primitive_workout(client, exercise_id)
+    log = _primitive_slot_log() | {"performed_exercise_id": _PULLUP}
+
+    response = client.post("/api/sync/results", json={"primitive_set_logs": [log]})
+
+    assert response.status_code == 422
+    assert "performed_exercise_id outside workout" in response.text
+
+
 def test_push_rejects_primitive_aggregate_referencing_wrong_set(client, test_engine) -> None:
     exercise_id = _seed_exercise(test_engine)
     workout = _create_primitive_workout(client, exercise_id)
@@ -409,6 +798,155 @@ def test_push_rejects_primitive_aggregate_referencing_wrong_set(client, test_eng
 
     assert response.status_code == 422
     assert "set_id outside workout" in response.text
+
+
+def test_push_rejects_aggregate_set_result_with_nonzero_set_index(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(
+        client,
+        exercise_id,
+        set_work_target=[
+            {
+                "metric": "rounds",
+                "value_form": "open",
+                "value": None,
+                "role": "observation",
+            }
+        ],
+    )
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                {
+                    "id": "88888888-8888-4888-8888-8888888888ab",
+                    "role": "set_result",
+                    "set_id": "30000000-0000-4000-8000-000000000001",
+                    "block_id": "20000000-0000-4000-8000-000000000001",
+                    "workout_id": workout["id"],
+                    "set_index": 1,
+                    "rounds": 3,
+                    "completed_at": "2026-04-20T07:40:00Z",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "aggregate_index outside workout" in response.text
+
+
+def test_push_rejects_aggregate_block_result_with_nonzero_repeat_indexes(
+    client, test_engine
+) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(
+        client,
+        exercise_id,
+        block_work_target=[
+            {
+                "metric": "rounds",
+                "value_form": "open",
+                "value": None,
+                "role": "observation",
+            }
+        ],
+    )
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                {
+                    "id": "88888888-8888-4888-8888-8888888888ac",
+                    "role": "block_result",
+                    "block_id": "20000000-0000-4000-8000-000000000001",
+                    "workout_id": workout["id"],
+                    "set_index": 0,
+                    "set_repeat_index": 1,
+                    "rounds": 3,
+                    "completed_at": "2026-04-20T07:40:00Z",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "aggregate_index outside workout" in response.text
+
+
+def test_push_rejects_block_result_out_of_bounds_block_repeat_index(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(
+        client,
+        exercise_id,
+        block_repeat=2,
+        block_work_target=[
+            {
+                "metric": "rounds",
+                "value_form": "open",
+                "value": None,
+                "role": "observation",
+            }
+        ],
+    )
+
+    response = client.post(
+        "/api/sync/results",
+        json={
+            "primitive_set_logs": [
+                {
+                    "id": "88888888-8888-4888-8888-8888888888ae",
+                    "role": "block_result",
+                    "block_id": "20000000-0000-4000-8000-000000000001",
+                    "workout_id": workout["id"],
+                    "block_repeat_index": 2,
+                    "rounds": 3,
+                    "completed_at": "2026-04-20T07:40:00Z",
+                }
+            ]
+        },
+    )
+
+    assert response.status_code == 422
+    assert "block_repeat_index outside workout" in response.text
+
+
+def test_push_accepts_repeated_block_result_with_aggregate_work_target(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(
+        client,
+        exercise_id,
+        block_repeat=2,
+        block_work_target=[
+            {
+                "metric": "rounds",
+                "value_form": "open",
+                "value": None,
+                "role": "observation",
+            }
+        ],
+    )
+    log = {
+        "id": "88888888-8888-4888-8888-8888888888ad",
+        "role": "block_result",
+        "block_id": "20000000-0000-4000-8000-000000000001",
+        "workout_id": workout["id"],
+        "set_index": 0,
+        "block_repeat_index": 1,
+        "rounds": 3,
+        "completed_at": "2026-04-20T07:40:00Z",
+    }
+
+    response = client.post("/api/sync/results", json={"primitive_set_logs": [log]})
+
+    assert response.status_code == 200, response.text
+    with Session(test_engine) as session:
+        row = session.get(PrimitiveSetLog, log["id"])
+        assert row is not None
+        assert row.role == "block_result"
+        assert row.block_repeat_index == 1
 
 
 def test_push_primitive_log_is_idempotent_by_id(client, test_engine) -> None:

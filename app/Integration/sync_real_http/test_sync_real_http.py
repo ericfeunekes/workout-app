@@ -210,7 +210,8 @@ def assert_primitive_set_log_upserted(db_path: Path) -> None:
     with sqlite3.connect(db_path) as connection:
         slot_row = connection.execute(
             """
-            SELECT id, workout_id, role, reps, weight, weight_unit, planned_exercise_id
+            SELECT id, workout_id, role, reps, weight, weight_unit,
+                   planned_exercise_id, performed_exercise_id
             FROM primitive_set_log
             WHERE id = ?
             """,
@@ -241,6 +242,7 @@ def assert_primitive_set_log_upserted(db_path: Path) -> None:
         7,
         40.0,
         "kg",
+        EXERCISE_ID,
         EXERCISE_ID,
     )
     assert aggregate_count == 1

@@ -14,6 +14,7 @@ import FeaturesExecution
 import FeaturesToday
 import Persistence
 import Shell
+import WatchBridge
 
 extension RootView {
 
@@ -174,6 +175,35 @@ extension RootView {
                 executionVM.startCurrentSet()
                 executionVM.logSet(reps: 5, rir: 2)
                 executionVM.advance()
+            }
+        }
+    }
+
+    /// DEBUG-only WatchConnectivity smoke. This is intentionally a fixed,
+    /// synthetic payload: it proves the iOS simulator can push content through
+    /// `LiveWatchBridge` to the paired Watch simulator without coupling the
+    /// custom Watch lane to the production execution reducer.
+    func sendDebugWatchPayloadIfRequested(args: [String]) {
+        guard args.contains("--debug-watch-push") else { return }
+        Task.detached {
+            let bridge = LiveWatchBridge()
+            let message = WatchMessage.pushActiveBlock(ActiveBlockPayload(
+                exerciseName: "Bench Press",
+                prescription: "5 reps @ 102 lb",
+                setNumber: 2,
+                setCount: 5,
+                targetRir: 2
+            ))
+
+            for attempt in 0..<6 {
+                do {
+                    try await bridge.send(message)
+                    try? await Task.sleep(nanoseconds: 5_000_000_000)
+                    return
+                } catch {
+                    if attempt == 5 { return }
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
             }
         }
     }

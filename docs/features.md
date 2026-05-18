@@ -56,6 +56,6 @@ owning docs.
 
 Early Apple Watch delivery starts with
 `docs/features/watch-workoutkit-handoff.md`: map eligible workouts into Apple's
-Workout app through WorkoutKit and prove completion reconciliation. Custom
-Setmark watch-primary execution remains a later capability owned by
+Workout app through WorkoutKit. Completion/result reconciliation is a separate
+future lane. Custom Setmark watch-primary execution remains a later capability owned by
 `docs/features/watch-primary-execution.md` and `docs/watch-metrics.md`.

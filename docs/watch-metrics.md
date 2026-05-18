@@ -38,6 +38,11 @@ The feature spec for this work lives in
 domain contract that the watch metric renderer and phone/watch protocol must
 respect.
 
+HealthKit metric sourcing is owned by `docs/healthkit-data-access.md` and
+`app/Packages/HealthKitBridge/`. Watch metric consumers request HR, cadence,
+pace, or other live values through the typed HealthKit data contract; they do
+not import HealthKit or build their own permission/query logic.
+
 `primary_authority` is part of live session state:
 
 ```text

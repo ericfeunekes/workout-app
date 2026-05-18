@@ -115,6 +115,10 @@ targets:
       # WatchBridge — iPhone ↔ Watch IPC. The only package allowed to
       # import WatchConnectivity (FF-13 enforces).
       - package: WatchBridge
+      # Companion watch app — embed so WatchConnectivity recognizes the
+      # paired Watch app as this iOS app's counterpart in simulator/device
+      # installs, not just as a separately-built target.
+      - target: WorkoutDBWatch
       # Features — user-facing screens. Today is the first and proves
       # the Domain + DesignSystem + Persistence integration.
       - package: FeaturesToday
@@ -159,6 +163,10 @@ targets:
           - armv7
         NSHealthShareUsageDescription: "Reads heart rate and cadence during workouts for set logging."
         NSHealthUpdateUsageDescription: "Writes workout data to Apple Health so sessions appear in Fitness."
+    entitlements:
+      path: WorkoutDB/WorkoutDB.entitlements
+      properties:
+        com.apple.developer.healthkit: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ericfeunekes.WorkoutDB
@@ -204,15 +212,35 @@ targets:
         CFBundleShortVersionString: "0.0.1"
         CFBundleVersion: "1"
         WKApplication: true
+        WKCompanionAppBundleIdentifier: com.ericfeunekes.WorkoutDB
         WKWatchOnly: NO     # companion to the iOS app
+    entitlements:
+      path: WorkoutDBWatch/WorkoutDBWatch.entitlements
+      properties:
+        com.apple.developer.healthkit: true
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ericfeunekes.WorkoutDB.watchkitapp
         TARGETED_DEVICE_FAMILY: "4"     # watch
         WATCHOS_DEPLOYMENT_TARGET: "10.0"
         CURRENT_PROJECT_VERSION: "1"
+
+  # -----------------------------------------------------------------------
+  # DEBUG-only UI probe target for system HealthKit authorization sheets.
+  # -----------------------------------------------------------------------
+  WorkoutDBUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: WorkoutDBUITests
+    dependencies:
+      - target: WorkoutDB
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ericfeunekes.WorkoutDBUITests
+        TEST_TARGET_NAME: WorkoutDB
         MARKETING_VERSION: "0.0.1"
-        GENERATE_INFOPLIST_FILE: NO
+        GENERATE_INFOPLIST_FILE: YES
 
   # -----------------------------------------------------------------------
   # Setmark — iOS app smoke tests
@@ -241,5 +269,6 @@ schemes:
       config: Debug
       targets:
         - WorkoutDBTests
+        - WorkoutDBUITests
     archive:
       config: Release

@@ -80,3 +80,37 @@ def test_sync_results_response_schema_is_specific(live_openapi: dict) -> None:
         "status_updates_received",
         "workout_resets_received",
     }
+
+
+def test_primitive_set_log_openapi_matches_role_grammar(live_openapi: dict) -> None:
+    schema = live_openapi["components"]["schemas"]["PrimitiveSetLogIn"]
+
+    assert schema["additionalProperties"] is False
+    assert "set_index" not in schema["required"]
+
+    slot_branch, set_result_branch, block_result_branch = schema["oneOf"]
+    assert set(slot_branch["required"]) == {"slot_id", "set_id", "block_id", "set_index"}
+
+    assert set_result_branch["properties"]["role"]["const"] == "set_result"
+    assert set_result_branch["properties"]["set_index"]["const"] == 0
+    forbidden_set_result_fields = {
+        item["required"][0] for item in set_result_branch["not"]["anyOf"]
+    }
+    assert forbidden_set_result_fields == {
+        "slot_id",
+        "planned_exercise_id",
+        "performed_exercise_id",
+    }
+
+    assert block_result_branch["properties"]["role"]["const"] == "block_result"
+    assert block_result_branch["properties"]["set_index"]["const"] == 0
+    assert block_result_branch["properties"]["set_repeat_index"]["const"] == 0
+    forbidden_block_result_fields = {
+        item["required"][0] for item in block_result_branch["not"]["anyOf"]
+    }
+    assert forbidden_block_result_fields == {
+        "slot_id",
+        "set_id",
+        "planned_exercise_id",
+        "performed_exercise_id",
+    }

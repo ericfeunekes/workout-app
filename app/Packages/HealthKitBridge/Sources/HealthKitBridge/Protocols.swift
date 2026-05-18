@@ -33,6 +33,8 @@ public enum HealthKitError: Error, Equatable, Sendable {
     case notAuthorized
     /// HealthKit itself failed the underlying query. Message is for logs.
     case queryFailed(String)
+    /// The typed contract exists, but this provider path is not implemented yet.
+    case notImplemented(String)
 }
 
 // MARK: - Protocols
@@ -67,4 +69,26 @@ public protocol HeartRateObserver: Sendable {
 /// HealthKit when no parameter has been pushed.
 public protocol BodyWeightReader: Sendable {
     func latestBodyWeightKg() async throws -> Double?
+}
+
+/// Requests the permissions needed by one or more HealthKit consumers.
+/// Consumers declare `HealthDataRequest`s; this package maps them to the
+/// HealthKit sample/characteristic types and read/write sets.
+public protocol HealthPermissionBroker: Sendable {
+    func requestAuthorization(for requests: [HealthDataRequest]) async throws
+}
+
+/// Batch/archive read surface. Consumers choose the type descriptors, date
+/// window, and optional anchored cursor. Implementations return normalized
+/// records with units attached to the values.
+public protocol HealthBatchDataProvider: Sendable {
+    func fetch(_ query: HealthBatchQuery) async throws -> HealthBatchResult
+}
+
+/// Live read surface for data that can stream during execution. This includes
+/// real Watch-backed workout metrics later, and fixture streams in simulator
+/// tests. Not every `HealthDataRequest` is eligible for live delivery.
+public protocol HealthLiveDataProvider: Sendable {
+    func stream(for requests: [HealthDataRequest]) async throws
+        -> AsyncThrowingStream<HealthDataRecord, Error>
 }

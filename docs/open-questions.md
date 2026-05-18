@@ -94,7 +94,7 @@ Each set has its own prescribed load; autoreg's "remaining" is well-defined (set
 ### Cluster per-slot actual editing
 Cluster/rest-pause execution now tracks sub-set slots and logs one top-level `set_log`, but expanded after-the-fact editing of individual sub-slot actuals is not yet modeled.
 - **Assumption:** v1 stores the top-level actual total, load, duration, and final-effort RIR. Per-slot actual rows wait until the first real workout shows that the extra edit detail is needed.
-- **Disposition:** watchlist for the current pre-primitives model. The accepted primitives model resolves the target shape as slot-level rows plus set/block result rows; do not treat this v1 watchlist as a blocker for primitives planning.
+- **Disposition:** watchlist - historical for the former pre-primitives model. The active primitives model resolves the target shape as slot-level rows plus set/block result rows; do not treat this v1 watchlist as a blocker for primitives planning.
 
 ### Autoreg on tempo reps
 Undershoot rule treats reps as a uniform signal; tempo reps are harder per rep.
@@ -147,8 +147,8 @@ Static holds split into at least two shapes: fixed-duration holds ("hold 24 kg s
 ### First-class block results
 AMRAP and For Time now have mode-native finish sheets, but the minimal v1 persistence shape records the result through existing `set_log` rows plus a workout note. AMRAP uses station logs during the block and a partial-station row at the end; For Time records elapsed duration against the first item. That is enough to stop presenting strength-shaped per-movement logging, but it is not a first-class block-result table.
 - **Examples:** For Time result = 8:43; scored interval block = total distance; max-duration hold = 54s.
-- **Assumption:** keep the current pre-primitives app on `set_log` + note unless result querying becomes painful before the primitives cutover.
-- **Disposition:** resolved for the primitives target by `docs/specs/primitives-data-model/log-shape.md`: primitive logs use `slot`, `set_result`, and `block_result` roles, and queries must not derive competing aggregates from slot rows. Still decide-next only if a pre-primitives v1 patch needs first-class block result querying before the cutover.
+- **Assumption:** historical pre-primitives app used `set_log` + note unless result querying became painful before the primitives cutover.
+- **Disposition:** resolved for the active primitives target by `docs/specs/primitives-data-model/log-shape.md`: primitive logs use `slot`, `set_result`, and `block_result` roles, and queries must not derive competing aggregates from slot rows. Still decide-next only if a legacy projection patch needs first-class block result querying before that bridge is retired.
 
 ### Complexes
 Barbell complex (deadlift + clean + squat + press as one round, N rounds). Superset works for 2 exercises; circuit works but the inter-exercise-rest semantics are wrong (a complex has zero rest between exercises and rest only between rounds).

@@ -7,11 +7,11 @@
 //   - per-exercise cards with mono set rows
 //   - optional workout-level note at the bottom
 //
-// Set rows are tap-to-edit: tapping a row opens `EditSetSheet` which
-// commits through `HistoryViewModel.editPastSet(workoutID:setLogID:…)`.
-// The edit writes locally AND enqueues a push via the shell-wired
-// `onSetLogEdited` hook. Fixes bug-015 — the prior stub flashed a
-// highlight and did nothing.
+// Set rows are tap-to-edit only when the shell wires a server push hook:
+// tapping a row opens `EditSetSheet` which commits through
+// `HistoryViewModel.editPastSet(workoutID:setLogID:…)`. Primitive-cutover
+// production leaves the legacy SetLog hook nil, so corrections fail closed
+// instead of becoming local-only edits.
 
 import SwiftUI
 import CoreDomain
@@ -147,6 +147,7 @@ struct HistorySessionDetailView: View {
                 .contentShape(Rectangle())
         })
         .buttonStyle(.plain)
+        .disabled(!historyViewModel.canEditPastSets)
         .accessibilityIdentifier("history.session.setrow.\(row.id.uuidString)")
     }
 
@@ -191,6 +192,9 @@ struct HistorySessionDetailView: View {
     /// respond) and open the edit sheet. The highlight clears when the
     /// sheet dismisses.
     private func handleSetRowTap(rowID: UUID) {
+        guard historyViewModel.canEditPastSets else {
+            return
+        }
         withAnimation(.easeInOut(duration: 0.15)) {
             highlightedSetID = rowID
         }

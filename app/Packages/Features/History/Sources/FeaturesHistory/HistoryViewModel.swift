@@ -183,9 +183,10 @@ public final class HistoryViewModel {
     let telemetry: TelemetryEmitter
 
     /// Hook fired after a past-set edit has been written to the local
-    /// cache. The shell wires it to `SyncAPI.pushLog([log])` so the edit
-    /// flows through the standard set_log push (deterministic UUID →
-    /// server upsert-in-place). `nil` means local-only; safe for tests.
+    /// cache. The primitive cutover closes the old `SetLog` push path in
+    /// production, so `nil` means corrective edits are unavailable rather
+    /// than local-only. Tests that exercise the legacy bridge inject a hook
+    /// explicitly.
     ///
     /// `internal` (default) + `var` so `WorkoutDBApp` can construct the
     /// VM at RootView init (before bootstrap gives us a `SyncAPI`) and
@@ -193,6 +194,10 @@ public final class HistoryViewModel {
     /// `setSetLogEditHook(_:)` below.
     var onSetLogEdited: HistorySetLogEditHook?
     var onWorkoutReset: HistoryWorkoutResetHook?
+
+    public var canEditPastSets: Bool {
+        onSetLogEdited != nil
+    }
 
     /// How many completed workouts to pull for the list view. 200 is
     /// comfortably past the single-user v1 horizon.

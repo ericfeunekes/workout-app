@@ -17,11 +17,11 @@ covers:
 Pre-QA proof contract for WorkoutDB. Testing proves behavior through automated
 or realistic-local checks before exploratory simulator/device QA starts.
 
-See also: `docs/MIGRATIONS.md` (schema cutover flow), `docs/prescription.md`
-(current pre-primitives prescription shape contract),
-`docs/specs/primitives-data-model.md` (accepted target shape for the
-primitives cutover), `docs/sync.md` (sync protocol contract), and `docs/QA.md`
-(exploratory simulator/device QA after testing gates are green).
+See also: `docs/MIGRATIONS.md` (schema cutover flow),
+`docs/specs/primitives-data-model.md` (active primitive workout contract),
+`docs/prescription.md` (legacy projection/reference surface while residual
+runtime bridge code remains), `docs/sync.md` (sync protocol contract), and
+`docs/QA.md` (exploratory simulator/device QA after testing gates are green).
 
 ## Testing vs QA
 
@@ -71,8 +71,8 @@ Run: `uv sync --extra dev && uv run pytest`.
 Scope:
 - Every entity in the spec is present in both server and app schemas.
 - Every field name, type, and nullability matches.
-- Current pre-primitives state: `timing_mode` enum and `prescription_json` shapes are identical on both sides.
-- Primitives cutover state: Block > Set > Slot schema, timing/traversal/repeat cells, primitive prescription fixtures, and primitive log roles are identical on both sides. The cutover is not done while both contract families are accepted.
+- Active primitives state: Block > Set > Slot schema, timing/traversal/repeat cells, primitive prescription fixtures, and primitive log roles are identical on both sides.
+- Legacy bridge/projected values may stay under app package tests while residual runtime cutover work is open, but contract tests must not accept old per-timing-mode authoring/result payloads as a second wire contract.
 
 Mechanism depends on the `schema/` decision (OpenAPI vs hand-mirrored). Until `schema/` is populated, contract tests live as failing placeholders or spec-referenced assertions.
 
@@ -149,7 +149,9 @@ Current harness: `make test-sync-real-http` starts FastAPI against a temporary
 SQLite database, seeds primitive workout data through real HTTP, drives the
 Swift Sync stack through `URLSessionTransport`, writes through SwiftData, pushes
 slot and aggregate primitive results back, and reads the server database to
-prove persistence and same-UUID upsert. It is wired into `make pre-qa`.
+prove persistence plus same-UUID upsert for the slot row. Aggregate rows are
+currently proven for persistence, not repeated upsert. It is wired into
+`make pre-qa`.
 
 ## Runtime proof — traces, memory graphs, and lifecycle
 
@@ -234,9 +236,14 @@ availability. That is QA readiness, not testing proof.
   Current gap `TEST-GAP-004`: package tests now pin the Shell coordinator,
   but simulator/app-root evidence does not yet prove the `scenePhase` path in
   a running app.
-- **Watch, HealthKit, haptics, physical ergonomics, sleep/wake, or real network
-  behavior** → package/fake tests for logic plus real-device or dedicated proof
-  per `docs/QA.md` before claiming the device behavior verified.
+- **HealthKit batch/archive behavior** → typed `HealthKitBridge` package tests
+  plus app-hosted simulator proof for permission request, synthetic
+  quantity/category/workout writes, reads, anchored inserts, and anchored
+  deletes. See `docs/healthkit-data-access.md`.
+- **Watch-backed live HealthKit, haptics, physical ergonomics, sleep/wake, or
+  real network behavior** → package/fake tests for logic plus real-device or
+  dedicated proof per `docs/QA.md` before claiming the device behavior
+  verified.
 - **Pure helper** → unit test in the owning stack.
 
 ## What's not under test yet
@@ -244,8 +251,9 @@ availability. That is QA readiness, not testing proof.
 - Claude-side behavior (conversation-driven planning, progression) — by design. If an invariant about what Claude pushes needs pinning, encode it as a server-side validator + test.
 - `TEST-GAP-002`: real app-hosted behavioral invariants beyond the current
   no-op app compile/link smoke.
-- `TEST-GAP-003`: real-device proof harnesses for Watch, HealthKit, and
-  device-only behavior.
+- `TEST-GAP-003`: real-device proof harnesses for Watch-backed live HealthKit
+  metrics and other device-only behavior. HealthKit batch/archive simulator
+  proof is routed through `docs/healthkit-data-access.md`.
 - `TEST-GAP-004`: foreground/background sync lifecycle proof. The package suite
   now covers the Shell app-sync coordinator's foreground pull, cache writeback,
   `lastSyncAt`, flusher start/restart/stop posture, token rejection, offline

@@ -85,6 +85,8 @@ private enum ShellPhase {
     /// unreachable — "no workouts yet" empty state.
     case empty(appSync: AppSyncCoordinator?)
     #if DEBUG
+    /// DEBUG launch-arg path for the HealthKit simulator capability spike.
+    case healthKitProbe
     /// DEBUG launch-arg fast-path. Uses the preview seed directly.
     ///
     /// Wraps the seeded VM in an `ExecutionVMHolder` so RootTabView's
@@ -217,6 +219,11 @@ struct RootView: View {
                 // bootstrap race note on `RootView`.
                 BootstrapLoadingView()
 
+            #if DEBUG
+            case .healthKitProbe:
+                HealthKitProbeView()
+            #endif
+
             case .empty(let appSync):
                 EmptyStateView(
                     onRetry: {
@@ -315,8 +322,14 @@ struct RootView: View {
             || args.contains("--jump-transition")
             || args.contains("--jump-complete")
             || args.contains("--debug-today-plan")
+            || args.contains("--debug-watch-push")
+            || args.contains("--healthkit-sim-spike")
         if forceBypass {
-            applyDebugLaunchArguments(args: args)
+            if args.contains("--healthkit-sim-spike") {
+                phase = .healthKitProbe
+            } else {
+                applyDebugLaunchArguments(args: args)
+            }
             return
         }
         if let serverIdx = args.firstIndex(of: "--server"),
@@ -495,7 +508,7 @@ struct RootView: View {
         case .firstRun, .bootstrapping:
             return nil
         #if DEBUG
-        case .debugSeed:
+        case .debugSeed, .healthKitProbe:
             return nil
         #endif
         }
@@ -555,6 +568,7 @@ struct RootView: View {
         if let vm = executionHolder.vm {
             applyDebugLaunchJumps(args: args, executionVM: vm)
         }
+        sendDebugWatchPayloadIfRequested(args: args)
         phase = .debugSeed(todayVM: todayVM, executionHolder: executionHolder)
     }
     #endif

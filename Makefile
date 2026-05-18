@@ -47,6 +47,7 @@ test-core:  ## Run Core + Sync executable Swift package tests (CLT-compatible)
 
 test-app-packages: test-core  ## Run every Swift package test target under app/Packages
 	cd app/Packages/DesignSystem && swift run DesignSystemTests
+	cd app/Packages/ExportProfile && swift test
 	cd app/Packages/HealthKitBridge && swift run HealthKitBridgeTests
 	cd app/Packages/Persistence && swift test
 	cd app/Packages/WatchBridge && swift test

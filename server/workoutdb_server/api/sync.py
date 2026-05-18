@@ -2,7 +2,8 @@
 
 - GET /api/sync/pull?since=... — server → app. Workouts, exercises, user_parameters
   modified after `since`, plus a `last_performed` snapshot per exercise in the pulled workouts.
-- POST /api/sync/results — app → server. Batch of set_logs + workout status transitions.
+- POST /api/sync/results — app → server. Batch of primitive_set_logs,
+  workout status transitions, and reset requests.
 
 The caller's user_id is resolved from the bearer token (ADR-2026-04-17). Direction-based;
 no conflict resolution. See docs/specs/v2-architecture.md § "Sync model".
@@ -24,12 +25,16 @@ from workoutdb_server.api.schemas import (
     UserParameterRead,
     WorkoutReset,
 )
-from workoutdb_server.api.workouts import workout_tree_loader
+from workoutdb_server.api.workouts import read_workout_or_500, workout_tree_loader
 from workoutdb_server.models import (
     Exercise,
     PrimitiveSetLog,
     UserParameter,
     Workout,
+)
+from workoutdb_server.primitive.contract import (
+    PrimitiveContractError,
+    validate_primitive_log_references,
 )
 
 router = APIRouter(prefix="/api/sync", tags=["sync"])
@@ -79,7 +84,7 @@ def sync_pull(
     last_performed = _build_last_performed(db, user_id)
 
     return SyncPullOut(
-        workouts=workouts,  # type: ignore[arg-type]
+        workouts=[read_workout_or_500(workout) for workout in workouts],
         exercises=exercises,  # type: ignore[arg-type]
         user_parameters=[UserParameterRead.model_validate(p) for p in user_parameters],
         last_performed=last_performed,
@@ -195,53 +200,16 @@ def _upsert_primitive_set_logs(db: DbSession, logs: list[PrimitiveSetLogIn], use
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Workout {log.workout_id} not found",
             )
-        _validate_primitive_log_references(log, workout)
+        validated_workout = read_workout_or_500(workout)
+        primitive_blocks = [block.model_dump() for block in validated_workout.primitive_blocks]
+        try:
+            validate_primitive_log_references(log, primitive_blocks)
+        except PrimitiveContractError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
         _upsert_primitive_set_log(db, log)
-
-
-def _validate_primitive_log_references(log: PrimitiveSetLogIn, workout: Workout) -> None:
-    block_ids: set[str] = set()
-    set_to_block: dict[str, str] = {}
-    slot_to_set: dict[str, str] = {}
-    slot_to_exercise: dict[str, str] = {}
-    for block in workout.primitive_blocks:
-        block_id = block["id"]
-        block_ids.add(block_id)
-        for primitive_set in block.get("sets", []):
-            set_id = primitive_set["id"]
-            set_to_block[set_id] = block_id
-            for slot in primitive_set.get("slots", []):
-                slot_id = slot["id"]
-                slot_to_set[slot_id] = set_id
-                slot_to_exercise[slot_id] = slot["exercise_id"]
-
-    if log.role == "block_result":
-        if log.block_id not in block_ids:
-            _raise_invalid_primitive_log("block_id", log)
-        return
-
-    if log.set_id is None or set_to_block.get(log.set_id) != log.block_id:
-        _raise_invalid_primitive_log("set_id", log)
-
-    if log.role == "set_result":
-        return
-
-    if log.slot_id is None or slot_to_set.get(log.slot_id) != log.set_id:
-        _raise_invalid_primitive_log("slot_id", log)
-    if (
-        log.planned_exercise_id is not None
-        and slot_to_exercise.get(log.slot_id) != log.planned_exercise_id
-    ):
-        _raise_invalid_primitive_log("planned_exercise_id", log)
-
-
-def _raise_invalid_primitive_log(field: str, log: PrimitiveSetLogIn) -> None:
-    raise HTTPException(
-        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
-        detail=(
-            f"primitive log {log.id} has {field} outside workout {log.workout_id}'s primitive tree"
-        ),
-    )
 
 
 def _reset_workout(db: DbSession, payload: WorkoutReset, user_id: str) -> None:

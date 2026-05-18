@@ -1,9 +1,9 @@
 ---
 title: Setmark v2 architecture spec
-status: accepted — partially superseded
+status: accepted — primitives are the active data contract
 date: 2026-04-15
-last_reviewed: 2026-05-17
-purpose: Target architecture for the dumb-app/smart-conversation workout system; data-model section now records the current pre-primitives baseline and is superseded for target planning by the primitives spec.
+last_reviewed: 2026-05-18
+purpose: System-level architecture for the dumb-app/smart-conversation workout system. The active workout data contract is primitive-only; older timing-mode/prescription sections are retained as historical context for bridge code only.
 covers:
   - docs/specs/primitives-data-model.md
   - docs/prescription.md
@@ -15,9 +15,10 @@ covers:
 # Setmark v2 — Architecture Spec
 
 **Date:** 2026-04-15 (accepted 2026-04-17)
-**Status:** Accepted — this is the target architecture. The former v1
-Python CLI / YAML / Google Calendar path is gone; this repo is the active v2
-system.
+**Status:** Accepted. The former v1 Python CLI / YAML / Google Calendar path
+is gone; this repo is the active v2 system. The active workout data contract is
+the primitive Block > Set > Slot model in
+`docs/specs/primitives-data-model.md`.
 
 ---
 
@@ -45,23 +46,31 @@ similarity decisions belong in separate taxonomy or adapter-profile layers.
 
 ## Data model
 
-> **Status (2026-05-18):** The primitive-only contract is now the active
-> cutover target. `docs/specs/primitives-data-model.md` and its aspect docs are
-> canonical for the Block > Set > Slot authoring shape, primitive result roles,
-> runtime legality, QA-data reset, and adapter-readiness rules. The older
-> timing-mode/block-item description below is retained only as migration context
-> for surfaces that still project primitives into existing app execution code
-> during the cutover.
+> **Status (2026-05-18):** The primitive-only contract is the active contract.
+> `docs/specs/primitives-data-model.md` and its aspect docs are canonical for
+> the Block > Set > Slot authoring shape, primitive result roles, runtime
+> legality, QA-data reset, and adapter-readiness rules. The older
+> timing-mode/block-item description below is **non-authoritative historical
+> context** for bridge surfaces that still project primitives into existing app
+> execution code during the cutover.
 >
 > The durable wire contract is primitive-only: workout create/update/read and
 > sync pull expose `primitive_blocks`, and result pushes use
 > `primitive_set_logs`.
 
-### Core principle: composition with timing
+### Historical pre-primitives model (non-authoritative)
+
+The rest of this Data model section, until `## Persistence architecture`, is
+the superseded timing-mode / `workout_item` / `set_log` model. It must not be
+used to author new requirements. Use it only to understand remaining legacy
+projection code that has not yet been replaced by primitive-native execution
+and history correction.
+
+#### Former core principle: composition with timing
 
 Everything is blocks. A block has a timing mode and contains exercises (or nested blocks). The app's job is to read the timing mode and drive the appropriate timer UI.
 
-### Entities
+#### Former entities
 
 #### `exercise`
 
@@ -77,7 +86,7 @@ An atomic movement. Minimal metadata — the app doesn't reason about exercises,
 | `default_alternatives_json` | String? | Library-level alternatives — a JSON array matching the `exercise_alternative` shape minus the `workout_item_id` pointer. Items that omit alternatives inherit this list. |
 
 No muscle groups, movement patterns, or modality on the exercise itself in the
-current pre-primitives baseline. That knowledge lives in conversation. If
+former pre-primitives baseline. That knowledge lives in conversation. If
 Claude wants the app to display a muscle tag for context, it goes in `notes` or
 `metadata_json`. A later exercise taxonomy may add structured relationships or
 external mappings, but only as read-only data for named history/export/sync
@@ -179,7 +188,10 @@ An exercise placed inside a block.
 - Cluster sets / rest-pause / myo-reps: `{"sets": 4, "reps": 5, "load_kg": 100, "sub_sets": 4, "intra_set_rest_sec": 15}` — each of the 4 top-level sets = 4 sub-sets of 5 reps with 15s rest between sub-sets; `rest_between_sets_sec` still applies between top-level sets
 - Cluster stations in round-based blocks may omit `sets`; the block `rounds` supplies the top-level count while the station keeps `sub_sets` and `intra_set_rest_sec`.
 
-Keeping this as JSON means new pre-primitives prescription shapes don't require schema changes. **For the current implemented model, the catalog of prescription shapes lives in `docs/prescription.md`** — that doc is the source the upstream "planning Claude" uses until the primitives cutover lands. For target primitives work, `docs/specs/primitives-data-model.md` and its aspects are authoritative; `docs/prescription.md` must be rewritten during the final docs sweep rather than treated as the target contract.
+Keeping this as JSON meant new pre-primitives prescription shapes did not
+require schema changes. This is no longer the active authoring contract.
+Primitive authoring lives in `docs/specs/primitives-data-model.md`; any
+remaining `prescription_json` readers are bridge/projection surfaces only.
 
 #### `workout`
 
@@ -293,7 +305,7 @@ This is a key-value log, not a fixed schema. Claude can push any parameter, any 
 **Conflict rules:**
 - Server wins for prescriptions; app wins for logs.
 - Live session is frozen: a new prescription arriving mid-session applies to the *next* occurrence of that workout, not the one currently executing.
-- Swaps mid-workout are session-local — the workout template is not mutated; the actually-performed `exercise_id` is recorded on `set_log`.
+- Swaps mid-workout are session-local — the workout template is not mutated; the actually-performed `exercise_id` is recorded on the primitive result row.
 
 **Offline behavior:**
 - Offline is the default assumption, not an error state. Neutral "offline" pill, no alarm colors.
@@ -327,10 +339,10 @@ from the token — no endpoint accepts `user_id` in a query param or body.
 **Plans (Claude → Server → App):**
 
 ```
-POST   /api/workouts                          — Create a workout (with nested blocks, items, alternatives)
-PUT    /api/workouts/:id                      — Update a workout
+POST   /api/workouts                          — Create a primitive workout (`primitive_blocks`)
+PUT    /api/workouts/:id                      — Update a primitive workout (`primitive_blocks`)
 GET    /api/workouts                          — List workouts. Filters: ?status=planned&after=2026-04-15&tag=hypertrophy_block_2
-GET    /api/workouts/:id                      — Get full workout with blocks, items, alternatives
+GET    /api/workouts/:id                      — Get full primitive workout (`primitive_blocks`)
 
 POST   /api/exercises                         — Create/upsert exercises (Claude-owned UUIDs)
 GET    /api/exercises                         — List all exercises
@@ -380,20 +392,20 @@ GET    /api/sync/pull?since=<timestamp>
 | Concern | Who decides | How |
 |---|---|---|
 | Which exercises this week | Claude | Pushes workout plans to server |
-| Sets, reps, load targets | Claude | In `prescription_json` |
-| Target RIR per exercise | Claude | `target_rir` in `prescription_json` |
-| Autoregulation rules (overshoot/undershoot steps) | Claude | `autoreg` subobject in `prescription_json` |
-| Load step / equipment granularity | Claude | `overshoot_step_kg` / `undershoot_step_kg` — no per-exercise default |
-| Alternatives if something's unavailable | Claude | Pre-computed in `exercise_alternative` |
+| Sets, reps, duration, distance, rounds, and load targets | Claude | In `primitive_blocks[].sets[].slots[].work_target` and `load` |
+| Target RIR per exercise | Claude | Slot/set/block `stimuli` in the primitive tree |
+| Autoregulation rules | Claude | Attached to the relevant primitive stimulus; the app applies only documented runtime rules |
+| Load step / equipment granularity | Claude | Authored as primitive load/autoreg metadata; no per-exercise app default |
+| Alternatives if something's unavailable | Claude | Pre-computed primitive slot alternatives |
 | User maxes, rep ranges, preferences | Claude | Pushes to `user_parameters` |
-| Percentage-based load resolution | App | Reads `percent_1rm` from prescription, resolves against `user_parameters` |
-| Timer behavior | App | Reads `timing_mode` + `timing_config_json`, drives UI |
-| Autoreg application (propose + apply to remaining sets) | App | Reads `target_rir` + `autoreg`, proposes on rest screen, applies on accept |
+| Percentage-based load resolution | App | Resolves primitive relative load against latest local `user_parameters` at seed time |
+| Timer behavior | App | Reads primitive timing/traversal/repeat cells, drives UI |
+| Autoreg application (propose + apply to remaining sets) | App | Reads primitive stimulus/autoreg metadata, proposes on rest screen, applies on accept |
 | Hold-autoreg (session-scoped) | User (in app) | "Undo" on proposal sets local `autoregHeld` for the session; cleared on complete |
-| Logging what happened | App | Writes `set_log` rows including `rir` |
+| Logging what happened | App | Writes `primitive_set_logs` rows with `slot`, `set_result`, or `block_result` role |
 | Body weight at completion | App → user_parameters | Optional prompt at completion writes a `bodyweight_kg` row |
-| Swapping to an alternative mid-workout | User (in app) | Taps alternative; session-local; log carries the performed exercise_id |
-| Editing a past (logged) set | User (in app) | Tap any cell; corrective — does **not** retrigger autoreg |
+| Swapping to an alternative mid-workout | User (in app) | Taps alternative; session-local; primitive log carries `performed_exercise_id` |
+| Editing a past logged result | User (in app) | Primitive correction path is required before server-backed history correction is re-enabled |
 | Editing a pending set | User (in app) | Tap load/reps cell; marks `adjust: "manual"` |
 | Progression decisions | Claude | Reads results from server, adjusts next week's plans |
 | "How are you feeling" / readiness | Conversation | Eric tells Claude, Claude adjusts plans before pushing |
@@ -420,10 +432,10 @@ Watch delivery now has two separate lanes:
    is the shorter path for getting eligible Setmark workouts onto Apple Watch.
    The iPhone maps a narrow subset of Setmark workouts into WorkoutKit plans,
    then schedules or hands them off through the platform path proven by the
-   WorkoutKit spike. Setmark reconciles only the completion/result facts the
-   platform actually exposes. Apple's Workout app owns the live Watch experience
-   in this lane; Setmark remains the authoring, planning, history, and analysis
-   surface.
+   WorkoutKit spike. Apple's Workout app owns the live Watch experience in this
+   lane; Setmark remains the authoring, planning, history, and analysis
+   surface. Completion/result reconciliation is a separate future lane, not a
+   requirement of WorkoutKit push.
 2. **Later custom watch-primary execution.**
    `docs/features/watch-primary-execution.md` and `docs/watch-metrics.md`
    remain the target for Setmark-owned Watch execution: custom Watch UI,
@@ -431,10 +443,11 @@ Watch delivery now has two separate lanes:
    phone/watch authority handoff.
 
 The Watch never talks to the server directly in either lane. In the WorkoutKit
-handoff lane, the iPhone performs the export and any later import/reconcile
-work. In the custom watch-primary lane, the Watch talks to the iPhone through a
-versioned WatchBridge protocol and the iPhone pushes results through the
-existing sync queue.
+handoff lane, the iPhone performs the push/open/schedule work. Any later
+result import or reconciliation is a separate module. In the custom
+watch-primary lane, the Watch talks to the iPhone through a versioned
+WatchBridge protocol and the iPhone pushes results through the existing sync
+queue.
 
 Do not mix these lanes during implementation planning. WorkoutKit handoff is
 not a partial implementation of the custom Watch UI, and the custom Watch docs
@@ -447,7 +460,8 @@ Deferred custom-watch capabilities include:
 - Tempo haptic pulses cueing eccentric/bottom/concentric/top phases during
   tempo lifts.
 - Raw accelerometer / gyroscope capture during sets. Schema reserves
-  `set_log.motion_samples_ref` for when this lands. When it does, samples can
+  `primitive_set_logs.motion_samples_ref` or an equivalent primitive result
+  artifact reference for when this lands. When it does, samples can
   be stored on the server as blobs referenced from that field. "Collect
   broadly, analyze in conversation" — the app never interprets raw motion.
 
@@ -456,7 +470,7 @@ Deferred custom-watch capabilities include:
 1. **Data model** — Define SwiftData models in Swift and SQLAlchemy/Pydantic models in Python. Keep them mirroring each other.
 2. **Home server** — Python, FastAPI, SQLite. CRUD endpoints + sync. Dead simple. Claude needs this to push/pull.
 3. **App shell** — SwiftData store, sync manager (pull plans, push results), basic workout list view.
-4. **Timer engine** — The core feature. Read `timing_mode`, drive the right timer UI. This is where most of the app complexity lives and where Eric's UX instincts matter.
+4. **Timer engine** — The core feature. Read primitive timing/traversal/repeat cells, drive the right timer UI. This is where most of the app complexity lives and where Eric's UX instincts matter.
 5. **Workout execution view** — Show current exercise, prescription, timer, log button. Alternatives accessible via swipe or tap.
 6. **Polish** — whatever Eric wants.
 

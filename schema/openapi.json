@@ -958,6 +958,7 @@
             "title": "Sets"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "id",
@@ -998,6 +999,7 @@
             "title": "Unit Type"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "unit",
@@ -1056,6 +1058,7 @@
             "title": "Slots"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "id",
@@ -1064,6 +1067,96 @@
         "title": "PrimitiveSetIn"
       },
       "PrimitiveSetLogIn": {
+        "oneOf": [
+          {
+            "properties": {
+              "role": {
+                "const": "slot"
+              }
+            },
+            "required": [
+              "slot_id",
+              "set_id",
+              "block_id",
+              "set_index"
+            ]
+          },
+          {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "slot_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "planned_exercise_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "performed_exercise_id"
+                  ]
+                }
+              ]
+            },
+            "properties": {
+              "role": {
+                "const": "set_result"
+              },
+              "set_index": {
+                "const": 0
+              }
+            },
+            "required": [
+              "role",
+              "set_id",
+              "block_id"
+            ]
+          },
+          {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "slot_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "set_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "planned_exercise_id"
+                  ]
+                },
+                {
+                  "required": [
+                    "performed_exercise_id"
+                  ]
+                }
+              ]
+            },
+            "properties": {
+              "role": {
+                "const": "block_result"
+              },
+              "set_index": {
+                "const": 0
+              },
+              "set_repeat_index": {
+                "const": 0
+              }
+            },
+            "required": [
+              "role",
+              "block_id"
+            ]
+          }
+        ],
         "properties": {
           "id": {
             "type": "string",
@@ -1141,7 +1234,8 @@
           "set_index": {
             "type": "integer",
             "minimum": 0.0,
-            "title": "Set Index"
+            "title": "Set Index",
+            "default": 0
           },
           "set_repeat_index": {
             "type": "integer",
@@ -1249,14 +1343,15 @@
             "title": "Completed At"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "id",
           "workout_id",
-          "set_index",
           "completed_at"
         ],
-        "title": "PrimitiveSetLogIn"
+        "title": "PrimitiveSetLogIn",
+        "description": "Primitive result row. The role selects the coordinate grammar: slot rows identify block/set/slot and must include set_index as the slot ordinal within the authored set; set_result rows identify block/set, use set_index 0 as their aggregate sentinel, and cannot carry slot or exercise ids; block_result rows identify block, use set_index and set_repeat_index 0 as aggregate sentinels, and cannot carry set, slot, or exercise ids. Runtime validation also verifies the coordinates against the persisted primitive workout tree."
       },
       "PrimitiveSetLogRead": {
         "properties": {
@@ -1495,6 +1590,7 @@
             "default": false
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "id",
@@ -1524,6 +1620,7 @@
             "title": "Target"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "type"
@@ -1576,6 +1673,7 @@
             "title": "Cap Sec"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "mode"
@@ -1625,6 +1723,7 @@
             "title": "Role"
           }
         },
+        "additionalProperties": false,
         "type": "object",
         "required": [
           "metric",
@@ -2062,7 +2161,7 @@
           "primitive_blocks"
         ],
         "title": "WorkoutCreate",
-        "description": "Accepts a full workout tree (blocks \u2192 items \u2192 alternatives) in one request.\n\nuser_id is resolved from the bearer token, not the body (ADR-2026-04-17)."
+        "description": "Accepts a full primitive workout tree (blocks \u2192 sets \u2192 slots) in one request.\n\nuser_id is resolved from the bearer token, not the body (ADR-2026-04-17)."
       },
       "WorkoutRead": {
         "properties": {
@@ -2176,7 +2275,7 @@
           "workout_id"
         ],
         "title": "WorkoutReset",
-        "description": "App tells server to erase same-day execution data for a workout.\n\nThis is the inverse of a completed-workout push: delete the set_logs\ntied to the workout tree and put the workout back into `planned` so a\nsubsequent pull does not resurrect a locally reset History row."
+        "description": "App tells server to erase same-day execution data for a workout.\n\nThis is the inverse of a completed-workout push: delete the primitive_set_logs\ntied to the workout tree and put the workout back into `planned` so a subsequent\npull does not resurrect a locally reset History row."
       },
       "WorkoutStatusUpdate": {
         "properties": {

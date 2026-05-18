@@ -22,6 +22,8 @@
 	<string>1</string>
 	<key>WKApplication</key>
 	<true/>
+	<key>WKCompanionAppBundleIdentifier</key>
+	<string>com.ericfeunekes.WorkoutDB</string>
 	<key>WKWatchOnly</key>
 	<false/>
 </dict>

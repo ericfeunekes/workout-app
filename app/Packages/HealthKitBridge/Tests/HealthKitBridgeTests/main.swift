@@ -148,4 +148,86 @@ runAsyncCase("HealthKitBridgeFactory.mock default wiring is usable") {
     try expect(kg == nil, "default bw should be nil")
 }
 
+// MARK: - General health data requests
+
+runAsyncCase("HealthDataRequest preserves type, access, and delivery choices") {
+    let request = HealthDataRequest(
+        type: HealthDataTypeRegistry.heartRate,
+        access: .read,
+        delivery: .live
+    )
+    try expectEqual(request.type.defaultUnit, "count/min")
+    try expectEqual(request.access, .read)
+    try expectEqual(request.delivery, .live)
+}
+
+runAsyncCase("FakeHealthPermissionBroker records requested data types") {
+    let broker = FakeHealthPermissionBroker()
+    let requests = [
+        HealthDataRequest(type: HealthDataTypeRegistry.heartRate, delivery: .live),
+        HealthDataRequest(type: HealthDataTypeRegistry.bodyMass, delivery: .batch),
+    ]
+    try await broker.requestAuthorization(for: requests)
+    try expectEqual(broker.requested, requests)
+}
+
+runAsyncCase("FakeHealthBatchDataProvider returns records and cursor") {
+    let record = HealthDataRecord(
+        id: "sample-1",
+        type: HealthDataTypeRegistry.stepCount,
+        start: Date(timeIntervalSince1970: 10),
+        end: Date(timeIntervalSince1970: 20),
+        value: .quantity(42, unit: "count")
+    )
+    let provider = FakeHealthBatchDataProvider(
+        result: HealthBatchResult(
+            records: [record],
+            deletedExternalIDs: ["deleted-1"],
+            nextCursor: HealthBatchCursor("cursor-2")
+        )
+    )
+    let query = HealthBatchQuery(
+        requests: [HealthDataRequest(type: HealthDataTypeRegistry.stepCount, delivery: .batch)],
+        cursor: HealthBatchCursor("cursor-1")
+    )
+    let result = try await provider.fetch(query)
+    try expectEqual(provider.queries, [query])
+    try expectEqual(result.records, [record])
+    try expectEqual(result.deletedExternalIDs, ["deleted-1"])
+    try expectEqual(result.nextCursor, HealthBatchCursor("cursor-2"))
+}
+
+runAsyncCase("FakeHealthLiveDataProvider yields scripted records") {
+    let record = HealthDataRecord(
+        id: "hr-1",
+        type: HealthDataTypeRegistry.heartRate,
+        start: Date(timeIntervalSince1970: 30),
+        value: .quantity(132, unit: "count/min")
+    )
+    let provider = FakeHealthLiveDataProvider(records: [record])
+    let requests = [HealthDataRequest(type: HealthDataTypeRegistry.heartRate, delivery: .live)]
+    let stream = try await provider.stream(for: requests)
+    var collected: [HealthDataRecord] = []
+    for try await item in stream {
+        collected.append(item)
+    }
+    try expectEqual(provider.requested, [requests])
+    try expectEqual(collected, [record])
+}
+
+runAsyncCase("HealthKitBridgeFactory.mock wires general providers") {
+    let record = HealthDataRecord(
+        id: "mass-1",
+        type: HealthDataTypeRegistry.bodyMass,
+        value: .quantity(81.2, unit: "kg")
+    )
+    let bundle = HealthKitBridgeFactory.mock(
+        batch: FakeHealthBatchDataProvider(result: HealthBatchResult(records: [record]))
+    )
+    let result = try await bundle.batch.fetch(HealthBatchQuery(
+        requests: [HealthDataRequest(type: HealthDataTypeRegistry.bodyMass, delivery: .batch)]
+    ))
+    try expectEqual(result.records, [record])
+}
+
 reportAndExit()

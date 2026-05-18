@@ -1,8 +1,8 @@
 ---
 title: workout-generation
-status: draft
-last_reviewed: 2026-05-17
-purpose: Practical guide for generating executable workouts from WorkoutDB's current workout components, timer modes, prescription shapes, and logging model.
+status: legacy bridge reference
+last_reviewed: 2026-05-18
+purpose: Historical guide for old timing-mode projection surfaces while residual bridge code remains; not the active primitive authoring contract.
 covers:
   - docs/prescription.md
   - docs/workout-taxonomy.md
@@ -14,11 +14,24 @@ covers:
 
 # Workout generation
 
-This is the practical authoring guide for Claude or a human coach generating workouts for Setmark / WorkoutDB.
+> **Legacy bridge reference.** This document still describes the old
+> timing-mode / `block` / `workout_item` / `prescription_json` projection
+> vocabulary used by residual bridge code. It is not the active authoring
+> contract for new primitive work. New workouts must be authored against
+> `docs/specs/primitives-data-model.md`, which defines the Block > Set > Slot
+> primitive contract.
+
+This used to be the practical authoring guide for Claude or a human coach
+generating workouts for Setmark / WorkoutDB. It now exists only to explain the
+legacy projection vocabulary while residual bridge code remains.
 
 The goal is not just "make valid JSON." The goal is to author a workout that the app can execute offline, with the right timer running, the right thing visible to the athlete, the right log fields available at the right moment, and enough structure for Claude to reason over results later.
 
-Use this as the top-level entry point. Use `docs/prescription.md` for the exact JSON vocabulary, `docs/workout-taxonomy.md` for the taxonomy, `docs/workout-execution-requirements.md` for the athlete-facing execution rules, and `docs/features/timing-modes.md` for current app behavior and QA scenarios.
+Do not use this as the top-level entry point for new workouts. Use
+`docs/specs/primitives-data-model.md` for the active Block > Set > Slot
+primitive contract. Use `docs/prescription.md`, `docs/workout-taxonomy.md`,
+`docs/workout-execution-requirements.md`, and `docs/features/timing-modes.md`
+only as legacy projection context until those surfaces are retired or rewritten.
 
 ## Mental model
 
@@ -28,7 +41,7 @@ The system has one load-bearing idea:
 
 The app should not decide programming, progression, exercise selection, or workout intent. Those decisions must be encoded as data before the app starts the workout.
 
-Author every workout in this order:
+Legacy projection authoring used this order:
 
 1. Decide the training intent.
 2. Split the session into executable blocks.

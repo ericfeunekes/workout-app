@@ -118,14 +118,26 @@ Scores below are **projected** for greenfield modules (what the module will scor
 
 **Projected score (unchecked):** Churn 3 + Complexity 2 + Boundary 1 + Blast 2 = **8**.
 
-**Prevented by:** one schemas file per route module.
+**Prevented by:** moving domain-shaped contracts out of route files before they
+turn into hidden business logic, then splitting route schemas incrementally.
 
-- `api/schemas.py` is removed. Each route module (`api/workouts.py`, `api/sync.py`, etc.) defines its own request/response schemas inline or in a sibling `api/workouts_schemas.py`.
+- Primitive result-row tree/reference validation lives in
+  `workoutdb_server/primitive/`, not in route modules.
+- Primitive authoring shape and input-field legality still live in Pydantic
+  models while `api/schemas.py` is being reduced; move each edited family out
+  with its own tests instead of adding more route-local business logic.
+- `api/schemas.py` is incrementally reduced. New or heavily edited schema
+  families move to sibling route schema modules such as `api/workouts_schemas.py`
+  or `api/sync_schemas.py` when the edit can stay local.
 - Cross-route shared types move to `models.py` (ORM) or to a named `api/common_types.py` only if the shared type is deliberate.
 
-**Enforcement:** FF-2 (complexity) naturally caps per-file growth; structural test `tests/architecture/test_schemas_split.py` fails if `api/schemas.py` exceeds 300 lines — forces the split once it grows.
+**Enforcement:** FF-2 (complexity) caps function growth. Architecture tests keep
+primitive result tree/reference validation out of `api/sync.py` and keep active
+docs routed to the primitive spec. Add a file-size split gate when the next
+schema-family move can land without unrelated churn.
 
-*(Note: today the file exists as `api/schemas.py`. This hotspot is a planned intervention at the next schema change, not an immediate one.)*
+*(Note: today the file exists as `api/schemas.py`. The primitive contract module
+is the first intervention; full route-schema splitting remains incremental.)*
 
 ---
 

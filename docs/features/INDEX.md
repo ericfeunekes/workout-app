@@ -11,7 +11,11 @@ covers:
 
 This directory holds one doc per user-visible feature. Each doc is a **target behavioral contract + QA scenarios**: how the feature is supposed to work, the edge cases that matter, the proof expected from tests or simulator QA, and the current gaps between that target and the implementation.
 
-Authoritative spec content lives in `docs/specs/`, `docs/sync.md`, and the current pre-primitives authoring docs. `docs/prescription.md` and `timing-modes.md` describe the implemented 12-mode baseline; `docs/specs/primitives-data-model.md` is the accepted target for the future primitives cutover. Feature docs cross-reference those surfaces — they don't duplicate them.
+Authoritative spec content lives in `docs/specs/` and `docs/sync.md`.
+`docs/specs/primitives-data-model.md` is the active workout data contract.
+`docs/prescription.md` and `timing-modes.md` are legacy projection/reference
+surfaces while residual bridge code remains. Feature docs cross-reference those
+surfaces — they don't duplicate them.
 
 ## Status model
 

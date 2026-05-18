@@ -1,7 +1,8 @@
 """/api/workouts primitive-only contract tests."""
 
+import copy
+
 import pytest
-from fastapi.exceptions import ResponseValidationError
 from sqlalchemy.orm import Session
 from workoutdb_server.models import AppUser, Exercise, Workout
 
@@ -41,6 +42,7 @@ def _primitive_block(
     return {
         "id": block_id,
         "title": "Main",
+        "work_target": work_target or [],
         "sets": [
             {
                 "id": set_id,
@@ -101,8 +103,36 @@ def test_read_rejects_invalid_persisted_primitive_block(client, test_engine, tes
         )
         session.commit()
 
-    with pytest.raises(ResponseValidationError):
-        client.get("/api/workouts/10000000-0000-4000-8000-000000000010")
+    response = client.get("/api/workouts/10000000-0000-4000-8000-000000000010")
+    assert response.status_code == 500
+    assert "Persisted primitive workout 10000000-0000-4000-8000-000000000010 is invalid" in (
+        response.text
+    )
+
+
+def test_list_rejects_invalid_persisted_primitive_block(client, test_engine, test_user_id) -> None:
+    with Session(test_engine) as session:
+        session.add(
+            Workout(
+                id="10000000-0000-4000-8000-000000000014",
+                user_id=test_user_id,
+                name="Future primitive list",
+                status="planned",
+                source="claude",
+                primitive_blocks_json=(
+                    '[{"id":"20000000-0000-4000-8000-000000000014",'
+                    '"sets":[{"id":"30000000-0000-4000-8000-000000000014",'
+                    '"timing":{"mode":"future_mode"},"slots":"not-a-list"}]}]'
+                ),
+            )
+        )
+        session.commit()
+
+    response = client.get("/api/workouts")
+    assert response.status_code == 500
+    assert "Persisted primitive workout 10000000-0000-4000-8000-000000000014 is invalid" in (
+        response.text
+    )
 
 
 def test_read_rejects_malformed_persisted_primitive_json(client, test_engine, test_user_id) -> None:
@@ -119,8 +149,11 @@ def test_read_rejects_malformed_persisted_primitive_json(client, test_engine, te
         )
         session.commit()
 
-    with pytest.raises(ResponseValidationError):
-        client.get("/api/workouts/10000000-0000-4000-8000-000000000011")
+    response = client.get("/api/workouts/10000000-0000-4000-8000-000000000011")
+    assert response.status_code == 500
+    assert "Persisted primitive workout 10000000-0000-4000-8000-000000000011 is invalid" in (
+        response.text
+    )
 
 
 def test_read_rejects_empty_persisted_primitive_json(client, test_engine, test_user_id) -> None:
@@ -137,8 +170,11 @@ def test_read_rejects_empty_persisted_primitive_json(client, test_engine, test_u
         )
         session.commit()
 
-    with pytest.raises(ResponseValidationError):
-        client.get("/api/workouts/10000000-0000-4000-8000-000000000012")
+    response = client.get("/api/workouts/10000000-0000-4000-8000-000000000012")
+    assert response.status_code == 500
+    assert "Persisted primitive workout 10000000-0000-4000-8000-000000000012 is invalid" in (
+        response.text
+    )
 
 
 def test_read_rejects_empty_persisted_primitive_array(client, test_engine, test_user_id) -> None:
@@ -155,8 +191,11 @@ def test_read_rejects_empty_persisted_primitive_array(client, test_engine, test_
         )
         session.commit()
 
-    with pytest.raises(ResponseValidationError):
-        client.get("/api/workouts/10000000-0000-4000-8000-000000000013")
+    response = client.get("/api/workouts/10000000-0000-4000-8000-000000000013")
+    assert response.status_code == 500
+    assert "Persisted primitive workout 10000000-0000-4000-8000-000000000013 is invalid" in (
+        response.text
+    )
 
 
 def test_create_rejects_legacy_blocks_payload(client, test_engine) -> None:
@@ -173,6 +212,69 @@ def test_create_rejects_legacy_blocks_payload(client, test_engine) -> None:
 
     response = client.post("/api/workouts", json=payload)
     assert response.status_code == 422
+
+
+def test_create_rejects_extra_fields_inside_primitive_tree(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(exercise_id)
+    payload["primitive_blocks"][0]["sets"][0]["slots"][0]["workoutkit_activity"] = "running"
+
+    response = client.post("/api/workouts", json=payload)
+
+    assert response.status_code == 422
+    assert "workoutkit_activity" in response.text
+
+
+@pytest.mark.parametrize(
+    ("path", "field"),
+    [
+        (("primitive_blocks", 0), "adapter_profile"),
+        (("primitive_blocks", 0, "work_target", 0), "export_metric"),
+        (("primitive_blocks", 0, "sets", 0), "adapter_profile"),
+        (("primitive_blocks", 0, "sets", 0, "timing"), "workoutkit_goal"),
+        (("primitive_blocks", 0, "sets", 0, "work_target", 0), "export_metric"),
+        (("primitive_blocks", 0, "sets", 0, "slots", 0), "workoutkit_activity"),
+        (("primitive_blocks", 0, "sets", 0, "slots", 0, "work_target", 0), "export_metric"),
+        (("primitive_blocks", 0, "sets", 0, "slots", 0, "load"), "strava_load"),
+        (("primitive_blocks", 0, "sets", 0, "slots", 0, "stimuli", 0), "healthkit_zone"),
+    ],
+)
+def test_create_rejects_extra_fields_inside_every_primitive_submodel(
+    client, test_engine, path, field
+) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(
+        exercise_id,
+        primitive_blocks=[
+            _primitive_block(
+                exercise_id,
+                work_target=[
+                    {
+                        "metric": "duration",
+                        "value_form": "open",
+                        "value": None,
+                        "role": "observation",
+                    }
+                ],
+                slots=[
+                    _slot(exercise_id)
+                    | {
+                        "stimuli": [{"type": "rir", "target": 2}],
+                    }
+                ],
+            )
+        ],
+    )
+    payload = copy.deepcopy(payload)
+    node = payload
+    for segment in path:
+        node = node[segment]
+    node[field] = "not-owned-here"
+
+    response = client.post("/api/workouts", json=payload)
+
+    assert response.status_code == 422
+    assert field in response.text
 
 
 def test_create_requires_primitive_blocks(client) -> None:

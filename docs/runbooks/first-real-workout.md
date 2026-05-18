@@ -78,13 +78,16 @@ At this point the app is live against the real server.
 2. Claude calls `POST /api/exercises` + `POST /api/workouts` against the server with a real Push A / Pull A / etc. session.
 3. App pulls on next foregrounding; Today shows the new workout.
 
-See `docs/prescription.md` for the authoring vocabulary Claude uses.
+See `docs/specs/primitives-data-model.md` for the active authoring vocabulary
+Claude uses. `docs/prescription.md` is legacy projection/reference only.
 
 ### 8. First real workout (Eric-action, 45–90 minutes in gym)
 
 Execute the workout. Every set tap logs to `SessionState`, enqueues to `PushQueue`, pushes to server. Rest timer runs. Autoreg fires. On complete, status update + any residual set logs flush to the server.
 
-Post-workout: verify via `curl https://<host>/api/workouts/<id>` that set_logs landed with correct rir / weight / reps / performed_exercise_id.
+Post-workout: verify via sync result readback or the server database that
+`primitive_set_logs` landed with correct `role`, `slot_id`, `set_id`,
+`block_id`, `rir`, `weight`, `reps`, and `performed_exercise_id`.
 
 ### 9. Post-workout feedback cycle (Eric-action, variable)
 

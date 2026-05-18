@@ -1,9 +1,9 @@
 ---
 title: Cutover — complete primitive contract with explicit QA-data reset
-status: accepted — spec
-last_reviewed: 2026-05-17
+status: accepted — active cutover contract with residual runtime followups
+last_reviewed: 2026-05-18
 parent: ../primitives-data-model.md
-purpose: How the primitives data model lands. Because the repo is single-user dev with no production compatibility constraint, the cutover is a clean contract replacement in one PR — with current local/server QA workout data reset, and without old-shape acceptance windows.
+purpose: How the primitives data model lands and how residual runtime cutover work stays on the no-legacy primitive contract. Because the repo is single-user dev with no production compatibility constraint, current local/server QA workout data may be reset and old-shape acceptance windows are not allowed.
 ---
 
 # Cutover
@@ -24,16 +24,36 @@ rules, temporary legacy-acceptance windows, and orphan policies for a broader
 production-preservation scenario. That is **not** the cutover for this spec.
 This spec carries the narrower QA-data reset requirement.
 
+## Current implementation state
+
+The primitive wire/schema/cache/sync/reset cutover has landed as the active
+contract: workout create/read/update and sync pull expose `primitive_blocks`,
+result pushes write `primitive_set_logs`, the app mirrors primitive workouts
+and result rows, reset clears primitive logs, and old QA workout data may be
+deleted rather than migrated.
+
+Residual work remains in the runtime-facing followups tracked by
+`docs/specs/primitives-data-model.md` and `docs/feature-gap-map.md`: full
+primitive-native execution, history correction over primitive result rows,
+cross-runtime proof, and the remaining bridge/projection retirement work. This
+file remains the cutover contract, not a claim that every downstream runtime
+surface has been replaced.
+
 ## Current gaps
 
 - `PDM-GAP-005`: Current local/server workout logs are disposable QA data
-  during this cutover. Future implementation must prove the destructive reset is
-  explicit, old-shape data does not mix with primitive data, and fresh primitive
-  workouts/results operate after reset.
+  during this cutover. The implemented cutover must continue to prove the
+  destructive reset is explicit, old-shape data does not mix with primitive
+  data, and fresh primitive workouts/results operate after reset.
 
-## What the cutover ships in one PR
+## Original full-cutover target
 
-A single commit lands:
+This was the original one-PR target. It remains the north-star shape for
+removing residual bridge code, but the current implementation has already
+landed the primitive wire/schema/cache/sync/reset core and is carrying the
+runtime-facing leftovers as explicit gaps.
+
+A complete runtime cutover lands:
 
 1. **Server — new schema migration.** One SQL migration (append-only, per `docs/MIGRATIONS.md`) that:
    - Drops the existing `workout_item`, `block.timing_mode`, `block.timing_config_json`, `block.rounds`, `exercise_alternative`, and the old `prescription_json` columns.
@@ -57,7 +77,10 @@ A single commit lands:
 
 7. **Docs sweep.** Update `docs/prescription.md` (current authoring vocabulary) to reflect the new shape. Update `docs/features/timing-modes.md` to describe timing modes as `(timing, traversal, repeat)` cells rather than a 12-case enum. Update `docs/specs/v2-architecture.md` with a pointer to this spec and a status note on the superseded data model section. Update harness surfaces whose cutover guidance changes, including `docs/MIGRATIONS.md` and `docs/runbooks/closeout.md`.
 
-All of the above lands in one PR. This is the complete-cutover invariant from `CLAUDE.md` — no feature flags, no parallel codepaths, no compat shims.
+The original target expected all of the above to land together: no feature
+flags, no parallel accepted payloads, and no compat shims. The current trunk
+already enforces the primitive wire contract; the remaining work must keep that
+same no-legacy posture while replacing bridge/runtime surfaces.
 
 ## Planning interpretation
 
@@ -72,10 +95,11 @@ discovers a requirement gap, update this spec or the relevant aspect file.
 
 ## Reversibility
 
-Rollback is `git revert <cutover-commit>`. Both sides of the bisect are runnable:
+Rollback is `git revert <cutover-commit>`. Both sides of the bisect remain
+runnable for the committed cutover surface:
 
-- Pre-cutover: server uses old schema + old fixtures; app uses old SwiftData version + old drivers.
-- Post-cutover: new everything, old QA workout data reset, and fresh primitive prescriptions.
+- Pre-cutover: server used old schema + old fixtures; app used old SwiftData version + old drivers.
+- Post-cutover core: primitive wire/cache/sync/reset, old QA workout data reset, and fresh primitive prescriptions.
 
 No runtime compatibility layer between the two sides is required because old-shape authoring and result payloads are not accepted post-cutover.
 
@@ -89,9 +113,9 @@ This satisfies acceptance criterion **A5**: the cutover explicitly resets old QA
 - **Does not carry any legacy acceptance path.** `/api/sync/results` accepts only new-shape payloads post-cutover. No dual-shape window.
 - **Does not include per-driver rewrite planning.** Each driver's port is its own implementation unit under `app/Packages/Features/Execution/`. The cutover lands the new contract; driver rewrites may land in the same PR as a single-shot port, or in stacked PRs sequenced by the driver-rewrite plan that implementation-planning produces.
 
-## Verification at cutover land
+## Verification for remaining runtime cutover
 
-Per acceptance criteria A1 (all 12 timing modes execute end-to-end) and A2 (ten worked examples round-trip), the cutover PR lands green when:
+Per acceptance criteria A1 (all timing modes execute end-to-end) and A2 (ten worked examples round-trip), the remaining runtime cutover is green when:
 
 1. All existing driver integration tests under `app/Packages/Features/Execution/Tests/` pass against new-shape fixtures.
 2. Contract tests in `tests/contract/` pass (server + app schema parity).
@@ -101,7 +125,9 @@ Per acceptance criteria A1 (all 12 timing modes execute end-to-end) and A2 (ten 
 6. A reset/cutover test proves representative old QA workouts/logs are removed and fresh primitive workouts/logs operate after the reset.
 7. A manual simulator smoke: Eric starts a fresh workout, executes a straight-set, a superset, and a cap-bounded block, confirms the set_log is written with the expected `slot_id` / `set_id` / `block_id` composition.
 
-If any of the above fail, the cutover does not land. There is no half-shipped state — either everything on the new contract or everything on the old.
+If any of the above fail, the runtime cutover remains open. There is no
+dual-shape payload window: the repo stays on the primitive wire contract while
+the implementation closes the named runtime gaps.
 
 ## When broader preservation constraints appear
 

@@ -300,9 +300,24 @@ def _apply_workout_update(
 
 def _primitive_blocks_to_json(blocks: list[PrimitiveBlockIn]) -> str:
     return json.dumps(
-        [block.model_dump(mode="json", exclude_none=True) for block in blocks],
+        [_primitive_dump(block.model_dump(mode="json", exclude_none=True)) for block in blocks],
         separators=(",", ":"),
     )
+
+
+def _primitive_dump(value):
+    if isinstance(value, list):
+        return [_primitive_dump(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    dumped = {key: _primitive_dump(item) for key, item in value.items()}
+    if (
+        dumped.get("unit") == "bodyweight"
+        and dumped.get("unit_type") == "implicit_bodyweight"
+        and "value" not in dumped
+    ):
+        dumped["value"] = None
+    return dumped
 
 
 @router.get("", response_model=list[WorkoutRead])

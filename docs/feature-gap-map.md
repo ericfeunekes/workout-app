@@ -93,7 +93,6 @@ gap in the owning docs. Git history is the archive.
 | `SYNC-GAP-001` | `docs/sync.md` | Stale live-session expiry remains undecided. | `decision` |
 | `SYNC-GAP-002` | `docs/sync.md` | CloudKit replication needs a record-family spike with authority, account, conflict, and Claude readback proof. | `spike` |
 | `SYNC-GAP-003` | `docs/sync.md` | Cloudflare Access endpoint needs a narrow endpoint spike with identity and capability proof. | `spike` |
-| `TEST-GAP-001` | `docs/TESTING.md`, `docs/sync.md` | No server/app sync harness runs FastAPI + SQLite locally and drives the Swift Sync boundary through real HTTP. | `proof` |
 | `TEST-GAP-002` | `docs/TESTING.md` | App-hosted Xcode tests are only compile/link smoke; no real launch-time or composition invariant exists. | `proof` |
 | `TEST-GAP-003` | `docs/TESTING.md` | No real-device proof harness exists for Watch, HealthKit, and device-only behavior. | `proof` |
 | `TEST-GAP-004` | `docs/TESTING.md`, `docs/sync.md` | App-sync foreground/background lifecycle has package proof for the Shell coordinator, but no simulator/app-root lifecycle evidence proving the `scenePhase` path in a running app. | `proof` |

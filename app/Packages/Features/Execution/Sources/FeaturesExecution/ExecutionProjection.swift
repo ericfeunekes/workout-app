@@ -287,18 +287,18 @@ extension ExecutionViewModel {
         if let preview = sessionPreviewProjection(),
            let current = preview.current {
             let previewBlock = context.block(at: current.blockIndex)
-            let exerciseName = context.exercises[current.exerciseID]?.name ?? "(unknown exercise)"
+            let title = previewTitle(for: current)
             return CurrentTaskPresentation(
                 kind: .today,
                 blockIndex: current.blockIndex,
                 blockCount: context.blocks.count,
                 blockName: previewBlock?.name,
                 blockIntent: previewBlock?.intent,
-                exerciseName: exerciseName,
-                title: exerciseName,
-                detail: previewDetail(for: current),
-                primaryMetric: primaryMetric(for: current),
-                secondaryMetric: secondaryMetric(for: current),
+                exerciseName: current.exerciseID.flatMap { context.exercises[$0]?.name },
+                title: title,
+                detail: current.metrics.detail,
+                primaryMetric: current.metrics.primary,
+                secondaryMetric: current.metrics.secondary,
                 side: .bilateral,
                 skipped: false
             )
@@ -388,8 +388,8 @@ extension ExecutionViewModel {
             return preview.upcoming.map { work in
                 UpcomingWorkPresentation(
                     label: work.blockIndex == state.cursor.blockIndex ? "current block" : "future block",
-                    title: context.exercises[work.exerciseID]?.name ?? "(unknown exercise)",
-                    detail: previewDetail(for: work)
+                    title: previewTitle(for: work),
+                    detail: work.metrics.detail
                 )
             }
         }
@@ -627,58 +627,11 @@ extension ExecutionViewModel {
         return SessionPreviewProjection(plan: plan, cursor: state.cursor)
     }
 
-    private func primaryMetric(for work: SessionPreviewWork) -> String? {
-        guard let target = work.primaryDisplayTarget else {
-            return loadDisplay(for: work)
+    private func previewTitle(for work: SessionPreviewWork) -> String {
+        guard let exerciseID = work.exerciseID else {
+            return context.block(at: work.blockIndex)?.name ?? "Timed work"
         }
-        if target.metric == .reps || target.metric == .completion {
-            return loadDisplay(for: work)
-        }
-        return primitiveDisplayText(for: target, work: work)
-    }
-
-    private func secondaryMetric(for work: SessionPreviewWork) -> String? {
-        guard let primary = work.primaryDisplayTarget else { return nil }
-        var parts: [String] = []
-        if primary.metric == .reps || primary.metric == .completion {
-            if let text = primitiveDisplayText(for: primary, work: work) {
-                parts.append(text)
-            }
-        } else if let load = loadDisplay(for: work) {
-            parts.append(load)
-        }
-        parts.append(contentsOf: work.secondaryDisplayTargets.compactMap {
-            primitiveDisplayText(for: $0, work: work)
-        })
-        return parts.removingAdjacentDuplicates().joined(separator: " · ").nilIfEmpty
-    }
-
-    private func previewDetail(for work: SessionPreviewWork) -> String? {
-        [primaryMetric(for: work), secondaryMetric(for: work)]
-            .compactMap { $0 }
-            .removingAdjacentDuplicates()
-            .joined(separator: " · ")
-            .nilIfEmpty
-    }
-
-    private func primitiveDisplayText(
-        for target: PrimitiveWorkTarget,
-        work: SessionPreviewWork
-    ) -> String? {
-        guard target.metric == .loadCarried,
-              let value = target.value else {
-            return displayText(for: target)
-        }
-        let formatted = value.rounded() == value ? String(Int(value)) : String(format: "%.2f", value)
-        return "\(formatted) \(work.loadUnit?.rawValue ?? "load")"
-    }
-
-    private func loadDisplay(for work: SessionPreviewWork) -> String? {
-        guard let weightUnit = work.loadUnit,
-              let unit = LoadUnit(rawValue: weightUnit.rawValue) else {
-            return nil
-        }
-        return formatLoad(weight: work.loadDisplayValue ?? work.loadKg, unit: unit)
+        return context.exercises[exerciseID]?.name ?? "(unknown exercise)"
     }
 
     private func isZeroItemBlock(at blockIndex: Int) -> Bool {

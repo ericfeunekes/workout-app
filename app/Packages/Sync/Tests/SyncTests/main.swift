@@ -198,6 +198,46 @@ private func encodedPrimitiveTombstoneFixture() throws -> Data {
     return try JSONEncoder.workoutDB().encode(response)
 }
 
+private func encodedInvalidPrimitiveBlocksFixture() -> Data {
+    let json = """
+    {
+      "workouts": [
+        {
+          "id": "11111111-1111-1111-1111-111111111111",
+          "user_id": "22222222-2222-2222-2222-222222222222",
+          "name": "Primitive Drift",
+          "scheduled_date": "2026-04-18",
+          "status": "planned",
+          "source": "claude",
+          "notes": null,
+          "tags_json": null,
+          "created_at": "2026-04-17T07:00:00Z",
+          "updated_at": "2026-04-17T07:00:00Z",
+          "completed_at": null,
+          "blocks": [],
+          "primitive_blocks": [
+            {
+              "id": "20000000-0000-4000-8000-000000000022",
+              "sets": [
+                {
+                  "id": "30000000-0000-4000-8000-000000000022",
+                  "timing": { "mode": "future_mode" },
+                  "slots": []
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "exercises": [],
+      "user_parameters": [],
+      "last_performed": [],
+      "server_time": "2026-04-17T08:00:00Z"
+    }
+    """
+    return json.data(using: .utf8)!
+}
+
 // MARK: - 1. PullService success
 
 runAsyncCase("PullService success — maps DTOs to Domain") {
@@ -243,6 +283,23 @@ runAsyncCase("PullService empty primitive_blocks → primitive tombstone") {
         result.primitiveWorkoutIDsToDelete,
         [uuid("11111111-1111-1111-1111-111111111111")]
     )
+}
+
+runAsyncCase("PullService invalid primitive_blocks → decode failure") {
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 200, body: encodedInvalidPrimitiveBlocksFixture()))
+    ])
+    let service = PullService(transport: transport)
+
+    do {
+        _ = try await service.pull(since: nil, bearerToken: "tok")
+        try expect(false, "expected primitive decode failure")
+    } catch let err as SyncError {
+        guard case .decode = err else {
+            try expect(false, "expected .decode, got \(err)")
+            return
+        }
+    }
 }
 
 // MARK: - 2. PullService 401

@@ -693,6 +693,9 @@ Warm-up ramp is a set with multiple slots (same exercise, ascending load, `is_wa
   before code relies on the ambiguous shape. Current preferences favor
   structural multi-slot authoring for drop sets and clusters, and seed-time
   relative-load resolution as pinned in `runtime-resolution.md`.
+- Bridge implementation note: current server/app bridge tests do not prove the
+  accepted `target_bounded.params.target` shape. That proof belongs to the
+  primitive-only contract cutover, not the bridge legality suite.
 
 ## Open questions
 

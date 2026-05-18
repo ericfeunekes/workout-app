@@ -145,10 +145,11 @@ Expected shapes:
   bounded real-time probes only when clock injection is impossible
 - concurrency/idempotency: exercise actual concurrent callers against the seam
 
-Current gap: there is no single local server/app sync harness yet. Keep this as
-an explicit capability gap when implementation touches real URLSession +
-FastAPI + SQLite behavior. A future harness should be reachable from
-`make pre-qa`, not buried in a one-off script.
+Current harness: `make test-sync-real-http` starts FastAPI against a temporary
+SQLite database, seeds primitive workout data through real HTTP, drives the
+Swift Sync stack through `URLSessionTransport`, writes through SwiftData, pushes
+slot and aggregate primitive results back, and reads the server database to
+prove persistence and same-UUID upsert. It is wired into `make pre-qa`.
 
 ## Runtime proof — traces, memory graphs, and lifecycle
 
@@ -190,6 +191,8 @@ It composes:
 
 - `make check` for Python lint/import contracts, Python tests, and schema
   package tests
+- `make test-sync-real-http` for FastAPI + SQLite + Swift URLSession primitive
+  sync and server-persistence proof
 - `make check-app` for every wired app package test plus the generated iOS app
   scheme compile/link smoke
 
@@ -206,9 +209,9 @@ availability. That is QA readiness, not testing proof.
 - **Server schema change** → server test (models) + contract test (parity with app) + migration integration test.
 - **New API endpoint** → server test (route behavior) + update `docs/ARCHITECTURE.md` if it changes sync story.
 - **Sync protocol change** → server test (endpoint) + contract test (both sides
-  agree) + Swift Sync package test; add a realistic-local server/app sync probe
-  when the claim depends on URLSession, auth headers, or the real FastAPI
-  boundary.
+  agree) + Swift Sync package test; run `make test-sync-real-http` when the
+  claim depends on URLSession, auth headers, primitive result push plus server
+  persistence, or the real FastAPI boundary.
 - **New timing mode before primitives cutover** → update spec + server enum + app enum + contract test + app timer test.
 - **Primitives data-model cutover** → update the primitives spec/aspects, server schema, Swift DTOs, SwiftData schema, contract tests, local-history migration proof, and app execution tests in the same cutover branch before merge.
 - **New `user_parameters` key the app interprets** → app package test for the
@@ -239,8 +242,6 @@ availability. That is QA readiness, not testing proof.
 ## What's not under test yet
 
 - Claude-side behavior (conversation-driven planning, progression) — by design. If an invariant about what Claude pushes needs pinning, encode it as a server-side validator + test.
-- `TEST-GAP-001`: a server/app sync harness that runs FastAPI + SQLite locally
-  and drives the Swift Sync boundary through real HTTP.
 - `TEST-GAP-002`: real app-hosted behavioral invariants beyond the current
   no-op app compile/link smoke.
 - `TEST-GAP-003`: real-device proof harnesses for Watch, HealthKit, and

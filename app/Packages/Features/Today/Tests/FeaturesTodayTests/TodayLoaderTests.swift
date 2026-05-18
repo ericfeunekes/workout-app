@@ -277,6 +277,166 @@ final class TodayLoaderTests: XCTestCase {
         XCTAssertEqual(plan?.workouts.first?.primitiveExecutionPlan?.blocks[0].sets[0].slots[0].loadKg, 120)
     }
 
+    func testLoadPlanLoadsPrimitiveOnlyExerciseCatalogEntries() async throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let workout = makeWorkout(name: "Primitive only", scheduledDate: now)
+        let block = makeBlock(workoutID: workout.id, name: "Main")
+        let exerciseID = UUID()
+        let primitive = PrimitiveWorkout(
+            id: workout.id,
+            name: workout.name,
+            blocks: [
+                PrimitiveBlock(id: block.id, sets: [
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: .init(mode: .setBounded),
+                        slots: [
+                            PrimitiveSlot(
+                                id: UUID(),
+                                exerciseID: exerciseID,
+                                workTargets: [
+                                    .init(metric: .reps, valueForm: .single, value: 5, role: .completion),
+                                ]
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        let fake = FakeCache(
+            workouts: [workout],
+            blocks: [workout.id: [block]],
+            items: [:],
+            exercises: [Exercise(id: exerciseID, name: "Kettlebell swing")],
+            primitiveWorkouts: [primitive]
+        )
+        let loader = TodayLoader(cache: fake, clock: { now })
+
+        let plan = try await loader.loadPlan()
+
+        XCTAssertEqual(plan?.selected.exercises[exerciseID]?.name, "Kettlebell swing")
+    }
+
+    func testLoadPlanFailsWhenSelectedPrimitivePlanIsInvalid() async throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let selected = makeWorkout(name: "Selected", scheduledDate: now)
+        let selectedBlock = makeBlock(workoutID: selected.id, name: "Selected block")
+        let invalidPrimitive = PrimitiveWorkout(
+            id: selected.id,
+            name: selected.name,
+            blocks: [
+                PrimitiveBlock(id: selectedBlock.id, sets: [
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: .init(mode: .setBounded),
+                        traversal: .amrap,
+                        slots: [
+                            PrimitiveSlot(id: UUID(), exerciseID: UUID(), workTargets: []),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        let fake = FakeCache(
+            workouts: [selected],
+            blocks: [selected.id: [selectedBlock]],
+            items: [:],
+            exercises: [],
+            primitiveWorkouts: [invalidPrimitive]
+        )
+        let loader = TodayLoader(cache: fake, clock: { now })
+
+        do {
+            _ = try await loader.loadPlan()
+            XCTFail("loadPlan must surface invalid selected primitive workouts")
+        } catch {
+            XCTAssertTrue(error is PrimitiveSemanticError)
+        }
+    }
+
+    func testLoadPlanFailsWhenAnyPrimitivePlanIsInvalid() async throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let selected = makeWorkout(name: "Selected", scheduledDate: now)
+        let nonSelected = makeWorkout(name: "Non selected", scheduledDate: now.addingTimeInterval(3600))
+        let selectedBlock = makeBlock(workoutID: selected.id, name: "Selected block")
+        let nonSelectedBlock = makeBlock(workoutID: nonSelected.id, name: "Non selected block")
+        let invalidPrimitive = PrimitiveWorkout(
+            id: nonSelected.id,
+            name: nonSelected.name,
+            blocks: [
+                PrimitiveBlock(id: nonSelectedBlock.id, sets: [
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: .init(mode: .setBounded),
+                        traversal: .amrap,
+                        slots: [
+                            PrimitiveSlot(id: UUID(), exerciseID: UUID(), workTargets: []),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        let fake = FakeCache(
+            workouts: [selected, nonSelected],
+            blocks: [selected.id: [selectedBlock], nonSelected.id: [nonSelectedBlock]],
+            items: [:],
+            exercises: [],
+            primitiveWorkouts: [invalidPrimitive]
+        )
+        let loader = TodayLoader(cache: fake, clock: { now })
+
+        do {
+            _ = try await loader.loadPlan()
+            XCTFail("loadPlan must surface invalid non-selected primitive workouts")
+        } catch {
+            XCTAssertTrue(error is PrimitiveSemanticError)
+        }
+    }
+
+    func testLoadPlanFailsWhenUserParameterReadFails() async throws {
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let workout = makeWorkout(name: "Selected", scheduledDate: now)
+        let block = makeBlock(workoutID: workout.id, name: "Selected block")
+        let exerciseID = UUID()
+        let primitive = PrimitiveWorkout(
+            id: workout.id,
+            name: workout.name,
+            blocks: [
+                PrimitiveBlock(id: block.id, sets: [
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: .init(mode: .setBounded),
+                        slots: [
+                            PrimitiveSlot(
+                                id: UUID(),
+                                exerciseID: exerciseID,
+                                workTargets: [
+                                    .init(metric: .reps, valueForm: .single, value: 5, role: .completion),
+                                ]
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        let fake = FakeCache(
+            workouts: [workout],
+            blocks: [workout.id: [block]],
+            items: [:],
+            exercises: [],
+            primitiveWorkouts: [primitive],
+            userParametersError: TestError.userParameters
+        )
+        let loader = TodayLoader(cache: fake, clock: { now })
+
+        do {
+            _ = try await loader.loadPlan()
+            XCTFail("loadPlan must surface user-parameter storage read failures")
+        } catch {
+            XCTAssertTrue(error is TestError)
+        }
+    }
+
     func testPickClosest_prefersPastOrTodayOverFuture() {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let past = makeWorkout(name: "past", scheduledDate: now.addingTimeInterval(-3 * 86400))
@@ -307,6 +467,21 @@ final class TodayLoaderTests: XCTestCase {
             completedAt: nil, tagsJSON: nil
         )
     }
+
+    private func makeBlock(workoutID: UUID, name: String?) -> Block {
+        Block(
+            id: UUID(),
+            workoutID: workoutID,
+            parentBlockID: nil,
+            position: 0,
+            name: name,
+            timingMode: .straightSets,
+            timingConfigJSON: "{}",
+            rounds: nil,
+            roundsRepSchemeJSON: nil,
+            notes: nil
+        )
+    }
 }
 
 // MARK: - Fake cache
@@ -320,6 +495,7 @@ private final class FakeCache: WorkoutCache, @unchecked Sendable {
     private let exercises: [Exercise]
     private let primitiveWorkouts: [PrimitiveWorkout]
     private let userParameters: [String: UserParameter]
+    private let userParametersError: Error?
 
     init(
         workouts: [Workout],
@@ -327,7 +503,8 @@ private final class FakeCache: WorkoutCache, @unchecked Sendable {
         items: [UUID: [WorkoutItem]],
         exercises: [Exercise],
         primitiveWorkouts: [PrimitiveWorkout] = [],
-        userParameters: [String: UserParameter] = [:]
+        userParameters: [String: UserParameter] = [:],
+        userParametersError: Error? = nil
     ) {
         self.workouts = workouts
         self.blocksByWorkout = blocks
@@ -335,6 +512,7 @@ private final class FakeCache: WorkoutCache, @unchecked Sendable {
         self.exercises = exercises
         self.primitiveWorkouts = primitiveWorkouts
         self.userParameters = userParameters
+        self.userParametersError = userParametersError
     }
 
     func save(_ dataset: PulledDataset) async throws {}
@@ -378,7 +556,12 @@ private final class FakeCache: WorkoutCache, @unchecked Sendable {
         exercises
     }
 
-    func loadUserParametersLatest() async throws -> [String: UserParameter] { userParameters }
+    func loadUserParametersLatest() async throws -> [String: UserParameter] {
+        if let userParametersError {
+            throw userParametersError
+        }
+        return userParameters
+    }
 
     func loadUserParameters(key: String) async throws -> [UserParameter] {
         []
@@ -411,4 +594,8 @@ private final class FakeCache: WorkoutCache, @unchecked Sendable {
     func saveUserParameter(_ param: UserParameter) async throws {}
 
     func clear() async throws {}
+}
+
+private enum TestError: Error {
+    case userParameters
 }

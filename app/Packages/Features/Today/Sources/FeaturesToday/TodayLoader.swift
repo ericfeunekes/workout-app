@@ -66,9 +66,10 @@ public struct TodayLoader: Sendable {
         let primitiveWorkouts = try await cache.loadPrimitiveWorkouts()
         let primitiveWorkout = primitiveWorkouts.first { $0.id == workout.id }
         let userParameters = try await numericUserParameters()
-        let primitivePlan = try primitiveWorkout.map {
-            try ExecutionPlan.validated(workout: $0, userParameters: userParameters)
-        }
+        let primitivePlan = try PrimitivePlanAssembly.executionPlan(
+            for: primitiveWorkout,
+            userParameters: userParameters
+        )
 
         var items: [WorkoutItem] = []
         for block in blocks {
@@ -77,6 +78,7 @@ public struct TodayLoader: Sendable {
         }
 
         let exerciseIDs = Set(items.map(\.exerciseID))
+            .union(PrimitivePlanAssembly.exerciseIDs(in: primitiveWorkout))
         let catalog = try await cache.loadExercises()
         let exercises = Dictionary(
             uniqueKeysWithValues: catalog
@@ -217,6 +219,7 @@ public struct TodayLoader: Sendable {
                 exerciseIDs.formUnion(blockItems.map(\.exerciseID))
             }
         }
+        exerciseIDs.formUnion(PrimitivePlanAssembly.exerciseIDs(in: primitiveWorkouts))
 
         let catalog = try await cache.loadExercises()
         let exercises = Dictionary(
@@ -232,9 +235,10 @@ public struct TodayLoader: Sendable {
                 .sorted { $0.position < $1.position }
                 .flatMap { itemsByBlock[$0.id] ?? [] }
             let primitiveWorkout = primitiveWorkouts.first { $0.id == workout.id }
-            let primitivePlan = try primitiveWorkout.map {
-                try ExecutionPlan.validated(workout: $0, userParameters: userParameters)
-            }
+            let primitivePlan = try PrimitivePlanAssembly.executionPlan(
+                for: primitiveWorkout,
+                userParameters: userParameters
+            )
             return TodayContext(
                 workout: workout,
                 primitiveWorkout: primitiveWorkout,
@@ -263,12 +267,6 @@ public struct TodayLoader: Sendable {
 
     private func numericUserParameters() async throws -> [String: Double] {
         let rawParams = try await cache.loadUserParametersLatest()
-        var numeric: [String: Double] = [:]
-        for (key, param) in rawParams {
-            if let value = Double(param.value) {
-                numeric[key] = value
-            }
-        }
-        return numeric
+        return PrimitivePlanAssembly.numericUserParameters(from: rawParams)
     }
 }

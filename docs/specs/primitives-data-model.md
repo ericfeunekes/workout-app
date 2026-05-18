@@ -215,6 +215,12 @@ In scope:
   required by `cutover.md`.
 - Prove pull -> local cache -> `ExecutionPlan` seed -> execution log/result
   grouping -> push -> server readback for representative primitive workouts.
+- Extend stage/proof telemetry where simulator click-through QA needs an
+  event trail for non-visual boundaries. At minimum, QA should be able to
+  correlate primitive cache write, `ExecutionPlan` assembly, primitive result
+  logging, completion publishing, push response, and queue drain through
+  `workout_id` / primitive set-log identifiers or an explicitly documented
+  equivalent readback.
 - Close or narrow `PDM-GAP-003`, `PDM-GAP-004`, `PDM-GAP-005`,
   `PDM-GAP-006`, and residual `PDM-GAP-007` only where the implementation
   actually touches those consumers.

@@ -1,8 +1,8 @@
 # Common commands for local development. Every target is a thin wrapper over
 # uv / swift so the source of truth stays in pyproject.toml and Package.swift.
 
-.PHONY: help setup dev test test-python test-swift test-core test-app-packages test-app-xcode check-app pre-qa \
-        lint format check regen-schema xcodegen xcode-mcp-tools qa-ready qa-runtime-ready clean \
+.PHONY: help setup dev test test-python test-swift test-core test-app-packages test-app-xcode \
+        test-sync-real-http check-app pre-qa lint format check regen-schema xcodegen xcode-mcp-tools qa-ready qa-runtime-ready clean \
         db-backup db-restore deploy deploy-rollback server-status server-logs
 
 # Deploy / ops targets. Override HOST on the command line (e.g. `make deploy HOST=workoutdb.tail-xyz.ts.net`).
@@ -63,6 +63,9 @@ test-app-xcode: xcodegen  ## Build app target and run the generated iOS app comp
 	  -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' \
 	  -configuration Debug CODE_SIGNING_ALLOWED=NO
 
+test-sync-real-http:  ## Run FastAPI + SQLite + Swift URLSession primitive sync probe
+	uv run pytest app/Integration/sync_real_http/test_sync_real_http.py
+
 check-app: test-app-packages test-app-xcode  ## Current local app pre-QA gate
 
 lint:  ## ruff check + import-linter
@@ -77,7 +80,7 @@ check: lint  ## Server/schema verification (ruff format --check + ruff check + l
 	uv run pytest
 	cd schema && swift test
 
-pre-qa: check check-app  ## Current behavior pre-QA proof gate before entering docs/QA.md flows
+pre-qa: check test-sync-real-http check-app  ## Current behavior pre-QA proof gate before entering docs/QA.md flows
 
 regen-schema:  ## Regenerate schema/openapi.json from the live FastAPI app
 	WORKOUTDB_BEARER_TOKEN=dummy WORKOUTDB_DB_PATH=/tmp/dummy.db \

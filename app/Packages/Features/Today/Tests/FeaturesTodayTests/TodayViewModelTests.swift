@@ -385,6 +385,69 @@ final class TodayViewModelTests: XCTestCase {
         XCTAssertEqual(preview.upcoming.map(\.detail), ["8 reps", "100 kg · 5 reps", "8 reps"])
     }
 
+    func testWorkoutDetailUsesPrimitiveProjectionForZeroSlotTimedWork() throws {
+        let workoutID = UUID()
+        let blockID = UUID()
+        let primitiveSetID = UUID()
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let workout = Workout(
+            id: workoutID,
+            userID: UUID(),
+            name: "Intervals",
+            scheduledDate: now,
+            status: .planned,
+            source: .claude,
+            notes: nil,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: nil,
+            tagsJSON: nil
+        )
+        let block = Block(
+            id: blockID,
+            workoutID: workoutID,
+            position: 0,
+            name: "Bike intervals",
+            timingMode: .emom,
+            timingConfigJSON: #"{"interval_sec":60,"total_minutes":3}"#,
+            intent: "Hold a steady cadence"
+        )
+        let primitiveWorkout = PrimitiveWorkout(
+            id: workoutID,
+            name: "Intervals",
+            blocks: [
+                PrimitiveBlock(id: blockID, sets: [
+                    PrimitiveSet(
+                        id: primitiveSetID,
+                        timing: .init(mode: .timeBounded, intervalSec: 60, rounds: 3),
+                        slots: []
+                    ),
+                ]),
+            ]
+        )
+        let context = TodayContext(
+            workout: workout,
+            primitiveWorkout: primitiveWorkout,
+            primitiveExecutionPlan: try ExecutionPlan.validated(workout: primitiveWorkout),
+            blocks: [block],
+            items: [],
+            exercises: [:],
+            lastPerformed: [:]
+        )
+
+        let vm = TodayViewModel(
+            planContext: TodayPlanContext(selected: context, workouts: [context])
+        )
+        let detail = try XCTUnwrap(vm.detail(for: workoutID))
+        let preview = try XCTUnwrap(detail.preview)
+
+        XCTAssertEqual(preview.currentTitle, "Bike intervals")
+        XCTAssertEqual(preview.currentDetail, "3 x 1:00")
+        XCTAssertEqual(preview.blockIntent, "Hold a steady cadence")
+        XCTAssertEqual(preview.remainingLine, "open-ended current block")
+        XCTAssertEqual(preview.upcoming, [])
+    }
+
     func testAdjustmentDraftIncludesWorkoutContext() throws {
         let workoutID = UUID()
         let blockID = UUID()

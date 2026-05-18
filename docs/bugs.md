@@ -48,7 +48,7 @@ Fixed bugs are removed from this file once closed — the fix, the regression te
 
 ## Active
 
-As of 2026-05-17: no active P0/P1 bugs are tracked here. Active P2 items remain below.
+As of 2026-05-18: one active P1 bug is tracked here. Active P2 items remain below.
 
 ### P0 — blocks v1
 

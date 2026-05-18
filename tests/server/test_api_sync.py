@@ -6,6 +6,8 @@ owned by that user and call endpoints without passing user_id in the request.
 
 from datetime import datetime
 
+import pytest
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 from workoutdb_server.models import (
     AppUser,
@@ -137,6 +139,28 @@ def test_pull_returns_workouts_and_last_performed(client, test_engine, test_user
     assert last["exercise_id"] == _BACK_SQUAT
     assert len(last["last_set_logs"]) == 1
     assert last["last_set_logs"][0]["weight"] == 100.0
+
+
+def test_pull_rejects_invalid_persisted_primitive_blocks(client, test_engine, test_user_id) -> None:
+    with Session(test_engine) as session:
+        workout = Workout(
+            user_id=test_user_id,
+            name="Persisted primitive drift",
+            scheduled_date="2026-04-20",
+            status="planned",
+            source="claude",
+            primitive_blocks_json=(
+                '[{"id":"20000000-0000-4000-8000-000000000021",'
+                '"sets":[{"id":"30000000-0000-4000-8000-000000000021",'
+                '"timing":{"mode":"future_mode"},'
+                '"slots":[{"load":{"unit":"bodyweight","value":null}}]}]}]'
+            ),
+        )
+        session.add(workout)
+        session.commit()
+
+    with pytest.raises(ValidationError):
+        client.get("/api/sync/pull")
 
 
 def test_push_set_logs_and_status(client, test_engine, test_user_id) -> None:

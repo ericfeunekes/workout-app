@@ -455,6 +455,77 @@ final class AppBootstrapTests: XCTestCase {
         XCTAssertEqual(context.primitiveWorkout, primitive)
         XCTAssertEqual(context.primitiveExecutionPlan?.workoutID, workoutID)
         XCTAssertEqual(context.primitiveExecutionPlan?.blocks[0].sets[0].traversal, .amrap)
+        XCTAssertEqual(context.exercises[exerciseID]?.name, "Push-up")
+    }
+
+    func testBuildWorkoutContextFailsWhenCachedPrimitiveWorkoutIsInvalid() async throws {
+        let factory = try PersistenceFactory.makeInMemory(
+            tokenServiceName: uniqueService()
+        )
+        let workoutID = UUID(uuidString: "10000000-0000-4000-8000-000000000063")!
+        let userID = UUID(uuidString: "01000000-0000-4000-8000-000000000063")!
+        let exerciseID = UUID(uuidString: "30000000-0000-4000-8000-000000000063")!
+        let blockID = UUID(uuidString: "20000000-0000-4000-8000-000000000063")!
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let workout = Workout(
+            id: workoutID,
+            userID: userID,
+            name: "Invalid primitive cached",
+            scheduledDate: now,
+            status: .planned,
+            source: .claude,
+            createdAt: now,
+            updatedAt: now
+        )
+        let primitive = PrimitiveWorkout(
+            id: workoutID,
+            name: workout.name,
+            blocks: [
+                PrimitiveBlock(id: blockID, sets: [
+                    PrimitiveSet(
+                        id: UUID(uuidString: "40000000-0000-4000-8000-000000000063")!,
+                        timing: PrimitiveTiming(mode: .setBounded),
+                        traversal: .amrap,
+                        slots: [
+                            PrimitiveSlot(id: UUID(), exerciseID: exerciseID, workTargets: []),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        try await factory.workoutCache.save(PulledDataset(
+            workouts: [workout],
+            primitiveWorkouts: [primitive],
+            exercises: [Exercise(id: exerciseID, name: "Push-up")]
+        ))
+
+        do {
+            _ = try await AppBootstrap.buildWorkoutContext(
+                for: workout,
+                cache: factory.workoutCache
+            )
+            XCTFail("buildWorkoutContext must surface invalid primitive cache state")
+        } catch {
+            XCTAssertTrue(error is PrimitiveSemanticError)
+        }
+    }
+
+    func testBuildWorkoutContextFailsWhenUserParameterReadFails() async throws {
+        let fixture = Fixtures.sampleWorkoutPayload()
+        let cache = ThrowingUserParameterCache(
+            base: EmptyWorkoutContextCache(workout: fixture.domainWorkout),
+            error: TestError.userParameters
+        )
+
+        do {
+            _ = try await AppBootstrap.buildWorkoutContext(
+                for: fixture.domainWorkout,
+                cache: cache
+            )
+            XCTFail("buildWorkoutContext must surface user-parameter storage failures")
+        } catch {
+            XCTAssertTrue(error is TestError)
+        }
     }
 
     func testSavePullPropagatesPrimitiveTombstoneToCache() async throws {
@@ -1735,6 +1806,115 @@ final class ShellTelemetryRecorder: TelemetryEmitter, @unchecked Sendable {
         defer { lock.unlock() }
         buffer.append(event)
     }
+}
+
+private typealias DomainWorkout = CoreDomain.Workout
+private typealias DomainWorkoutStatus = CoreDomain.WorkoutStatus
+private typealias DomainPrimitiveWorkout = CoreDomain.PrimitiveWorkout
+private typealias DomainBlock = CoreDomain.Block
+private typealias DomainWorkoutItem = CoreDomain.WorkoutItem
+private typealias DomainExerciseAlternative = CoreDomain.ExerciseAlternative
+private typealias DomainExercise = CoreDomain.Exercise
+private typealias DomainUserParameter = CoreDomain.UserParameter
+private typealias DomainSetLog = CoreDomain.SetLog
+private typealias DomainPrimitiveSetLog = CoreDomain.PrimitiveSetLog
+
+private final class EmptyWorkoutContextCache: WorkoutCache, @unchecked Sendable {
+    private let workout: DomainWorkout
+
+    init(workout: DomainWorkout) {
+        self.workout = workout
+    }
+
+    func save(_ dataset: PulledDataset) async throws {}
+    func loadWorkouts(status: DomainWorkoutStatus?, since: Date?) async throws -> [DomainWorkout] { [workout] }
+    func loadPrimitiveWorkouts() async throws -> [DomainPrimitiveWorkout] { [] }
+    func loadBlocks(workoutID: WorkoutID) async throws -> [DomainBlock] { [] }
+    func loadItems(blockID: BlockID) async throws -> [DomainWorkoutItem] { [] }
+    func loadItems(workoutIDs: [WorkoutID]) async throws -> [WorkoutID: [DomainWorkoutItem]] { [:] }
+    func loadAlternatives(workoutItemID: WorkoutItemID) async throws -> [DomainExerciseAlternative] { [] }
+    func loadExercises() async throws -> [DomainExercise] { [] }
+    func loadUserParametersLatest() async throws -> [String: DomainUserParameter] { [:] }
+    func loadUserParameters(key: String) async throws -> [DomainUserParameter] { [] }
+    func loadCompletedWorkouts(limit: Int, offset: Int) async throws -> [DomainWorkout] { [] }
+    func loadSetLogs(workoutID: WorkoutID) async throws -> [DomainSetLog] { [] }
+    func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [DomainPrimitiveSetLog] { [] }
+    func loadSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [DomainSetLog] { [] }
+    func loadOrphanedSetLogs() async throws -> [DomainSetLog] { [] }
+    func saveSetLogs(_ setLogs: [DomainSetLog], workoutID: WorkoutID) async throws {}
+    func savePrimitiveSetLogs(_ setLogs: [DomainPrimitiveSetLog], workoutID: WorkoutID) async throws {}
+    func resetWorkout(workoutID: WorkoutID) async throws {}
+    func saveWorkout(_ workout: DomainWorkout) async throws {}
+    func saveUserParameter(_ param: DomainUserParameter) async throws {}
+    func clear() async throws {}
+}
+
+private final class ThrowingUserParameterCache: WorkoutCache, @unchecked Sendable {
+    private let base: WorkoutCache
+    private let error: Error
+
+    init(base: WorkoutCache, error: Error) {
+        self.base = base
+        self.error = error
+    }
+
+    func save(_ dataset: PulledDataset) async throws { try await base.save(dataset) }
+    func loadWorkouts(status: DomainWorkoutStatus?, since: Date?) async throws -> [DomainWorkout] {
+        try await base.loadWorkouts(status: status, since: since)
+    }
+    func loadPrimitiveWorkouts() async throws -> [DomainPrimitiveWorkout] {
+        try await base.loadPrimitiveWorkouts()
+    }
+    func loadBlocks(workoutID: WorkoutID) async throws -> [DomainBlock] {
+        try await base.loadBlocks(workoutID: workoutID)
+    }
+    func loadItems(blockID: BlockID) async throws -> [DomainWorkoutItem] {
+        try await base.loadItems(blockID: blockID)
+    }
+    func loadItems(workoutIDs: [WorkoutID]) async throws -> [WorkoutID: [DomainWorkoutItem]] {
+        try await base.loadItems(workoutIDs: workoutIDs)
+    }
+    func loadAlternatives(workoutItemID: WorkoutItemID) async throws -> [DomainExerciseAlternative] {
+        try await base.loadAlternatives(workoutItemID: workoutItemID)
+    }
+    func loadExercises() async throws -> [DomainExercise] { try await base.loadExercises() }
+    func loadUserParametersLatest() async throws -> [String: DomainUserParameter] { throw error }
+    func loadUserParameters(key: String) async throws -> [DomainUserParameter] {
+        try await base.loadUserParameters(key: key)
+    }
+    func loadCompletedWorkouts(limit: Int, offset: Int) async throws -> [DomainWorkout] {
+        try await base.loadCompletedWorkouts(limit: limit, offset: offset)
+    }
+    func loadSetLogs(workoutID: WorkoutID) async throws -> [DomainSetLog] {
+        try await base.loadSetLogs(workoutID: workoutID)
+    }
+    func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [DomainPrimitiveSetLog] {
+        try await base.loadPrimitiveSetLogs(workoutID: workoutID)
+    }
+    func loadSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [DomainSetLog] {
+        try await base.loadSetLogs(exerciseID: exerciseID, limit: limit)
+    }
+    func loadOrphanedSetLogs() async throws -> [DomainSetLog] {
+        try await base.loadOrphanedSetLogs()
+    }
+    func saveSetLogs(_ setLogs: [DomainSetLog], workoutID: WorkoutID) async throws {
+        try await base.saveSetLogs(setLogs, workoutID: workoutID)
+    }
+    func savePrimitiveSetLogs(_ setLogs: [DomainPrimitiveSetLog], workoutID: WorkoutID) async throws {
+        try await base.savePrimitiveSetLogs(setLogs, workoutID: workoutID)
+    }
+    func resetWorkout(workoutID: WorkoutID) async throws {
+        try await base.resetWorkout(workoutID: workoutID)
+    }
+    func saveWorkout(_ workout: DomainWorkout) async throws { try await base.saveWorkout(workout) }
+    func saveUserParameter(_ param: DomainUserParameter) async throws {
+        try await base.saveUserParameter(param)
+    }
+    func clear() async throws { try await base.clear() }
+}
+
+private enum TestError: Error {
+    case userParameters
 }
 
 // Equatable on BootstrapResult for `.empty` assertions only — the

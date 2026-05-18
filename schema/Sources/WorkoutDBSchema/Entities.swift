@@ -261,7 +261,10 @@ public struct Workout: Codable, Sendable, Equatable {
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)
         blocks = try container.decode([Block].self, forKey: .blocks)
-        primitiveBlocks = try container.decodeIfPresent([PrimitiveBlock].self, forKey: .primitiveBlocks) ?? []
+        primitiveBlocks = try container.decodeIfPresent(
+            [PrimitiveBlock].self,
+            forKey: .primitiveBlocks
+        ) ?? []
     }
 }
 

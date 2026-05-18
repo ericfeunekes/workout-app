@@ -904,6 +904,51 @@ final class ExecutionProjectionTests: XCTestCase {
         XCTAssertEqual(projection.workQueue.first?.detail, "50 m · 32 kg")
     }
 
+    func testTodayRouteUsesPrimitivePreviewForZeroSlotTimedWork() throws {
+        var (context, _) = Self.context(
+            timingMode: .emom,
+            blockName: "Bike intervals",
+            blockIntent: "Hold a steady cadence",
+            timingConfigJSON: #"{"interval_sec":60,"total_minutes":3}"#,
+            items: [],
+            exercises: [:]
+        )
+        let primitiveWorkout = PrimitiveWorkout(
+            id: context.workout.id,
+            name: context.workout.name,
+            blocks: [
+                PrimitiveBlock(id: Self.blockID, sets: [
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: PrimitiveTiming(mode: .timeBounded, intervalSec: 60, rounds: 3),
+                        slots: []
+                    ),
+                ]),
+            ]
+        )
+        context = WorkoutContext(
+            workout: context.workout,
+            primitiveWorkout: primitiveWorkout,
+            primitiveExecutionPlan: try ExecutionPlan.validated(workout: primitiveWorkout),
+            blocks: context.blocks,
+            itemsByBlock: context.itemsByBlock,
+            exercises: context.exercises
+        )
+        let vm = ExecutionViewModel(context: context, clock: FixedClock(now: now))
+
+        let projection = vm.executionProjection(now: now)
+
+        XCTAssertEqual(projection.currentTask.kind, .today)
+        XCTAssertEqual(projection.currentTask.title, "Bike intervals")
+        XCTAssertEqual(projection.currentTask.detail, "3 x 1:00")
+        XCTAssertNil(projection.currentTask.exerciseName)
+        XCTAssertEqual(projection.currentTask.primaryMetric, "3 x 1:00")
+        XCTAssertNil(projection.currentTask.secondaryMetric)
+        XCTAssertEqual(projection.currentTask.blockIntent, "Hold a steady cadence")
+        XCTAssertEqual(projection.remainingWork.totalSets, 0)
+        XCTAssertEqual(projection.workQueue.map(\.title), [])
+    }
+
     // MARK: - Fixtures
 
     private static let workoutID = UUID()

@@ -296,12 +296,6 @@ public enum AppBootstrap {
     ) async throws -> WorkoutContext {
         let blocks = try await cache.loadBlocks(workoutID: workout.id)
         let loaded = try await loadItemsAndAlternatives(blocks: blocks, cache: cache)
-        let catalog = try await cache.loadExercises()
-        let exercises = Dictionary(
-            uniqueKeysWithValues: catalog
-                .filter { loaded.allExerciseIDs.contains($0.id) }
-                .map { ($0.id, $0) }
-        )
         let lastPerformed = await lastPerformedStore?.load() ?? [:]
         // qa-045: load latest-per-key user_parameters so the
         // `percent_1rm` resolver in `SessionSeeder` can convert
@@ -310,19 +304,24 @@ public enum AppBootstrap {
         // local (rather than handing raw `UserParameter` rows through)
         // lets the seeder stay ignorant of the UserParameter shape
         // and tolerant of unparseable values — a bad row just drops
-        // the key from the map and the item falls back to BW.
-        let rawParams = (try? await cache.loadUserParametersLatest()) ?? [:]
-        var numericParams: [String: Double] = [:]
-        for (key, param) in rawParams {
-            if let value = Double(param.value) {
-                numericParams[key] = value
-            }
-        }
+        // the key from the map. Storage failures still surface so primitive
+        // relative loads cannot silently fall back to bodyweight.
+        let rawParams = try await cache.loadUserParametersLatest()
+        let numericParams = PrimitivePlanAssembly.numericUserParameters(from: rawParams)
         let primitiveWorkout = try await cache.loadPrimitiveWorkouts()
             .first { $0.id == workout.id }
-        let primitivePlan = try primitiveWorkout.map {
-            try ExecutionPlan.validated(workout: $0, userParameters: numericParams)
-        }
+        let primitivePlan = try PrimitivePlanAssembly.executionPlan(
+            for: primitiveWorkout,
+            userParameters: numericParams
+        )
+        let exerciseIDs = loaded.allExerciseIDs
+            .union(PrimitivePlanAssembly.exerciseIDs(in: primitiveWorkout))
+        let catalog = try await cache.loadExercises()
+        let exercises = Dictionary(
+            uniqueKeysWithValues: catalog
+                .filter { exerciseIDs.contains($0.id) }
+                .map { ($0.id, $0) }
+        )
         return WorkoutContext(
             workout: workout,
             primitiveWorkout: primitiveWorkout,

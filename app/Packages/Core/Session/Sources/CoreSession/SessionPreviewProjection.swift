@@ -93,15 +93,16 @@ public struct SessionPreviewWork: Equatable, Sendable {
     public var setID: PrimitiveSetID
     public var setIndexInBlock: Int
     public var setRepeatIndex: Int
-    public var slotID: PrimitiveSlotID
+    public var slotID: PrimitiveSlotID?
     public var slotIndex: Int
-    public var exerciseID: ExerciseID
+    public var exerciseID: ExerciseID?
     public var primaryDisplayTarget: PrimitiveWorkTarget?
     public var secondaryDisplayTargets: [PrimitiveWorkTarget]
     public var loadKg: Double?
     public var loadUnit: WeightUnit?
     public var loadDisplayValue: Double?
     public var isWarmup: Bool
+    public var timing: PrimitiveTiming
 
     public init(
         blockIndex: Int,
@@ -109,15 +110,16 @@ public struct SessionPreviewWork: Equatable, Sendable {
         setID: PrimitiveSetID,
         setIndexInBlock: Int,
         setRepeatIndex: Int,
-        slotID: PrimitiveSlotID,
+        slotID: PrimitiveSlotID?,
         slotIndex: Int,
-        exerciseID: ExerciseID,
+        exerciseID: ExerciseID?,
         primaryDisplayTarget: PrimitiveWorkTarget?,
         secondaryDisplayTargets: [PrimitiveWorkTarget],
         loadKg: Double?,
         loadUnit: WeightUnit?,
         loadDisplayValue: Double?,
-        isWarmup: Bool
+        isWarmup: Bool,
+        timing: PrimitiveTiming
     ) {
         self.blockIndex = blockIndex
         self.blockID = blockID
@@ -133,6 +135,87 @@ public struct SessionPreviewWork: Equatable, Sendable {
         self.loadUnit = loadUnit
         self.loadDisplayValue = loadDisplayValue
         self.isWarmup = isWarmup
+        self.timing = timing
+    }
+}
+
+public struct SessionPreviewMetrics: Equatable, Sendable {
+    public var primary: String?
+    public var secondary: String?
+
+    public var detail: String? {
+        [primary, secondary]
+            .compactMap { $0 }
+            .removingAdjacentDuplicates()
+            .joined(separator: " · ")
+            .nilIfEmpty
+    }
+
+    public init(primary: String?, secondary: String?) {
+        self.primary = primary
+        self.secondary = secondary
+    }
+}
+
+public extension SessionPreviewWork {
+    var metrics: SessionPreviewMetrics {
+        SessionPreviewMetrics(
+            primary: primaryMetricText,
+            secondary: secondaryMetricText
+        )
+    }
+
+    var isTimerOnly: Bool {
+        exerciseID == nil
+    }
+
+    private var primaryMetricText: String? {
+        guard let target = primaryDisplayTarget else {
+            return loadDisplayText ?? timingDisplayText
+        }
+        if target.metric == .reps || target.metric == .completion {
+            return loadDisplayText ?? timingDisplayText
+        }
+        return displayText(for: target, loadUnit: loadUnit)
+    }
+
+    private var secondaryMetricText: String? {
+        guard let primary = primaryDisplayTarget else { return nil }
+        var parts: [String] = []
+        if primary.metric == .reps || primary.metric == .completion {
+            if let text = displayText(for: primary, loadUnit: loadUnit) {
+                parts.append(text)
+            }
+        } else if let loadDisplayText {
+            parts.append(loadDisplayText)
+        }
+        parts.append(contentsOf: secondaryDisplayTargets.compactMap {
+            displayText(for: $0, loadUnit: loadUnit)
+        })
+        return parts.removingAdjacentDuplicates().joined(separator: " · ").nilIfEmpty
+    }
+
+    private var loadDisplayText: String? {
+        guard let weightUnit = loadUnit,
+              let unit = LoadUnit(rawValue: weightUnit.rawValue) else { return nil }
+        return formatLoad(weight: loadDisplayValue ?? loadKg, unit: unit)
+    }
+
+    private var timingDisplayText: String? {
+        switch timing.mode {
+        case .timeBounded:
+            if let intervalSec = timing.intervalSec, let rounds = timing.rounds {
+                return "\(rounds) x \(formatDuration(seconds: intervalSec))"
+            }
+            if let intervalSec = timing.intervalSec {
+                return formatDuration(seconds: intervalSec)
+            }
+            return nil
+        case .capBounded:
+            return timing.capSec.map { "cap \(formatDuration(seconds: $0))" }
+        case .setBounded, .targetBounded:
+            return nil
+        }
     }
 }
 
@@ -164,7 +247,28 @@ private extension ExecutionPlan {
         blocks.enumerated().flatMap { blockIndex, block in
             block.sets.enumerated().flatMap { setIndex, set in
                 (0..<max(1, set.setRepeat)).flatMap { setRepeatIndex in
-                    set.slots.enumerated().map { slotIndex, slot in
+                    if set.slots.isEmpty {
+                        return [
+                            SessionPreviewWork(
+                                blockIndex: blockIndex,
+                                blockID: block.blockID,
+                                setID: set.setID,
+                                setIndexInBlock: setIndex,
+                                setRepeatIndex: setRepeatIndex,
+                                slotID: nil,
+                                slotIndex: 0,
+                                exerciseID: nil,
+                                primaryDisplayTarget: set.workTargets.first,
+                                secondaryDisplayTargets: Array(set.workTargets.dropFirst()),
+                                loadKg: nil,
+                                loadUnit: nil,
+                                loadDisplayValue: nil,
+                                isWarmup: false,
+                                timing: set.timing
+                            ),
+                        ]
+                    }
+                    return set.slots.enumerated().map { slotIndex, slot in
                         SessionPreviewWork(
                             blockIndex: blockIndex,
                             blockID: block.blockID,
@@ -179,7 +283,8 @@ private extension ExecutionPlan {
                             loadKg: slot.loadKg,
                             loadUnit: slot.loadUnit,
                             loadDisplayValue: slot.loadDisplayValue,
-                            isWarmup: slot.isWarmup
+                            isWarmup: slot.isWarmup,
+                            timing: set.timing
                         )
                     }
                 }
@@ -192,5 +297,53 @@ private extension Array {
     subscript(safe index: Int) -> Element? {
         guard index >= 0, index < count else { return nil }
         return self[index]
+    }
+}
+
+private extension Array where Element == String {
+    func removingAdjacentDuplicates() -> [String] {
+        reduce(into: []) { result, value in
+            if result.last != value {
+                result.append(value)
+            }
+        }
+    }
+}
+
+private func displayText(for target: PrimitiveWorkTarget, loadUnit: WeightUnit?) -> String? {
+    switch target.metric {
+    case .reps:
+        return target.value.map { "\(formatDecimal($0)) reps" }
+    case .duration:
+        return target.value.map { formatDuration(seconds: $0) } ?? "duration"
+    case .distance:
+        return target.value.map(distanceLabel)
+    case .rounds:
+        return target.value.map { "\(formatDecimal($0)) rounds" } ?? "rounds"
+    case .completion:
+        return nil
+    case .loadCarried:
+        guard let value = target.value else { return "load carried" }
+        return "\(formatDecimal(value)) \(loadUnit?.rawValue ?? "load")"
+    }
+}
+
+private func distanceLabel(_ metres: Double) -> String {
+    if metres >= 1000 {
+        return "\(formatDecimal(metres / 1000)) km"
+    }
+    return "\(formatDecimal(metres)) m"
+}
+
+private func formatDecimal(_ value: Double) -> String {
+    if value.rounded() == value {
+        return String(Int(value))
+    }
+    return String(format: "%.1f", value)
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }

@@ -32,9 +32,10 @@ Apple's WorkoutKit supports creating, previewing, opening, exporting, and
 scheduling workout plans for the Workout app on Apple Watch. It supports common
 WorkoutKit workout shapes such as single-goal, pacer, custom interval, and
 multi-sport workouts. Custom workout steps carry a limited goal/alert shape, so
-this bridge starts narrow: enough for selected cardio or simple interval cases,
-not enough to represent every Setmark timing mode or every strength-log field
-losslessly.
+this bridge must separate **exportability** from **Setmark fidelity**. A workout
+may still be useful to send to Apple's Workout app when WorkoutKit cannot carry
+every Setmark primitive fact, as long as the app records what was simplified or
+omitted and never treats the Apple result as a full Setmark execution log.
 
 HealthKit can launch or wake the companion watch app with an
 `HKWorkoutConfiguration`, but that path starts a HealthKit workout session for
@@ -45,30 +46,57 @@ WorkoutKit handoff bridge.
 
 The bridge must be explicit about what survives the mapping:
 
-- WorkoutKit mapping consumes Setmark primitives through an adapter profile; it
-  must not add WorkoutKit-specific fields to primitive workout, block, set,
-  slot, or log records. The same primitive inspection shape should be reusable
-  by future export targets such as Strava or other health/training systems.
+- WorkoutKit mapping consumes Setmark primitives through a vendor-neutral export
+  profile first, then a WorkoutKit adapter profile. It must not add
+  WorkoutKit-specific fields to primitive workout, block, set, slot, or log
+  records. The same primitive inspection shape should be reusable by future
+  export targets such as Strava or other health/training systems.
+- **Outbound mapping and inbound ingestion are separate extension points.**
+  The export profile answers "what can this Setmark workout become for target
+  X?" Target adapters then translate that profile into WorkoutKit, Strava, or
+  another application. Result ingestion is the mirror image: each target gets
+  its own ingestion engine that reads the target's completion/result data and
+  maps only proven facts back into Setmark. Do not make a target adapter both
+  the source of export truth and the owner of imported-result semantics.
 - **Eligible workouts** map to a known WorkoutKit workout type and activity
   type. Each mapped workout carries a stable Setmark workout identifier in the
   phone-side tracking record so completion can reconcile back.
-- **Unsupported workouts** stay in Setmark only and show a clear reason, not a
-  fake or lossy export. Examples likely include complex strength blocks,
-  clusters, supersets, and anything whose value depends on per-set load/reps/RIR
-  logging.
+- **Unsupported workouts** stay in Setmark only and show a clear reason.
+  Unsupported means WorkoutKit cannot represent the workout safely enough to be
+  useful, not merely that Setmark facts such as load, reps, RIR, alternatives,
+  notes, or per-slot results would be omitted.
 - **Support status is profile-specific.** A primitive composition can be
   native, degraded, Setmark-only, or unsupported depending on the export
   target. Degraded mappings are allowed only when the user-facing loss is named
-  before export. For example, a run with target pace may map cleanly while
-  Setmark-specific notes remain phone-only.
-- **Completion reconciliation** is app-owned imported-result behavior. It may
-  mark the Setmark workout completed or attach coarse HealthKit/WorkoutKit
-  facts only when identity matching is unambiguous. It must not invent set-level
-  logs that Apple did not produce.
+  before export and carried in the export tracking record. For example, a
+  strength circuit may map as a functional-strength or custom interval workout
+  while Setmark-specific load/reps/RIR and per-set logging remain phone-only.
+- **Representational fit is separate from proof state.** A composition can have
+  a plausible native or degraded WorkoutKit representation while still being
+  blocked from user-facing export until SDK availability, simulator behavior,
+  real-device visibility/startability, and completion identity are proven.
+- **Setmark-only is not failure.** A valid Setmark workout can intentionally
+  remain Setmark-only for a specific export target. `unsupported` is reserved
+  for a target/profile that cannot produce a safe or useful representation.
+- **Degradation includes result semantics, not only fields.** Every degraded
+  mapping names the Apple-visible goal/result, the Setmark-importable result,
+  whether the workout or block may be marked completed, and which authored
+  result semantics are unrecoverable from Apple.
+- **Completion reconciliation** is app-owned imported-result behavior through a
+  target-specific ingestion engine. It may mark the Setmark workout completed
+  or attach coarse HealthKit/WorkoutKit facts only when identity matching is
+  unambiguous. It must not invent set-level logs that the target did not
+  produce.
+- **Bridge ownership stays split.** WorkoutKit plan construction, opening, and
+  scheduling belong to a WorkoutKit adapter boundary. `HKWorkout` readback and
+  HealthKit sample queries stay in `HealthKitBridge`; a higher-level app
+  coordinator composes export and import behavior when later phases need both.
 
 The mapping table is a durable artifact of this feature. It should name each
-Setmark timing/workout archetype, the Apple workout type it maps to, what data
-is preserved, what data is lost, and whether the bridge is allowed to export it.
+Setmark archetype, primary goal, dominant metric, domain hint, primitive axes,
+Apple workout type, preserved facts, omitted/collapsed facts, Apple-visible
+result, Setmark-importable result, proof state, and whether the bridge is
+allowed to export it.
 
 Initial allowlist:
 
@@ -78,7 +106,7 @@ Initial allowlist:
 | Pace-target run or ride | Allow after real-device proof | Maps closest to pacer or alert-backed workout shapes. |
 | Simple time/distance interval cardio | Allow after real-device proof | Maps closest to custom interval steps when the per-step goal/alert limits are acceptable. |
 | Multi-sport swim/bike/run | Spike before allow | WorkoutKit has a multi-sport shape, but Setmark identity and completion mapping still need proof. |
-| Strength, supersets, clusters, circuits with load/reps/RIR, mixed manual stations | Block by default | Apple's Workout app does not produce Setmark per-set load/reps/RIR logs, and lossy completion would misrepresent the workout. |
+| Strength, supersets, clusters, circuits with load/reps/RIR, mixed manual stations | Map as degraded or block after Phase 1 profile proof | The goal is to find the closest useful Workout app representation across primitives. Load/reps/RIR and Setmark set-level detail may be omitted, but that omission must be explicit and must constrain completion reconciliation. |
 
 Completion proof must answer these cases before implementation planning:
 
@@ -115,7 +143,10 @@ Completion proof must answer these cases before implementation planning:
 4. **Setmark remains the source of truth for plans.** Claude-authored Setmark
    workouts still originate in the server/app model. WorkoutKit receives a
    mapped copy; it does not become the planning authority.
-5. **Fallback is clear.** A workout that cannot map safely remains executable in
+5. **Degradation is tracked.** Every non-native export records the WorkoutKit
+   representation used, the primitive facts preserved, the primitive facts
+   omitted or collapsed, and the resulting reconciliation rule.
+6. **Fallback is clear.** A workout that cannot map safely remains executable in
    the Setmark phone app.
 
 ## Current gaps

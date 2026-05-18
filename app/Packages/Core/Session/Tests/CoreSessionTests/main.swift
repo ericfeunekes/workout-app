@@ -735,6 +735,29 @@ runCase("session preview projection handles zero-set rest block") {
     try expectEqual(projection.upcoming, [])
 }
 
+runCase("session preview projection exposes zero-slot timed set") {
+    let workout = PrimitiveWorkout(
+        id: primitiveUUID(0x1204),
+        name: "Timed",
+        blocks: [
+            PrimitiveBlock(id: primitiveUUID(0x2204), sets: [
+                PrimitiveSet(
+                    id: primitiveUUID(0x3204),
+                    timing: .init(mode: .timeBounded, intervalSec: 60, rounds: 3),
+                    slots: []
+                ),
+            ]),
+        ]
+    )
+    let projection = SessionPreviewProjection(plan: try ExecutionPlan.validated(workout: workout))
+
+    try expectEqual(projection.current?.exerciseID, nil)
+    try expectEqual(projection.current?.slotID, nil)
+    try expectEqual(projection.current?.isTimerOnly, true)
+    try expectEqual(projection.current?.metrics.detail, "3 x 1:00")
+    try expectEqual(projection.remaining, .unbounded)
+}
+
 runCase("session preview projection binds metadata to forwarded current block") {
     let exerciseID = primitiveUUID(0x1203)
     let plan = ExecutionPlan(

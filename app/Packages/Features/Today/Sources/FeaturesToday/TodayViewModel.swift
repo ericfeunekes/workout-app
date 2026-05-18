@@ -603,20 +603,36 @@ public final class TodayViewModel {
         guard let current = projection.current else { return nil }
 
         return PreviewSummary(
-            currentTitle: exerciseName(for: current.exerciseID, in: context),
-            currentDetail: previewDetail(for: current),
+            currentTitle: previewTitle(for: current, in: context),
+            currentDetail: current.metrics.detail,
             blockIntent: projection.currentBlock.flatMap { block in
                 context.blocks[safe: block.blockIndex]?.intent
             },
             remainingLine: remainingLine(for: projection.remaining),
             upcoming: projection.upcoming.map { upcoming in
                 PreviewUpcoming(
-                    id: "\(upcoming.blockID.uuidString)-\(upcoming.setID.uuidString)-\(upcoming.slotID.uuidString)-\(upcoming.setRepeatIndex)",
-                    title: exerciseName(for: upcoming.exerciseID, in: context),
-                    detail: previewDetail(for: upcoming)
+                    id: previewID(for: upcoming),
+                    title: previewTitle(for: upcoming, in: context),
+                    detail: upcoming.metrics.detail
                 )
             }
         )
+    }
+
+    private static func previewID(for work: SessionPreviewWork) -> String {
+        [
+            work.blockID.uuidString,
+            work.setID.uuidString,
+            work.slotID?.uuidString ?? "timer",
+            String(work.setRepeatIndex),
+        ].joined(separator: "-")
+    }
+
+    private static func previewTitle(for work: SessionPreviewWork, in context: TodayContext) -> String {
+        guard let exerciseID = work.exerciseID else {
+            return context.blocks[safe: work.blockIndex]?.name ?? "Timed work"
+        }
+        return exerciseName(for: exerciseID, in: context)
     }
 
     private static func exerciseName(for exerciseID: ExerciseID, in context: TodayContext) -> String {
@@ -630,64 +646,6 @@ public final class TodayViewModel {
             return "\(left) \(left == 1 ? "set" : "sets") left in current block of \(total)"
         case .unbounded:
             return "open-ended current block"
-        }
-    }
-
-    private static func previewDetail(for work: SessionPreviewWork) -> String? {
-        [primaryMetric(for: work), secondaryMetric(for: work)]
-            .compactMap { $0 }
-            .removingAdjacentDuplicates()
-            .joined(separator: " · ")
-            .nilIfEmpty
-    }
-
-    private static func primaryMetric(for work: SessionPreviewWork) -> String? {
-        guard let target = work.primaryDisplayTarget else {
-            return loadText(for: work)
-        }
-        if target.metric == .reps || target.metric == .completion {
-            return loadText(for: work)
-        }
-        return targetText(target, loadUnit: work.loadUnit)
-    }
-
-    private static func secondaryMetric(for work: SessionPreviewWork) -> String? {
-        guard let primary = work.primaryDisplayTarget else { return nil }
-        var parts: [String] = []
-        if primary.metric == .reps || primary.metric == .completion {
-            if let text = targetText(primary, loadUnit: work.loadUnit) {
-                parts.append(text)
-            }
-        } else if let load = loadText(for: work) {
-            parts.append(load)
-        }
-        parts.append(contentsOf: work.secondaryDisplayTargets.compactMap {
-            targetText($0, loadUnit: work.loadUnit)
-        })
-        return parts.removingAdjacentDuplicates().joined(separator: " · ").nilIfEmpty
-    }
-
-    private static func loadText(for work: SessionPreviewWork) -> String? {
-        guard let weightUnit = work.loadUnit,
-              let unit = LoadUnit(rawValue: weightUnit.rawValue) else { return nil }
-        return formatLoad(weight: work.loadDisplayValue ?? work.loadKg, unit: unit)
-    }
-
-    private static func targetText(_ target: PrimitiveWorkTarget, loadUnit: WeightUnit?) -> String? {
-        switch target.metric {
-        case .reps:
-            return target.value.map { "\(formatDecimal($0)) reps" }
-        case .duration:
-            return target.value.map { formatDuration(seconds: $0) } ?? "duration"
-        case .distance:
-            return target.value.map(distanceLabel)
-        case .rounds:
-            return target.value.map { "\(formatDecimal($0)) rounds" } ?? "rounds"
-        case .completion:
-            return nil
-        case .loadCarried:
-            guard let value = target.value else { return "load carried" }
-            return "\(formatDecimal(value)) \(loadUnit?.rawValue ?? "load")"
         }
     }
 

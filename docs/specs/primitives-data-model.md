@@ -124,6 +124,43 @@ Primitive cutover closeout is not "debug fixtures run." The remaining proof
 must cover the seven primitives and their important compositions before
 simulator QA is used as confirmation.
 
+## Primitive semantics foundation
+
+The next implementation cluster must introduce a shared primitive semantics
+layer before broadening the matrix. The problem is not only that AMRAP partial
+results need distance or carried-load controls; the broader issue is that
+seeding, projection, result entry, completion summaries, correction, and sync
+currently have to infer primitive meaning independently.
+
+The durable contract is:
+
+- Domain and Sync own the validated primitive authoring values and wire decode.
+- A CoreSession-owned semantics layer owns the pure rules that turn a
+  primitive block/set/slot into an executable/result contract.
+- Feature views, completion ledgers, persistence grouping, and sync payload
+  construction consume that contract; they do not rediscover primary metrics,
+  completion metrics, aggregate roles, or editable result fields from timing
+  mode names, row counts, or UI defaults.
+- Server validation owns authoring rejection at ingest, but must enforce the
+  same legal primitive composition rules the app semantics layer executes.
+
+The semantics layer must answer, for each primitive composition:
+
+- Which timing/traversal cells are legal, bounded, unbounded, or rejected.
+- Which metrics are completion-driving and which are observations.
+- Which metric is primary for display, and which metrics are secondary.
+- Which outputs become `slot`, `set_result`, or `block_result` rows.
+- How repeated sets, repeated blocks, round-robin traversal, AMRAP traversal,
+  and aggregate scopes determine deterministic log identity.
+- Which fields are editable on result and correction surfaces.
+- Which counts are implementation sentinels and must never render as user
+  progress.
+
+This layer intentionally does **not** rewrite every existing timing driver in
+one move, introduce an in-app primitive editor, or generalize beyond the
+accepted seven primitives. It is the smallest foundation needed so the next
+bug fixes and proof matrix assert one set of primitive composition rules.
+
 The cutover implementation must add deterministic proof for:
 
 - **Timing x traversal:** legal `set_bounded`, `time_bounded`, `cap_bounded`,
@@ -189,6 +226,13 @@ already cover.
   slice through automated gates and simulator QA, but it does not close the
   cutover. Remaining material items are `PDM-GAP-006`, `bug-089`, and
   `bug-090`, plus the full proof matrix above.
+
+- `PDM-GAP-007`: Primitive composition semantics are not centralized. Result
+  UI, completion summaries, projection, persistence grouping, sync payloads,
+  and server validation can still infer completion metrics, primary display,
+  aggregate row roles, and sentinel counts through separate timing-mode or
+  UI-specific logic. The next phase must create the CoreSession semantics
+  foundation above and route the `PDM-GAP-006` result fixes through it.
 
 ## Open questions
 

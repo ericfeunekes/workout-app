@@ -128,6 +128,7 @@ gap in the owning docs. Git history is the archive.
 | `PDM-GAP-004` | `docs/specs/primitives-data-model/runtime-resolution.md` | Runtime resolution must preserve offline execution and seed-time parameter pinning. | `proof` |
 | `PDM-GAP-005` | `docs/specs/primitives-data-model/cutover.md` | Completed local workout logs are the preservation constraint during cutover. | `proof` |
 | `PDM-GAP-006` | `docs/specs/primitives-data-model/log-shape.md` | Partial-result controls and completion summaries still collapse non-rep primitive metrics such as distance, duration, and carried load. | `implementation` |
+| `PDM-GAP-007` | `docs/specs/primitives-data-model.md` | Primitive composition semantics are not centralized across seeding, projection, result entry, completion summaries, persistence grouping, sync payloads, and server validation. | `implementation` |
 
 ## Maintenance
 

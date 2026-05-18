@@ -24,7 +24,6 @@ On launch (or after FirstRun succeeds), the shell checks `TokenStore.loadConnect
 - Does not retry pulls — single attempt per bootstrap. The `PushFlusher`'s 60s cadence is orthogonal; it pushes, not pulls.
 - Does not distinguish decode/network/server errors to the user — all non-401 errors fall through to cache (`AppBootstrap.swift:146-150`, comment: "Transport / decode / server errors: fall through silently")
 - Does not guard `WorkoutCache.save` against mid-loop throws — known issue in `open-questions.md` § "WorkoutCacheImpl.save non-atomicity"
-- Does not provide Settings entry — TODO in `WorkoutDBApp.swift:37-41`
 - Does not own foreground/manual refresh after first render — those pulls are
   coordinated by `AppSyncCoordinator`.
 
@@ -42,9 +41,8 @@ On launch (or after FirstRun succeeds), the shell checks `TokenStore.loadConnect
 
 ## Current gaps
 
-- `BOOT-GAP-001`: No manual sync trigger exists on the bootstrap surface. Pull
-  runs at bootstrap and through Today refresh, but Settings has no general
-  "sync now" action.
+- Settings owns post-bootstrap recovery actions such as sync now, reset local
+  data, and change server. Bootstrap still only owns initial hydration.
 
 ## QA scenarios
 

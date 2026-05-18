@@ -303,19 +303,77 @@ If the configured URL fails DNS or times out, the app stays offline (no crash, n
 ## Future replication and endpoint directions
 
 The current REST-over-private-network sync path remains the implemented
-contract. Future sync work should investigate two separate lanes rather than
-treating them as one generic replacement:
+contract. CloudKit was investigated as a possible Apple-device replication
+substrate, but is **not** part of the current sync architecture.
+
+### CloudKit decision
+
+Decision: do not use CloudKit for the current sync architecture. Keep REST as
+the canonical Claude authoring and readback path, and keep SwiftData as the
+app's permanent offline execution store.
+
+Why:
+
+- The app already needs a backend because Claude authors plans and needs
+  history readback. Once that backend exists, CloudKit mostly becomes a second
+  sync system rather than a replacement.
+- A headless REST service should not be planned as a durable direct writer into
+  each user's private CloudKit database. Apple's server-to-server key path is
+  public-database oriented; private user access depends on user-authenticated
+  web tokens, which is a different operating model.
+- CloudKit background delivery is indeterminate. Explicit `CKSyncEngine`
+  send/fetch operations can support foreground user-driven attempts and tests,
+  but CloudKit should not replace REST for timing-sensitive "plan now" or
+  "result readback now" flows unless a later real-device/account probe proves
+  the latency and recovery contract.
+- Native SwiftData/CloudKit mirroring hides too much sync/outbox policy for
+  WorkoutDB's current proof requirements: durable completion publication,
+  retry classification, token/account recovery, conflict visibility, and
+  state readback.
+- CloudKit sharing is a collaboration feature, not the default multi-user
+  account model. Future other-user support should keep REST accounts/service
+  identity as the user boundary, with CloudKit limited to same-user
+  Apple-device replication unless a product requirement explicitly asks for
+  user-managed shared workouts.
+
+What could change this decision:
+
+- Same-user Apple-device replication becomes important enough that REST alone
+  is awkward, for example iPhone/iPad/Mac/Watch need to exchange app state when
+  the backend is unreachable.
+- A real-device/account probe proves explicit CloudKit send/fetch can meet a
+  concrete latency and recovery target for a named user flow.
+- Product direction shifts toward user-managed shared workouts where
+  CloudKit's owner/participant model is the feature, not an implementation
+  detail.
+- The backend becomes a narrow bridge rather than the canonical store, and the
+  app can remain the authoritative importer/publisher for all private CloudKit
+  data without losing Claude readback.
+
+If one of those changes occurs, the next CloudKit spike should be narrow:
+prove one app-mediated bridge slice using explicit zones/change state, account
+availability handling, offline behavior, conflict rules, manual send/fetch, and
+the REST Claude authoring/readback path. Non-goal: replacing the server before
+the authority model is proven.
+
+Future sync work should investigate two separate lanes rather than treating
+them as one generic replacement:
 
 1. **Apple-device replication lane.** CloudKit is the likely first candidate
    for iPhone/iPad/Mac/Watch data replication because it syncs app-owned
    records through the user's iCloud account. This is not just a transport swap:
    it changes record ownership, conflict behavior, account dependency,
-   background-delivery expectations, and possibly the local data model. A
-   CloudKit path should use app data records, zones, and sync state, not iCloud
-   Drive files as the primary database. iCloud Drive may be useful for explicit
-   import/export artifacts, but file sync should not become the source of truth
-   for workout state unless a spike proves CloudKit cannot cover the required
-   app data.
+   background-delivery expectations, and possibly the local data model. The
+   only viable future planning assumption is REST canonical plus explicit
+   CloudKit bridge: SwiftData remains the app's permanent offline execution
+   store; REST remains the immediate Claude authoring and readback channel; a
+   future CloudKit bridge publishes/consumes selected app-owned records for
+   same-user Apple-device replication.
+   A CloudKit path should use app data records, zones, and sync state, not
+   iCloud Drive files as the primary database. iCloud Drive may be useful for
+   explicit import/export artifacts, but file sync should not become the source
+   of truth for workout state unless a spike proves CloudKit cannot cover the
+   required app data.
 2. **External/private service lane.** Cloudflare Tunnel + Cloudflare Access are
    candidates for exposing selected local endpoints to non-Apple clients,
    callbacks, or future app families without opening the origin publicly. The
@@ -332,31 +390,22 @@ State authority must stay explicit regardless of transport:
 - The app remains authoritative for completed workout results it records.
 - CloudKit may become a replication substrate for app-owned records; it should
   not silently create a second planner or conflict resolver.
+- If CloudKit proceeds, assume a hybrid record shape: coarse authored workout
+  records where that remains under record limits, plus normalized app-owned
+  completion/result and sync-state records. Avoid one giant database blob and
+  avoid fully normalized CloudKit records before the first bridge proves it.
 - Cloudflare-protected endpoints may expose narrow APIs or callback receivers;
   they should not become a broad generic write proxy into personal data.
 
 Open decisions before implementation:
 
-- `SYNC-GAP-002`: Whether CloudKit supplements the home server or replaces it for Apple-device
-  sync. If the home server is replaced for a flow, the spike must name where
-  Claude writes plans, how those plans enter CloudKit, and how history returns
-  to Claude for analysis.
-- Which records belong in CloudKit first: planned workouts, exercises, local
-  results, user parameters, or only a small export/import envelope.
-- Whether immediate "start workout now" flows can tolerate CloudKit's
-  system-scheduled background sync, or need explicit fetch/send calls or the
-  existing REST path.
 - `SYNC-GAP-003`: Whether Cloudflare Access identity maps to app users, service capabilities,
   or both.
 - Whether the general endpoint should live inside this repo, beside the
   existing OAuth callback service, or as a separate personal gateway.
 
-Spike contracts:
+Spike contract if the Cloudflare lane is reopened:
 
-- **CloudKit replication spike:** prove one end-to-end record family using
-  explicit zones/change state, account availability handling, offline behavior,
-  conflict rules, and the Claude authoring/readback path. Non-goal: replacing
-  the server before the authority model is proven.
 - **Cloudflare Access endpoint spike:** expose one narrow loopback-only
   endpoint through Tunnel + Access, prove identity headers/JWT validation,
   audit logging, and capability boundaries. Non-goal: a broad generic write

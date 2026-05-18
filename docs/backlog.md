@@ -44,7 +44,7 @@ actually wants to author, and it creates the stable mapping surface for the
 WorkoutKit handoff lane.
 
 In parallel, short evidence or implementation slices can move on feedback app
-surfaces, WorkoutKit feasibility, and sync/auth spikes. Those lanes should stay
+surfaces, WorkoutKit feasibility, and sync/auth work. Those lanes should stay
 small: pick the gap cluster, prove it, then update the gaps.
 
 ## Lanes
@@ -64,8 +64,7 @@ small: pick the gap cluster, prove it, then update the gaps.
 | DesignSystem and accessibility foundation | Parallel foundation lane | `DS-GAP-001`, `DS-GAP-002`, `DS-GAP-003`, `DS-GAP-004` | Centralizes scalable type, accessibility metadata, hit targets, and material/glass posture before feature views keep diverging. | Update primitives first, then prove Active, Rest, edit sheets, and History with `snapshot_ui` plus Dynamic Type screenshots. |
 | Testing proof infrastructure | Parallel proof lane | `TEST-GAP-002`, `TEST-GAP-003`, `TEST-GAP-004`, `TEST-GAP-005` | Builds the app-hosted, lifecycle, runtime-cost, and object-lifetime harnesses that pre-QA needs before simulator/device QA can be trusted for boundary claims. The real HTTP sync harness for `TEST-GAP-001` now exists for primitive slot and aggregate result sync plus server-persistence proof and should be extended by future sync work when needed. | Promote when a selected implementation depends on a missing proof harness; otherwise keep the gap explicit. Feature-specific proof gaps stay in their feature lanes. |
 | Early WorkoutKit handoff | Evidence lane | `WATCHKIT-GAP-002`, `WATCHKIT-GAP-003` | Shorter Apple Watch path: push eligible workouts to Apple's Workout app, then reconcile completion facts. | The vendor-neutral export profile and fake-backed WorkoutKit classifier now exist as a pure package. Next prove real-device WorkoutKit open/schedule visibility and completion identity/readback before any user-facing export. |
-| CloudKit replication | Spike lane | `SYNC-GAP-002` | May reduce custom transport work if iCloud can move plan/result records reliably enough for the app and Claude readback. | Spike record families, authority, account model, conflict behavior, and readback proof. |
-| Cloudflare protected endpoint | Spike lane | `SYNC-GAP-003` | Reuses existing OAuth/Access posture for narrow app-facing sync or data endpoints when CloudKit is insufficient. | Spike one Access-protected endpoint and prove identity plus capability boundaries. |
+| Cloudflare protected endpoint | Spike lane | `SYNC-GAP-003` | Reuses existing OAuth/Access posture for narrow app-facing sync or data endpoints if REST-over-Tailscale becomes inconvenient or needs a safer external callback/API surface. | Spike one Access-protected endpoint and prove identity plus capability boundaries. |
 | Modifier and equipment modeling | Requirements lane | `MOD-GAP-001`, `MOD-GAP-002`, `MOD-GAP-004` | Captures variants, equipment, setup context, substitutions, and app-display-only behavior without premature schema changes. | Tighten authoring examples and schema justification before any schema work. |
 | In-app Claude | Requirements lane | `CHAT-GAP-001`, `CHAT-GAP-002`, `CHAT-GAP-003` | Future proposal/review/acceptance workflow for Claude-assisted changes inside the app. | Requirements and trust-boundary pass before implementation. |
 | Apple system surfaces / App Intents | Requirements lane | `APPINTENT-GAP-001`, `APPINTENT-GAP-002`, `APPINTENT-GAP-003`, `APPINTENT-GAP-004` | Future Shortcuts/Siri/Spotlight/widget/control entry points for opening WorkoutDB safely without app-side programming or accidental mutation. | Specify open-app handoff routes and entity identity first; defer mutation intents until persistence/sync/telemetry semantics are accepted. |

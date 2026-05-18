@@ -24,7 +24,7 @@ execution; edge packages vary.
 | `Core/Domain` | `Core/Foundation` | Plain Swift structs for the domain entities: `Workout`, `Block`, `WorkoutItem`, `SetLog`, `Exercise`, `ExerciseAlternative`, `UserParameter`. No SwiftData, no Foundation-network, no persistence. | ✅ | ✅ |
 | `Core/Prescription` | `Core/Foundation`, `Core/Domain` | Per-shape parsers for `prescription_json` and `timing_config_json`. Returns typed `Result` values. No computation — parsers only. See HS-3. | ✅ | ✅ |
 | `Core/Autoreg` | `Core/Foundation`, `Core/Domain`, `Core/Prescription` | Pure functions that compute autoreg proposals. `propose(prescribed:, logged:) -> AutoregProposal?`. No state, no I/O. | ✅ | ✅ |
-| `Core/Session` | `Core/Foundation`, `Core/Domain`, `Core/Prescription`, `Core/Autoreg` | Live-session state machine and canonical primitive runtime contract. Owns executable session state, cursor/route/log reducer behavior, primitive `ExecutionPlan`, primitive execution block/set/slot runtime values, log coordinates, and deterministic log identity helpers. No I/O. | ✅ | ✅ |
+| `Core/Session` | `Core/Foundation`, `Core/Domain`, `Core/Prescription`, `Core/Autoreg` | Live-session state machine and canonical primitive runtime contract. Owns executable session state, cursor/route/log reducer behavior, primitive `ExecutionPlan`, primitive execution block/set/slot runtime values, seed-time primitive load resolution, pre-start `SessionPreviewProjection` semantics, log coordinates, and deterministic log identity helpers. No I/O and no feature presentation strings. | ✅ | ✅ |
 | `Core/Foundation` | (none) | Pure utilities shared across Core packages: `Clock` protocol, ID generation, kg↔lb conversion, duration formatting. The **only** shared-utilities package allowed. | ✅ | ✅ |
 | `Core/Telemetry` | (none) | Pure value type `Event` + `TelemetryEmitter` protocol + process-stable `TelemetrySession.id`. Emitters are implemented in `Persistence`; the shape stays in Core so every layer can accept an emitter without pulling in storage. | ✅ | ✅ |
 | `DesignSystem` | `Core/Foundation` (for formatting helpers only) | Visual tokens (colors, type ramp, spacing, motion) and primitives (button, chip, pill, ring, keypad). No routing, no business rules. | ✅ | ✅ |
@@ -85,8 +85,10 @@ pending-set edits, long-press action menus, completion-ledger editing, or large
 History filters, create a small seam first:
 
 - visual-only primitives and accessibility behavior -> `DesignSystem`
-- execution cursor/timer/read-model behavior -> `Core/Session` or
-  `Features/Execution` projection
+- executable-session semantics, pre-start preview facts, primitive seed
+  resolution, and deterministic log identity -> `Core/Session`
+- live execution timers, route copy, and feature presentation read models ->
+  `Features/Execution`
 - cross-feature route selection -> `Shell`
 - feature-local sheet selection -> one `Identifiable` enum per feature surface,
   not multiple booleans in the view body

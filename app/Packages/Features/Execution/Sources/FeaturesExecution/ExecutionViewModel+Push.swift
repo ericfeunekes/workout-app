@@ -423,14 +423,16 @@ extension ExecutionViewModel {
         reps: Int? = nil,
         rounds: Int? = nil,
         durationSec: Double? = nil,
+        distanceM: Double? = nil,
+        weight: Double? = nil,
+        weightUnit: WeightUnit? = nil,
         completedAt: Date? = nil
     ) {
         guard let plan = context.primitiveExecutionPlan else { return }
         guard blockIndex >= 0, blockIndex < plan.blocks.count else { return }
         let block = plan.blocks[blockIndex]
         guard setIndexInBlock >= 0, setIndexInBlock < block.sets.count else { return }
-        primitiveSetLogs.append(PrimitiveSessionSeeder.setResultLog(
-            plan: plan,
+        primitiveSetLogs.append(plan.setResultLog(
             blockIndex: blockIndex,
             setIndexInBlock: setIndexInBlock,
             blockRepeatIndex: blockRepeatIndex,
@@ -438,6 +440,9 @@ extension ExecutionViewModel {
             reps: reps,
             rounds: rounds,
             durationSec: durationSec,
+            distanceM: distanceM,
+            weight: weight,
+            weightUnit: weightUnit,
             completedAt: completedAt ?? clock.now
         ))
         persist()
@@ -451,8 +456,7 @@ extension ExecutionViewModel {
     ) {
         guard let plan = context.primitiveExecutionPlan else { return }
         guard blockIndex >= 0, blockIndex < plan.blocks.count else { return }
-        primitiveSetLogs.append(PrimitiveSessionSeeder.blockResultLog(
-            plan: plan,
+        primitiveSetLogs.append(plan.blockResultLog(
             blockIndex: blockIndex,
             blockRepeatIndex: blockRepeatIndex,
             durationSec: durationSec,

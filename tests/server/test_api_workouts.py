@@ -122,6 +122,147 @@ def test_create_validates_primitive_blocks_at_ingest_boundary(client, test_engin
     assert readback.json()["primitive_blocks"] == body["primitive_blocks"]
 
 
+def test_create_accepts_legal_primitive_runtime_grid(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    cases = [
+        (
+            "set_bounded",
+            "sequential",
+            {"mode": "set_bounded"},
+            [],
+        ),
+        (
+            "set_bounded",
+            "round_robin",
+            {"mode": "set_bounded"},
+            [],
+        ),
+        (
+            "time_bounded",
+            "sequential",
+            {"mode": "time_bounded", "interval_sec": 60, "rounds": 3},
+            [],
+        ),
+        (
+            "time_bounded",
+            "round_robin",
+            {"mode": "time_bounded", "interval_sec": 60, "rounds": 3},
+            [],
+        ),
+        (
+            "time_bounded",
+            "amrap",
+            {"mode": "time_bounded", "interval_sec": 60, "rounds": 3},
+            [
+                {
+                    "metric": "rounds",
+                    "value_form": "open",
+                    "value": None,
+                    "role": "observation",
+                }
+            ],
+        ),
+        (
+            "cap_bounded",
+            "sequential",
+            {"mode": "cap_bounded", "cap_sec": 300},
+            [
+                {
+                    "metric": "duration",
+                    "value_form": "open",
+                    "value": None,
+                    "role": "observation",
+                }
+            ],
+        ),
+        (
+            "cap_bounded",
+            "round_robin",
+            {"mode": "cap_bounded", "cap_sec": 300},
+            [
+                {
+                    "metric": "duration",
+                    "value_form": "open",
+                    "value": None,
+                    "role": "observation",
+                }
+            ],
+        ),
+        (
+            "cap_bounded",
+            "amrap",
+            {"mode": "cap_bounded", "cap_sec": 300},
+            [
+                {
+                    "metric": "rounds",
+                    "value_form": "open",
+                    "value": None,
+                    "role": "observation",
+                }
+            ],
+        ),
+        (
+            "target_bounded",
+            "sequential",
+            {"mode": "target_bounded"},
+            [
+                {
+                    "metric": "reps",
+                    "value_form": "single",
+                    "value": 100,
+                    "role": "completion",
+                }
+            ],
+        ),
+        (
+            "target_bounded",
+            "round_robin",
+            {"mode": "target_bounded"},
+            [
+                {
+                    "metric": "reps",
+                    "value_form": "single",
+                    "value": 100,
+                    "role": "completion",
+                }
+            ],
+        ),
+    ]
+
+    for index, (mode, traversal, timing, work_target) in enumerate(cases, start=30):
+        payload = _workout_payload(exercise_id)
+        payload["primitive_blocks"] = [
+            {
+                "id": f"20000000-0000-4000-8000-0000000000{index}",
+                "sets": [
+                    {
+                        "id": f"30000000-0000-4000-8000-0000000000{index}",
+                        "timing": timing,
+                        "traversal": traversal,
+                        "work_target": work_target,
+                        "slots": [
+                            {
+                                "id": f"40000000-0000-4000-8000-0000000000{index}",
+                                "exercise_id": exercise_id,
+                                "work_target": [
+                                    {
+                                        "metric": "reps",
+                                        "value_form": "single",
+                                        "value": 10,
+                                        "role": "completion",
+                                    }
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+
+        response = client.post("/api/workouts", json=payload)
+        assert response.status_code == 200, (mode, traversal, response.text)
+
+
 def test_create_rejects_illegal_primitive_runtime_cell(client, test_engine) -> None:
     exercise_id = _seed_exercise(test_engine)
     payload = _workout_payload(exercise_id)
@@ -137,6 +278,163 @@ def test_create_rejects_illegal_primitive_runtime_cell(client, test_engine) -> N
                         {
                             "id": "40000000-0000-4000-8000-000000000002",
                             "exercise_id": exercise_id,
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422
+
+
+def test_create_rejects_target_bounded_amrap_primitive_runtime_cell(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(exercise_id)
+    payload["primitive_blocks"] = [
+        {
+            "id": "20000000-0000-4000-8000-000000000023",
+            "sets": [
+                {
+                    "id": "30000000-0000-4000-8000-000000000023",
+                    "timing": {"mode": "target_bounded"},
+                    "traversal": "amrap",
+                    "work_target": [
+                        {
+                            "metric": "reps",
+                            "value_form": "single",
+                            "value": 100,
+                            "role": "completion",
+                        }
+                    ],
+                    "slots": [
+                        {
+                            "id": "40000000-0000-4000-8000-000000000023",
+                            "exercise_id": exercise_id,
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422
+
+
+def test_create_rejects_amrap_rounds_target_without_observation_role(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(exercise_id)
+    payload["primitive_blocks"] = [
+        {
+            "id": "20000000-0000-4000-8000-000000000022",
+            "sets": [
+                {
+                    "id": "30000000-0000-4000-8000-000000000022",
+                    "timing": {"mode": "cap_bounded", "cap_sec": 300},
+                    "traversal": "amrap",
+                    "work_target": [
+                        {
+                            "metric": "rounds",
+                            "value_form": "open",
+                            "role": "completion",
+                        }
+                    ],
+                    "slots": [
+                        {
+                            "id": "40000000-0000-4000-8000-000000000022",
+                            "exercise_id": exercise_id,
+                        }
+                    ],
+                }
+            ],
+        }
+    ]
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422
+    assert "rounds observation" in response.text
+
+
+def test_create_rejects_time_bounded_missing_interval_or_rounds(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    for index, timing in enumerate(
+        [
+            {"mode": "time_bounded", "rounds": 3},
+            {"mode": "time_bounded", "interval_sec": 60},
+        ],
+        start=24,
+    ):
+        payload = _workout_payload(exercise_id)
+        payload["primitive_blocks"] = [
+            {
+                "id": f"20000000-0000-4000-8000-0000000000{index}",
+                "sets": [
+                    {
+                        "id": f"30000000-0000-4000-8000-0000000000{index}",
+                        "timing": timing,
+                        "traversal": "sequential",
+                        "slots": [
+                            {
+                                "id": f"40000000-0000-4000-8000-0000000000{index}",
+                                "exercise_id": exercise_id,
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+        response = client.post("/api/workouts", json=payload)
+        assert response.status_code == 422
+
+
+def test_create_rejects_zero_slot_set_bounded_primitive_set(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(exercise_id)
+    payload["primitive_blocks"] = [
+        {
+            "id": "20000000-0000-4000-8000-000000000026",
+            "sets": [
+                {
+                    "id": "30000000-0000-4000-8000-000000000026",
+                    "timing": {"mode": "set_bounded"},
+                    "traversal": "sequential",
+                    "slots": [],
+                }
+            ],
+        }
+    ]
+    response = client.post("/api/workouts", json=payload)
+    assert response.status_code == 422
+
+
+def test_create_rejects_ambiguous_primitive_slot_completion_targets(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(exercise_id)
+    payload["primitive_blocks"] = [
+        {
+            "id": "20000000-0000-4000-8000-000000000027",
+            "sets": [
+                {
+                    "id": "30000000-0000-4000-8000-000000000027",
+                    "timing": {"mode": "set_bounded"},
+                    "traversal": "sequential",
+                    "slots": [
+                        {
+                            "id": "40000000-0000-4000-8000-000000000027",
+                            "exercise_id": exercise_id,
+                            "work_target": [
+                                {
+                                    "metric": "distance",
+                                    "value_form": "single",
+                                    "value": 50,
+                                    "role": "completion",
+                                },
+                                {
+                                    "metric": "load_carried",
+                                    "value_form": "single",
+                                    "value": 60,
+                                    "role": "completion",
+                                },
+                            ],
                         }
                     ],
                 }

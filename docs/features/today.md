@@ -62,13 +62,18 @@ The selected workout remains the default execution target, but any preview for a
 - `percent_1rm` renders as integer percent, e.g. "4 × 5 @ 85% 1RM" (`PrescriptionLineFormatter.swift:32-35`, `:106-112`).
 - `amrapToken`, `setsDetail`, `empty` get best-effort fallbacks (`PrescriptionLineFormatter.swift:52-74`).
 
+Projection-backed current work, current-block remaining work, and upcoming work
+are rendered in the preview sheet when a primitive execution plan is available
+(`SessionPreviewProjection`, tested by
+`TodayViewModelTests.testWorkoutDetailUsesPrimitiveProjectionForPreviewSummary`).
+`TodayLoader` also loads primitive workouts and latest numeric user parameters
+so Today and Execution seed the same `Core/Session.ExecutionPlan` without a
+feature cross-import.
+
 ## Current gaps
 
 - `TODAY-GAP-002`: Preview tap targets and Start affordance need simulator
   proof before the feature can be marked `verified`.
-- `TODAY-GAP-003`: Current-block remaining work is projection-backed on
-  Execution's next-up preview, but not yet rendered in Today's preview/detail
-  sheet.
 
 ## Deliberate non-goals
 

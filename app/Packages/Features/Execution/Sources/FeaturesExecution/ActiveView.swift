@@ -18,6 +18,7 @@ import UIKit
 import Combine
 import CoreAutoreg
 import CoreDomain
+import CoreSession
 import DesignSystem
 import WorkoutCoreFoundation
 
@@ -129,6 +130,11 @@ struct ActiveView: View {
             }
         } message: {
             Text("Unlogged sets won't be recorded. You can still save & done.")
+        }
+        .onChange(of: viewModel.state.route) { oldRoute, newRoute in
+            if ActiveView.shouldDismissEndConfirmation(oldRoute: oldRoute, newRoute: newRoute) {
+                showEndConfirm = false
+            }
         }
     }
 
@@ -341,6 +347,13 @@ struct ActiveView: View {
     static func shouldRenderBlockProgress(_ progress: BlockProgressPresentation?) -> Bool {
         guard let progress else { return false }
         return progress.totalSets > 0
+    }
+
+    static func shouldDismissEndConfirmation(
+        oldRoute: SessionState.Route,
+        newRoute: SessionState.Route
+    ) -> Bool {
+        oldRoute != newRoute
     }
 
     static func blockProgressSummary(_ progress: BlockProgressPresentation) -> String {

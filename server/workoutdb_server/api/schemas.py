@@ -379,6 +379,13 @@ class PrimitiveSlotIn(_UuidInputBase):
     post_rest_sec: int = 0
     is_warmup: bool = False
 
+    @model_validator(mode="after")
+    def _completion_target_is_unambiguous(self) -> "PrimitiveSlotIn":
+        completion_count = sum(1 for target in self.work_target if target.role == "completion")
+        if completion_count > 1:
+            raise ValueError("primitive slots may not define multiple completion work_targets")
+        return self
+
 
 class PrimitiveSetIn(_UuidInputBase):
     id: str
@@ -396,9 +403,14 @@ class PrimitiveSetIn(_UuidInputBase):
         if not self.slots and self.timing.mode not in {"time_bounded", "cap_bounded"}:
             raise ValueError("zero-slot primitive sets require time_bounded or cap_bounded timing")
         if self.timing.mode == "cap_bounded" and self.traversal == "amrap":
-            has_rounds = any(target.metric == "rounds" for target in self.work_target)
+            has_rounds = any(
+                target.metric == "rounds" and target.role == "observation"
+                for target in self.work_target
+            )
             if not has_rounds:
-                raise ValueError("cap_bounded x amrap requires a set-level rounds work_target")
+                raise ValueError(
+                    "cap_bounded x amrap requires a set-level rounds observation work_target"
+                )
         if self.timing.mode == "cap_bounded" and self.traversal != "amrap" and self.slots:
             has_duration = any(
                 target.role == "observation" and target.metric == "duration"

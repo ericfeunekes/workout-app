@@ -7,6 +7,7 @@
 import Foundation
 import CoreDomain
 import CoreSession
+import WorkoutCoreFoundation
 
 public struct CurrentTaskPresentation: Equatable, Sendable {
     public enum Kind: Equatable, Sendable {
@@ -283,6 +284,25 @@ extension ExecutionViewModel {
         block: Block?,
         content: ActiveContent?
     ) -> CurrentTaskPresentation {
+        if let preview = sessionPreviewProjection(),
+           let current = preview.current {
+            let previewBlock = context.block(at: current.blockIndex)
+            let exerciseName = context.exercises[current.exerciseID]?.name ?? "(unknown exercise)"
+            return CurrentTaskPresentation(
+                kind: .today,
+                blockIndex: current.blockIndex,
+                blockCount: context.blocks.count,
+                blockName: previewBlock?.name,
+                blockIntent: previewBlock?.intent,
+                exerciseName: exerciseName,
+                title: exerciseName,
+                detail: previewDetail(for: current),
+                primaryMetric: primaryMetric(for: current),
+                secondaryMetric: secondaryMetric(for: current),
+                side: .bilateral,
+                skipped: false
+            )
+        }
         if isZeroItemBlock(at: state.cursor.blockIndex) {
             return CurrentTaskPresentation(
                 kind: .today,
@@ -319,6 +339,15 @@ extension ExecutionViewModel {
     }
 
     private func remainingWorkPresentation() -> RemainingWorkPresentation {
+        if state.route == .today,
+           let preview = sessionPreviewProjection(),
+           case .bounded(let completed, let total) = preview.remaining {
+            return RemainingWorkPresentation(
+                completedSets: completed,
+                totalSets: total,
+                remainingSets: max(0, total - completed)
+            )
+        }
         let counts = context.itemsByBlock.enumerated().reduce((completed: 0, total: 0)) { partial, entry in
             let blockIndex = entry.offset
             guard let block = context.block(at: blockIndex),
@@ -352,6 +381,17 @@ extension ExecutionViewModel {
     private func workQueuePresentation() -> [UpcomingWorkPresentation] {
         guard state.route == .today || state.route == .active || state.route == .rest else {
             return []
+        }
+
+        if state.route == .today,
+           let preview = sessionPreviewProjection() {
+            return preview.upcoming.map { work in
+                UpcomingWorkPresentation(
+                    label: work.blockIndex == state.cursor.blockIndex ? "current block" : "future block",
+                    title: context.exercises[work.exerciseID]?.name ?? "(unknown exercise)",
+                    detail: previewDetail(for: work)
+                )
+            }
         }
 
         var rows: [UpcomingWorkPresentation] = []
@@ -481,6 +521,9 @@ extension ExecutionViewModel {
     }
 
     private func primaryMetric(for content: ActiveContent) -> String? {
+        if let slot = primitiveSlotForCurrentCursor() {
+            return primitivePrimaryMetric(slot: slot, content: content)
+        }
         switch content.kind {
         case .strength:
             return content.loadDisplay
@@ -490,6 +533,12 @@ extension ExecutionViewModel {
     }
 
     private func secondaryMetric(for content: ActiveContent) -> String? {
+        if let slot = primitiveSlotForCurrentCursor() {
+            let parts = primitiveSecondaryMetrics(slot: slot, content: content)
+            if !parts.isEmpty {
+                return parts.joined(separator: " · ")
+            }
+        }
         switch content.kind {
         case .strength:
             return "\(content.repsDisplay) reps"
@@ -520,7 +569,116 @@ extension ExecutionViewModel {
     }
 
     private func usesUnboundedSetCount(_ block: Block) -> Bool {
-        block.timingMode == .amrap || block.timingMode == .emom || block.timingMode == .accumulate
+        if let index = context.blocks.firstIndex(where: { $0.id == block.id }),
+           let primitiveBlock = context.primitiveExecutionPlan?.blocks[safe: index],
+           primitiveBlock.sets.contains(where: { !$0.allowsVisibleSetProgressTotal }) {
+            return true
+        }
+        return block.timingMode == .amrap || block.timingMode == .emom || block.timingMode == .accumulate
+    }
+
+    private func primitivePrimaryMetric(slot: ExecutionSlot, content: ActiveContent) -> String? {
+        guard let target = slot.primaryDisplayTarget else {
+            return content.kind == .strength ? content.loadDisplay : content.repsDisplay
+        }
+        if target.metric == .reps || target.metric == .completion {
+            return content.loadDisplay
+        }
+        return primitiveDisplayText(for: target, slot: slot)
+    }
+
+    private func primitiveSecondaryMetrics(slot: ExecutionSlot, content: ActiveContent) -> [String] {
+        guard let primary = slot.primaryDisplayTarget else { return [] }
+        var parts: [String] = []
+        if primary.metric == .reps || primary.metric == .completion {
+            parts.append(primitiveDisplayText(for: primary, slot: slot))
+        } else if content.kind == .strength {
+            parts.append(content.loadDisplay)
+        }
+        parts.append(contentsOf: slot.secondaryDisplayTargets.map { primitiveDisplayText(for: $0, slot: slot) })
+        return parts.removingAdjacentDuplicates()
+    }
+
+    private func primitiveDisplayText(for target: PrimitiveWorkTarget, slot: ExecutionSlot) -> String {
+        guard target.metric == .loadCarried,
+              let value = target.value else {
+            return displayText(for: target)
+        }
+        let formatted = value.rounded() == value ? String(Int(value)) : String(format: "%.2f", value)
+        return "\(formatted) \(slot.loadUnit?.rawValue ?? "load")"
+    }
+
+    private func primitiveSlotForCurrentCursor() -> ExecutionSlot? {
+        let cursor = state.cursor
+        guard let block = context.primitiveExecutionPlan?.blocks[safe: cursor.blockIndex],
+              let currentItem = context.item(at: cursor.blockIndex, itemIndex: cursor.itemIndex) else {
+            return nil
+        }
+        let itemCount = context.itemsByBlock[safe: cursor.blockIndex]?.count ?? 0
+        return block.slotForLegacyCursor(
+            itemIndex: cursor.itemIndex,
+            exerciseID: currentItem.exerciseID,
+            itemCount: itemCount
+        )
+    }
+
+    private func sessionPreviewProjection() -> SessionPreviewProjection? {
+        guard let plan = context.primitiveExecutionPlan else { return nil }
+        return SessionPreviewProjection(plan: plan, cursor: state.cursor)
+    }
+
+    private func primaryMetric(for work: SessionPreviewWork) -> String? {
+        guard let target = work.primaryDisplayTarget else {
+            return loadDisplay(for: work)
+        }
+        if target.metric == .reps || target.metric == .completion {
+            return loadDisplay(for: work)
+        }
+        return primitiveDisplayText(for: target, work: work)
+    }
+
+    private func secondaryMetric(for work: SessionPreviewWork) -> String? {
+        guard let primary = work.primaryDisplayTarget else { return nil }
+        var parts: [String] = []
+        if primary.metric == .reps || primary.metric == .completion {
+            if let text = primitiveDisplayText(for: primary, work: work) {
+                parts.append(text)
+            }
+        } else if let load = loadDisplay(for: work) {
+            parts.append(load)
+        }
+        parts.append(contentsOf: work.secondaryDisplayTargets.compactMap {
+            primitiveDisplayText(for: $0, work: work)
+        })
+        return parts.removingAdjacentDuplicates().joined(separator: " · ").nilIfEmpty
+    }
+
+    private func previewDetail(for work: SessionPreviewWork) -> String? {
+        [primaryMetric(for: work), secondaryMetric(for: work)]
+            .compactMap { $0 }
+            .removingAdjacentDuplicates()
+            .joined(separator: " · ")
+            .nilIfEmpty
+    }
+
+    private func primitiveDisplayText(
+        for target: PrimitiveWorkTarget,
+        work: SessionPreviewWork
+    ) -> String? {
+        guard target.metric == .loadCarried,
+              let value = target.value else {
+            return displayText(for: target)
+        }
+        let formatted = value.rounded() == value ? String(Int(value)) : String(format: "%.2f", value)
+        return "\(formatted) \(work.loadUnit?.rawValue ?? "load")"
+    }
+
+    private func loadDisplay(for work: SessionPreviewWork) -> String? {
+        guard let weightUnit = work.loadUnit,
+              let unit = LoadUnit(rawValue: weightUnit.rawValue) else {
+            return nil
+        }
+        return formatLoad(weight: work.loadDisplayValue ?? work.loadKg, unit: unit)
     }
 
     private func isZeroItemBlock(at blockIndex: Int) -> Bool {
@@ -541,5 +699,21 @@ private extension Array {
     subscript(safe index: Int) -> Element? {
         guard index >= 0, index < count else { return nil }
         return self[index]
+    }
+}
+
+private extension Array where Element == String {
+    func removingAdjacentDuplicates() -> [String] {
+        reduce(into: []) { result, value in
+            if result.last != value {
+                result.append(value)
+            }
+        }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }

@@ -44,6 +44,10 @@ struct WorkoutPreviewView: View {
 
                     detailHeader
 
+                    if let preview = detail.preview {
+                        previewCard(preview)
+                    }
+
                     ForEach(detail.blocks) { block in
                         blockDetailCard(block)
                     }
@@ -123,6 +127,61 @@ struct WorkoutPreviewView: View {
                         .font(DSTypography.caption)
                         .foregroundStyle(DSColors.accentInk)
                         .accessibilityIdentifier("today.adjustment.copied")
+                }
+            }
+        }
+    }
+
+    private func previewCard(_ preview: TodayViewModel.PreviewSummary) -> some View {
+        DSCard {
+            VStack(alignment: .leading, spacing: DSSpacing.md) {
+                Text("Current block")
+                    .font(DSTypography.caption)
+                    .tracking(1.2)
+                    .foregroundStyle(DSColors.accentInk)
+
+                VStack(alignment: .leading, spacing: DSSpacing.xs) {
+                    Text(preview.currentTitle)
+                        .font(DSTypography.title)
+                        .foregroundStyle(DSColors.foreground)
+
+                    if let currentDetail = preview.currentDetail {
+                        Text(currentDetail)
+                            .font(DSTypography.mono)
+                            .foregroundStyle(DSColors.foregroundDim)
+                    }
+
+                    if let blockIntent = preview.blockIntent {
+                        Text(blockIntent)
+                            .font(DSTypography.caption)
+                            .foregroundStyle(DSColors.foregroundMuted)
+                    }
+
+                    if let remainingLine = preview.remainingLine {
+                        Text(remainingLine)
+                            .font(DSTypography.caption)
+                            .foregroundStyle(DSColors.foregroundMuted)
+                    }
+                }
+
+                if !preview.upcoming.isEmpty {
+                    DSDivider()
+                    VStack(alignment: .leading, spacing: DSSpacing.sm) {
+                        ForEach(preview.upcoming) { row in
+                            HStack(alignment: .firstTextBaseline, spacing: DSSpacing.md) {
+                                Text(row.title)
+                                    .font(DSTypography.body)
+                                    .foregroundStyle(DSColors.foreground)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                                if let detail = row.detail {
+                                    Text(detail)
+                                        .font(DSTypography.mono)
+                                        .foregroundStyle(DSColors.foregroundDim)
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }

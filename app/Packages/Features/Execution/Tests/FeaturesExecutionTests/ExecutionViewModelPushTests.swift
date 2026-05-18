@@ -12,6 +12,7 @@
 
 import XCTest
 import CoreDomain
+import CoreSession
 import CoreTelemetry
 import WorkoutCoreFoundation
 @testable import FeaturesExecution
@@ -472,7 +473,7 @@ private enum PushTestFixtures {
                 ]),
             ]
         )
-        let plan = try! PrimitiveSessionSeeder.seed(workout: primitive)
+        let plan = try! ExecutionPlan.validated(workout: primitive)
         return WorkoutContext(
             workout: workout,
             primitiveWorkout: primitive,

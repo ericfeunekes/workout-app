@@ -29,6 +29,7 @@
 
 import XCTest
 import CoreDomain
+import CoreSession
 import WorkoutCoreFoundation
 @testable import FeaturesExecution
 
@@ -460,6 +461,13 @@ final class ExecutionViewModelTickBlockTimerTests: XCTestCase {
             source.contains("guard !showEndConfirm else { return }"),
             "RestView must not pause clock-owned timers while the End confirmation is visible"
         )
+    }
+
+    func testEndConfirmationInvalidatesAcrossIntervalRouteBoundaries() {
+        XCTAssertTrue(ActiveView.shouldDismissEndConfirmation(oldRoute: .active, newRoute: .rest))
+        XCTAssertTrue(RestView.shouldDismissEndConfirmation(oldRoute: .rest, newRoute: .active))
+        XCTAssertFalse(ActiveView.shouldDismissEndConfirmation(oldRoute: .active, newRoute: .active))
+        XCTAssertFalse(RestView.shouldDismissEndConfirmation(oldRoute: .rest, newRoute: .rest))
     }
 
     func testActiveViewScopesSwapLongPressAwayFromTimerHero() throws {

@@ -63,6 +63,12 @@ public struct TodayLoader: Sendable {
         }
 
         let blocks = try await cache.loadBlocks(workoutID: workout.id)
+        let primitiveWorkouts = try await cache.loadPrimitiveWorkouts()
+        let primitiveWorkout = primitiveWorkouts.first { $0.id == workout.id }
+        let userParameters = try await numericUserParameters()
+        let primitivePlan = try primitiveWorkout.map {
+            try ExecutionPlan.validated(workout: $0, userParameters: userParameters)
+        }
 
         var items: [WorkoutItem] = []
         for block in blocks {
@@ -92,12 +98,15 @@ public struct TodayLoader: Sendable {
 
         return TodayContext(
             workout: workout,
+            primitiveWorkout: primitiveWorkout,
+            primitiveExecutionPlan: primitivePlan,
             blocks: blocks,
             items: items,
             exercises: exercises,
             lastPerformed: resolvedLastPerformed,
             lastSessionSummary: lastSessionSummary,
             programTags: programTags,
+            userParameters: userParameters,
             sessionStateBinding: sessionStateBinding
         )
     }
@@ -119,9 +128,13 @@ public struct TodayLoader: Sendable {
         }
 
         let orderedWorkouts = Self.sortPlanQueue(to: now, workouts: planned)
+        let primitiveWorkouts = try await cache.loadPrimitiveWorkouts()
+        let userParameters = try await numericUserParameters()
         let contexts = try await contextsForWorkouts(
             orderedWorkouts,
             selectedWorkoutID: selectedWorkout.id,
+            primitiveWorkouts: primitiveWorkouts,
+            userParameters: userParameters,
             lastPerformed: lastPerformed,
             lastSessionSummary: lastSessionSummary,
             programTags: programTags,
@@ -184,6 +197,8 @@ public struct TodayLoader: Sendable {
     private func contextsForWorkouts(
         _ workouts: [Workout],
         selectedWorkoutID: WorkoutID,
+        primitiveWorkouts: [PrimitiveWorkout],
+        userParameters: [String: Double],
         lastPerformed: [UUID: String]?,
         lastSessionSummary: String?,
         programTags: [String],
@@ -211,19 +226,26 @@ public struct TodayLoader: Sendable {
         )
         let resolvedLastPerformed = await resolveLastPerformed(lastPerformed)
 
-        return workouts.map { workout in
+        return try workouts.map { workout in
             let blocks = blocksByWorkout[workout.id] ?? []
             let items = blocks
                 .sorted { $0.position < $1.position }
                 .flatMap { itemsByBlock[$0.id] ?? [] }
+            let primitiveWorkout = primitiveWorkouts.first { $0.id == workout.id }
+            let primitivePlan = try primitiveWorkout.map {
+                try ExecutionPlan.validated(workout: $0, userParameters: userParameters)
+            }
             return TodayContext(
                 workout: workout,
+                primitiveWorkout: primitiveWorkout,
+                primitiveExecutionPlan: primitivePlan,
                 blocks: blocks,
                 items: items,
                 exercises: exercises,
                 lastPerformed: resolvedLastPerformed,
                 lastSessionSummary: workout.id == selectedWorkoutID ? lastSessionSummary : nil,
                 programTags: programTags,
+                userParameters: userParameters,
                 sessionStateBinding: sessionStateBinding
             )
         }
@@ -237,5 +259,16 @@ public struct TodayLoader: Sendable {
         } else {
             return [:]
         }
+    }
+
+    private func numericUserParameters() async throws -> [String: Double] {
+        let rawParams = try await cache.loadUserParametersLatest()
+        var numeric: [String: Double] = [:]
+        for (key, param) in rawParams {
+            if let value = Double(param.value) {
+                numeric[key] = value
+            }
+        }
+        return numeric
     }
 }

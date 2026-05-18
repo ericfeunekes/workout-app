@@ -285,6 +285,106 @@ final class TodayViewModelTests: XCTestCase {
         XCTAssertEqual(detail.blocks[0].exercises.first?.lastTime, "3×8 @ 75 kg")
     }
 
+    func testWorkoutDetailUsesPrimitiveProjectionForPreviewSummary() throws {
+        let workoutID = UUID()
+        let blockID = UUID()
+        let primitiveSetID = UUID()
+        let benchSlotID = UUID()
+        let rowSlotID = UUID()
+        let benchID = UUID()
+        let rowID = UUID()
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let workout = Workout(
+            id: workoutID,
+            userID: UUID(),
+            name: "Primitive Preview",
+            scheduledDate: now,
+            status: .planned,
+            source: .claude,
+            notes: nil,
+            createdAt: now,
+            updatedAt: now,
+            completedAt: nil,
+            tagsJSON: nil
+        )
+        let block = Block(
+            id: blockID,
+            workoutID: workoutID,
+            position: 0,
+            name: "A-series",
+            timingMode: .superset,
+            timingConfigJSON: #"{"rounds":2}"#,
+            rounds: 2,
+            intent: "Keep transitions crisp."
+        )
+        let primitiveWorkout = PrimitiveWorkout(
+            id: workoutID,
+            name: "Primitive Preview",
+            blocks: [
+                PrimitiveBlock(id: blockID, sets: [
+                    PrimitiveSet(
+                        id: primitiveSetID,
+                        timing: .init(mode: .setBounded),
+                        traversal: .roundRobin,
+                        repeatCount: 2,
+                        slots: [
+                            PrimitiveSlot(
+                                id: benchSlotID,
+                                exerciseID: benchID,
+                                workTargets: [
+                                    .init(
+                                        metric: .reps,
+                                        valueForm: .single,
+                                        value: 5,
+                                        role: .completion
+                                    ),
+                                ],
+                                load: .init(value: 100, unit: .kg, unitType: .absolute)
+                            ),
+                            PrimitiveSlot(
+                                id: rowSlotID,
+                                exerciseID: rowID,
+                                workTargets: [
+                                    .init(
+                                        metric: .reps,
+                                        valueForm: .single,
+                                        value: 8,
+                                        role: .completion
+                                    ),
+                                ]
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        let context = TodayContext(
+            workout: workout,
+            primitiveWorkout: primitiveWorkout,
+            primitiveExecutionPlan: try ExecutionPlan.validated(workout: primitiveWorkout),
+            blocks: [block],
+            items: [],
+            exercises: [
+                benchID: Exercise(id: benchID, name: "Bench Press"),
+                rowID: Exercise(id: rowID, name: "Row"),
+            ],
+            lastPerformed: [:]
+        )
+
+        let vm = TodayViewModel(
+            planContext: TodayPlanContext(selected: context, workouts: [context])
+        )
+        let detail = try XCTUnwrap(vm.detail(for: workoutID))
+        let preview = try XCTUnwrap(detail.preview)
+
+        XCTAssertEqual(preview.currentTitle, "Bench Press")
+        XCTAssertEqual(preview.currentDetail, "100 kg · 5 reps")
+        XCTAssertEqual(preview.blockIntent, "Keep transitions crisp.")
+        XCTAssertEqual(preview.remainingLine, "2 sets left in current block of 2")
+        XCTAssertEqual(preview.upcoming.map(\.title), ["Row", "Bench Press", "Row"])
+        XCTAssertEqual(preview.upcoming.map(\.detail), ["8 reps", "100 kg · 5 reps", "8 reps"])
+    }
+
     func testAdjustmentDraftIncludesWorkoutContext() throws {
         let workoutID = UUID()
         let blockID = UUID()

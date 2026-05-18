@@ -15,6 +15,7 @@ struct AMRAPPartialResultItem: Identifiable, Equatable {
     let id: UUID
     let name: String
     let prescription: String
+    let resultLabel: String
     let state: State
 }
 
@@ -98,7 +99,7 @@ struct MetconResultSheet: View {
                     .foregroundStyle(DSColors.accentInk)
                     .accessibilityLabel("\(item.name) completed")
             case .current:
-                counterControls(label: item.name)
+                counterControls(label: item.name, resultLabel: item.resultLabel)
             case .locked:
                 Text("—")
                     .font(.system(size: 32, weight: .light, design: .monospaced))
@@ -115,7 +116,7 @@ struct MetconResultSheet: View {
         }
     }
 
-    private func counterControls(label: String) -> some View {
+    private func counterControls(label: String, resultLabel: String) -> some View {
         HStack(spacing: DSSpacing.md) {
             Button {
                 extraReps = max(0, extraReps - 1)
@@ -127,7 +128,7 @@ struct MetconResultSheet: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("decrease \(label) reps")
+            .accessibilityLabel("decrease \(label) \(resultLabel)")
 
             Text("\(extraReps)")
                 .font(.system(size: 36, weight: .light, design: .monospaced))
@@ -145,7 +146,7 @@ struct MetconResultSheet: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityLabel("increase \(label) reps")
+            .accessibilityLabel("increase \(label) \(resultLabel)")
         }
     }
 

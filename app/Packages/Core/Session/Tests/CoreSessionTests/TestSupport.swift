@@ -59,6 +59,24 @@ func expectEqual<T: Equatable>(
     }
 }
 
+func expectApprox(
+    _ lhs: Double,
+    _ rhs: Double,
+    accuracy: Double,
+    _ message: @autoclosure () -> String = "",
+    file: StaticString = #file,
+    line: UInt = #line
+) throws {
+    if abs(lhs - rhs) > accuracy {
+        let prefix = message().isEmpty ? "not approximately equal" : message()
+        throw ExpectationFailure(
+            message: "\(prefix): \(lhs) != \(rhs) +/- \(accuracy)",
+            file: file,
+            line: line
+        )
+    }
+}
+
 func reportAndExit() -> Never {
     let failed = TestHarness.failures.count
     let run = TestHarness.runCount

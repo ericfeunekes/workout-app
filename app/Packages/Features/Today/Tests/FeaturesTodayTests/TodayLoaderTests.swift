@@ -6,6 +6,7 @@
 
 import XCTest
 import CoreDomain
+import CoreSession
 import Persistence
 import WorkoutCoreFoundation
 @testable import FeaturesToday
@@ -64,6 +65,89 @@ final class TodayLoaderTests: XCTestCase {
         XCTAssertEqual(unwrapped.exercises.count, 2)
         XCTAssertNotNil(unwrapped.exercises[benchID])
         XCTAssertNotNil(unwrapped.exercises[rowID])
+    }
+
+    func testLoadAttachesPrimitiveWorkoutPlanAndNumericUserParameters() async throws {
+        let userID = UUID()
+        let blockID = UUID()
+        let exerciseID = UUID()
+        let scheduledDate = Date(timeIntervalSince1970: 1_700_000_000)
+        let workout = makeWorkout(userID: userID, name: "Primitive Push", scheduledDate: scheduledDate)
+        let block = Block(
+            id: blockID,
+            workoutID: workout.id,
+            parentBlockID: nil,
+            position: 0,
+            name: "Strength",
+            timingMode: .straightSets,
+            timingConfigJSON: "{}",
+            rounds: nil,
+            roundsRepSchemeJSON: nil,
+            notes: nil
+        )
+        let item = WorkoutItem(
+            id: UUID(),
+            blockID: blockID,
+            position: 0,
+            exerciseID: exerciseID,
+            prescriptionJSON: #"{"sets":3,"reps":5,"percent_1rm":0.8}"#
+        )
+        let primitive = PrimitiveWorkout(
+            id: workout.id,
+            name: workout.name,
+            blocks: [
+                PrimitiveBlock(id: blockID, sets: [
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: .init(mode: .setBounded),
+                        slots: [
+                            PrimitiveSlot(
+                                id: UUID(),
+                                exerciseID: exerciseID,
+                                workTargets: [
+                                    .init(metric: .reps, valueForm: .single, value: 5, role: .completion),
+                                ],
+                                load: .init(value: 0.8, unit: .oneRepMax, unitType: .relative)
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        let parameterKey = "one_rep_max_\(exerciseID.uuidString.lowercased())_kg"
+        let fake = FakeCache(
+            workouts: [workout],
+            blocks: [workout.id: [block]],
+            items: [blockID: [item]],
+            exercises: [Exercise(id: exerciseID, name: "Bench")],
+            primitiveWorkouts: [primitive],
+            userParameters: [
+                parameterKey: UserParameter(
+                    id: UUID(),
+                    userID: userID,
+                    key: parameterKey,
+                    value: "150",
+                    updatedAt: scheduledDate,
+                    source: .manual
+                ),
+                "ignored": UserParameter(
+                    id: UUID(),
+                    userID: userID,
+                    key: "ignored",
+                    value: "not numeric",
+                    updatedAt: scheduledDate,
+                    source: .manual
+                ),
+            ]
+        )
+        let loader = TodayLoader(cache: fake, clock: { scheduledDate })
+
+        let loaded = try await loader.load()
+        let ctx = try XCTUnwrap(loaded)
+
+        XCTAssertEqual(ctx.primitiveWorkout, primitive)
+        XCTAssertEqual(ctx.userParameters, [parameterKey: 150])
+        XCTAssertEqual(ctx.primitiveExecutionPlan?.blocks[0].sets[0].slots[0].loadKg, 120)
     }
 
     func testLoadReturnsNilWhenNoPlannedWorkout() async throws {
@@ -155,17 +239,23 @@ private final class FakeCache: WorkoutCache, @unchecked Sendable {
     private let blocksByWorkout: [UUID: [Block]]
     private let itemsByBlock: [UUID: [WorkoutItem]]
     private let exercises: [Exercise]
+    private let primitiveWorkouts: [PrimitiveWorkout]
+    private let userParameters: [String: UserParameter]
 
     init(
         workouts: [Workout],
         blocks: [UUID: [Block]],
         items: [UUID: [WorkoutItem]],
-        exercises: [Exercise]
+        exercises: [Exercise],
+        primitiveWorkouts: [PrimitiveWorkout] = [],
+        userParameters: [String: UserParameter] = [:]
     ) {
         self.workouts = workouts
         self.blocksByWorkout = blocks
         self.itemsByBlock = items
         self.exercises = exercises
+        self.primitiveWorkouts = primitiveWorkouts
+        self.userParameters = userParameters
     }
 
     func save(_ dataset: PulledDataset) async throws {}
@@ -175,7 +265,7 @@ private final class FakeCache: WorkoutCache, @unchecked Sendable {
         return workouts.filter { $0.status == status }
     }
 
-    func loadPrimitiveWorkouts() async throws -> [PrimitiveWorkout] { [] }
+    func loadPrimitiveWorkouts() async throws -> [PrimitiveWorkout] { primitiveWorkouts }
 
     func loadBlocks(workoutID: WorkoutID) async throws -> [Block] {
         blocksByWorkout[workoutID] ?? []
@@ -209,9 +299,7 @@ private final class FakeCache: WorkoutCache, @unchecked Sendable {
         exercises
     }
 
-    func loadUserParametersLatest() async throws -> [String: UserParameter] {
-        [:]
-    }
+    func loadUserParametersLatest() async throws -> [String: UserParameter] { userParameters }
 
     func loadUserParameters(key: String) async throws -> [UserParameter] {
         []

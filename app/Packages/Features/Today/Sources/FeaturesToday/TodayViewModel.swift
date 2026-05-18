@@ -93,7 +93,22 @@ public final class TodayViewModel {
         public let sectionTitle: String
         public let tagLine: String?
         public let notes: String?
+        public let preview: PreviewSummary?
         public let blocks: [BlockDetail]
+    }
+
+    public struct PreviewSummary: Equatable, Sendable {
+        public let currentTitle: String
+        public let currentDetail: String?
+        public let blockIntent: String?
+        public let remainingLine: String?
+        public let upcoming: [PreviewUpcoming]
+    }
+
+    public struct PreviewUpcoming: Identifiable, Equatable, Sendable {
+        public let id: String
+        public let title: String
+        public let detail: String?
     }
 
     public struct BlockDetail: Identifiable, Equatable, Sendable {
@@ -462,6 +477,7 @@ public final class TodayViewModel {
                 sectionTitle: section.title,
                 tagLine: tagLine(from: workoutContext.workout.tagsJSON),
                 notes: workoutContext.workout.notes,
+                preview: derivePreviewSummary(from: workoutContext),
                 blocks: deriveBlockDetails(from: workoutContext)
             )
             return (detail.id, detail)
@@ -578,6 +594,81 @@ public final class TodayViewModel {
                 notes: block.notes,
                 exercises: items.map { exerciseSummary(for: $0, in: context) }
             )
+        }
+    }
+
+    private static func derivePreviewSummary(from context: TodayContext) -> PreviewSummary? {
+        guard let plan = context.primitiveExecutionPlan else { return nil }
+        let projection = SessionPreviewProjection(plan: plan)
+        guard let current = projection.current else { return nil }
+
+        return PreviewSummary(
+            currentTitle: exerciseName(for: current.exerciseID, in: context),
+            currentDetail: previewDetail(for: current),
+            blockIntent: projection.currentBlock.flatMap { block in
+                context.blocks[safe: block.blockIndex]?.intent
+            },
+            remainingLine: remainingLine(for: projection.remaining),
+            upcoming: projection.upcoming.map { upcoming in
+                PreviewUpcoming(
+                    id: "\(upcoming.blockID.uuidString)-\(upcoming.setID.uuidString)-\(upcoming.slotID.uuidString)-\(upcoming.setRepeatIndex)",
+                    title: exerciseName(for: upcoming.exerciseID, in: context),
+                    detail: previewDetail(for: upcoming)
+                )
+            }
+        )
+    }
+
+    private static func exerciseName(for exerciseID: ExerciseID, in context: TodayContext) -> String {
+        context.exercises[exerciseID]?.name ?? "(unknown exercise)"
+    }
+
+    private static func remainingLine(for remaining: SessionPreviewRemaining) -> String? {
+        switch remaining {
+        case .bounded(_, let total):
+            guard let left = remaining.remaining else { return nil }
+            return "\(left) \(left == 1 ? "set" : "sets") left in current block of \(total)"
+        case .unbounded:
+            return "open-ended current block"
+        }
+    }
+
+    private static func previewDetail(for work: SessionPreviewWork) -> String? {
+        var parts: [String] = []
+        if let load = loadText(for: work) {
+            parts.append(load)
+        }
+        if let primary = work.primaryDisplayTarget,
+           let text = targetText(primary, loadUnit: work.loadUnit) {
+            parts.append(text)
+        }
+        parts.append(contentsOf: work.secondaryDisplayTargets.compactMap {
+            targetText($0, loadUnit: work.loadUnit)
+        })
+        return parts.removingAdjacentDuplicates().joined(separator: " · ").nilIfEmpty
+    }
+
+    private static func loadText(for work: SessionPreviewWork) -> String? {
+        guard let weightUnit = work.loadUnit,
+              let unit = LoadUnit(rawValue: weightUnit.rawValue) else { return nil }
+        return formatLoad(weight: work.loadDisplayValue ?? work.loadKg, unit: unit)
+    }
+
+    private static func targetText(_ target: PrimitiveWorkTarget, loadUnit: WeightUnit?) -> String? {
+        switch target.metric {
+        case .reps:
+            return target.value.map { "\(formatDecimal($0)) reps" }
+        case .duration:
+            return target.value.map { formatDuration(seconds: $0) } ?? "duration"
+        case .distance:
+            return target.value.map(distanceLabel)
+        case .rounds:
+            return target.value.map { "\(formatDecimal($0)) rounds" } ?? "rounds"
+        case .completion:
+            return nil
+        case .loadCarried:
+            guard let value = target.value else { return "load carried" }
+            return "\(formatDecimal(value)) \(loadUnit?.rawValue ?? "load")"
         }
     }
 
@@ -791,5 +882,28 @@ public final class TodayViewModel {
         case .missed: return "needs reschedule"
         case .today, .upcoming, .unscheduled: return nil
         }
+    }
+}
+
+private extension Array where Element == String {
+    func removingAdjacentDuplicates() -> [String] {
+        reduce(into: []) { result, value in
+            if result.last != value {
+                result.append(value)
+            }
+        }
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        guard index >= 0, index < count else { return nil }
+        return self[index]
     }
 }

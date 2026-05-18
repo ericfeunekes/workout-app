@@ -6,6 +6,7 @@
 
 import Foundation
 import CoreAutoreg
+import CoreDomain
 import CorePrescription
 import WorkoutCoreFoundation
 
@@ -25,6 +26,23 @@ func displayText(for set: SetPlan) -> String {
         return displayText(for: target)
     }
     return "\(set.reps)"
+}
+
+func displayText(for target: PrimitiveWorkTarget) -> String {
+    switch target.metric {
+    case .reps:
+        return "\(formatPrimitiveValue(target)) reps"
+    case .duration:
+        return "\(formatPrimitiveValue(target)) sec"
+    case .distance:
+        return formatPrimitiveDistance(target.value)
+    case .rounds:
+        return "\(formatPrimitiveValue(target)) rounds"
+    case .completion:
+        return "complete"
+    case .loadCarried:
+        return "\(formatPrimitiveValue(target)) load"
+    }
 }
 
 func activeKind(for set: SetPlan) -> ActiveContent.Kind {
@@ -64,4 +82,17 @@ private func formatTargetNumber(_ value: Double) -> String {
         formatted.removeLast()
     }
     return formatted
+}
+
+private func formatPrimitiveValue(_ target: PrimitiveWorkTarget) -> String {
+    guard let value = target.value else { return "open" }
+    return formatTargetNumber(value)
+}
+
+private func formatPrimitiveDistance(_ metres: Double?) -> String {
+    guard let metres else { return "open distance" }
+    if metres >= 1000 {
+        return "\(formatTargetNumber(metres / 1000.0)) km"
+    }
+    return "\(formatTargetNumber(metres)) m"
 }

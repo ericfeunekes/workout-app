@@ -38,10 +38,8 @@ gap in the owning docs. Git history is the archive.
 | gap_id | owning_docs | gap | gap_kind |
 | --- | --- | --- | --- |
 | `TODAY-GAP-002` | `docs/features/today.md` | Preview tap targets and Start affordance need simulator proof. | `proof` |
-| `TODAY-GAP-003` | `docs/features/today.md` | Today's preview/detail does not yet render current-block remaining work from the execution projection. | `implementation` |
 | `PREVIEW-GAP-001` | `docs/features/workout-preview.md` | Preview editability is not proven for every target field. | `proof` |
 | `PREVIEW-GAP-002` | `docs/features/workout-preview.md` | Preview edit persistence is not implemented and must respect whole-tree server replacement semantics. | `implementation` |
-| `PREVIEW-GAP-003` | `docs/features/workout-preview.md` | Preview does not yet directly consume the shared execution projection seam. | `implementation` |
 | `SWAP-GAP-001` | `docs/features/exercise-swap.md` | Exercise swap is item-scoped; there is no per-set swap behavior. | `implementation` |
 | `SWAP-GAP-002` | `docs/features/exercise-swap.md` | Exercise swap cannot move work across blocks. | `implementation` |
 | `SWAP-GAP-003` | `docs/features/exercise-swap.md` | Exercise swap has no undo path. | `implementation` |
@@ -128,7 +126,7 @@ gap in the owning docs. Git history is the archive.
 | `PDM-GAP-004` | `docs/specs/primitives-data-model/runtime-resolution.md` | Runtime resolution must preserve offline execution and seed-time parameter pinning. | `proof` |
 | `PDM-GAP-005` | `docs/specs/primitives-data-model/cutover.md` | Completed local workout logs are the preservation constraint during cutover. | `proof` |
 | `PDM-GAP-006` | `docs/specs/primitives-data-model/log-shape.md` | Partial-result controls and completion summaries still collapse non-rep primitive metrics such as distance, duration, and carried load. | `implementation` |
-| `PDM-GAP-007` | `docs/specs/primitives-data-model.md` | Primitive composition semantics are not centralized across seeding, projection, result entry, completion summaries, persistence grouping, sync payloads, and server validation. | `implementation` |
+| `PDM-GAP-007` | `docs/specs/primitives-data-model.md` | Primitive composition semantics are not centralized across seeding, projection, result entry, completion summaries, correction, persistence grouping, sync payloads, and server validation. Active cluster narrows this to CoreSession app-runtime semantics plus server legality parity; residual scope must name History correction, correction UI outside execution completion, and any untouched sync/persistence consumers. | `implementation` |
 
 ## Maintenance
 

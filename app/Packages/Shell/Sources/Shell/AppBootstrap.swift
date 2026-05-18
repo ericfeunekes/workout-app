@@ -321,7 +321,7 @@ public enum AppBootstrap {
         let primitiveWorkout = try await cache.loadPrimitiveWorkouts()
             .first { $0.id == workout.id }
         let primitivePlan = try primitiveWorkout.map {
-            try PrimitiveSessionSeeder.seed(workout: $0, userParameters: numericParams)
+            try ExecutionPlan.validated(workout: $0, userParameters: numericParams)
         }
         return WorkoutContext(
             workout: workout,

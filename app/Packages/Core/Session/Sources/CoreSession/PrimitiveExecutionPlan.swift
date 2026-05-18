@@ -159,6 +159,9 @@ public struct ExecutionSet: Equatable, Sendable {
         reps: Int?,
         rounds: Int?,
         durationSec: Double?,
+        distanceM: Double? = nil,
+        weight: Double? = nil,
+        weightUnit: WeightUnit? = nil,
         completedAt: Date
     ) -> PrimitiveSetLog {
         let coordinate = PrimitiveLogCoordinate(
@@ -178,7 +181,10 @@ public struct ExecutionSet: Equatable, Sendable {
             setRepeatIndex: setRepeatIndex,
             blockRepeatIndex: blockRepeatIndex,
             reps: reps,
+            weight: weight,
+            weightUnit: weightUnit,
             durationSec: durationSec,
+            distanceM: distanceM,
             rounds: rounds,
             completedAt: completedAt
         )
@@ -349,6 +355,8 @@ public extension ExecutionSlot {
         setRepeatIndex: Int,
         setIndex: Int,
         reps: Int?,
+        weight: Double? = nil,
+        weightUnit: WeightUnit? = nil,
         durationSec: Double? = nil,
         distanceM: Double? = nil,
         rir: Int?,
@@ -363,15 +371,7 @@ public extension ExecutionSlot {
             setRepeatIndex: setRepeatIndex,
             setIndex: setIndex
         )
-        let loggedWeight: Double?
-        switch loadUnit {
-        case .lb:
-            loggedWeight = loadDisplayValue ?? loadKg
-        case .kg:
-            loggedWeight = loadKg
-        case nil:
-            loggedWeight = nil
-        }
+        let loggedWeight = weight ?? resolvedLoggedWeight
         return PrimitiveSetLog(
             id: coordinate.deterministicLogID,
             role: .slot,
@@ -385,13 +385,24 @@ public extension ExecutionSlot {
             blockRepeatIndex: blockRepeatIndex,
             reps: reps,
             weight: loggedWeight,
-            weightUnit: loadUnit,
+            weightUnit: weightUnit ?? loadUnit,
             durationSec: durationSec,
             distanceM: distanceM,
             rir: rir,
             isWarmup: isWarmup,
             completedAt: completedAt
         )
+    }
+
+    private var resolvedLoggedWeight: Double? {
+        switch loadUnit {
+        case .lb:
+            loadDisplayValue ?? loadKg
+        case .kg:
+            loadKg
+        case nil:
+            nil
+        }
     }
 }
 

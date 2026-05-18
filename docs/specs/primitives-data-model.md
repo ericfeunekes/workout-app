@@ -161,6 +161,56 @@ one move, introduce an in-app primitive editor, or generalize beyond the
 accepted seven primitives. It is the smallest foundation needed so the next
 bug fixes and proof matrix assert one set of primitive composition rules.
 
+### Current implementation cluster
+
+The active implementation cluster is intentionally narrower than full
+primitive-lane closeout. It must deliver the app-runtime semantics foundation
+with proof, not every downstream consumer in one move.
+
+In scope:
+
+- Add narrow CoreSession-owned computed semantics on the existing primitive
+  execution types for timing/traversal legality, visible-progress policy,
+  completion vs observation target lookup, metric display ordering,
+  partial-result input fields, and aggregate result row policy.
+- Route production primitive seeding, execution projection, AMRAP/aggregate
+  result entry, completion summaries, and the `bug-090` sentinel-progress fix
+  through those semantics.
+- Fix `bug-089` in the same implementation cluster as execution
+  route/sheet lifecycle work, with deterministic proof plus simulator
+  confirmation.
+- Prove narrow app/server legality parity for the primitive timing/traversal
+  and aggregate-target rules that this cluster centralizes.
+
+Out of scope for this cluster:
+
+- History correction and any correction UI outside execution completion.
+- Full closure of every `PDM-GAP-007` consumer, including untouched
+  sync/persistence consumers when no encoding or payload behavior changes.
+- New primitive wire fields, new SwiftData migrations, and new sync payload
+  semantics unless implementation exposes a real encoding gap.
+- Cross-runtime server/app sync proof unless this cluster changes behavior at
+  the real URLSession/FastAPI/SQLite boundary. If it does cross that seam, the
+  missing realistic-local sync harness is a testing capability gap, not a
+  simulator-QA substitute.
+
+The proof bar for this cluster is:
+
+- CoreSession semantic-helper tests over the shared legality matrix, metric
+  roles, aggregate-result policy, deterministic result identity, and sentinel
+  visibility.
+- FeatureExecution tests proving seeder delegation, primitive projection
+  metrics, AMRAP non-rep partial results, completion summaries without
+  primitive note parsing fallback, and `bug-090`.
+- Server ingest tests mirroring the same accept/reject legality grid as
+  CoreSession, including role-specific aggregate-target checks. Representative
+  server coverage is not enough for this cluster.
+- Deterministic route/sheet lifecycle tests for `bug-089`, covering both
+  active -> rest and rest -> active interval-boundary transitions unless the
+  durable repro proves only one edge.
+- `make pre-qa` before simulator QA, then `docs/QA.md` evidence on the bounded
+  primitive fixtures named below.
+
 The cutover implementation must add deterministic proof for:
 
 - **Timing x traversal:** legal `set_bounded`, `time_bounded`, `cap_bounded`,
@@ -232,7 +282,11 @@ already cover.
   and server validation can still infer completion metrics, primary display,
   aggregate row roles, and sentinel counts through separate timing-mode or
   UI-specific logic. The next phase must create the CoreSession semantics
-  foundation above and route the `PDM-GAP-006` result fixes through it.
+  foundation above and route the `PDM-GAP-006` result fixes through it. The
+  active cluster should narrow this gap to the residual surfaces it does not
+  touch: History correction, correction UI outside execution completion, and
+  any sync/persistence consumer left untouched because no encoding gap was
+  found.
 
 ## Open questions
 

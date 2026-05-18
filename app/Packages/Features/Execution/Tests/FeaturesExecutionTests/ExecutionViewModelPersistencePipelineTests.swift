@@ -615,7 +615,7 @@ final class ExecutionViewModelPersistencePipelineTests: XCTestCase {
                 ]),
             ]
         )
-        let primitivePlan = try PrimitiveSessionSeeder.seed(workout: primitiveWorkout)
+        let primitivePlan = try ExecutionPlan.validated(workout: primitiveWorkout)
         let ctx = WorkoutContext(
             workout: base.workout,
             primitiveWorkout: primitiveWorkout,

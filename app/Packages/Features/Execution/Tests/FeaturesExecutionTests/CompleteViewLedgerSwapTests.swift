@@ -153,6 +153,134 @@ final class CompleteViewLedgerSwapTests: XCTestCase {
         XCTAssertEqual(entries.first?.summary, "AMRAP result: 3 rounds + 4 reps")
     }
 
+    func testBlockResultsPreferPrimitiveAggregateSetResults() {
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let blockID = UUID()
+        let setID = UUID()
+        let context = makeContext(
+            itemID: itemID,
+            plannedExerciseID: exerciseID,
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Run")],
+            timingMode: .amrap,
+            timingConfigJSON: #"{"time_cap_sec":1200}"#,
+            blockName: "Mixed AMRAP",
+            blockID: blockID,
+            primitiveExecutionPlan: ExecutionPlan(
+                workoutID: UUID(),
+                blocks: [
+                    ExecutionBlock(
+                        blockID: blockID,
+                        blockRepeat: 1,
+                        workTargets: [],
+                        sets: []
+                    )
+                ]
+            )
+        )
+        let result = PrimitiveSetLog(
+            id: UUID(),
+            role: .setResult,
+            setID: setID,
+            blockID: blockID,
+            setIndex: 0,
+            reps: 12,
+            durationSec: 1_200,
+            distanceM: 1_000,
+            rounds: 4,
+            completedAt: Date()
+        )
+
+        let entries = CompleteView.blockResultEntries(
+            context: context,
+            items: [],
+            note: "AMRAP result: stale legacy note",
+            primitiveSetLogs: [result]
+        )
+
+        XCTAssertEqual(entries.first?.summary, "4 rounds + 12 reps + 20:00 + 1.0 km")
+    }
+
+    func testBlockResultsFallBackToLegacySummaryWhenPrimitiveHasNoAggregateRows() {
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let blockID = UUID()
+        let context = makeContext(
+            itemID: itemID,
+            plannedExerciseID: exerciseID,
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Run")],
+            timingMode: .amrap,
+            timingConfigJSON: #"{"time_cap_sec":1200}"#,
+            blockName: "Mixed AMRAP",
+            blockID: blockID,
+            primitiveExecutionPlan: ExecutionPlan(
+                workoutID: UUID(),
+                blocks: [
+                    ExecutionBlock(
+                        blockID: blockID,
+                        blockRepeat: 1,
+                        workTargets: [],
+                        sets: []
+                    )
+                ]
+            )
+        )
+
+        let entries = CompleteView.blockResultEntries(
+            context: context,
+            items: [],
+            note: "AMRAP result: stale legacy note",
+            primitiveSetLogs: []
+        )
+
+        XCTAssertEqual(entries.first?.summary, "AMRAP result: stale legacy note")
+    }
+
+    func testBlockResultsSummarizePrimitiveSlotRowsWhenNoAggregateRowsExist() {
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let blockID = UUID()
+        let context = makeContext(
+            itemID: itemID,
+            plannedExerciseID: exerciseID,
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Carry")],
+            timingMode: .straightSets,
+            blockName: "Carry work",
+            blockID: blockID,
+            primitiveExecutionPlan: ExecutionPlan(
+                workoutID: UUID(),
+                blocks: [
+                    ExecutionBlock(
+                        blockID: blockID,
+                        blockRepeat: 1,
+                        workTargets: [],
+                        sets: []
+                    )
+                ]
+            )
+        )
+        let slot = PrimitiveSetLog(
+            id: UUID(),
+            role: .slot,
+            blockID: blockID,
+            setIndex: 0,
+            reps: 20,
+            weight: 53,
+            weightUnit: .lb,
+            distanceM: 50,
+            completedAt: Date()
+        )
+
+        let entries = CompleteView.blockResultEntries(
+            context: context,
+            items: [],
+            note: "",
+            primitiveSetLogs: [slot]
+        )
+
+        XCTAssertEqual(entries.first?.summary, "20 reps + 50 m + 53 lb")
+    }
+
     // MARK: - Fixtures
 
     private func makeSet(
@@ -179,12 +307,14 @@ final class CompleteViewLedgerSwapTests: XCTestCase {
         exercises: [UUID: Exercise],
         timingMode: TimingMode = .straightSets,
         timingConfigJSON: String = "{}",
-        blockName: String? = nil
+        blockName: String? = nil,
+        blockID requestedBlockID: UUID? = nil,
+        primitiveExecutionPlan: ExecutionPlan? = nil
     ) -> WorkoutContext {
         let now = Date()
         let userID = UUID()
         let workoutID = UUID()
-        let blockID = UUID()
+        let blockID = requestedBlockID ?? UUID()
         let workout = Workout(
             id: workoutID, userID: userID, name: "Swap Ledger Test",
             scheduledDate: now, status: .completed, source: .claude,
@@ -203,6 +333,7 @@ final class CompleteViewLedgerSwapTests: XCTestCase {
         )
         return WorkoutContext(
             workout: workout,
+            primitiveExecutionPlan: primitiveExecutionPlan,
             blocks: [block],
             itemsByBlock: [[item]],
             exercises: exercises

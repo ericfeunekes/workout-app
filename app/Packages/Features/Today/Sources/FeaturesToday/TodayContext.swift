@@ -21,6 +21,12 @@ public struct TodayContext: Sendable {
     /// the loader filters before handing off.
     public let workout: Workout
 
+    /// Intact primitive authoring shape for this workout, when available.
+    public let primitiveWorkout: PrimitiveWorkout?
+
+    /// Runtime plan seeded from `primitiveWorkout` through CoreSession.
+    public let primitiveExecutionPlan: ExecutionPlan?
+
     /// Blocks in position order.
     public let blocks: [Block]
 
@@ -47,27 +53,36 @@ public struct TodayContext: Sendable {
     /// Example: `["week 3", "push day"]` → "week 3 · push day".
     public let programTags: [String]
 
+    /// Latest-per-key numeric user parameters used at seed time.
+    public let userParameters: [String: Double]
+
     /// Dispatch sink for session mutations. Optional so previews /
     /// tests can pass nil. The Today screen only dispatches `.start`.
     public let sessionStateBinding: (@Sendable (SessionMutation) -> Void)?
 
     public init(
         workout: Workout,
+        primitiveWorkout: PrimitiveWorkout? = nil,
+        primitiveExecutionPlan: ExecutionPlan? = nil,
         blocks: [Block],
         items: [WorkoutItem],
         exercises: [UUID: Exercise],
         lastPerformed: [UUID: String],
         lastSessionSummary: String? = nil,
         programTags: [String] = [],
+        userParameters: [String: Double] = [:],
         sessionStateBinding: (@Sendable (SessionMutation) -> Void)? = nil
     ) {
         self.workout = workout
+        self.primitiveWorkout = primitiveWorkout
+        self.primitiveExecutionPlan = primitiveExecutionPlan
         self.blocks = blocks
         self.items = items
         self.exercises = exercises
         self.lastPerformed = lastPerformed
         self.lastSessionSummary = lastSessionSummary
         self.programTags = programTags
+        self.userParameters = userParameters
         self.sessionStateBinding = sessionStateBinding
     }
 }

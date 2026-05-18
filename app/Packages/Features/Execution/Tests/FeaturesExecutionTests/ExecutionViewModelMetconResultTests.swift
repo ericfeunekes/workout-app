@@ -253,7 +253,7 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
 
         let completions = await recorder.completions
         let completion = try XCTUnwrap(completions.first)
-        let primitive = try XCTUnwrap(completion.primitiveSetLogs.first)
+        let primitive = try XCTUnwrap(completion.primitiveSetLogs.first { $0.role == .setResult })
         XCTAssertEqual(primitive.role, .setResult)
         XCTAssertEqual(primitive.workoutID, fixture.context.workout.id)
         XCTAssertEqual(primitive.setIndex, 0)
@@ -294,9 +294,219 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
 
         let completions = await recorder.completions
         let completion = try XCTUnwrap(completions.first)
-        let primitive = try XCTUnwrap(completion.primitiveSetLogs.first)
+        let primitive = try XCTUnwrap(completion.primitiveSetLogs.first { $0.role == .setResult })
         XCTAssertEqual(primitive.durationSec, 300)
         XCTAssertEqual(primitive.completedAt, start.addingTimeInterval(300))
+    }
+
+    func testAMRAPPrimitivePartialResultRecordsTotalDistanceMetric() async throws {
+        let start = Date(timeIntervalSince1970: 1_700_003_300)
+        let clock = MetconMutableClock(now: start)
+        let fixture = Self.metconThenStrengthContext(
+            firstMode: .amrap,
+            firstTimingConfigJSON: #"{"time_cap_sec":300}"#,
+            firstItems: [
+                ("Pull-up", #"{"reps":5}"#),
+                ("Run", #"{"distance_m":1000}"#),
+            ],
+            includePrimitive: true
+        )
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
+            }
+        )
+        let vm = ExecutionViewModel(context: fixture.context, clock: clock, push: hooks)
+
+        vm.start()
+        vm.logAMRAPStation(reps: 5)
+        vm.logAMRAPStation(reps: 0)
+        vm.logAMRAPStation(reps: 5)
+        clock.now = start.addingTimeInterval(300)
+        vm.logAMRAPPartialResult(value: 400)
+        vm.complete()
+        vm.saveAndDone()
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let completions = await recorder.completions
+        let completion = try XCTUnwrap(completions.first)
+        let slot = try XCTUnwrap(completion.primitiveSetLogs.first { $0.role == .slot })
+        XCTAssertNil(slot.reps)
+        XCTAssertEqual(slot.distanceM, 400)
+        let aggregate = try XCTUnwrap(completion.primitiveSetLogs.first { $0.role == .setResult })
+        XCTAssertEqual(aggregate.rounds, 1)
+        XCTAssertNil(aggregate.reps)
+        XCTAssertEqual(aggregate.distanceM, 1_400)
+        XCTAssertEqual(aggregate.durationSec, 300)
+    }
+
+    func testAMRAPPrimitivePartialResultRecordsLoadCarriedMetric() async throws {
+        let start = Date(timeIntervalSince1970: 1_700_003_400)
+        let clock = MetconMutableClock(now: start)
+        let fixture = Self.metconThenStrengthContext(
+            firstMode: .amrap,
+            firstTimingConfigJSON: #"{"time_cap_sec":300}"#,
+            firstItems: [
+                ("Carry", #"{"load_carried_lb":60}"#),
+            ],
+            includePrimitive: true
+        )
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
+            }
+        )
+        let vm = ExecutionViewModel(context: fixture.context, clock: clock, push: hooks)
+
+        vm.start()
+        clock.now = start.addingTimeInterval(300)
+        vm.logAMRAPPartialResult(value: 42)
+        vm.complete()
+        vm.saveAndDone()
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let completions = await recorder.completions
+        let completion = try XCTUnwrap(completions.first)
+        let slot = try XCTUnwrap(completion.primitiveSetLogs.first { $0.role == .slot })
+        XCTAssertEqual(slot.weight, 42)
+        XCTAssertEqual(slot.weightUnit, .lb)
+        let aggregate = try XCTUnwrap(completion.primitiveSetLogs.first { $0.role == .setResult })
+        XCTAssertEqual(aggregate.weight, 42)
+        XCTAssertEqual(aggregate.weightUnit, .lb)
+    }
+
+    func testAMRAPPrimitivePartialResultUsesSecondSetWhenExerciseRepeatsAcrossSets() async throws {
+        let start = Date(timeIntervalSince1970: 1_700_003_450)
+        let clock = MetconMutableClock(now: start)
+        let userID = UUID()
+        let workoutID = UUID()
+        let blockID = UUID()
+        let exerciseID = UUID()
+        let firstSetID = UUID()
+        let secondSetID = UUID()
+        let firstSlotID = UUID()
+        let secondSlotID = UUID()
+        let workout = Workout(
+            id: workoutID,
+            userID: userID,
+            name: "Repeated exercise primitive AMRAP",
+            scheduledDate: start,
+            status: .planned,
+            source: .claude,
+            notes: nil,
+            createdAt: start,
+            updatedAt: start,
+            completedAt: nil,
+            tagsJSON: nil
+        )
+        let block = Block(
+            id: blockID,
+            workoutID: workoutID,
+            position: 0,
+            timingMode: .amrap,
+            timingConfigJSON: #"{"time_cap_sec":300}"#
+        )
+        let firstItem = WorkoutItem(
+            id: UUID(),
+            blockID: blockID,
+            position: 0,
+            exerciseID: exerciseID,
+            prescriptionJSON: #"{"reps":5}"#
+        )
+        let secondItem = WorkoutItem(
+            id: UUID(),
+            blockID: blockID,
+            position: 1,
+            exerciseID: exerciseID,
+            prescriptionJSON: #"{"reps":8}"#
+        )
+        let primitiveWorkout = PrimitiveWorkout(
+            id: workoutID,
+            name: workout.name,
+            blocks: [
+                PrimitiveBlock(id: blockID, sets: [
+                    PrimitiveSet(
+                        id: firstSetID,
+                        timing: PrimitiveTiming(mode: .capBounded, capSec: 300),
+                        traversal: .amrap,
+                        workTargets: [
+                            PrimitiveWorkTarget(metric: .rounds, valueForm: .open, role: .observation),
+                        ],
+                        slots: [
+                            PrimitiveSlot(
+                                id: firstSlotID,
+                                exerciseID: exerciseID,
+                                workTargets: [
+                                    PrimitiveWorkTarget(
+                                        metric: .reps,
+                                        valueForm: .single,
+                                        value: 5,
+                                        role: .completion
+                                    ),
+                                ]
+                            ),
+                        ]
+                    ),
+                    PrimitiveSet(
+                        id: secondSetID,
+                        timing: PrimitiveTiming(mode: .capBounded, capSec: 300),
+                        traversal: .amrap,
+                        workTargets: [
+                            PrimitiveWorkTarget(metric: .rounds, valueForm: .open, role: .observation),
+                        ],
+                        slots: [
+                            PrimitiveSlot(
+                                id: secondSlotID,
+                                exerciseID: exerciseID,
+                                workTargets: [
+                                    PrimitiveWorkTarget(
+                                        metric: .reps,
+                                        valueForm: .single,
+                                        value: 8,
+                                        role: .completion
+                                    ),
+                                ]
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        let context = WorkoutContext(
+            workout: workout,
+            primitiveWorkout: primitiveWorkout,
+            primitiveExecutionPlan: ExecutionPlan(workout: primitiveWorkout),
+            blocks: [block],
+            itemsByBlock: [[firstItem, secondItem]],
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Bench")]
+        )
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
+            }
+        )
+        let vm = ExecutionViewModel(context: context, clock: clock, push: hooks)
+
+        vm.start()
+        vm.logAMRAPStation(reps: 5)
+        clock.now = start.addingTimeInterval(300)
+        vm.logAMRAPPartialResult(value: 3)
+        vm.complete()
+        vm.saveAndDone()
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let completions = await recorder.completions
+        let completion = try XCTUnwrap(completions.first)
+        let slotLog = try XCTUnwrap(completion.primitiveSetLogs.first { $0.role == .slot })
+        XCTAssertEqual(slotLog.slotID, secondSlotID)
+        XCTAssertEqual(slotLog.setID, secondSetID)
+        XCTAssertEqual(slotLog.reps, 3)
     }
 
     func testForTimeResultRecordsPrimitiveBlockResultOnLiveCompletionPath() async throws {
@@ -329,7 +539,7 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
 
         let completions = await recorder.completions
         let completion = try XCTUnwrap(completions.first)
-        let primitive = try XCTUnwrap(completion.primitiveSetLogs.first)
+        let primitive = try XCTUnwrap(completion.primitiveSetLogs.first { $0.role == .blockResult })
         XCTAssertEqual(primitive.role, .blockResult)
         XCTAssertEqual(primitive.workoutID, fixture.context.workout.id)
         XCTAssertEqual(primitive.setIndex, 0)
@@ -450,12 +660,27 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         items: [WorkoutItem]
     ) -> PrimitiveWorkout {
         let slots = items.map { item in
-            PrimitiveSlot(
-                id: UUID(),
-                exerciseID: item.exerciseID,
-                workTargets: [
+            let targets: [PrimitiveWorkTarget]
+            if item.prescriptionJSON.contains("distance_m") {
+                targets = [
+                    PrimitiveWorkTarget(metric: .distance, valueForm: .single, value: 1_000, role: .completion),
+                ]
+            } else if item.prescriptionJSON.contains("load_carried") {
+                targets = [
+                    PrimitiveWorkTarget(metric: .loadCarried, valueForm: .single, value: 60, role: .completion),
+                ]
+            } else {
+                targets = [
                     PrimitiveWorkTarget(metric: .reps, valueForm: .single, value: 1, role: .completion),
                 ]
+            }
+            return PrimitiveSlot(
+                id: UUID(),
+                exerciseID: item.exerciseID,
+                workTargets: targets,
+                load: item.prescriptionJSON.contains("load_carried")
+                    ? PrimitiveLoad(value: 60, unit: .lb, unitType: .absolute)
+                    : nil
             )
         }
         let primitiveSet: PrimitiveSet

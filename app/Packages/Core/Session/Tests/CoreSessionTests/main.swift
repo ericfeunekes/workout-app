@@ -129,6 +129,433 @@ runCase("primitive log coordinate creates stable role-scoped ids") {
     try expect(setResultA != blockResultA, "aggregate roles must remain role-scoped")
 }
 
+runCase("primitive semantics validates shared timing traversal matrix") {
+    let exerciseID = UUID(uuidString: "50000000-0000-4000-8000-000000000010")!
+    let legal = PrimitiveWorkout(
+        id: UUID(uuidString: "10000000-0000-4000-8000-000000000010")!,
+        name: "Legal",
+        blocks: [
+            PrimitiveBlock(id: UUID(uuidString: "20000000-0000-4000-8000-000000000010")!, sets: [
+                PrimitiveSet(
+                    id: UUID(uuidString: "30000000-0000-4000-8000-000000000010")!,
+                    timing: PrimitiveTiming(mode: .capBounded, capSec: 300),
+                    traversal: .amrap,
+                    workTargets: [
+                        PrimitiveWorkTarget(metric: .rounds, valueForm: .open, role: .observation),
+                    ],
+                    slots: [
+                        PrimitiveSlot(
+                            id: UUID(uuidString: "40000000-0000-4000-8000-000000000010")!,
+                            exerciseID: exerciseID,
+                            workTargets: [
+                                PrimitiveWorkTarget(metric: .distance, valueForm: .single, value: 1_000, role: .completion),
+                            ]
+                        ),
+                    ]
+                ),
+            ]),
+        ]
+    )
+    let plan = try ExecutionPlan.validated(workout: legal)
+    let set = plan.blocks[0].sets[0]
+    try expectEqual(set.allowsVisibleSetProgressTotal, false)
+    try expectEqual(set.slots[0].resultInputContract?.metric, .distance)
+
+    let illegal = PrimitiveWorkout(
+        id: UUID(uuidString: "10000000-0000-4000-8000-000000000011")!,
+        name: "Illegal",
+        blocks: [
+            PrimitiveBlock(id: UUID(uuidString: "20000000-0000-4000-8000-000000000011")!, sets: [
+                PrimitiveSet(
+                    id: UUID(uuidString: "30000000-0000-4000-8000-000000000011")!,
+                    timing: PrimitiveTiming(mode: .setBounded),
+                    traversal: .amrap,
+                    slots: [
+                        PrimitiveSlot(
+                            id: UUID(uuidString: "40000000-0000-4000-8000-000000000011")!,
+                            exerciseID: exerciseID,
+                            workTargets: []
+                        ),
+                    ]
+                ),
+            ]),
+        ]
+    )
+    do {
+        _ = try ExecutionPlan.validated(workout: illegal)
+        try expect(false, "set_bounded x amrap must reject")
+    } catch PrimitiveSemanticError.illegalRuntimeCell(let setID) {
+        try expectEqual(setID, UUID(uuidString: "30000000-0000-4000-8000-000000000011")!)
+    }
+}
+
+runCase("primitive semantics maps legacy cursor position across repeated exercise sets") {
+    let blockID = UUID(uuidString: "20000000-0000-4000-8000-000000000020")!
+    let exerciseID = UUID(uuidString: "50000000-0000-4000-8000-000000000020")!
+    let firstSlotID = UUID(uuidString: "40000000-0000-4000-8000-000000000020")!
+    let secondSlotID = UUID(uuidString: "40000000-0000-4000-8000-000000000021")!
+    let block = ExecutionBlock(
+        blockID: blockID,
+        blockRepeat: 1,
+        workTargets: [],
+        sets: [
+            ExecutionSet(
+                setID: UUID(uuidString: "30000000-0000-4000-8000-000000000020")!,
+                blockID: blockID,
+                setRepeat: 1,
+                timing: PrimitiveTiming(mode: .setBounded),
+                traversal: .sequential,
+                workTargets: [],
+                slots: [
+                    ExecutionSlot(
+                        slotID: firstSlotID,
+                        setID: UUID(uuidString: "30000000-0000-4000-8000-000000000020")!,
+                        blockID: blockID,
+                        exerciseID: exerciseID,
+                        workTargets: [
+                            PrimitiveWorkTarget(metric: .reps, valueForm: .single, value: 5, role: .completion),
+                        ],
+                        loadKg: nil,
+                        loadUnit: nil,
+                        loadDisplayValue: nil,
+                        stimuli: [],
+                        postRestSec: 0,
+                        isWarmup: false
+                    ),
+                ]
+            ),
+            ExecutionSet(
+                setID: UUID(uuidString: "30000000-0000-4000-8000-000000000021")!,
+                blockID: blockID,
+                setRepeat: 1,
+                timing: PrimitiveTiming(mode: .setBounded),
+                traversal: .sequential,
+                workTargets: [],
+                slots: [
+                    ExecutionSlot(
+                        slotID: secondSlotID,
+                        setID: UUID(uuidString: "30000000-0000-4000-8000-000000000021")!,
+                        blockID: blockID,
+                        exerciseID: exerciseID,
+                        workTargets: [
+                            PrimitiveWorkTarget(metric: .reps, valueForm: .single, value: 8, role: .completion),
+                        ],
+                        loadKg: nil,
+                        loadUnit: nil,
+                        loadDisplayValue: nil,
+                        stimuli: [],
+                        postRestSec: 0,
+                        isWarmup: false
+                    ),
+                ]
+            ),
+        ]
+    )
+
+    guard let second = block.slotForLegacyCursor(
+        itemIndex: 1,
+        exerciseID: exerciseID,
+        itemCount: 2
+    ) else {
+        try expect(false, "legacy cursor should resolve the second repeated-exercise slot")
+        return
+    }
+    try expectEqual(second.slotID, secondSlotID)
+}
+
+runCase("primitive seed resolution covers relative 1rm and bodyweight loads") {
+    let exerciseID = primitiveUUID(0x5001)
+    let workout = PrimitiveWorkout(
+        id: primitiveUUID(0x1001),
+        name: "Loads",
+        blocks: [
+            PrimitiveBlock(id: primitiveUUID(0x2001), sets: [
+                PrimitiveSet(
+                    id: primitiveUUID(0x3001),
+                    timing: .init(mode: .setBounded),
+                    slots: [
+                        PrimitiveSlot(
+                            id: primitiveUUID(0x4001),
+                            exerciseID: exerciseID,
+                            workTargets: [
+                                .init(metric: .reps, valueForm: .single, value: 5, role: .completion),
+                            ],
+                            load: .init(value: 0.8, unit: .oneRepMax, unitType: .relative)
+                        ),
+                        PrimitiveSlot(
+                            id: primitiveUUID(0x4002),
+                            exerciseID: exerciseID,
+                            workTargets: [
+                                .init(metric: .reps, valueForm: .single, value: 5, role: .completion),
+                            ],
+                            load: .init(value: 1.25, unit: .bodyweight, unitType: .relative)
+                        ),
+                        PrimitiveSlot(
+                            id: primitiveUUID(0x4003),
+                            exerciseID: exerciseID,
+                            workTargets: [
+                                .init(metric: .reps, valueForm: .single, value: 5, role: .completion),
+                            ],
+                            load: .init(value: 0.5, unit: .oneRepMax, unitType: .relative)
+                        ),
+                    ]
+                ),
+            ]),
+        ]
+    )
+
+    let plan = try ExecutionPlan.validated(
+        workout: workout,
+        userParameters: [
+            "one_rep_max_\(exerciseID.uuidString.lowercased())_kg": 150,
+            "bodyweight_kg": 80,
+        ]
+    )
+    let slots = plan.blocks[0].sets[0].slots
+
+    try expectEqual(slots[0].loadKg, 120)
+    try expectEqual(slots[0].loadUnit, .kg)
+    try expectEqual(slots[0].loadDisplayValue, 120)
+    try expectEqual(slots[1].loadKg, 100)
+    try expectEqual(slots[1].loadUnit, .kg)
+    try expectEqual(slots[1].loadDisplayValue, 100)
+    try expectEqual(slots[2].loadKg, 75)
+}
+
+runCase("primitive seed resolution preserves unresolved relative display value") {
+    let exerciseID = primitiveUUID(0x5002)
+    let workout = primitiveWorkout(
+        setID: primitiveUUID(0x3002),
+        timing: .init(mode: .setBounded),
+        traversal: .sequential,
+        load: .init(value: 0.7, unit: .oneRepMax, unitType: .relative)
+    )
+
+    let plan = try ExecutionPlan.validated(workout: workout, userParameters: [:])
+    let slot = plan.blocks[0].sets[0].slots[0]
+
+    try expectEqual(slot.exerciseID, exerciseID)
+    try expectEqual(slot.loadKg, nil)
+    try expectEqual(slot.loadUnit, nil)
+    try expectEqual(slot.loadDisplayValue, 0.7)
+}
+
+runCase("primitive semantics rejects malformed timing cells and ambiguous completions") {
+    let setBoundedAMRAP = primitiveWorkout(
+        setID: primitiveUUID(0x3011),
+        timing: .init(mode: .setBounded),
+        traversal: .amrap
+    )
+    do {
+        _ = try ExecutionPlan.validated(workout: setBoundedAMRAP)
+        try expect(false, "set-bounded AMRAP must reject")
+    } catch PrimitiveSemanticError.illegalRuntimeCell(let setID) {
+        try expectEqual(setID, primitiveUUID(0x3011))
+    }
+
+    let capWithoutDuration = primitiveWorkout(
+        setID: primitiveUUID(0x3016),
+        timing: .init(mode: .capBounded, capSec: 300),
+        traversal: .sequential
+    )
+    do {
+        _ = try ExecutionPlan.validated(workout: capWithoutDuration)
+        try expect(false, "cap-bounded sequential cell without duration target must reject")
+    } catch PrimitiveSemanticError.invalidTiming(let setID) {
+        try expectEqual(setID, primitiveUUID(0x3016))
+    }
+
+    let ambiguous = primitiveWorkout(
+        setID: primitiveUUID(0x3017),
+        timing: .init(mode: .setBounded),
+        traversal: .sequential,
+        slotTargets: [
+            .init(metric: .distance, valueForm: .single, value: 50, role: .completion),
+            .init(metric: .loadCarried, valueForm: .single, value: 60, role: .completion),
+        ]
+    )
+    do {
+        _ = try ExecutionPlan.validated(workout: ambiguous)
+        try expect(false, "ambiguous completion metrics must reject")
+    } catch PrimitiveSemanticError.invalidTiming(let setID) {
+        try expectEqual(setID, primitiveUUID(0x3017))
+    }
+}
+
+runCase("primitive result identity helpers live on ExecutionPlan") {
+    let workout = primitiveWorkout(
+        setID: primitiveUUID(0x3030),
+        timing: .init(mode: .capBounded, capSec: 300),
+        traversal: .amrap,
+        setTargets: [.init(metric: .rounds, valueForm: .open, role: .observation)]
+    )
+    let plan = try ExecutionPlan.validated(workout: workout)
+    let slot = plan.blocks[0].sets[0].slots[0]
+    let completedAt = Date(timeIntervalSince1970: 200)
+
+    let first = slot.slotLog(
+        workoutID: workout.id,
+        blockRepeatIndex: 1,
+        setRepeatIndex: 2,
+        setIndex: 3,
+        reps: 10,
+        rir: 2,
+        completedAt: completedAt
+    )
+    let same = slot.slotLog(
+        workoutID: workout.id,
+        blockRepeatIndex: 1,
+        setRepeatIndex: 2,
+        setIndex: 3,
+        reps: 11,
+        rir: 1,
+        completedAt: completedAt
+    )
+    let aggregate = plan.setResultLog(
+        blockIndex: 0,
+        setIndexInBlock: 0,
+        blockRepeatIndex: 1,
+        setRepeatIndex: 2,
+        reps: 4,
+        rounds: 7,
+        durationSec: 300,
+        completedAt: completedAt
+    )
+
+    try expectEqual(first.id, same.id, "same coordinate is a same-UUID correction target")
+    try expect(first.id != aggregate.id, "slot and aggregate ids must be distinct")
+    try expectEqual(aggregate.role, .setResult)
+    try expectEqual(aggregate.blockRepeatIndex, 1)
+    try expectEqual(aggregate.setRepeatIndex, 2)
+    try expectEqual(aggregate.setIndex, 0)
+}
+
+runCase("session preview projection exposes current remaining and upcoming primitive facts") {
+    let exerciseA = primitiveUUID(0x5101)
+    let exerciseB = primitiveUUID(0x5102)
+    let workout = PrimitiveWorkout(
+        id: primitiveUUID(0x1101),
+        name: "Preview",
+        blocks: [
+            PrimitiveBlock(id: primitiveUUID(0x2101), sets: [
+                PrimitiveSet(
+                    id: primitiveUUID(0x3101),
+                    timing: .init(mode: .setBounded),
+                    repeatCount: 2,
+                    slots: [
+                        PrimitiveSlot(
+                            id: primitiveUUID(0x4101),
+                            exerciseID: exerciseA,
+                            workTargets: [
+                                .init(metric: .reps, valueForm: .single, value: 5, role: .completion),
+                                .init(metric: .duration, valueForm: .open, role: .observation),
+                            ],
+                            load: .init(value: 100, unit: .kg, unitType: .absolute)
+                        ),
+                    ]
+                ),
+            ]),
+            PrimitiveBlock(id: primitiveUUID(0x2102), sets: [
+                PrimitiveSet(
+                    id: primitiveUUID(0x3102),
+                    timing: .init(mode: .setBounded),
+                    slots: [
+                        PrimitiveSlot(
+                            id: primitiveUUID(0x4102),
+                            exerciseID: exerciseB,
+                            workTargets: [
+                                .init(metric: .distance, valueForm: .single, value: 100, role: .completion),
+                            ]
+                        ),
+                    ]
+                ),
+            ]),
+        ]
+    )
+    let projection = SessionPreviewProjection(plan: try ExecutionPlan.validated(workout: workout))
+
+    try expectEqual(projection.current?.exerciseID, exerciseA)
+    try expectEqual(projection.current?.primaryDisplayTarget?.metric, .reps)
+    try expectEqual(projection.current?.secondaryDisplayTargets.map(\.metric), [.duration])
+    try expectEqual(projection.current?.loadKg, 100)
+    try expectEqual(projection.currentBlock?.blockID, primitiveUUID(0x2101))
+    try expectEqual(projection.remaining, .bounded(completed: 0, total: 2))
+    try expectEqual(projection.remaining.remaining, 2)
+    try expectEqual(projection.upcoming.first?.exerciseID, exerciseA)
+    try expectEqual(projection.upcoming.dropFirst().first?.exerciseID, exerciseB)
+}
+
+runCase("session preview projection suppresses unbounded progress totals") {
+    let workout = primitiveWorkout(
+        setID: primitiveUUID(0x3201),
+        timing: .init(mode: .capBounded, capSec: 300),
+        traversal: .amrap,
+        setTargets: [.init(metric: .rounds, valueForm: .open, role: .observation)]
+    )
+    let projection = SessionPreviewProjection(plan: try ExecutionPlan.validated(workout: workout))
+
+    try expectEqual(projection.remaining, .unbounded)
+    try expectEqual(projection.remaining.remaining, nil)
+}
+
+runCase("session preview projection handles zero-set rest block") {
+    let plan = ExecutionPlan(
+        workoutID: primitiveUUID(0x1201),
+        blocks: [
+            ExecutionBlock(
+                blockID: primitiveUUID(0x2201),
+                blockRepeat: 1,
+                workTargets: [],
+                sets: []
+            ),
+        ]
+    )
+    let projection = SessionPreviewProjection(plan: plan)
+
+    try expectEqual(projection.current, nil)
+    try expectEqual(projection.currentBlock?.blockID, primitiveUUID(0x2201))
+    try expectEqual(projection.remaining, .bounded(completed: 0, total: 0))
+    try expectEqual(projection.upcoming, [])
+}
+
+func primitiveWorkout(
+    setID: UUID,
+    timing: PrimitiveTiming,
+    traversal: PrimitiveTraversal,
+    setTargets: [PrimitiveWorkTarget] = [],
+    slotTargets: [PrimitiveWorkTarget] = [
+        .init(metric: .reps, valueForm: .single, value: 10, role: .completion),
+    ],
+    load: PrimitiveLoad? = nil
+) -> PrimitiveWorkout {
+    PrimitiveWorkout(
+        id: primitiveUUID(0x1000),
+        name: "Primitive",
+        blocks: [
+            PrimitiveBlock(id: primitiveUUID(0x2000), sets: [
+                PrimitiveSet(
+                    id: setID,
+                    timing: timing,
+                    traversal: traversal,
+                    workTargets: setTargets,
+                    slots: [
+                        PrimitiveSlot(
+                            id: primitiveUUID(0x4000),
+                            exerciseID: primitiveUUID(0x5002),
+                            workTargets: slotTargets,
+                            load: load
+                        ),
+                    ]
+                ),
+            ]),
+        ]
+    )
+}
+
+func primitiveUUID(_ suffix: Int) -> UUID {
+    UUID(uuidString: String(format: "00000000-0000-4000-8000-%012x", suffix))!
+}
+
 func pristineSets(loadKg: Double = 100.0, reps: Int = 5, count: Int = 3) -> [SetPlan] {
     (1...count).map { i in
         SetPlan(setIndex: i, loadKg: loadKg, reps: reps, done: false, adjust: nil, rir: nil)

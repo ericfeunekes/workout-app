@@ -160,6 +160,11 @@ struct RestView: View {
         } message: {
             Text("Unlogged sets won't be recorded. You can still save & done.")
         }
+        .onChange(of: viewModel.state.route) { oldRoute, newRoute in
+            if RestView.shouldDismissEndConfirmation(oldRoute: oldRoute, newRoute: newRoute) {
+                showEndConfirm = false
+            }
+        }
     }
 
     // MARK: - Nav bar
@@ -764,5 +769,12 @@ struct RestView: View {
 
     static func restOverdueSeconds(endsAt: Date?, now: Date) -> TimeInterval {
         max(0, now.timeIntervalSince(endsAt ?? now))
+    }
+
+    static func shouldDismissEndConfirmation(
+        oldRoute: SessionState.Route,
+        newRoute: SessionState.Route
+    ) -> Bool {
+        oldRoute != newRoute
     }
 }

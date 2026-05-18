@@ -22,14 +22,16 @@ extension CompleteView {
         CompleteView.blockResultEntries(
             context: viewModel.context,
             items: viewModel.state.items,
-            note: viewModel.state.note
+            note: viewModel.state.note,
+            primitiveSetLogs: viewModel.primitiveSetLogs
         )
     }
 
     static func blockResultEntries(
         context: WorkoutContext,
         items itemLogs: [SessionState.ItemLog],
-        note: String
+        note: String,
+        primitiveSetLogs: [PrimitiveSetLog] = []
     ) -> [BlockResultEntry] {
         context.blocks.enumerated().map { blockIndex, block in
             let blockItems = blockIndex < context.itemsByBlock.count
@@ -40,6 +42,9 @@ extension CompleteView {
                 subtitle: block.timingMode.rawValue,
                 summary: blockResultSummary(
                     block: block,
+                    blockIndex: blockIndex,
+                    primitivePlan: context.primitiveExecutionPlan,
+                    primitiveSetLogs: primitiveSetLogs,
                     blockItems: blockItems,
                     itemLogs: itemLogs,
                     note: note
@@ -75,10 +80,20 @@ extension CompleteView {
 
     private static func blockResultSummary(
         block: Block,
+        blockIndex: Int,
+        primitivePlan: ExecutionPlan?,
+        primitiveSetLogs: [PrimitiveSetLog],
         blockItems: [WorkoutItem],
         itemLogs: [SessionState.ItemLog],
         note: String
     ) -> String {
+        if let primitive = primitiveResultSummary(
+            blockIndex: blockIndex,
+            primitivePlan: primitivePlan,
+            primitiveSetLogs: primitiveSetLogs
+        ) {
+            return primitive
+        }
         switch block.timingMode {
         case .amrap:
             return amrapResult(note: note) ?? loggedCountSummary(
@@ -155,6 +170,54 @@ extension CompleteView {
             .first(where: { $0.hasPrefix("AMRAP result:") })
     }
 
+    private static func primitiveResultSummary(
+        blockIndex: Int,
+        primitivePlan: ExecutionPlan?,
+        primitiveSetLogs: [PrimitiveSetLog]
+    ) -> String? {
+        guard let block = primitivePlan?.blocks[safe: blockIndex] else {
+            return nil
+        }
+        let logs = primitiveSetLogs.filter { $0.blockID == block.blockID }
+        guard !logs.isEmpty else { return nil }
+        let summary = logs
+            .filter { $0.role == .blockResult || $0.role == .setResult }
+            .map(primitiveResultText(for:))
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+            .nilIfEmpty
+        if let summary {
+            return summary
+        }
+        return logs
+            .filter { $0.role == .slot }
+            .map(primitiveResultText(for:))
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+            .nilIfEmpty
+    }
+
+    private static func primitiveResultText(for log: PrimitiveSetLog) -> String {
+        var parts: [String] = []
+        if let rounds = log.rounds {
+            parts.append("\(rounds) rounds")
+        }
+        if let reps = log.reps {
+            parts.append("\(reps) reps")
+        }
+        if let duration = log.durationSec {
+            parts.append(formatDuration(seconds: duration))
+        }
+        if let distance = log.distanceM {
+            parts.append(formatDistance(distance))
+        }
+        if let weight = log.weight {
+            let unit = log.weightUnit?.rawValue ?? "load"
+            parts.append("\(formatNumber(weight)) \(unit)")
+        }
+        return parts.joined(separator: " + ")
+    }
+
     private static func doneRows(
         blockItems: [WorkoutItem],
         itemLogs: [SessionState.ItemLog]
@@ -177,5 +240,32 @@ extension CompleteView {
             return String(format: "%.1f km", metres / 1000.0)
         }
         return "\(Int(metres.rounded())) m"
+    }
+
+    private static func formatNumber(_ value: Double) -> String {
+        if value.rounded() == value {
+            return String(Int(value))
+        }
+        var formatted = String(format: "%.2f", value)
+        while formatted.hasSuffix("0") {
+            formatted.removeLast()
+        }
+        if formatted.hasSuffix(".") {
+            formatted.removeLast()
+        }
+        return formatted
+    }
+}
+
+private extension Array {
+    subscript(safe index: Int) -> Element? {
+        guard index >= 0, index < count else { return nil }
+        return self[index]
+    }
+}
+
+private extension String {
+    var nilIfEmpty: String? {
+        isEmpty ? nil : self
     }
 }

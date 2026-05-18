@@ -841,6 +841,7 @@ public enum ExecutionPreviewSeed {
             ],
             primitiveWorkTargets: [
                 .init(metric: .completion, valueForm: .single, value: 1, role: .completion),
+                .init(metric: .duration, valueForm: .open, role: .observation),
             ],
             slotTargets: [
                 [
@@ -911,16 +912,16 @@ public enum ExecutionPreviewSeed {
             slotTargets: [
                 [
                     .init(metric: .distance, valueForm: .single, value: 50, role: .completion),
-                    .init(metric: .loadCarried, valueForm: .single, value: 32, role: .completion),
+                    .init(metric: .loadCarried, valueForm: .single, value: 32, role: .observation),
                 ],
                 [
                     .init(metric: .distance, valueForm: .single, value: 30, role: .completion),
-                    .init(metric: .loadCarried, valueForm: .single, value: 45, role: .completion),
+                    .init(metric: .loadCarried, valueForm: .single, value: 45, role: .observation),
                 ],
                 [.init(metric: .reps, valueForm: .single, value: 20, role: .completion)],
                 [
                     .init(metric: .distance, valueForm: .single, value: 20, role: .completion),
-                    .init(metric: .loadCarried, valueForm: .single, value: 60, role: .completion),
+                    .init(metric: .loadCarried, valueForm: .single, value: 60, role: .observation),
                 ],
             ],
             slotLoads: [
@@ -1056,7 +1057,7 @@ public enum ExecutionPreviewSeed {
         return WorkoutContext(
             workout: workout,
             primitiveWorkout: primitiveWorkout,
-            primitiveExecutionPlan: ExecutionPlan(workout: primitiveWorkout),
+            primitiveExecutionPlan: try! ExecutionPlan.validated(workout: primitiveWorkout),
             blocks: [block],
             itemsByBlock: [workoutItems],
             exercises: exercises,

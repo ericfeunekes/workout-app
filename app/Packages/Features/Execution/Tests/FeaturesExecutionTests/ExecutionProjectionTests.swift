@@ -7,6 +7,7 @@
 
 import XCTest
 import CoreDomain
+import CoreSession
 import WorkoutCoreFoundation
 @testable import FeaturesExecution
 
@@ -713,6 +714,98 @@ final class ExecutionProjectionTests: XCTestCase {
             projection.workQueue.contains { $0.detail?.contains("sets left") == true },
             "Accumulate targets are target-owned work, not finite set counts"
         )
+    }
+
+    func testPrimitiveProjectionUsesFlattenedSlotOrderAcrossRepeatedExerciseSets() {
+        let exerciseID = UUID()
+        let firstItem = Self.item(
+            blockID: Self.blockID,
+            exerciseID: exerciseID,
+            position: 0,
+            prescriptionJSON: #"{"reps":5}"#
+        )
+        let secondItem = Self.item(
+            blockID: Self.blockID,
+            exerciseID: exerciseID,
+            position: 1,
+            prescriptionJSON: #"{"reps":8}"#
+        )
+        var (context, _) = Self.context(
+            timingMode: .amrap,
+            blockName: "Repeated bench",
+            blockIntent: nil,
+            timingConfigJSON: #"{"time_cap_sec":300}"#,
+            items: [firstItem, secondItem],
+            exercises: [exerciseID: "Bench"]
+        )
+        let primitiveWorkout = PrimitiveWorkout(
+            id: context.workout.id,
+            name: context.workout.name,
+            blocks: [
+                PrimitiveBlock(id: Self.blockID, sets: [
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: PrimitiveTiming(mode: .capBounded, capSec: 300),
+                        traversal: .amrap,
+                        workTargets: [
+                            PrimitiveWorkTarget(metric: .rounds, valueForm: .open, role: .observation),
+                        ],
+                        slots: [
+                            PrimitiveSlot(
+                                id: UUID(),
+                                exerciseID: exerciseID,
+                                workTargets: [
+                                    PrimitiveWorkTarget(
+                                        metric: .reps,
+                                        valueForm: .single,
+                                        value: 5,
+                                        role: .completion
+                                    ),
+                                ]
+                            ),
+                        ]
+                    ),
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: PrimitiveTiming(mode: .capBounded, capSec: 300),
+                        traversal: .amrap,
+                        workTargets: [
+                            PrimitiveWorkTarget(metric: .rounds, valueForm: .open, role: .observation),
+                        ],
+                        slots: [
+                            PrimitiveSlot(
+                                id: UUID(),
+                                exerciseID: exerciseID,
+                                workTargets: [
+                                    PrimitiveWorkTarget(
+                                        metric: .reps,
+                                        valueForm: .single,
+                                        value: 8,
+                                        role: .completion
+                                    ),
+                                ]
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        context = WorkoutContext(
+            workout: context.workout,
+            primitiveWorkout: primitiveWorkout,
+            primitiveExecutionPlan: ExecutionPlan(workout: primitiveWorkout),
+            blocks: context.blocks,
+            itemsByBlock: context.itemsByBlock,
+            exercises: context.exercises
+        )
+        let vm = ExecutionViewModel(context: context, clock: FixedClock(now: now))
+
+        vm.start()
+        vm.logAMRAPStation(reps: 5)
+        let projection = vm.executionProjection(now: now)
+
+        XCTAssertEqual(projection.currentTask.title, "Bench")
+        XCTAssertEqual(projection.currentTask.secondaryMetric, "8 reps")
     }
 
     // MARK: - Fixtures

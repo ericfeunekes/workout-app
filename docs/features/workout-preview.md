@@ -7,6 +7,7 @@ covers:
   - docs/features/today.md
   - docs/features/execute-loop.md
   - docs/set-edit-sheet.md
+  - app/Packages/Core/Session/Sources/CoreSession/SessionPreviewProjection.swift
   - app/Packages/Features/Today/
   - app/Packages/Features/Execution/
   - app/Packages/Features/Execution/Sources/FeaturesExecution/ExecutionProjection.swift
@@ -37,10 +38,11 @@ gym context where taps are imprecise.
   state if one exists.
 - **Outputs:** preview read model, explicit start action, scoped edit intents
   routed through `docs/set-edit-sheet.md`.
-- **Projection ownership:** preview should consume the shared execution
-  projection seam for first-task, remaining-work, upcoming-work, block-intent,
-  and editability answers. It should not re-derive execution cursor rules or
-  driver-specific display strings in a separate preview-only model.
+- **Projection ownership:** preview consumes the shared `Core/Session`
+  `SessionPreviewProjection` seam for first-task, current-block remaining-work,
+  upcoming-work, and primitive target facts. Features own presentation strings
+  and layout. Today must not import `FeaturesExecution`, and preview must not
+  re-derive primitive cursor/progress rules in a separate preview-only model.
 - **State transitions:** preview has no live timers. `Start` is the only route
   from preview into execution.
 
@@ -76,11 +78,12 @@ handoff instead of inventing a local plan mutation.
   publisher must be
   built against the server's whole-tree replacement contract and must decide how
   to handle stale local previews versus newer server workout trees.
-- `PREVIEW-GAP-003`: Preview still uses Today's read-side block detail instead of directly
-  importing `ExecutionProjection`; that preserves the feature-package boundary
-  that only Shell may compose sibling features. Execution-side preview work now
-  exposes a projection-backed work queue for current-block remaining and future
-  work.
+- Preview now consumes the shared CoreSession preview seam for current work,
+  current-block remaining work, and upcoming work when a primitive execution
+  plan is available (`SessionPreviewProjection`; tested by
+  `TodayViewModelTests.testWorkoutDetailUsesPrimitiveProjectionForPreviewSummary`).
+  It also shares CoreSession primitive seed/load-resolution semantics with
+  Execution. Today does not import FeaturesExecution.
 - `TODAY-GAP-002`: Simulator proof is required before any preview tap target or
   layout claim is marked `verified`.
 

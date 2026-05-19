@@ -232,6 +232,21 @@ extension ExecutionViewModel {
         ))
     }
 
+    /// Emit one data-readback event for each primitive output row the app
+    /// records. This is intentionally row-shaped rather than gesture-shaped:
+    /// QA can compare it directly with the `PrimitiveSetLog` that will be
+    /// pushed or included in the completion record.
+    func emitPrimitiveResultRecorded(_ log: PrimitiveSetLog) {
+        telemetry.emit(Event(
+            sessionID: TelemetrySession.id,
+            kind: "state",
+            name: "execution.primitive_result_recorded",
+            dataJSON: Self.encodeTelemetryPayload(PrimitiveResultRecordedEventPayload(log: log)),
+            workoutID: log.workoutID,
+            setLogID: log.id
+        ))
+    }
+
     // MARK: - Telemetry payload encoding
 
     /// Encode an `Encodable` telemetry payload into a JSON string for
@@ -253,7 +268,7 @@ extension ExecutionViewModel {
     private static func completionPayload(_ record: WorkoutCompletionRecord) -> CompletionEventPayload {
         CompletionEventPayload(
             workoutID: record.workoutID.wireID,
-            setLogCount: record.setLogs.count,
+            setLogCount: 0,
             primitiveSetLogCount: record.primitiveSetLogs.count,
             hasNote: record.notes != nil
         )
@@ -344,6 +359,72 @@ private struct CompletionPublishEventPayload: Encodable {
         case hasNote = "has_note"
         case publisherInstalled = "publisher_installed"
         case error
+    }
+}
+
+private struct PrimitiveResultRecordedEventPayload: Encodable {
+    let role: String
+    let logID: String
+    let workoutID: String?
+    let slotID: String?
+    let setID: String?
+    let blockID: String?
+    let plannedExerciseID: String?
+    let performedExerciseID: String?
+    let setIndex: Int
+    let setRepeatIndex: Int
+    let blockRepeatIndex: Int
+    let reps: Int?
+    let weight: Double?
+    let weightUnit: String?
+    let durationSec: Double?
+    let distanceM: Double?
+    let rounds: Int?
+    let rir: Int?
+    let isWarmup: Bool
+
+    init(log: PrimitiveSetLog) {
+        self.role = log.role.rawValue
+        self.logID = log.id.wireID
+        self.workoutID = log.workoutID?.wireID
+        self.slotID = log.slotID?.wireID
+        self.setID = log.setID?.wireID
+        self.blockID = log.blockID?.wireID
+        self.plannedExerciseID = log.plannedExerciseID?.wireID
+        self.performedExerciseID = log.performedExerciseID?.wireID
+        self.setIndex = log.setIndex
+        self.setRepeatIndex = log.setRepeatIndex
+        self.blockRepeatIndex = log.blockRepeatIndex
+        self.reps = log.reps
+        self.weight = log.weight
+        self.weightUnit = log.weightUnit?.rawValue
+        self.durationSec = log.durationSec
+        self.distanceM = log.distanceM
+        self.rounds = log.rounds
+        self.rir = log.rir
+        self.isWarmup = log.isWarmup
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case role
+        case logID = "log_id"
+        case workoutID = "workout_id"
+        case slotID = "slot_id"
+        case setID = "set_id"
+        case blockID = "block_id"
+        case plannedExerciseID = "planned_exercise_id"
+        case performedExerciseID = "performed_exercise_id"
+        case setIndex = "set_index"
+        case setRepeatIndex = "set_repeat_index"
+        case blockRepeatIndex = "block_repeat_index"
+        case reps
+        case weight
+        case weightUnit = "weight_unit"
+        case durationSec = "duration_sec"
+        case distanceM = "distance_m"
+        case rounds
+        case rir
+        case isWarmup = "is_warmup"
     }
 }
 

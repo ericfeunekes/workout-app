@@ -63,6 +63,8 @@ packages:
     path: Packages/HealthKitBridge
   WatchBridge:
     path: Packages/WatchBridge
+  WorkoutKitAdapter:
+    path: Packages/WorkoutKitAdapter
   FeaturesToday:
     path: Packages/Features/Today
   FeaturesExecution:
@@ -115,6 +117,10 @@ targets:
       # WatchBridge — iPhone ↔ Watch IPC. The only package allowed to
       # import WatchConnectivity (FF-13 enforces).
       - package: WatchBridge
+      # WorkoutKitAdapter — target-side WorkoutKit plan construction,
+      # scheduling/opening, and DEBUG proof probes. No visible export UI
+      # calls this until real-device proof is recorded.
+      - package: WorkoutKitAdapter
       # Companion watch app — embed so WatchConnectivity recognizes the
       # paired Watch app as this iOS app's counterpart in simulator/device
       # installs, not just as a separately-built target.
@@ -159,6 +165,9 @@ targets:
           UIImageName: ""
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
         UIRequiredDeviceCapabilities:
           - armv7
         NSHealthShareUsageDescription: "Reads heart rate and cadence during workouts for set logging."
@@ -198,9 +207,15 @@ targets:
       - package: DesignSystem
       # Persistence — watch persists local session state too.
       - package: Persistence
+      # HealthKitBridge — owns HealthKit live workout probes and future
+      # typed metric sourcing for watch metric consumers.
+      - package: HealthKitBridge
       # WatchBridge — IPC back to the phone. Watch-side consumer talks to
       # the same protocol the phone talks to; direction is in the message.
       - package: WatchBridge
+      # WorkoutKitAdapter — watchOS-only openInWorkoutApp proof path. Kept
+      # separate from WatchBridge because this is WorkoutKit, not IPC.
+      - package: WorkoutKitAdapter
       # FeaturesWatchFaces — watch companion UI (Idle / ActiveSet / Rest
       # faces + view model). The watch target stays a thin shell; faces
       # and wiring live in the Features package.
@@ -211,9 +226,12 @@ targets:
         CFBundleDisplayName: Setmark
         CFBundleShortVersionString: "0.0.1"
         CFBundleVersion: "1"
+        CFBundleIconName: AppIcon
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.ericfeunekes.WorkoutDB
         WKWatchOnly: NO     # companion to the iOS app
+        NSHealthShareUsageDescription: "Reads live workout metrics from Apple Health for workout capture."
+        NSHealthUpdateUsageDescription: "Writes completed workout probe data to Apple Health."
     entitlements:
       path: WorkoutDBWatch/WorkoutDBWatch.entitlements
       properties:

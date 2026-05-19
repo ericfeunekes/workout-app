@@ -41,6 +41,10 @@ public protocol LastPerformedStore: Sendable {
     /// prior entries not in `entries` are dropped (the server sends the
     /// complete snapshot on every pull, so the write is authoritative).
     func save(_ entries: [UUID: String]) async
+
+    /// Remove the cached map. Used by explicit server-owned local-state reset;
+    /// ordinary empty pulls do not clear the store.
+    func clear() async
 }
 
 /// UserDefaults-backed implementation. Thread-safety comes from
@@ -93,5 +97,9 @@ public struct LastPerformedStoreImpl: LastPerformedStore {
             return
         }
         defaults.set(data, forKey: key)
+    }
+
+    public func clear() async {
+        defaults.removeObject(forKey: key)
     }
 }

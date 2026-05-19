@@ -32,6 +32,19 @@ One user (Eric) uses this system. No legacy data to migrate from a previous user
   explicitly treat current local/server workouts as disposable QA data. Do not
   silently choose either preservation or deletion; the owning spec must say.
 
+## Destructive cutover exception
+
+The default schema-change path is append-only migration. A destructive cutover
+is allowed only when the owning accepted spec explicitly says the affected data
+is disposable, names the server and local reset/recreate scope, and names the
+proof that old data cannot silently mix with fresh data after the cutover.
+
+The primitive data model cutover is such an exception: current server and local
+workouts are QA data, so the next deployment may recreate the server database
+and reset the local workout cache before fresh primitive workouts are pushed.
+This is not a compatibility mode and does not reopen a production
+preservation/backfill lane.
+
 ## Server migrations
 
 **Format:** Numbered SQL files in `server/db/migrations/`:
@@ -96,9 +109,10 @@ The app should refuse to launch if a preservation migration fails — don't
 silently drop data. If the owning spec permits a reset, the migration or
 operator runbook must make the destructive reset explicit.
 
-## The cutover flow (every schema change)
+## The default cutover flow
 
-A schema change is a single atomic commit that touches all of the below:
+Unless the owning spec invokes the destructive cutover exception above, a schema
+change is a single atomic commit that touches all of the below:
 
 1. **Server SQL migration** — `server/db/migrations/NNN_<change>.sql`
 2. **Server models** — `server/workoutdb_server/models.py` (SQLAlchemy + Pydantic)

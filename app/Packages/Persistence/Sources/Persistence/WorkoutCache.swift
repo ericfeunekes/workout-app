@@ -448,17 +448,22 @@ public actor WorkoutCacheImpl: WorkoutCache {
     }
 
     public func clear() async throws {
-        try modelContext.delete(model: WorkoutModel.self)
-        try modelContext.delete(model: PrimitiveWorkoutModel.self)
-        try modelContext.delete(model: PrimitiveSetLogModel.self)
-        try modelContext.delete(model: BlockModel.self)
-        try modelContext.delete(model: WorkoutItemModel.self)
-        try modelContext.delete(model: ExerciseModel.self)
-        try modelContext.delete(model: ExerciseAlternativeModel.self)
-        try modelContext.delete(model: SetLogModel.self)
-        try modelContext.delete(model: UserParameterModel.self)
-        try modelContext.delete(model: AppUserModel.self)
-        try modelContext.save()
+        do {
+            try modelContext.delete(model: WorkoutModel.self)
+            try modelContext.delete(model: PrimitiveWorkoutModel.self)
+            try modelContext.delete(model: PrimitiveSetLogModel.self)
+            try modelContext.delete(model: BlockModel.self)
+            try modelContext.delete(model: WorkoutItemModel.self)
+            try modelContext.delete(model: ExerciseModel.self)
+            try modelContext.delete(model: ExerciseAlternativeModel.self)
+            try modelContext.delete(model: SetLogModel.self)
+            try modelContext.delete(model: UserParameterModel.self)
+            try modelContext.delete(model: AppUserModel.self)
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
     }
 
     // Per-entity upsert helpers live in `WorkoutCache+Upserts.swift` so

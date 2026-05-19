@@ -1,28 +1,28 @@
 ---
-title: Cutover — complete primitive contract with explicit QA-data reset
+title: Cutover — complete primitive contract with disposable QA data
 status: accepted — active cutover contract with residual runtime followups
 last_reviewed: 2026-05-18
 parent: ../primitives-data-model.md
-purpose: How the primitives data model lands and how residual runtime cutover work stays on the no-legacy primitive contract. Because the repo is single-user dev with no production compatibility constraint, current local/server QA workout data may be reset and old-shape acceptance windows are not allowed.
+purpose: How the primitives data model lands and how residual runtime cutover work stays on the no-legacy primitive contract. Because the repo is single-user dev with no production compatibility constraint, current local/server QA workout data may be reset or removed by recreating the database, and old-shape acceptance windows are not allowed.
 ---
 
 # Cutover
 
 ## Why this is short
 
-The repo is single-user dev. There is no existing user base to migrate and no backwards compatibility window to honor. The server's prescription store can be dropped and re-accepted when Claude pushes workouts in the new shape.
+The repo is single-user dev. There is no existing user base to migrate and no backwards compatibility window to honor. The server database can be deleted and recreated on the next deployment, then rehydrated when Claude pushes workouts in the primitive shape.
 
 Current local/server workouts and logs are QA data, not authoritative training
 history. They may be deleted during this cutover. Reset does not mean keeping
-the old schema, accepting old payloads, or supporting a legacy execution path.
-It means the SwiftData/server cutover explicitly removes old-shape workout data
-and proves fresh primitive workouts can be pulled, executed, logged, pushed, and
-reset without old data returning.
+the old schema, accepting old payloads, preserving rows, or supporting a legacy
+execution path. It means local cache reset is explicit and fresh primitive
+workouts can be pulled, executed, logged, pushed, and reset without old data
+returning.
 
 Earlier migration analysis considered outbox drain, per-timing-mode backfill
 rules, temporary legacy-acceptance windows, and orphan policies for a broader
 production-preservation scenario. That is **not** the cutover for this spec.
-This spec carries the narrower QA-data reset requirement.
+This spec carries the narrower disposable-QA-data requirement.
 
 ## Current implementation state
 
@@ -30,7 +30,11 @@ The primitive wire/schema/cache/sync/reset cutover has landed as the active
 contract: workout create/read/update and sync pull expose `primitive_blocks`,
 result pushes write `primitive_set_logs`, the app mirrors primitive workouts
 and result rows, reset clears primitive logs, and old QA workout data may be
-deleted rather than migrated.
+deleted rather than migrated. Grouped completion payloads now carry primitive
+result rows only; the old `SetLog` result batch is no longer a sync or
+push-queue payload shape. Live execution push wiring now uses only the
+primitive result hook; the previous per-log `SetLog` push hook is no longer a
+production execution dependency.
 
 Residual work remains in the runtime-facing followups tracked by
 `docs/specs/primitives-data-model.md` and `docs/feature-gap-map.md`: full
@@ -41,10 +45,10 @@ surface has been replaced.
 
 ## Current gaps
 
-- `PDM-GAP-005`: Current local/server workout logs are disposable QA data
-  during this cutover. The implemented cutover must continue to prove the
-  destructive reset is explicit, old-shape data does not mix with primitive
-  data, and fresh primitive workouts/results operate after reset.
+No cutover-only cache/reset gap remains. `PDM-GAP-005` is closed: old QA rows
+do not need a preservation migration, local cache reset is explicit, and the
+server database may be recreated on deployment before fresh primitive workouts
+are pushed.
 
 ## Original full-cutover target
 
@@ -55,7 +59,10 @@ runtime-facing leftovers as explicit gaps.
 
 A complete runtime cutover lands:
 
-1. **Server — new schema migration.** One SQL migration (append-only, per `docs/MIGRATIONS.md`) that:
+1. **Server — database replacement.** On the next deployment, the server
+   database may be deleted and recreated on the current primitive schema. If a
+   future deploy needs preservation, re-enter requirements planning before
+   writing a migration/backfill path. The active primitive schema:
    - Drops the existing `workout_item`, `block.timing_mode`, `block.timing_config_json`, `block.rounds`, `exercise_alternative`, and the old `prescription_json` columns.
    - Creates the new `workout`, `block`, `set` (new table), `slot` (renamed from workout_item), `alternative_slot` (replaces exercise_alternative) tables per the log-shape aspect's DDL.
    - Recreates `set_log` with the columns the log-shape aspect names (`role`, `slot_id`, `set_id`, `block_id`, `workout_id`, `planned_exercise_id`, `set_repeat_index`, `block_repeat_index`, `set_index`, `rounds`, `rir`, stimulus raw columns, overlay columns).
@@ -65,11 +72,14 @@ A complete runtime cutover lands:
 
 3. **Shared schema DTOs.** `schema/Sources/WorkoutDBSchema/` Swift DTOs updated to match. `TimingMode` enum replaced by the `(timing, traversal, repeat)` cells defined in the authoring-shape aspect. Contract test in `tests/contract/test_swift_schema_parity.py` updated.
 
-4. **App — SwiftData versioned cutover.** One SwiftData migration stage from V_current to V_new:
+4. **App — local cache replacement.** Local QA workout/log/cache data may be
+   reset. No row-preserving SwiftData migration is required for workout data:
    - Drops old `WorkoutItem`, `ExerciseAlternative`, `SetLog`, `Block` timing fields.
    - Adds new `Set`, `Slot`, `AlternativeSlot` model types and new `Block` fields (`repeat`, `timer`, `work_target`, `stimuli`).
    - New `SetLog` with the columns above.
-   - Explicitly resets old local workout/log data as QA data while preserving non-workout app configuration needed to reconnect. The proof obligation is reset correctness, not field-for-field legacy schema retention.
+   - Explicitly resets old local workout/log data as QA data. The proof
+     obligation is reset correctness and clean fresh primitive operation, not
+     field-for-field legacy schema retention.
 
 5. **App — execution engine.** `SessionSeeder` rewritten to consume the new prescription shape and produce an `ExecutionPlan` per the runtime-resolution aspect. Drivers under `app/Packages/Features/Execution/Sources/FeaturesExecution/Drivers/` updated to read the new contract. Existing driver _behavior_ is preserved per acceptance criterion A1; driver _code_ is rewritten against the new `ExecutionPlan` / `ExecutionSlot` shape.
 
@@ -103,12 +113,14 @@ runnable for the committed cutover surface:
 
 No runtime compatibility layer between the two sides is required because old-shape authoring and result payloads are not accepted post-cutover.
 
-This satisfies acceptance criterion **A5**: the cutover explicitly resets old QA workout data and remains reversible within dev.
+This satisfies acceptance criterion **A5**: the cutover treats old QA workout
+data as disposable, keeps local reset explicit, and remains reversible within
+dev.
 
 ## What the cutover deliberately does not do
 
 - **Does not preserve old local workout/log data.** Current workouts and logs are QA data and may be deleted. The old row shape, old foreign keys, and old execution IDs do not survive as a compatibility lane.
-- **Does not preserve server-side prescriptions.** Claude re-pushes active workouts in the new shape after the cutover lands. The server's old prescription store is wiped.
+- **Does not preserve server-side prescriptions.** Claude re-pushes active workouts in the new shape after the cutover lands. The server's old prescription store is wiped, and the whole server database may be recreated on deployment.
 - **Does not preserve in-flight sessions.** If Eric has an active session when the cutover deploys, it is abandoned. The SwiftData destructive migration drops the `SessionState` store alongside `SetLog`.
 - **Does not carry any legacy acceptance path.** `/api/sync/results` accepts only new-shape payloads post-cutover. No dual-shape window.
 - **Does not include per-driver rewrite planning.** Each driver's port is its own implementation unit under `app/Packages/Features/Execution/`. The cutover lands the new contract; driver rewrites may land in the same PR as a single-shot port, or in stacked PRs sequenced by the driver-rewrite plan that implementation-planning produces.
@@ -122,7 +134,7 @@ Per acceptance criteria A1 (all timing modes execute end-to-end) and A2 (ten wor
 3. Ten round-trip tests (one per worked example) pass.
 4. `uv run pytest` passes on the server.
 5. `uv run lint-imports` passes (no new architectural boundary violations).
-6. A reset/cutover test proves representative old QA workouts/logs are removed and fresh primitive workouts/logs operate after the reset.
+6. A reset/cutover test proves representative local QA workouts/logs are removed and fresh primitive workouts/logs operate after the reset. Server proof is database recreation plus fresh primitive push/readback, not row-preserving migration.
 7. A manual simulator smoke: Eric starts a fresh workout, executes a straight-set, a superset, and a cap-bounded block, confirms the set_log is written with the expected `slot_id` / `set_id` / `block_id` composition.
 
 If any of the above fail, the runtime cutover remains open. There is no

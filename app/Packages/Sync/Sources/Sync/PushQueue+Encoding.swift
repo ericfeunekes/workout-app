@@ -15,13 +15,13 @@ import WorkoutDBSchema
 
 extension PushQueue {
 
-    /// Route a payload to its endpoint. Set logs + status updates share
+    /// Route a payload to its endpoint. Primitive result logs + status updates share
     /// `/api/sync/results`; telemetry has its own endpoint so failures on
     /// one path don't block the other; user_parameters have their own
     /// endpoint and are append-only.
     func pushPath(for payload: PushItem.Payload) -> String {
         switch payload {
-        case .setLogs, .primitiveSetLogs, .statusUpdate, .completionResults, .workoutReset:
+        case .primitiveSetLogs, .statusUpdate, .completionResults, .workoutReset:
             return "/api/sync/results"
         case .events:
             return "/api/telemetry/events"
@@ -36,8 +36,6 @@ extension PushQueue {
     /// `SyncError.encode`.
     func encodeBody(for item: PushItem) throws -> Data {
         switch item.payload {
-        case .setLogs(let logs):
-            return try encodeSetLogs(logs)
         case .primitiveSetLogs(let logs):
             return try encodePrimitiveSetLogs(logs)
         case .statusUpdate(let workoutID, let status, let completedAt, let notes):
@@ -47,12 +45,11 @@ extension PushQueue {
                 completedAt: completedAt,
                 notes: notes
             )
-        case .completionResults(let workoutID, let completedAt, let notes, let logs, let primitiveLogs):
+        case .completionResults(let workoutID, let completedAt, let notes, let primitiveLogs):
             return try encodeCompletionResults(
                 workoutID: workoutID,
                 completedAt: completedAt,
                 notes: notes,
-                logs: logs,
                 primitiveLogs: primitiveLogs
             )
         case .workoutReset(let workoutID):
@@ -66,16 +63,6 @@ extension PushQueue {
             // `user_id` stays server-derived (from the bearer token).
             return try encoder.encode([DTOMapping.toInDTO(param)])
         }
-    }
-
-    private func encodeSetLogs(_ logs: [CoreDomain.SetLog]) throws -> Data {
-        throw EncodingError.invalidValue(
-            logs,
-            .init(
-                codingPath: [],
-                debugDescription: "legacy set_logs are not syncable after primitive result cutover"
-            )
-        )
     }
 
     private func encodePrimitiveSetLogs(_ logs: [CoreDomain.PrimitiveSetLog]) throws -> Data {
@@ -118,18 +105,8 @@ extension PushQueue {
         workoutID: WorkoutID,
         completedAt: Date?,
         notes: String?,
-        logs: [CoreDomain.SetLog],
         primitiveLogs: [CoreDomain.PrimitiveSetLog]
     ) throws -> Data {
-        if !logs.isEmpty && primitiveLogs.isEmpty {
-            throw EncodingError.invalidValue(
-                logs,
-                EncodingError.Context(
-                    codingPath: [],
-                    debugDescription: "legacy set_logs are not syncable after primitive result cutover"
-                )
-            )
-        }
         // swiftlint:disable:next force_unwrapping
         let wireStatus = WorkoutDBSchema.WorkoutStatus(rawValue: CoreDomain.WorkoutStatus.completed.rawValue)!
         let dto = WorkoutDBSchema.WorkoutStatusUpdate(

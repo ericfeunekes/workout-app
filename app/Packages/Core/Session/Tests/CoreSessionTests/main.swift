@@ -852,6 +852,8 @@ runCase("session preview projection binds metadata to forwarded current block") 
     try expectEqual(projection.remaining, .bounded(completed: 0, total: 2))
 }
 
+runPrimitiveCompositionGeneratorTests()
+
 func primitiveWorkout(
     setID: UUID,
     timing: PrimitiveTiming,

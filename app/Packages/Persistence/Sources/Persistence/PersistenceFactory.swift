@@ -19,7 +19,9 @@ public struct PersistenceFactory {
     public let workoutCache: WorkoutCache
     public let sessionStore: SessionStore
     public let pushQueueStore: PushQueueStore
+    public let healthArchiveStore: HealthArchiveStore
     public let tokenStore: TokenStore
+    public let authRecoveryStore: AuthRecoveryStore
     public let syncMetadataStore: SyncMetadataStore
     /// Pre-formatted per-exercise "LAST · …" summary map. Populated by
     /// the Shell composition after a successful pull; read back by
@@ -57,8 +59,18 @@ public struct PersistenceFactory {
     public static func makeDefault(
         tokenServiceName: String = "com.ericfeunekes.WorkoutDB.token"
     ) throws -> PersistenceFactory {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV7.self)
         let storeURL = try defaultStoreURL()
+        return try makeOnDisk(
+            storeURL: storeURL,
+            tokenServiceName: tokenServiceName
+        )
+    }
+
+    public static func makeOnDisk(
+        storeURL: URL,
+        tokenServiceName: String = "com.ericfeunekes.WorkoutDB.token"
+    ) throws -> PersistenceFactory {
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV8.self)
         let configuration = ModelConfiguration(schema: schema, url: storeURL)
         let container: ModelContainer
         do {
@@ -78,6 +90,7 @@ public struct PersistenceFactory {
         return PersistenceFactory(
             container: container,
             tokenStore: TokenStoreImpl(serviceName: tokenServiceName),
+            authRecoveryStore: AuthRecoveryStoreImpl(),
             syncMetadataStore: SyncMetadataStoreImpl(),
             lastPerformedStore: LastPerformedStoreImpl()
         )
@@ -98,7 +111,7 @@ public struct PersistenceFactory {
     public static func makeInMemory(
         tokenServiceName: String = "com.ericfeunekes.WorkoutDB.token.test"
     ) throws -> PersistenceFactory {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV7.self)
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV8.self)
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(
             for: schema,
@@ -113,6 +126,7 @@ public struct PersistenceFactory {
         return PersistenceFactory(
             container: container,
             tokenStore: TokenStoreImpl(serviceName: tokenServiceName),
+            authRecoveryStore: AuthRecoveryStoreImpl(defaults: defaults),
             syncMetadataStore: SyncMetadataStoreImpl(defaults: defaults),
             lastPerformedStore: LastPerformedStoreImpl(defaults: defaults)
         )
@@ -138,16 +152,19 @@ public struct PersistenceFactory {
     public init(
         container: ModelContainer,
         tokenStore: TokenStore,
+        authRecoveryStore: AuthRecoveryStore = AuthRecoveryStoreImpl(),
         syncMetadataStore: SyncMetadataStore = SyncMetadataStoreImpl(),
         lastPerformedStore: LastPerformedStore = LastPerformedStoreImpl()
     ) {
         self.container = container
         self.workoutCache = WorkoutCacheImpl(modelContainer: container)
         self.sessionStore = SessionStoreImpl(modelContainer: container)
+        self.healthArchiveStore = HealthArchiveStoreImpl(modelContainer: container)
         let pushQueueStore = PushQueueStoreImpl(modelContainer: container)
         self.pushQueueStore = pushQueueStore
         self.pushQueueStoreImpl = pushQueueStore
         self.tokenStore = tokenStore
+        self.authRecoveryStore = authRecoveryStore
         self.syncMetadataStore = syncMetadataStore
         self.lastPerformedStore = lastPerformedStore
         // Build the emitter but do NOT attach from init. The old code fired

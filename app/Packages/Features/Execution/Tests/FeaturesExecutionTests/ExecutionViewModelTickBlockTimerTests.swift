@@ -23,9 +23,9 @@
 //      view's `.onReceive` once per second" without booting a SwiftUI
 //      runtime in tests.
 //
-// If SwiftUI view testing ever becomes practical in this harness, swap
-// the source-inspection half for a mounted-view assertion. Until then
-// this is the strongest check available.
+// Source inspection is only used for timer wiring and static affordance
+// placement. User-visible route/alert lifecycle regressions are covered
+// in WorkoutDBUITests so they exercise the real SwiftUI surfaces.
 
 import XCTest
 import CoreDomain
@@ -464,10 +464,11 @@ final class ExecutionViewModelTickBlockTimerTests: XCTestCase {
     }
 
     func testEndConfirmationInvalidatesAcrossIntervalRouteBoundaries() {
-        XCTAssertTrue(ActiveView.shouldDismissEndConfirmation(oldRoute: .active, newRoute: .rest))
-        XCTAssertTrue(RestView.shouldDismissEndConfirmation(oldRoute: .rest, newRoute: .active))
-        XCTAssertFalse(ActiveView.shouldDismissEndConfirmation(oldRoute: .active, newRoute: .active))
-        XCTAssertFalse(RestView.shouldDismissEndConfirmation(oldRoute: .rest, newRoute: .rest))
+        XCTAssertTrue(ExecutionView.shouldDismissEndConfirmation(oldRoute: .active, newRoute: .rest))
+        XCTAssertTrue(ExecutionView.shouldDismissEndConfirmation(oldRoute: .rest, newRoute: .active))
+        XCTAssertTrue(ExecutionView.shouldDismissEndConfirmation(oldRoute: .active, newRoute: .complete))
+        XCTAssertFalse(ExecutionView.shouldDismissEndConfirmation(oldRoute: .active, newRoute: .active))
+        XCTAssertFalse(ExecutionView.shouldDismissEndConfirmation(oldRoute: .rest, newRoute: .rest))
     }
 
     func testActiveViewScopesSwapLongPressAwayFromTimerHero() throws {

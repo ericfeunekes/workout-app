@@ -16,14 +16,13 @@ import WorkoutCoreFoundation
 
 public typealias PushItemID = UUID
 
-/// What we're pushing: a batch of set_logs, a single workout-status flip,
+/// What we're pushing: primitive result rows, a single workout-status flip,
 /// a batch of telemetry events, or a single user_parameter row. The first
 /// two hit `/api/sync/results`; `.events` hits `/api/telemetry/events`;
 /// `.userParameter` hits `/api/user-parameters`. See `docs/sync.md` §
 /// "Push protocol" and the telemetry scope note.
 public struct PushItem: Sendable, Equatable {
     public enum Payload: Sendable, Equatable {
-        case setLogs([CoreDomain.SetLog])
         case primitiveSetLogs([CoreDomain.PrimitiveSetLog])
         /// `notes` rides on the terminal status push so the server is
         /// authoritative for the user-authored post-workout note. `nil`
@@ -44,7 +43,6 @@ public struct PushItem: Sendable, Equatable {
             workoutID: WorkoutID,
             completedAt: Date?,
             notes: String?,
-            setLogs: [CoreDomain.SetLog],
             primitiveSetLogs: [CoreDomain.PrimitiveSetLog]
         )
         case workoutReset(workoutID: WorkoutID)
@@ -60,7 +58,7 @@ public struct PushItem: Sendable, Equatable {
         /// two tables.
         public var priority: Int {
             switch self {
-            case .setLogs, .primitiveSetLogs, .statusUpdate, .completionResults, .workoutReset, .userParameter:
+            case .primitiveSetLogs, .statusUpdate, .completionResults, .workoutReset, .userParameter:
                 return 0
             case .events:
                 return 1
@@ -79,18 +77,12 @@ public struct PushItem: Sendable, Equatable {
         /// store — callers never parse it, they just pass it through.
         public var dedupKey: String? {
             switch self {
-            case .setLogs(let logs):
-                // Only single-log payloads dedup; batch completion pushes
-                // are a distinct logical unit. Matches the rule in
-                // `PushQueue+Dedup.dropExistingSetLog`.
-                guard logs.count == 1 else { return nil }
-                return "setLog:\(logs[0].id.uuidString.lowercased())"
             case .primitiveSetLogs(let logs):
                 guard logs.count == 1 else { return nil }
                 return "primitiveSetLog:\(logs[0].id.uuidString.lowercased())"
             case .statusUpdate(let workoutID, let status, _, _):
                 return "status:\(workoutID.uuidString.lowercased()):\(status.rawValue)"
-            case .completionResults(let workoutID, _, _, _, _):
+            case .completionResults(let workoutID, _, _, _):
                 return "completion:\(workoutID.uuidString.lowercased())"
             case .workoutReset(let workoutID):
                 return "reset:\(workoutID.uuidString.lowercased())"
@@ -147,7 +139,7 @@ public protocol PushQueueStore: Sendable {
     /// FIFO by `enqueuedAt` within each priority class. Callers use
     /// `remove(ids:)` after a successful push. This ordering is what
     /// keeps a verbose-mode telemetry burst from stalling a freshly-
-    /// logged set behind a long tail: `.events` sorts *after* `.setLogs`
+    /// logged set behind a long tail: `.events` sorts *after* result rows
     /// / `.statusUpdate` / `.userParameter` even when the event rows are
     /// chronologically older.
     func peek(max: Int) async throws -> [PushItem]
@@ -176,4 +168,8 @@ public protocol PushQueueStore: Sendable {
 
     /// Whether the queue has zero items pending.
     func isEmpty() async throws -> Bool
+
+    /// Remove every queued row. Used when the local server identity is being
+    /// discarded, so old queued mutations cannot flush to the next server.
+    func clear() async throws
 }

@@ -188,10 +188,8 @@ extension ExecutionViewModel {
         // timestamp (the server's upsert overwrites on each push).
         let completedAt = loggedSet?.completedAt ?? clock.now
         let skipped = loggedSet?.skipped ?? false
-        let setLog = SetLog(
-            id: Self.setLogID(itemID: item.id, setIndex: setIndex),
-            workoutItemID: item.id,
-            performedExerciseID: performedExerciseID,
+        let primitiveLog = appendPrimitiveSlotLog(
+            item: item,
             setIndex: setIndex,
             reps: skipped ? nil : reps,
             weight: skipped ? nil : loggedLoad,
@@ -199,36 +197,12 @@ extension ExecutionViewModel {
             durationSec: skipped ? nil : loggedSet?.durationSec,
             distanceM: skipped ? nil : loggedSet?.distanceM,
             rir: skipped ? nil : rir,
-            isWarmup: false,
-            skipped: skipped,
-            side: loggedSet?.side ?? .bilateral,
-            startedAt: loggedSet?.startedAt,
-            completedAt: completedAt,
-            hrAvgBpm: skipped ? nil : loggedSet?.hrAvgBpm,
-            cadenceAvgSpm: skipped ? nil : loggedSet?.cadenceAvgSpm
-        )
-        let primitiveLog = appendPrimitiveSlotLog(
-            item: item,
-            setIndex: setIndex,
-            reps: setLog.reps,
-            weight: setLog.weight,
-            weightUnit: setLog.weightUnit,
-            durationSec: setLog.durationSec,
-            distanceM: setLog.distanceM,
-            rir: setLog.rir,
             completedAt: completedAt,
             performedExerciseID: performedExerciseID,
             skipped: skipped
         )
-        if context.primitiveExecutionPlan != nil {
-            guard let primitiveLog else { return }
-            enqueuePrimitiveSetObserver(primitiveLog)
-            return
-        }
-        if primitiveLog == nil {
-            enqueueLocalSetObserver(setLog)
-            return
-        }
+        guard let primitiveLog else { return }
+        enqueuePrimitiveSetObserver(primitiveLog)
     }
 
     /// Cardio sibling of `enqueueLoggedSet`. Builds a cardio result log
@@ -248,10 +222,8 @@ extension ExecutionViewModel {
         let completedAt = loggedSet?.completedAt ?? clock.now
         let weight = loggedSet?.loadKg
         let skipped = loggedSet?.skipped ?? false
-        let setLog = SetLog(
-            id: Self.setLogID(itemID: item.id, setIndex: setIndex),
-            workoutItemID: item.id,
-            performedExerciseID: performedExerciseID,
+        let primitiveLog = appendPrimitiveSlotLog(
+            item: item,
             setIndex: setIndex,
             reps: nil,
             weight: skipped ? nil : weight,
@@ -259,36 +231,12 @@ extension ExecutionViewModel {
             durationSec: skipped ? nil : input.durationSec,
             distanceM: skipped ? nil : input.distanceM,
             rir: nil,
-            isWarmup: false,
-            skipped: skipped,
-            side: loggedSet?.side ?? .bilateral,
-            startedAt: loggedSet?.startedAt ?? input.startedAt,
-            completedAt: completedAt,
-            hrAvgBpm: skipped ? nil : input.hrAvgBpm,
-            cadenceAvgSpm: skipped ? nil : input.cadenceAvgSpm
-        )
-        let primitiveLog = appendPrimitiveSlotLog(
-            item: item,
-            setIndex: setIndex,
-            reps: nil,
-            weight: setLog.weight,
-            weightUnit: setLog.weightUnit,
-            durationSec: setLog.durationSec,
-            distanceM: setLog.distanceM,
-            rir: nil,
             completedAt: completedAt,
             performedExerciseID: performedExerciseID,
             skipped: skipped
         )
-        if context.primitiveExecutionPlan != nil {
-            guard let primitiveLog else { return }
-            enqueuePrimitiveSetObserver(primitiveLog)
-            return
-        }
-        if primitiveLog == nil {
-            enqueueLocalSetObserver(setLog)
-            return
-        }
+        guard let primitiveLog else { return }
+        enqueuePrimitiveSetObserver(primitiveLog)
     }
 
     /// Enqueue a corrective past-set edit through the push hook.
@@ -330,10 +278,8 @@ extension ExecutionViewModel {
         // A loadless row (`loadKg == nil`) writes both as nil so History
         // renders "BW" and analytics don't see a phantom unit on a BW set.
         let skipped = set.skipped
-        let setLog = SetLog(
-            id: Self.setLogID(itemID: item.id, setIndex: setIndex),
-            workoutItemID: item.id,
-            performedExerciseID: itemLog.performedExerciseID,
+        let primitiveLog = appendPrimitiveSlotLog(
+            item: item,
             setIndex: setIndex,
             reps: skipped ? nil : set.reps,
             weight: skipped ? nil : set.loadKg,
@@ -341,36 +287,12 @@ extension ExecutionViewModel {
             durationSec: skipped ? nil : set.durationSec,
             distanceM: skipped ? nil : set.distanceM,
             rir: skipped ? nil : set.rir,
-            isWarmup: false,
-            skipped: skipped,
-            side: set.side,
-            startedAt: set.startedAt,
-            completedAt: completedAt,
-            hrAvgBpm: skipped ? nil : set.hrAvgBpm,
-            cadenceAvgSpm: skipped ? nil : set.cadenceAvgSpm
-        )
-        let primitiveLog = appendPrimitiveSlotLog(
-            item: item,
-            setIndex: setIndex,
-            reps: setLog.reps,
-            weight: setLog.weight,
-            weightUnit: setLog.weightUnit,
-            durationSec: setLog.durationSec,
-            distanceM: setLog.distanceM,
-            rir: setLog.rir,
             completedAt: completedAt,
             performedExerciseID: itemLog.performedExerciseID,
             skipped: skipped
         )
-        if context.primitiveExecutionPlan != nil {
-            guard let primitiveLog else { return }
-            enqueuePrimitiveSetObserver(primitiveLog)
-            return
-        }
-        if primitiveLog == nil {
-            enqueueLocalSetObserver(setLog)
-            return
-        }
+        guard let primitiveLog else { return }
+        enqueuePrimitiveSetObserver(primitiveLog)
     }
 
     private func appendPrimitiveSlotLog(
@@ -386,11 +308,37 @@ extension ExecutionViewModel {
         performedExerciseID: ExerciseID?,
         skipped: Bool
     ) -> PrimitiveSetLog? {
-        guard !skipped,
-              let plan = context.primitiveExecutionPlan,
-              let slotPosition = primitiveSlotPosition(for: item, in: plan) else {
-            return nil
+        guard !skipped else { return nil }
+        guard let plan = context.primitiveExecutionPlan else {
+            var log = PrimitiveSetLog(
+                id: Self.setLogID(itemID: item.id, setIndex: setIndex),
+                role: .slot,
+                slotID: item.id,
+                blockID: item.blockID,
+                workoutID: context.workout.id,
+                plannedExerciseID: item.exerciseID,
+                performedExerciseID: performedExerciseID,
+                setIndex: 0,
+                setRepeatIndex: max(0, setIndex - 1),
+                blockRepeatIndex: 0,
+                reps: reps,
+                weight: weight,
+                weightUnit: weightUnit,
+                durationSec: durationSec,
+                distanceM: distanceM,
+                rir: rir,
+                completedAt: completedAt
+            )
+            log.performedExerciseID = performedExerciseID
+            primitiveSetLogs.removeAll { existing in
+                existing.id == log.id && existing.role == .slot
+            }
+            primitiveSetLogs.append(log)
+            emitPrimitiveResultRecorded(log)
+            persist()
+            return log
         }
+        guard let slotPosition = primitiveSlotPosition(for: item, in: plan) else { return nil }
         var log = slotPosition.slot.slotLog(
             workoutID: plan.workoutID,
             blockRepeatIndex: 0,
@@ -409,6 +357,7 @@ extension ExecutionViewModel {
             existing.id == log.id && existing.role == .slot
         }
         primitiveSetLogs.append(log)
+        emitPrimitiveResultRecorded(log)
         persist()
         return log
     }
@@ -425,14 +374,6 @@ extension ExecutionViewModel {
             }
         }
         return nil
-    }
-
-    private func enqueueLocalSetObserver(_ setLog: SetLog) {
-        guard let onSetLogged = push.onSetLogged else { return }
-        // swiftlint:disable:next no_direct_task_unstructured
-        Task { @MainActor in
-            await onSetLogged(setLog)
-        }
     }
 
     private func enqueuePrimitiveSetObserver(_ primitiveLog: PrimitiveSetLog) {
@@ -528,10 +469,8 @@ extension ExecutionViewModel {
             completedAt: completedAt,
             tagsJSON: base.tagsJSON
         )
-        let setLogs = buildCompletionSetLogs(fallbackCompletedAt: completedAt)
         return WorkoutCompletionRecord(
             workout: completedWorkout,
-            setLogs: setLogs,
             primitiveSetLogs: primitiveSetLogs
         )
     }
@@ -553,7 +492,7 @@ extension ExecutionViewModel {
         guard blockIndex >= 0, blockIndex < plan.blocks.count else { return }
         let block = plan.blocks[blockIndex]
         guard setIndexInBlock >= 0, setIndexInBlock < block.sets.count else { return }
-        primitiveSetLogs.append(plan.setResultLog(
+        let log = plan.setResultLog(
             blockIndex: blockIndex,
             setIndexInBlock: setIndexInBlock,
             blockRepeatIndex: blockRepeatIndex,
@@ -565,7 +504,9 @@ extension ExecutionViewModel {
             weight: weight,
             weightUnit: weightUnit,
             completedAt: completedAt ?? clock.now
-        ))
+        )
+        primitiveSetLogs.append(log)
+        emitPrimitiveResultRecorded(log)
         persist()
     }
 
@@ -577,12 +518,14 @@ extension ExecutionViewModel {
     ) {
         guard let plan = context.primitiveExecutionPlan else { return }
         guard blockIndex >= 0, blockIndex < plan.blocks.count else { return }
-        primitiveSetLogs.append(plan.blockResultLog(
+        let log = plan.blockResultLog(
             blockIndex: blockIndex,
             blockRepeatIndex: blockRepeatIndex,
             durationSec: durationSec,
             completedAt: completedAt ?? clock.now
-        ))
+        )
+        primitiveSetLogs.append(log)
+        emitPrimitiveResultRecorded(log)
         persist()
     }
 
@@ -592,74 +535,6 @@ extension ExecutionViewModel {
     func writeCompletionToLocalCache(_ record: WorkoutCompletionRecord) async {
         guard let writer = localCompletionWriter else { return }
         await writer(record)
-    }
-
-    /// Flatten every done `SetPlan` in `state.items` into a `SetLog`
-    /// stream for the local-cache completion writer. Extracted so
-    /// `writeCompletionToLocalCache` stays under SwiftLint's
-    /// `function_body_length` cap.
-    ///
-    /// Walks items in cursor order (the flat `state.items` order matches
-    /// block→item authoring order; within an item sets are 1..N).
-    ///
-    /// `startedAt` is read straight off `SetPlan.startedAt` — no chaining
-    /// across sets. The reducer's `.logSet` / `.logCardioSet` handlers
-    /// stamped it at log time from `state.workStartedAt` (which the VM
-    /// populates on `.start` and every `.advanceFromRest`). Chaining via
-    /// the previous set's `completedAt` would fold rest time INTO set
-    /// duration — semantically wrong for per-set work-time analysis. See
-    /// `SessionState.workStartedAt`.
-    ///
-    /// `fallbackCompletedAt` is used when a done SetPlan is missing its
-    /// stamp — defensive against legacy persisted state seeded before
-    /// the reducer-side stamp landed; the live path always has a stamp.
-    private func buildCompletionSetLogs(fallbackCompletedAt: Date) -> [SetLog] {
-        var setLogs: [SetLog] = []
-        for itemLog in state.items {
-            for set in itemLog.sets.sorted(by: { $0.setIndex < $1.setIndex })
-            where set.done {
-                let setCompletedAt = set.completedAt ?? fallbackCompletedAt
-                // Cardio rows carry duration/distance/HR/cadence and may
-                // still carry load (farmer carries, weighted hangs). Cluster
-                // strength rows also carry duration, so a duration field by
-                // itself is not enough; an explicit unit-aware target wins.
-                let isCardio = set.workTarget?.kind == .duration
-                    || set.workTarget?.kind == .distance
-                    || set.distanceM != nil
-                    || set.hrAvgBpm != nil
-                    || set.cadenceAvgSpm != nil
-                    || (set.durationSec != nil && set.reps == 0 && set.rir == nil)
-                let reps: Int? = isCardio ? nil : set.reps
-                let repsForLog: Int? = set.skipped ? nil : reps
-                let weight: Double? = set.skipped ? nil : set.loadKg
-                // `weightUnit` only makes sense paired with a non-nil
-                // weight. A loadless strength row (BW, loadless AMRAP
-                // token, `.empty` placeholder) writes weight=nil and
-                // unit=nil so History renders "BW" and analytics don't
-                // see a phantom unit on a BW set.
-                let weightUnit: WeightUnit? = weight == nil ? nil : set.unit
-                setLogs.append(SetLog(
-                    id: Self.setLogID(itemID: itemLog.itemID, setIndex: set.setIndex),
-                    workoutItemID: itemLog.itemID,
-                    performedExerciseID: itemLog.performedExerciseID,
-                    setIndex: set.setIndex,
-                    reps: repsForLog,
-                    weight: weight,
-                    weightUnit: weightUnit,
-                    durationSec: set.skipped ? nil : set.durationSec,
-                    distanceM: set.skipped ? nil : set.distanceM,
-                    rir: set.skipped ? nil : set.rir,
-                    isWarmup: false,
-                    skipped: set.skipped,
-                    side: set.side,
-                    startedAt: set.startedAt,
-                    completedAt: setCompletedAt,
-                    hrAvgBpm: set.skipped ? nil : set.hrAvgBpm,
-                    cadenceAvgSpm: set.skipped ? nil : set.cadenceAvgSpm
-                ))
-            }
-        }
-        return setLogs
     }
 
     /// Build a `UserParameter` for the just-captured bodyweight and fire
@@ -718,7 +593,7 @@ extension ExecutionViewModel {
     }
 
     /// Post-apply side effects of `logSet`: update proposal banner state,
-    /// emit telemetry, enqueue the SetLog push, and re-derive timers.
+    /// emit telemetry, enqueue the primitive result push, and re-derive timers.
     /// Extracted so the public `logSet` entry point stays under
     /// SwiftLint's `function_body_length` cap. Lives on the `+Push`
     /// extension (rather than the main class body) so the class body

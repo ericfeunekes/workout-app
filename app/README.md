@@ -19,7 +19,7 @@ See also:
 
 ## Status
 
-Xcode project is generated from `app/project.yml` by [XcodeGen](https://github.com/yonaskolb/XcodeGen). The generated `app/WorkoutDB.xcodeproj/` is gitignored — `project.yml` is the source of truth. GitHub CI remains Linux-only; iOS proof is a local macOS/Xcode gate through `make test-app-packages`, `make test-app-xcode`, and `make pre-qa` (see `docs/WORKFLOW.md`).
+Xcode project is generated from `app/project.yml` by [XcodeGen](https://github.com/yonaskolb/XcodeGen). The generated `app/WorkoutDB.xcodeproj/` is gitignored — `project.yml` is the source of truth. GitHub CI remains Linux-only; iOS proof is a local macOS/Xcode gate through `make test-app-packages`, `make test-app-xcode`, and `make pre-qa` (see `docs/WORKFLOW.md`). Signed entitlement-dependent proofs, such as HealthKit archive authorization/projection, run as separate named targets.
 
 The app is split into local SwiftPM packages under `app/Packages/`.
 `docs/architecture/swift-packages.md` is authoritative for package ownership
@@ -82,6 +82,13 @@ The current pre-QA gate for app-facing work is:
 
 ```bash
 make pre-qa
+```
+
+HealthKit authorization/archive projection proof requires signing and is not
+part of `make pre-qa`:
+
+```bash
+make test-healthkit-ui
 ```
 
 ## Agent-driven iOS loop

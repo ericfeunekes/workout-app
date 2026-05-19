@@ -21,10 +21,13 @@ public struct WorkoutKitExportClassifier: Sendable {
             && contract.candidateFamilies.isDisjoint(with: supportedCandidates)
         var unresolved = contract.unresolvedRequirements
         if unsupported {
-            unresolved.insert(.targetCapabilityUnavailable)
+            unresolved.insert(.targetFamilyUnavailable)
         }
         if !facts.ambiguities.isEmpty, contract.blocksOnSourceAmbiguity {
             unresolved.insert(.sourceAmbiguity)
+        }
+        if !unsupported, contract.requiresExactTargetValues {
+            unresolved.insert(.exactTargetValuesUnavailable)
         }
 
         return WorkoutKitExportPlan(
@@ -56,15 +59,33 @@ public struct WorkoutKitExportClassifier: Sendable {
         if path == .openOnWatch {
             required.insert(.realDeviceStartability)
         }
+        if let rowBlockers = terminalRowBlockers(in: plan.unresolvedRequirements) {
+            return WorkoutKitDeliveryAssessment(
+                path: path,
+                unmetProofRequirements: [],
+                unmetAcknowledgementRequirements: [],
+                blockingReasons: rowBlockers
+            )
+        }
         var acknowledgement: Set<WorkoutKitProofRequirement> = []
         if plan.supportState == .degraded, !proofs.degradationAcknowledged {
             acknowledgement.insert(.degradationAcknowledgement)
         }
         let unmet = required.subtracting(proofs.proven)
         var reasons = plan.unresolvedRequirements
-        if !unmet.isEmpty {
-            reasons.insert(.realDeviceProofRequired)
+        if !plan.deliveryPaths.contains(path) {
+            reasons.insert(.deliveryPathUnavailable)
+            return WorkoutKitDeliveryAssessment(
+                path: path,
+                unmetProofRequirements: [],
+                unmetAcknowledgementRequirements: [],
+                blockingReasons: reasons
+            )
         }
+        if plan.requiresExactTargetValues {
+            reasons.insert(.exactTargetValuesUnavailable)
+        }
+        insertBlockReasons(for: unmet, into: &reasons)
         if unmet.contains(.duplicateUpdateBehavior) {
             reasons.insert(.duplicateUpdateProofRequired)
         }
@@ -81,6 +102,42 @@ public struct WorkoutKitExportClassifier: Sendable {
     }
 }
 
+private func terminalRowBlockers(
+    in reasons: Set<WorkoutKitBlockReason>
+) -> Set<WorkoutKitBlockReason>? {
+    let terminal = reasons.intersection([
+        .setmarkOnly,
+        .sourceAmbiguity,
+        .targetCapabilityUnavailable,
+        .targetFamilyUnavailable,
+    ])
+    return terminal.isEmpty ? nil : terminal
+}
+
+private func insertBlockReasons(
+    for unmet: Set<WorkoutKitProofRequirement>,
+    into reasons: inout Set<WorkoutKitBlockReason>
+) {
+    if unmet.contains(.realDeviceScheduleVisibility) {
+        reasons.insert(.scheduleVisibilityProofRequired)
+    }
+    if unmet.contains(.realDeviceStartability) {
+        reasons.insert(.watchStartabilityProofRequired)
+    }
+    if unmet.contains(.activitySupport) {
+        reasons.insert(.activitySupportUnproven)
+    }
+    let remaining = unmet.subtracting([
+        .realDeviceScheduleVisibility,
+        .realDeviceStartability,
+        .activitySupport,
+        .duplicateUpdateBehavior,
+    ])
+    if !remaining.isEmpty {
+        reasons.insert(.realDeviceProofRequired)
+    }
+}
+
 private struct WorkoutKitMatrixContract: Sendable, Hashable {
     var rowID: WorkoutKitMatrixRowID
     var candidateFamilies: Set<WorkoutKitCandidateFamily>
@@ -93,6 +150,15 @@ private struct WorkoutKitMatrixContract: Sendable, Hashable {
     var proofRequirements: Set<WorkoutKitProofRequirement>
     var unresolvedRequirements: Set<WorkoutKitBlockReason>
     var blocksOnSourceAmbiguity: Bool
+
+    var requiresExactTargetValues: Bool {
+        switch payload.goal {
+        case .time, .distance, .intervalSteps:
+            true
+        case .open, .none:
+            false
+        }
+    }
 
     static func contract(for facts: PrimitiveExportFacts) -> WorkoutKitMatrixContract {
         let axes = facts.axes
@@ -111,7 +177,7 @@ private struct WorkoutKitMatrixContract: Sendable, Hashable {
         {
             return .ambiguousAmrap()
         }
-        if axes.slotsWithLoadAndDistance > 0 || axes.metrics.contains(.loadCarried) {
+        if axes.metrics.contains(.loadCarried) {
             return .loadedCarry(distanceBased: axes.metrics.contains(.distance))
         }
         if axes.traversals.contains(.roundRobin), axes.slotCount > 1 {
@@ -248,7 +314,7 @@ private struct WorkoutKitMatrixContract: Sendable, Hashable {
     }
 
     static func mobilityRecovery() -> WorkoutKitMatrixContract {
-        degraded(
+        var contract = degraded(
             rowID: .mobilityRecovery,
             family: .singleGoal,
             payload: WorkoutKitPayloadBlueprint(
@@ -263,6 +329,8 @@ private struct WorkoutKitMatrixContract: Sendable, Hashable {
             ),
             proofRequirements: [.sdkCompile, .simulatorConstruction, .activitySupport, .degradationAcknowledgement]
         )
+        contract.blocksOnSourceAmbiguity = false
+        return contract
     }
 
     static func ambiguousAmrap() -> WorkoutKitMatrixContract {
@@ -326,7 +394,7 @@ private struct WorkoutKitMatrixContract: Sendable, Hashable {
         WorkoutKitMatrixContract(
             rowID: rowID,
             candidateFamilies: [family],
-            deliveryPaths: [.scheduleOnPhone, .openOnWatch, .previewOnly],
+            deliveryPaths: [.scheduleOnPhone, .openOnWatch],
             selectionPolicy: .exact(family),
             supportState: .native,
             payload: payload,
@@ -356,7 +424,7 @@ private struct WorkoutKitMatrixContract: Sendable, Hashable {
         WorkoutKitMatrixContract(
             rowID: rowID,
             candidateFamilies: [family],
-            deliveryPaths: [.scheduleOnPhone, .openOnWatch, .previewOnly],
+            deliveryPaths: [.scheduleOnPhone, .openOnWatch],
             selectionPolicy: .exact(family),
             supportState: .degraded,
             payload: payload,
@@ -388,4 +456,15 @@ private extension WorkoutKitPayloadBlueprint {
         activitySelection: .unknown,
         goal: .none
     )
+}
+
+private extension WorkoutKitExportPlan {
+    var requiresExactTargetValues: Bool {
+        switch payload.goal {
+        case .time, .distance, .intervalSteps:
+            true
+        case .open, .none:
+            false
+        }
+    }
 }

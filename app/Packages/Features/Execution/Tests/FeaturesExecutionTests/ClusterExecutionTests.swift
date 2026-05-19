@@ -110,8 +110,8 @@ final class ClusterExecutionTests: XCTestCase {
         let vm = ExecutionViewModel(
             context: context,
             clock: clock,
-            push: ExecutionPushHooks(onSetLogged: { [recorder] log in
-                await recorder.appendSet(log)
+            push: ExecutionPushHooks(onPrimitiveSetLogged: { [recorder] log in
+                await recorder.appendPrimitiveSet(log)
             })
         )
 
@@ -122,7 +122,7 @@ final class ClusterExecutionTests: XCTestCase {
 
         var set = try XCTUnwrap(vm.state.items.first { $0.itemID == itemID }?.sets.first)
         XCTAssertFalse(set.done, "non-final cluster slot must not commit the top-level set")
-        let logsAfterFirstSlot = await recorder.setLogs
+        let logsAfterFirstSlot = await recorder.primitiveSetLogs
         XCTAssertEqual(logsAfterFirstSlot.count, 0)
         let restTimer = try XCTUnwrap(vm.timerPresentation(now: clock.now))
         XCTAssertEqual(restTimer.label, "CLUSTER REST")
@@ -138,13 +138,12 @@ final class ClusterExecutionTests: XCTestCase {
         XCTAssertTrue(set.done)
         XCTAssertEqual(set.reps, 10)
         XCTAssertEqual(set.rir, 1)
-        XCTAssertEqual(set.startedAt, t0)
         XCTAssertEqual(set.completedAt, clock.now)
         XCTAssertEqual(try XCTUnwrap(set.durationSec), 33, accuracy: 0.001)
         XCTAssertTrue(vm.state.compositeSets.allSatisfy { $0.setIndex != 1 })
         XCTAssertEqual(vm.state.route, .rest)
 
-        let pushedLogs = await recorder.setLogs
+        let pushedLogs = await recorder.primitiveSetLogs
         let pushed = try XCTUnwrap(pushedLogs.first)
         XCTAssertEqual(pushed.reps, 10)
         XCTAssertEqual(pushed.weight, 100)

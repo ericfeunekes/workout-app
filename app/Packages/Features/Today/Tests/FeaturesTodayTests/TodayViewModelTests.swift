@@ -1175,4 +1175,10 @@ private final class FakeLastPerformedStore: LastPerformedStore, @unchecked Senda
             self.entries = entries
         }
     }
+
+    func clear() async {
+        lock.withLock {
+            entries = [:]
+        }
+    }
 }

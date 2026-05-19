@@ -21,9 +21,9 @@ extension PushQueue {
     /// logical id so an operator can trace the dropped row back to the
     /// specific entity. `.events` payloads have no single id (a batch
     /// of telemetry events) — the correlation field is omitted there.
-    /// `.setLogs` batches use the first log's id; single-log enqueues
-    /// (the dominant shape via per-id dedup) are unambiguous, and the
-    /// first id still lets an operator pull the batch.
+    /// `.primitiveSetLogs` batches use the first log's id; single-log enqueues
+    /// (the dominant shape via per-id dedup) are unambiguous, and the first id
+    /// still lets an operator pull the batch.
     func deadLetterDataJSON(
         item: PushItem,
         status: Int,
@@ -43,7 +43,6 @@ extension PushQueue {
     /// shape.
     func payloadKind(for payload: PushItem.Payload) -> String {
         switch payload {
-        case .setLogs: return "set_logs"
         case .primitiveSetLogs: return "primitive_set_logs"
         case .statusUpdate: return "status_update"
         case .completionResults: return "completion_results"
@@ -68,18 +67,12 @@ extension PushQueue {
     /// air.
     private func correlationField(for payload: PushItem.Payload) -> String? {
         switch payload {
-        case .setLogs(let logs):
-            guard let first = logs.first else { return nil }
-            return #""set_log_id":"\#(first.id.wireID)""#
         case .primitiveSetLogs(let logs):
             guard let first = logs.first else { return nil }
             return #""primitive_set_log_id":"\#(first.id.wireID)""#
         case .statusUpdate(let workoutID, _, _, _):
             return #""workout_id":"\#(workoutID.wireID)""#
-        case .completionResults(let workoutID, _, _, let logs, let primitiveLogs):
-            if let first = logs.first {
-                return #""workout_id":"\#(workoutID.wireID)","set_log_id":"\#(first.id.wireID)""#
-            }
+        case .completionResults(let workoutID, _, _, let primitiveLogs):
             if let first = primitiveLogs.first {
                 return #""workout_id":"\#(workoutID.wireID)","primitive_set_log_id":"\#(first.id.wireID)""#
             }

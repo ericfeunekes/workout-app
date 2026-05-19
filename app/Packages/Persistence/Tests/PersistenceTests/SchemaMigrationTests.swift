@@ -7,20 +7,22 @@
 // from the server.
 //
 // Covers:
-//   • V1 → V7 — pre-006 store opens under the current schema. The
-//     planner chains V1→V2→V3→V4→V5→V6→V7 lightweight stages.
-//   • V2 → V7 — post-006, pre-R1.4 store opens under V7 AND the SetLog
+//   • V1 → V8 — pre-006 store opens under the current schema. The
+//     planner chains V1→V2→V3→V4→V5→V6→V7→V8 lightweight stages.
+//   • V2 → V8 — post-006, pre-R1.4 store opens under V8 AND the SetLog
 //     denormalization backfill resolves `workoutID` + `plannedExerciseID`
 //     from the parent WorkoutItem → Block chain for rows that predate
 //     the column.
-//   • V3 → V7 — R1.4-era store opens under the current schema AND the
+//   • V3 → V8 — R1.4-era store opens under the current schema AND the
 //     PushItem priority + dedupKey backfill populates the new columns
 //     from each row's decoded envelope.
-//   • V4 → V7 — perf-002-era store opens with skipped/side/intent defaults.
-//   • V5 → V7 — the primitive-workout cache table is introduced without
+//   • V4 → V8 — perf-002-era store opens with skipped/side/intent defaults.
+//   • V5 → V8 — the primitive-workout cache table is introduced without
 //     stranding existing workout logs.
-//   • V6 → V7 — the first-class primitive result table is introduced;
+//   • V6 → V8 — the first-class primitive result table is introduced;
 //     V6 QA primitive result data is intentionally reset.
+//   • V7 → V8 — the HealthKit archive projection tables are introduced and
+//     writable without stranding existing primitive cache/log rows.
 //
 // Strategy per test: spin up an on-disk ModelContainer scoped to the old
 // version, insert a few rows via the shadow types, tear the container
@@ -98,10 +100,10 @@ final class SchemaMigrationTests: XCTestCase {
 
     /// Build a current ModelContainer pointing at the same on-disk URL, with
     /// the full migration plan so the appropriate stage(s) fire at open.
-    /// V7 is the current runtime schema (per `SchemaVersions.swift`);
+    /// V8 is the current runtime schema (per `SchemaVersions.swift`);
     /// older stores chain forward through the plan.
     private func makeCurrentContainer(at url: URL) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV7.self)
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV8.self)
         let configuration = ModelConfiguration(schema: schema, url: url)
         return try ModelContainer(
             for: schema,
@@ -593,8 +595,20 @@ final class SchemaMigrationTests: XCTestCase {
         )
     }
 
+    /// Build a V7-only ModelContainer (no migration plan). Simulates the
+    /// primitive-result-row build before HealthKit archive projection existed.
+    private func makeV7OnlyContainer(at url: URL) throws -> ModelContainer {
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV7.self)
+        let configuration = ModelConfiguration(schema: schema, url: url)
+        return try ModelContainer(
+            for: schema,
+            migrationPlan: nil,
+            configurations: [configuration]
+        )
+    }
+
     /// Seed a V3-shaped store with three `PushItemModel` rows — one for
-    /// each dedup class (single-log setLog, statusUpdate, userParameter)
+    /// each dedup class (single-log primitiveSetLog, statusUpdate, userParameter)
     /// — plus one batch setLog and one telemetry event to exercise the
     /// "no dedup key" side of the backfill. The rows are written via the
     /// V3 shadow type which has no `priority` or `dedupKey` columns, so
@@ -659,10 +673,15 @@ final class SchemaMigrationTests: XCTestCase {
         // the backfill decodes via the same coder, so a round-trip via
         // the public API is the tightest regression guard.
         let singleLogID = UUID()
-        let singleLogSetLogID = UUID()
-        let singleLog = CoreDomain.SetLog(
-            id: singleLogSetLogID,
-            workoutItemID: UUID(),
+        let singlePrimitiveSetLogID = UUID()
+        let singleLog = CoreDomain.PrimitiveSetLog(
+            id: singlePrimitiveSetLogID,
+            role: .slot,
+            slotID: UUID(),
+            setID: UUID(),
+            blockID: UUID(),
+            workoutID: UUID(),
+            plannedExerciseID: UUID(),
             performedExerciseID: nil,
             setIndex: 1,
             reps: 5,
@@ -672,7 +691,7 @@ final class SchemaMigrationTests: XCTestCase {
             completedAt: baseDate
         )
         let singleLogEnvelope = try PushQueuePayloadCoding.encode(
-            .setLogs([singleLog])
+            .primitiveSetLogs([singleLog])
         )
 
         let statusID = UUID()
@@ -701,10 +720,15 @@ final class SchemaMigrationTests: XCTestCase {
 
         let batchID = UUID()
         let batchEnvelope = try PushQueuePayloadCoding.encode(
-            .setLogs([
-                CoreDomain.SetLog(
+            .primitiveSetLogs([
+                CoreDomain.PrimitiveSetLog(
                     id: UUID(),
-                    workoutItemID: UUID(),
+                    role: .slot,
+                    slotID: UUID(),
+                    setID: UUID(),
+                    blockID: UUID(),
+                    workoutID: UUID(),
+                    plannedExerciseID: UUID(),
                     performedExerciseID: nil,
                     setIndex: 1,
                     reps: 5,
@@ -713,9 +737,14 @@ final class SchemaMigrationTests: XCTestCase {
                     rir: 2,
                     completedAt: baseDate
                 ),
-                CoreDomain.SetLog(
+                CoreDomain.PrimitiveSetLog(
                     id: UUID(),
-                    workoutItemID: UUID(),
+                    role: .slot,
+                    slotID: UUID(),
+                    setID: UUID(),
+                    blockID: UUID(),
+                    workoutID: UUID(),
+                    plannedExerciseID: UUID(),
                     performedExerciseID: nil,
                     setIndex: 2,
                     reps: 5,
@@ -769,10 +798,10 @@ final class SchemaMigrationTests: XCTestCase {
         let byID = Dictionary(uniqueKeysWithValues: rows.map { ($0.id, $0) })
 
         let single = try XCTUnwrap(byID[singleLogID])
-        XCTAssertEqual(single.priority, 0, "single-log setLog is a result (priority 0)")
+        XCTAssertEqual(single.priority, 0, "single-log primitiveSetLog is a result (priority 0)")
         XCTAssertEqual(
             single.dedupKey,
-            "setLog:\(singleLogSetLogID.uuidString.lowercased())"
+            "primitiveSetLog:\(singlePrimitiveSetLogID.uuidString.lowercased())"
         )
 
         let status = try XCTUnwrap(byID[statusID])
@@ -790,8 +819,8 @@ final class SchemaMigrationTests: XCTestCase {
         )
 
         let batch = try XCTUnwrap(byID[batchID])
-        XCTAssertEqual(batch.priority, 0, "batch setLogs still priority 0 (result)")
-        XCTAssertNil(batch.dedupKey, "batch setLogs do not dedup — key stays nil")
+        XCTAssertEqual(batch.priority, 0, "batch primitiveSetLogs still priority 0 (result)")
+        XCTAssertNil(batch.dedupKey, "batch primitiveSetLogs do not dedup — key stays nil")
 
         let events = try XCTUnwrap(byID[eventsID])
         XCTAssertEqual(events.priority, 1, "events are telemetry — priority 1")
@@ -1095,6 +1124,98 @@ final class SchemaMigrationTests: XCTestCase {
 
         let rowsAfterInsert = try context.fetch(FetchDescriptor<PrimitiveSetLogModel>())
         XCTAssertEqual(rowsAfterInsert.count, 1, "V7 primitive set log table must be writable")
+    }
+
+    // MARK: - V7 → V8 HealthKit archive projection rows
+
+    private func seedV7PrimitiveStore(at url: URL, ids: FixtureIDs) throws {
+        let container = try makeV7OnlyContainer(at: url)
+        let context = ModelContext(container)
+
+        context.insert(PrimitiveWorkoutModel(
+            id: ids.workoutID,
+            name: "Primitive workout",
+            payloadJSON: "{}"
+        ))
+        context.insert(PrimitiveSetLogModel(
+            id: ids.setLogID,
+            roleRaw: PrimitiveLogRole.slot.rawValue,
+            slotID: ids.itemID,
+            setID: nil,
+            blockID: ids.blockID,
+            workoutID: ids.workoutID,
+            plannedExerciseID: ids.exerciseID,
+            performedExerciseID: nil,
+            setIndex: 0,
+            setRepeatIndex: 0,
+            blockRepeatIndex: 0,
+            reps: 5,
+            weight: nil,
+            weightUnitRaw: nil,
+            durationSec: nil,
+            distanceM: nil,
+            rounds: nil,
+            rir: nil,
+            isWarmup: false,
+            completedAt: ids.baseDate
+        ))
+        try context.save()
+    }
+
+    @MainActor
+    func testV7toV8UpgradeIntroducesWritableHealthArchiveTables() async throws {
+        let url = try XCTUnwrap(storeURL)
+        let ids = FixtureIDs.make()
+
+        do {
+            try seedV7PrimitiveStore(at: url, ids: ids)
+        }
+
+        let currentContainer = try makeCurrentContainer(at: url)
+        let context = ModelContext(currentContainer)
+
+        let primitiveWorkouts = try context.fetch(FetchDescriptor<PrimitiveWorkoutModel>())
+        XCTAssertEqual(primitiveWorkouts.count, 1)
+        XCTAssertEqual(primitiveWorkouts.first?.id, ids.workoutID)
+
+        let primitiveLogs = try context.fetch(FetchDescriptor<PrimitiveSetLogModel>())
+        XCTAssertEqual(primitiveLogs.count, 1)
+        XCTAssertEqual(primitiveLogs.first?.id, ids.setLogID)
+
+        context.insert(HealthDataRecordModel(
+            id: UUID(),
+            externalID: "health-sample-1",
+            descriptorID: "HKQuantityTypeIdentifierHeartRate",
+            sampleKindRaw: "quantity",
+            sourceBundleIdentifier: "com.apple.Health",
+            start: ids.baseDate,
+            end: ids.baseDate,
+            unit: "count/min",
+            valueJSON: #"{"quantity":{"_0":120,"unit":"count/min"}}"#,
+            metadataJSON: #"{"setmark_probe_run_id":"migration"}"#,
+            firstSeenAt: ids.baseDate,
+            lastSeenAt: ids.baseDate
+        ))
+        context.insert(HealthDataDeletionModel(
+            id: UUID(),
+            descriptorID: "HKQuantityTypeIdentifierHeartRate",
+            externalID: "deleted-health-sample",
+            observedAt: ids.baseDate
+        ))
+        context.insert(HealthBatchCursorModel(
+            id: UUID(),
+            requestSetKey: "archive-all",
+            cursor: "cursor-1",
+            updatedAt: ids.baseDate
+        ))
+        try context.save()
+
+        let healthRows = try context.fetch(FetchDescriptor<HealthDataRecordModel>())
+        let deletionRows = try context.fetch(FetchDescriptor<HealthDataDeletionModel>())
+        let cursorRows = try context.fetch(FetchDescriptor<HealthBatchCursorModel>())
+        XCTAssertEqual(healthRows.count, 1)
+        XCTAssertEqual(deletionRows.count, 1)
+        XCTAssertEqual(cursorRows.count, 1)
     }
 
 }

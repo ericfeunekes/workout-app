@@ -464,12 +464,10 @@ private func makeWorkout(
 
 private func makeCompletionRecord(
     workoutID: UUID = uuid("11111111-2222-3333-4444-555555555555"),
-    setLogs: [CoreDomain.SetLog] = [makeLog(setIndex: 1)],
-    primitiveSetLogs: [CoreDomain.PrimitiveSetLog] = []
+    primitiveSetLogs: [CoreDomain.PrimitiveSetLog] = [makePrimitiveLog()]
 ) -> CoreDomain.WorkoutCompletionRecord {
-    CoreDomain.WorkoutCompletionRecord(
+    return CoreDomain.WorkoutCompletionRecord(
         workout: makeWorkout(id: workoutID),
-        setLogs: setLogs,
         primitiveSetLogs: primitiveSetLogs
     )
 }
@@ -1032,56 +1030,6 @@ runAsyncCase("PushQueue — telemetry events route to /api/telemetry/events") {
     try expectEqual(calls[0].path, "/api/telemetry/events")
 }
 
-runAsyncCase("PushQueue — legacy set_logs fail before transport") {
-    // Primitive result cutover must not silently ship an empty results body.
-    let store = FakePushQueueStore()
-    let transport = FakeTransport(outcomes: [
-        .response(HTTPResponse(status: 200, body: Data())),
-    ])
-    let queue = PushQueue(store: store, transport: transport)
-
-    try await queue.enqueueSetLogs([makeLog(setIndex: 1)])
-    do {
-        _ = try await queue.flush(bearerToken: "tok")
-        try expect(false, "expected legacy set_logs encode failure")
-    } catch let err as SyncError {
-        if case .encode(let message) = err {
-            try expect(message.contains("legacy set_logs"), "unexpected message: \(message)")
-        } else {
-            try expect(false, "expected SyncError.encode, got \(err)")
-        }
-    }
-
-    let calls = await transport.store.recordedCalls()
-    try expectEqual(calls.count, 0)
-}
-
-runAsyncCase("PushQueue — completion with legacy set_logs fails before transport") {
-    let store = FakePushQueueStore()
-    let transport = FakeTransport(outcomes: [
-        .response(HTTPResponse(status: 200, body: Data())),
-    ])
-    let queue = PushQueue(store: store, transport: transport)
-
-    try await queue.enqueueCompletionResults(makeCompletionRecord(
-        setLogs: [makeLog(setIndex: 1)],
-        primitiveSetLogs: []
-    ))
-    do {
-        _ = try await queue.flush(bearerToken: "tok")
-        try expect(false, "expected legacy completion set_logs encode failure")
-    } catch let err as SyncError {
-        if case .encode(let message) = err {
-            try expect(message.contains("legacy set_logs"), "unexpected message: \(message)")
-        } else {
-            try expect(false, "expected SyncError.encode, got \(err)")
-        }
-    }
-
-    let calls = await transport.store.recordedCalls()
-    try expectEqual(calls.count, 0)
-}
-
 runAsyncCase("PushQueue — primitive_set_logs route to sync results and encode body") {
     let store = FakePushQueueStore()
     let transport = FakeTransport(outcomes: [
@@ -1454,7 +1402,7 @@ runAsyncCase("Completion results encode primitive logs with status in one sync r
     ])
     let queue = PushQueue(store: store, transport: transport)
 
-    let record = makeCompletionRecord(setLogs: [], primitiveSetLogs: [
+    let record = makeCompletionRecord(primitiveSetLogs: [
         makePrimitiveLog(workoutID: nil),
     ])
     try await queue.enqueueCompletionResults(record)
@@ -1489,7 +1437,7 @@ runAsyncCase("Completion results 503 leaves grouped logs and status queued toget
     ])
     let queue = PushQueue(store: store, transport: transport)
 
-    let record = makeCompletionRecord(setLogs: [], primitiveSetLogs: [
+    let record = makeCompletionRecord(primitiveSetLogs: [
         makePrimitiveLog(workoutID: nil),
     ])
     try await queue.enqueueCompletionResults(record)
@@ -1502,9 +1450,8 @@ runAsyncCase("Completion results 503 leaves grouped logs and status queued toget
     let remaining = await store.all()
     try expectEqual(remaining.count, 1)
     try expectEqual(remaining[0].attempts, 1)
-    if case .completionResults(let workoutID, _, _, let logs, let primitiveLogs) = remaining[0].payload {
+    if case .completionResults(let workoutID, _, _, let primitiveLogs) = remaining[0].payload {
         try expectEqual(workoutID, record.workoutID)
-        try expectEqual(logs.count, record.setLogs.count)
         try expectEqual(primitiveLogs.count, record.primitiveSetLogs.count)
     } else {
         try expect(false, "expected completionResults payload")
@@ -1518,7 +1465,7 @@ runAsyncCase("Completion results 200 removes the single grouped item") {
     ])
     let queue = PushQueue(store: store, transport: transport)
 
-    try await queue.enqueueCompletionResults(makeCompletionRecord(setLogs: [], primitiveSetLogs: [
+    try await queue.enqueueCompletionResults(makeCompletionRecord(primitiveSetLogs: [
         makePrimitiveLog(workoutID: nil),
     ]))
 
@@ -1529,7 +1476,7 @@ runAsyncCase("Completion results 200 removes the single grouped item") {
     try expect(empty, "completion item should be removed after 2xx")
 }
 
-runAsyncCase("Completion results dedups older single logs, completed status, and grouped completion") {
+runAsyncCase("Completion results dedups older primitive logs, completed status, and grouped completion") {
     let store = FakePushQueueStore()
     let queue = PushQueue(
         store: store,
@@ -1538,8 +1485,8 @@ runAsyncCase("Completion results dedups older single logs, completed status, and
     )
 
     let workoutID = uuid("11111111-2222-3333-4444-555555555555")
-    let log = makeLog(id: uuid("abcdef01-2345-6789-abcd-ef0123456789"))
-    try await queue.enqueueSetLogs([log])
+    let log = makePrimitiveLog(id: uuid("abcdef01-2345-6789-abcd-ef0123456789"))
+    try await queue.enqueuePrimitiveSetLogs([log])
     try await queue.enqueueStatusUpdate(
         workoutID: workoutID,
         status: .completed,
@@ -1548,14 +1495,16 @@ runAsyncCase("Completion results dedups older single logs, completed status, and
     )
     try await queue.enqueueCompletionResults(makeCompletionRecord(
         workoutID: workoutID,
-        setLogs: [log]
+        primitiveSetLogs: [log]
     ))
     try await queue.enqueueCompletionResults(makeCompletionRecord(
         workoutID: workoutID,
-        setLogs: [CoreDomain.SetLog(
+        primitiveSetLogs: [CoreDomain.PrimitiveSetLog(
             id: log.id,
-            workoutItemID: log.workoutItemID,
-            performedExerciseID: nil,
+            role: .setResult,
+            setID: log.setID,
+            blockID: log.blockID,
+            workoutID: workoutID,
             setIndex: 1,
             reps: 8,
             weight: 102.5,
@@ -1567,13 +1516,12 @@ runAsyncCase("Completion results dedups older single logs, completed status, and
 
     let all = await store.all()
     try expectEqual(all.count, 1, "completion replaces older single and grouped rows")
-    if case .completionResults(let queuedWorkoutID, _, let notes, let logs, let primitiveLogs) = all[0].payload {
+    if case .completionResults(let queuedWorkoutID, _, let notes, let primitiveLogs) = all[0].payload {
         try expectEqual(queuedWorkoutID, workoutID)
         try expectEqual(notes, "leg day PR!")
-        try expectEqual(logs.count, 1)
-        try expectEqual(primitiveLogs.count, 0)
-        try expectEqual(logs[0].reps, 8, "latest grouped payload wins")
-        try expectEqual(logs[0].weight, 102.5)
+        try expectEqual(primitiveLogs.count, 1)
+        try expectEqual(primitiveLogs[0].reps, 8, "latest grouped payload wins")
+        try expectEqual(primitiveLogs[0].weight, 102.5)
     } else {
         try expect(false, "expected completionResults payload")
     }
@@ -1678,8 +1626,8 @@ runAsyncCase("PushItem.priority derived from payload case") {
     // is priority 1. Codifies the contract so a future payload case
     // added without touching `PushItem.Payload.priority` would fail
     // loudly here — the switch is exhaustive.
-    let log = makeLog()
-    let results = PushItem(payload: .setLogs([log]), enqueuedAt: Date())
+    let log = makePrimitiveLog()
+    let results = PushItem(payload: .primitiveSetLogs([log]), enqueuedAt: Date())
     try expectEqual(results.priority, 0)
 
     let status = PushItem(
@@ -1698,8 +1646,7 @@ runAsyncCase("PushItem.priority derived from payload case") {
             workoutID: UUID(),
             completedAt: nil,
             notes: nil,
-            setLogs: [log],
-            primitiveSetLogs: []
+            primitiveSetLogs: [log]
         ),
         enqueuedAt: Date()
     )
@@ -2342,22 +2289,15 @@ runAsyncCase("PushQueue dedup uses scoped removeMatchingDedupKey — no full-tab
         clock: SystemClock()
     )
 
-    // Single setLog, statusUpdate, and userParameter payloads each use
+    // Single primitive result, statusUpdate, and userParameter payloads each use
     // scoped dedup-key removal. Completion results use the stronger
     // store-level replace operation so stale-row deletion and grouped
     // insertion commit together.
-    let setLog = CoreDomain.SetLog(
+    let setLog = makePrimitiveLog(
         id: uuid("abcdef01-2345-6789-abcd-ef0123456700"),
-        workoutItemID: uuid("44444444-4444-4444-4444-444444444444"),
-        performedExerciseID: nil,
-        setIndex: 1,
-        reps: 5,
-        weight: 100,
-        weightUnit: .lb,
-        rir: 2,
-        completedAt: iso8601("2026-04-17T08:00:00Z")
+        workoutID: uuid("11111111-2222-3333-4444-555555555555")
     )
-    try await queue.enqueueSetLogs([setLog])
+    try await queue.enqueuePrimitiveSetLogs([setLog])
     try await queue.enqueueStatusUpdate(
         workoutID: uuid("11111111-2222-3333-4444-555555555555"),
         status: .completed,
@@ -2365,7 +2305,7 @@ runAsyncCase("PushQueue dedup uses scoped removeMatchingDedupKey — no full-tab
     )
     try await queue.enqueueCompletionResults(makeCompletionRecord(
         workoutID: uuid("11111111-2222-3333-4444-555555555555"),
-        setLogs: [setLog]
+        primitiveSetLogs: [setLog]
     ))
     let param = CoreDomain.UserParameter(
         id: uuid("99999999-aaaa-bbbb-cccc-dddddddddddd"),
@@ -2388,11 +2328,11 @@ runAsyncCase("PushQueue dedup uses scoped removeMatchingDedupKey — no full-tab
     try expectEqual(
         dedupCalls.count,
         3,
-        "single setLog/status/userParam use scoped dedup; completion uses atomic replacement"
+        "single primitive result/status/userParam use scoped dedup; completion uses atomic replacement"
     )
     try expect(
-        dedupCalls.contains("setLog:abcdef01-2345-6789-abcd-ef0123456700"),
-        "setLog dedup key shape uses lowercase UUID"
+        dedupCalls.contains("primitiveSetLog:abcdef01-2345-6789-abcd-ef0123456700"),
+        "primitive result dedup key shape uses lowercase UUID"
     )
     try expect(
         dedupCalls.contains("status:11111111-2222-3333-4444-555555555555:completed"),
@@ -2408,8 +2348,8 @@ runAsyncCase("PushQueue dedup uses scoped removeMatchingDedupKey — no full-tab
         return
     }
     try expect(
-        completionKeys.contains("setLog:abcdef01-2345-6789-abcd-ef0123456700"),
-        "completion replacement includes final setLog key"
+        completionKeys.contains("primitiveSetLog:abcdef01-2345-6789-abcd-ef0123456700"),
+        "completion replacement includes final primitive result key"
     )
     try expect(
         completionKeys.contains("status:11111111-2222-3333-4444-555555555555:completed"),
@@ -2420,9 +2360,9 @@ runAsyncCase("PushQueue dedup uses scoped removeMatchingDedupKey — no full-tab
         "completion replacement includes grouped completion key"
     )
 
-    // Batch setLogs and events are explicitly NOT deduped — no scoped
+    // Batch primitive result rows and events are explicitly NOT deduped — no scoped
     // call fires for them either.
-    try await queue.enqueueSetLogs([setLog, setLog])
+    try await queue.enqueuePrimitiveSetLogs([setLog, setLog])
     try await queue.enqueueEvents([CoreTelemetry.Event(
         sessionID: UUID(), kind: "state", name: "nope"
     )])

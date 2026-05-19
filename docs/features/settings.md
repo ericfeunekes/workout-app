@@ -72,16 +72,19 @@ future accepted app-side proposal workflow, not Settings.
 - **setup:** saved connection and local cached workouts.
 - **steps:** open Settings, choose change server, cancel, then repeat and
   confirm.
-- **expected:** cancel preserves local state; confirm wipes local cache as
-  documented in `docs/sync.md`, routes to FirstRun or connection entry, and
-  never leaves mixed old/new server data visible.
+- **expected:** cancel preserves local state; confirm wipes the authoritative
+  local server-owned state as documented in `docs/sync.md`, routes to FirstRun
+  or connection entry only after the clear succeeds, preserves HealthKit archive
+  data, and never leaves mixed old/new server data visible.
 
 ### S3. Reset local data
 
 - **setup:** cached workouts and/or completed local history.
 - **steps:** open Settings, choose reset local data, cancel, then confirm.
 - **expected:** destructive confirmation is clear; confirm clears only the
-  intended local data and leaves credential behavior as specified by the row.
+  intended server-owned local data, preserves the current connection and
+  HealthKit archive data, and leaves credential behavior as specified by the
+  row.
 
 ### S4. Units and autoreg defaults
 

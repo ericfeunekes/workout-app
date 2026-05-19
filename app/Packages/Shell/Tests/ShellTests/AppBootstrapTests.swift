@@ -753,7 +753,7 @@ final class AppBootstrapTests: XCTestCase {
     /// shared PushQueueStore via its injected enqueuer. We observe the
     /// store directly — a single enqueue per logSet, with the
     /// corresponding PrimitiveSetLog shape.
-    func testWiredExecutionViewModelEnqueuesSetLogOnLog() async throws {
+    func testWiredExecutionViewModelEnqueuesPrimitiveSetLogOnLog() async throws {
         let factory = try PersistenceFactory.makeInMemory(
             tokenServiceName: uniqueService()
         )
@@ -800,8 +800,8 @@ final class AppBootstrapTests: XCTestCase {
     // MARK: - Save & done writes completion to the local cache
 
     /// After the user logs every set and taps "Save & done", the wired
-    /// view-model must write a `.completed` workout + its set_logs to the
-    /// local WorkoutCache. Guards the History-tab-backfill invariant from
+    /// view-model must write a `.completed` workout + its primitive result logs
+    /// to the local WorkoutCache. Guards the History-tab-backfill invariant from
     /// `docs/open-questions.md` § "Execution `save & done` doesn't persist
     /// the completed workout to local cache".
     func testSaveAndDoneWritesCompletedWorkoutToLocalCache() async throws {
@@ -855,7 +855,7 @@ final class AppBootstrapTests: XCTestCase {
         XCTAssertEqual(saved.status, .completed)
         XCTAssertNotNil(saved.completedAt)
 
-        let logs = try await factory.workoutCache.loadSetLogs(workoutID: saved.id)
+        let logs = try await factory.workoutCache.loadPrimitiveSetLogs(workoutID: saved.id)
         XCTAssertEqual(logs.count, 7)
         XCTAssertTrue(logs.allSatisfy { $0.reps != nil })
 
@@ -900,7 +900,7 @@ final class AppBootstrapTests: XCTestCase {
         let payloads = try completionEvents.map(Self.decodeTelemetryPayload)
         let workoutID = fixture.domainWorkout.id.uuidString.lowercased()
         XCTAssertTrue(payloads.allSatisfy { $0["workout_id"] as? String == workoutID })
-        XCTAssertTrue(payloads.allSatisfy { $0["set_log_count"] as? Int == 7 })
+        XCTAssertTrue(payloads.allSatisfy { $0["set_log_count"] as? Int == 0 })
         XCTAssertTrue(payloads.allSatisfy { $0["primitive_set_log_count"] as? Int == 7 })
         XCTAssertTrue(payloads.allSatisfy { $0["has_note"] as? Bool == false })
         XCTAssertEqual(payloads[1]["publisher_installed"] as? Bool, true)

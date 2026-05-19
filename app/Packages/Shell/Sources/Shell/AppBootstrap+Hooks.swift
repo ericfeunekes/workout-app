@@ -498,12 +498,6 @@ extension AppBootstrap {
             let workout = record.workout
             do {
                 try await inputs.workoutCache.saveWorkout(workout)
-                // `workoutID` stamps each log's denormalized column so
-                // History's `loadSetLogs(workoutID:)` resolves via a direct
-                // predicate even after a future reconcile removes the
-                // parent WorkoutItem (R1.4 SetLog denormalization). The
-                // completed workout we just wrote carries the id.
-                try await inputs.workoutCache.saveSetLogs(record.setLogs, workoutID: workout.id)
                 try await inputs.workoutCache.savePrimitiveSetLogs(
                     record.primitiveSetLogs,
                     workoutID: workout.id
@@ -552,7 +546,7 @@ extension AppBootstrap {
     ) {
         let payload = CompletionLocalCacheWriteEventPayload(
             workoutID: record.workoutID.wireID,
-            setLogCount: record.setLogs.count,
+            setLogCount: 0,
             primitiveSetLogCount: record.primitiveSetLogs.count,
             hasNote: record.notes != nil,
             error: errorDescription.map { String($0.prefix(240)) }

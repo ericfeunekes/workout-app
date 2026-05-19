@@ -1,7 +1,7 @@
 ---
 title: Bugs — live tracker
 status: living
-last_reviewed: 2026-05-17
+last_reviewed: 2026-05-19
 purpose: Canonical active defect tracker. Closed issues live in git history; unbuilt feature gaps live in owning requirement docs and the gap map.
 covers:
   - whole project
@@ -48,7 +48,7 @@ Fixed bugs are removed from this file once closed — the fix, the regression te
 
 ## Active
 
-As of 2026-05-18: one active P1 bug is tracked here. Active P2 items remain below.
+As of 2026-05-18: no active P1 bugs are tracked here. Active P2 items remain below.
 
 ### P0 — blocks v1
 
@@ -58,7 +58,7 @@ _None._
 
 | ID | Title | Affected feature | Status | Notes |
 |---|---|---|---|---|
-| bug-089 | Interval boundary can ghost the End Workout confirmation over active/rest UI | Execution / intervals | open | Primitive stress QA on 2026-05-17: while the `End workout?` confirmation was visible during a mixed-interval fixture, the interval timer advanced underneath it. The modal chrome/buttons disappeared, but the confirmation text remained over the rest/active screens, clipping and obscuring the workout UI. Raw scratch evidence was reviewed during the phase and removed at closeout; the durable repro is "open End confirmation during a work interval and wait through the interval boundary." |
+| bug-094 | Workout-type UI matrix is not reliable as one full simulator gate | Testing proof infrastructure / execution QA | open | Full workout-type QA on 2026-05-18: individual XCUITest cases can pass, but repeated full-matrix runs on iPhone 16 Pro and iPhone 16 hit CoreSimulator/Xcode runner failures (`Mach error -308`, early runner exit, result-bundle staging failures) before the app behavior is reached. The Make target now runs one focused method per workout type with explicit result bundles and native Xcode retry, but the all-types command still cannot be treated as a green gate until the runner lifecycle is stabilized, likely via build-for-testing/test-without-building batching or a smaller sharded harness. |
 
 ### P2 — cosmetic / polish
 
@@ -68,10 +68,12 @@ _None._
 | bug-085 | Today exposes off-screen workout cards as activatable accessibility targets | Today plan queue / accessibility | open | Simulator QA on 2026-04-25: tapping an off-screen workout by accessibility label activated the wrong/current visible workflow and started a missed workout while trying to inspect the bridge plan. Some of this is MCP automation behavior, but the app should make visible card targets unambiguous for VoiceOver and UI automation, ideally with stable IDs and no accidental off-screen activation path. |
 | bug-087 | Alternative swaps cannot clear inherited load or represent non-integer rep targets | Execution / alternatives | open | Payload-contract QA on 2026-04-25: bodyweight/band alternatives inherit parent load when the override omits load, and string reps such as `amrap` are not a valid override shape. This can make a bodyweight substitute look loaded or make an alternative unusable. |
 | bug-088 | Conditional workout choices are hidden in notes instead of executable controls | Today / execution / workout authoring payloads | open | Week-review QA on 2026-04-25: choices like skip/reduce lower-body work or choose core vs easy engine based on Sunday were authored as prose notes. That is readable but not executable in the app, so the athlete has no clear tap target for the intended branch. |
-| bug-090 | EMOM active block progress leaks internal sentinel row count | Execution / EMOM progress | open | Primitive stress QA on 2026-05-17: the strength-density EMOM correctly rendered `INTERVAL 1 OF 3`, but the active block progress line showed a fake sentinel denominator (`0 of 300 done`; video review read the same issue as a fake `0 / 900 DONE`). This violates the execute-loop contract that unbounded/sentinel modes must not leak internal row counts into visible progress. Raw scratch evidence was reviewed during the phase and removed at closeout; the durable repro is the primitive strength-density EMOM fixture's active screen. |
 | bug-091 | Debug simulator launch shows prolonged blank white screen before first UI | App launch / shell | watchlist | Primitive lane QA on 2026-05-17: video review saw a distinct blank white screen before the Today debug plan appeared and again before the primitive capstone relaunch appeared. The app continued without crash and the primitive flow was not blocked, so this is tracked as non-blocking launch polish unless it recurs outside debug simulator launch. Raw scratch evidence was reviewed during the phase and removed at closeout; recheck with a debug simulator launch and primitive debug relaunch. |
+| bug-092 | Timer End confirmation allows active timer content to bleed through alert | Execution / timer modes | open | Workout-type video QA on 2026-05-18: focused clocked-mode recording proved `emom`, `amrap`, `for_time`, `intervals`, and `tabata`, but the visual reviewer flagged active timer text/graphics bleeding through the `End workout?` confirmation during Tabata and mixed interval-style flows. |
+| bug-093 | Completion result list can clip final endurance item | Execution / completion summary | open | Timer-gauntlet video QA on 2026-05-18: `timer_gauntlet_strength`, `timer_gauntlet_clocked`, and `timer_gauntlet_endurance` all launched, accepted a representative action, and reached completion, but the final `Threshold Run` row on the endurance completion screen was clipped at the bottom. |
+| bug-095 | Primitive debug fixture can visually complete while primitive logs stay empty | Debug fixtures / execution QA | watchlist | Final WorkoutKit remediation QA on 2026-05-18 found the `primitive_strength_density` debug seed could show a logged completion while SwiftData telemetry reported `primitive_set_log_count: 0`. Cause was split IDs between legacy `WorkoutItem` rows and `PrimitiveSlot` rows, which broke slot-position lookup. Fixed in the active branch by reusing the same ID; keep watchlisted until closeout confirms no sibling debug fixture can mask primitive persistence without telemetry readback. |
 
-**ID allocation:** bug-001–060 were assigned during the initial QA campaign; `bug-061+` are post-campaign findings. `qa-001`–`qa-047` were campaign-internal ids; any finding that still matters as an active defect must have a `bug-NNN` row here. Next ID: `bug-092`.
+**ID allocation:** bug-001–060 were assigned during the initial QA campaign; `bug-061+` are post-campaign findings. `qa-001`–`qa-047` were campaign-internal ids; any finding that still matters as an active defect must have a `bug-NNN` row here. Next ID: `bug-096`.
 
 ---
 

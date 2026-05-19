@@ -211,6 +211,16 @@ public actor PushQueueStoreImpl: PushQueueStore {
         return try modelContext.fetch(descriptor).isEmpty
     }
 
+    public func clear() async throws {
+        do {
+            try modelContext.delete(model: PushItemModel.self)
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            throw error
+        }
+    }
+
     /// Delete every row whose `payloadJSON` can no longer be decoded by
     /// `PushQueuePayloadCoding`. Returns the number of rows dropped.
     ///

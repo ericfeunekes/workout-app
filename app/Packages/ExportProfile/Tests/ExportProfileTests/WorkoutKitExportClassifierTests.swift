@@ -46,6 +46,13 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
         XCTAssertEqual(facts.ambiguities, [.resultOverlayNotRepresentedInPrimitives])
     }
 
+    func testPrimitiveFactsRequireSourceFactForCardioMapping() throws {
+        let facts = try PrimitiveExportProfileBuilder.build(workout: Self.continuousCardioWorkout())
+
+        XCTAssertTrue(facts.axes.metrics.contains(.distance))
+        XCTAssertTrue(facts.ambiguities.contains(.missingSourceFact))
+    }
+
     func testClassifiesRepresentativePrimitiveRowsThroughRealBuilder() throws {
         let classifier = WorkoutKitExportClassifier()
 
@@ -84,11 +91,12 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
         try Self.assertPlan(
             try classifier.classify(workout: Self.continuousCardioWorkout()),
             support: .native,
-            deliveryPaths: [.scheduleOnPhone, .openOnWatch, .previewOnly],
+            deliveryPaths: [.scheduleOnPhone, .openOnWatch],
             selectionPolicy: .exact(.singleGoal),
             payload: WorkoutKitPayloadBlueprint(shape: .singleGoal, activitySelection: .cardio, goal: .distance),
             identity: nativeIdentity,
             proofRequirements: baseProofs,
+            unresolvedRequirements: [.exactTargetValuesUnavailable, .sourceAmbiguity],
             degradation: WorkoutKitDegradation(
                 preservedFacts: [.activityType, .distanceGoal],
                 omittedFacts: [.setmarkHierarchy],
@@ -98,11 +106,12 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
         try Self.assertPlan(
             try classifier.classify(workout: Self.timeGoalCardioWorkout()),
             support: .native,
-            deliveryPaths: [.scheduleOnPhone, .openOnWatch, .previewOnly],
+            deliveryPaths: [.scheduleOnPhone, .openOnWatch],
             selectionPolicy: .exact(.singleGoal),
             payload: WorkoutKitPayloadBlueprint(shape: .singleGoal, activitySelection: .cardio, goal: .time),
             identity: nativeIdentity,
             proofRequirements: baseProofs,
+            unresolvedRequirements: [.exactTargetValuesUnavailable, .sourceAmbiguity],
             degradation: WorkoutKitDegradation(
                 preservedFacts: [.activityType, .timeGoal],
                 omittedFacts: [.setmarkHierarchy],
@@ -112,7 +121,7 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
         try Self.assertPlan(
             try classifier.classify(workout: Self.simpleIntervalWorkout()),
             support: .native,
-            deliveryPaths: [.scheduleOnPhone, .openOnWatch, .previewOnly],
+            deliveryPaths: [.scheduleOnPhone, .openOnWatch],
             selectionPolicy: .exact(.customWorkout),
             payload: WorkoutKitPayloadBlueprint(
                 shape: .customIntervals,
@@ -122,6 +131,7 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
             ),
             identity: nativeIdentity,
             proofRequirements: baseProofs,
+            unresolvedRequirements: [.exactTargetValuesUnavailable, .sourceAmbiguity],
             degradation: WorkoutKitDegradation(
                 preservedFacts: [.activityType, .intervalOrder, .workRestCadence],
                 omittedFacts: [.setmarkHierarchy, .customStepNames],
@@ -131,7 +141,7 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
         try Self.assertPlan(
             try classifier.classify(workout: Self.straightStrengthWorkout()),
             support: .degraded,
-            deliveryPaths: [.scheduleOnPhone, .openOnWatch, .previewOnly],
+            deliveryPaths: [.scheduleOnPhone, .openOnWatch],
             selectionPolicy: .exact(.singleGoal),
             payload: WorkoutKitPayloadBlueprint(
                 shape: .singleGoal,
@@ -149,7 +159,7 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
         try Self.assertPlan(
             try classifier.classify(workout: Self.roundRobinStrengthWorkout()),
             support: .degraded,
-            deliveryPaths: [.scheduleOnPhone, .openOnWatch, .previewOnly],
+            deliveryPaths: [.scheduleOnPhone, .openOnWatch],
             selectionPolicy: .exact(.customWorkout),
             payload: WorkoutKitPayloadBlueprint(
                 shape: .customIntervals,
@@ -168,7 +178,7 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
         try Self.assertPlan(
             try classifier.classify(workout: Self.cappedForTimeWorkout()),
             support: .degraded,
-            deliveryPaths: [.scheduleOnPhone, .openOnWatch, .previewOnly],
+            deliveryPaths: [.scheduleOnPhone, .openOnWatch],
             selectionPolicy: .exact(.customWorkout),
             payload: WorkoutKitPayloadBlueprint(
                 shape: .customIntervals,
@@ -178,6 +188,7 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
             ),
             identity: degradedIdentity,
             proofRequirements: degradedProofs,
+            unresolvedRequirements: [.exactTargetValuesUnavailable, .sourceAmbiguity],
             degradation: WorkoutKitDegradation(
                 preservedFacts: [.activityType, .broadActivity, .timeGoal],
                 omittedFacts: [.setmarkHierarchy, .exerciseIdentity, .reps, .perSlotResults, .aggregateScore, .partialCompletion],
@@ -187,11 +198,12 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
         try Self.assertPlan(
             try classifier.classify(workout: Self.loadedCarryWorkout()),
             support: .degraded,
-            deliveryPaths: [.scheduleOnPhone, .openOnWatch, .previewOnly],
+            deliveryPaths: [.scheduleOnPhone, .openOnWatch],
             selectionPolicy: .exact(.singleGoal),
             payload: WorkoutKitPayloadBlueprint(shape: .singleGoal, activitySelection: .carry, goal: .distance),
             identity: degradedIdentity,
             proofRequirements: degradedProofs,
+            unresolvedRequirements: [.exactTargetValuesUnavailable],
             degradation: WorkoutKitDegradation(
                 preservedFacts: [.activityType, .distanceGoal],
                 omittedFacts: [.setmarkHierarchy, .exerciseIdentity, .load, .carryLoad, .perSlotResults],
@@ -201,11 +213,12 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
         try Self.assertPlan(
             try classifier.classify(workout: Self.mobilityRecoveryWorkout()),
             support: .degraded,
-            deliveryPaths: [.scheduleOnPhone, .openOnWatch, .previewOnly],
+            deliveryPaths: [.scheduleOnPhone, .openOnWatch],
             selectionPolicy: .exact(.singleGoal),
             payload: WorkoutKitPayloadBlueprint(shape: .singleGoal, activitySelection: .recovery, goal: .time),
             identity: degradedIdentity,
             proofRequirements: degradedProofs.union([.activitySupport]),
+            unresolvedRequirements: [.exactTargetValuesUnavailable],
             degradation: WorkoutKitDegradation(
                 preservedFacts: [.activityType, .broadActivity, .timeGoal],
                 omittedFacts: [.setmarkHierarchy, .poseSequence],
@@ -230,6 +243,18 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
         XCTAssertTrue(carry.pushIdentity.requirements.contains(.degradationDisclosure))
     }
 
+    func testLoadedCarryRequiresExplicitCarryAuthority() throws {
+        let classifier = WorkoutKitExportClassifier()
+
+        let explicitCarry = try classifier.classify(workout: Self.loadedCarryWorkout())
+        XCTAssertEqual(explicitCarry.rowID, .loadedCarry)
+        XCTAssertEqual(explicitCarry.payload.activitySelection, .carry)
+
+        let weightedDistance = try classifier.classify(workout: Self.genericWeightedDistanceWorkout())
+        XCTAssertNotEqual(weightedDistance.rowID, .loadedCarry)
+        XCTAssertNotEqual(weightedDistance.payload.activitySelection, .carry)
+    }
+
     func testAmbiguousAmrapFailsClosedEvenWhenConstructionProofsExist() throws {
         let classifier = WorkoutKitExportClassifier()
         let plan = try classifier.classify(workout: Self.amrapWorkout())
@@ -245,38 +270,103 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
             path: .previewOnly,
             proofs: WorkoutKitDeliveryProofs()
         )
-        XCTAssertTrue(assessment.blockingReasons.contains(.sourceAmbiguity))
+        XCTAssertTrue(assessment.unmetProofRequirements.isEmpty)
+        XCTAssertEqual(assessment.blockingReasons, [.sourceAmbiguity])
     }
 
     func testDeliveryAssessmentKeepsPathSpecificProofsOutOfTheBasePlan() throws {
         let classifier = WorkoutKitExportClassifier()
-        let plan = try classifier.classify(workout: Self.continuousCardioWorkout())
+        var plan = try classifier.classify(workout: Self.continuousCardioWorkout())
+        plan.unresolvedRequirements.remove(.sourceAmbiguity)
 
         XCTAssertEqual(plan.proofRequirements, [.sdkCompile, .simulatorConstruction])
 
         let noProofs = classifier.assessDelivery(plan, path: .previewOnly)
-        XCTAssertEqual(noProofs.unmetProofRequirements, [.sdkCompile, .simulatorConstruction])
-        XCTAssertTrue(noProofs.blockingReasons.contains(.realDeviceProofRequired))
+        XCTAssertTrue(noProofs.unmetProofRequirements.isEmpty)
+        XCTAssertEqual(noProofs.blockingReasons, [
+            .deliveryPathUnavailable,
+            .exactTargetValuesUnavailable,
+        ])
 
         let preview = classifier.assessDelivery(plan, path: .previewOnly, proofs: WorkoutKitDeliveryProofs(
             proven: [.sdkCompile, .simulatorConstruction]
         ))
         XCTAssertTrue(preview.unmetProofRequirements.isEmpty)
-        XCTAssertTrue(preview.blockingReasons.isEmpty)
+        XCTAssertEqual(preview.blockingReasons, [
+            .deliveryPathUnavailable,
+            .exactTargetValuesUnavailable,
+        ])
 
         let scheduled = classifier.assessDelivery(plan, path: .scheduleOnPhone, proofs: WorkoutKitDeliveryProofs(
             proven: [.sdkCompile, .simulatorConstruction]
         ))
         XCTAssertEqual(scheduled.unmetProofRequirements, [.realDeviceScheduleVisibility, .duplicateUpdateBehavior])
-        XCTAssertTrue(scheduled.blockingReasons.contains(.realDeviceProofRequired))
-        XCTAssertTrue(scheduled.blockingReasons.contains(.duplicateUpdateProofRequired))
+        XCTAssertEqual(scheduled.blockingReasons, [
+            .scheduleVisibilityProofRequired,
+            .duplicateUpdateProofRequired,
+            .exactTargetValuesUnavailable,
+        ])
 
         let opened = classifier.assessDelivery(plan, path: .openOnWatch, proofs: WorkoutKitDeliveryProofs(
             proven: [.sdkCompile, .simulatorConstruction]
         ))
         XCTAssertEqual(opened.unmetProofRequirements, [.realDeviceStartability])
-        XCTAssertTrue(opened.blockingReasons.contains(.realDeviceProofRequired))
-        XCTAssertFalse(opened.blockingReasons.contains(.duplicateUpdateProofRequired))
+        XCTAssertEqual(opened.blockingReasons, [
+            .watchStartabilityProofRequired,
+            .exactTargetValuesUnavailable,
+        ])
+    }
+
+    func testDeliveryAssessmentBlocksPathsOutsidePlanContract() throws {
+        let classifier = WorkoutKitExportClassifier()
+        var plan = try classifier.classify(workout: Self.straightStrengthWorkout())
+        plan.deliveryPaths = [.previewOnly]
+
+        let assessment = classifier.assessDelivery(
+            plan,
+            path: .scheduleOnPhone,
+            proofs: WorkoutKitDeliveryProofs(
+                proven: [
+                    .sdkCompile,
+                    .simulatorConstruction,
+                    .realDeviceScheduleVisibility,
+                    .duplicateUpdateBehavior,
+                ],
+                degradationAcknowledged: true
+            )
+        )
+
+        XCTAssertEqual(assessment.blockingReasons, [.deliveryPathUnavailable])
+    }
+
+    func testValueBackedWorkoutKitRowsBlockUntilExactTargetMappingExists() throws {
+        let classifier = WorkoutKitExportClassifier()
+        let timePlan = try classifier.classify(workout: Self.timeGoalCardioWorkout())
+        let distancePlan = try classifier.classify(workout: Self.continuousCardioWorkout())
+        let intervalPlan = try classifier.classify(workout: Self.simpleIntervalWorkout())
+        let openPlan = try classifier.classify(workout: Self.straightStrengthWorkout())
+
+        XCTAssertTrue(timePlan.unresolvedRequirements.contains(.exactTargetValuesUnavailable))
+        XCTAssertTrue(distancePlan.unresolvedRequirements.contains(.exactTargetValuesUnavailable))
+        XCTAssertTrue(intervalPlan.unresolvedRequirements.contains(.exactTargetValuesUnavailable))
+        XCTAssertFalse(openPlan.unresolvedRequirements.contains(.exactTargetValuesUnavailable))
+    }
+
+    func testUnavailableCandidateFamilyDoesNotAlsoReportExactTargetGap() throws {
+        let classifier = WorkoutKitExportClassifier(supportedCandidates: [.customWorkout])
+        let plan = try classifier.classify(workout: Self.continuousCardioWorkout())
+
+        XCTAssertEqual(plan.supportState, .unsupported)
+        XCTAssertEqual(plan.payload.shape, .noPayload)
+        XCTAssertEqual(plan.unresolvedRequirements, [.sourceAmbiguity, .targetFamilyUnavailable])
+
+        let assessment = classifier.assessDelivery(
+            plan,
+            path: .scheduleOnPhone,
+            proofs: WorkoutKitDeliveryProofs()
+        )
+        XCTAssertEqual(assessment.blockingReasons, [.sourceAmbiguity, .targetFamilyUnavailable])
+        XCTAssertTrue(assessment.unmetProofRequirements.isEmpty)
     }
 
     func testDegradationAcknowledgementIsNotCountedAsDeviceProof() throws {
@@ -285,18 +375,30 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
 
         let missingAcknowledgement = classifier.assessDelivery(
             plan,
-            path: .previewOnly,
+            path: .scheduleOnPhone,
             proofs: WorkoutKitDeliveryProofs(proven: [.sdkCompile, .simulatorConstruction])
         )
-        XCTAssertTrue(missingAcknowledgement.unmetProofRequirements.isEmpty)
+        XCTAssertEqual(
+            missingAcknowledgement.unmetProofRequirements,
+            [.realDeviceScheduleVisibility, .duplicateUpdateBehavior]
+        )
         XCTAssertEqual(missingAcknowledgement.unmetAcknowledgementRequirements, [.degradationAcknowledgement])
-        XCTAssertEqual(missingAcknowledgement.blockingReasons, [.degradationAcknowledgementRequired])
+        XCTAssertEqual(missingAcknowledgement.blockingReasons, [
+            .scheduleVisibilityProofRequired,
+            .duplicateUpdateProofRequired,
+            .degradationAcknowledgementRequired,
+        ])
 
         let acknowledged = classifier.assessDelivery(
             plan,
-            path: .previewOnly,
+            path: .scheduleOnPhone,
             proofs: WorkoutKitDeliveryProofs(
-                proven: [.sdkCompile, .simulatorConstruction],
+                proven: [
+                    .sdkCompile,
+                    .simulatorConstruction,
+                    .realDeviceScheduleVisibility,
+                    .duplicateUpdateBehavior,
+                ],
                 degradationAcknowledged: true
             )
         )
@@ -311,12 +413,17 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
 
         XCTAssertTrue(plan.proofRequirements.contains(.activitySupport))
 
-        let assessment = classifier.assessDelivery(plan, path: .previewOnly, proofs: WorkoutKitDeliveryProofs(
+        let assessment = classifier.assessDelivery(plan, path: .scheduleOnPhone, proofs: WorkoutKitDeliveryProofs(
             proven: [.sdkCompile, .simulatorConstruction],
             degradationAcknowledged: true
         ))
         XCTAssertTrue(assessment.unmetProofRequirements.contains(.activitySupport))
-        XCTAssertTrue(assessment.blockingReasons.contains(.realDeviceProofRequired))
+        XCTAssertEqual(assessment.blockingReasons, [
+            .exactTargetValuesUnavailable,
+            .activitySupportUnproven,
+            .scheduleVisibilityProofRequired,
+            .duplicateUpdateProofRequired,
+        ])
     }
 
     private static func continuousCardioWorkout() -> PrimitiveWorkout {
@@ -404,6 +511,21 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
     private static func loadedCarryWorkout() -> PrimitiveWorkout {
         workout(
             name: "Loaded carry",
+            timing: PrimitiveTiming(mode: .targetBounded),
+            slots: [
+                slot(
+                    targets: [
+                        target(.distance, value: 400),
+                        target(.loadCarried, value: 32, role: .observation),
+                    ]
+                ),
+            ]
+        )
+    }
+
+    private static func genericWeightedDistanceWorkout() -> PrimitiveWorkout {
+        workout(
+            name: "Generic weighted distance",
             timing: PrimitiveTiming(mode: .targetBounded),
             slots: [
                 slot(
@@ -500,6 +622,7 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
         payload: WorkoutKitPayloadBlueprint,
         identity: Set<WorkoutKitPushIdentityRequirement>,
         proofRequirements: Set<WorkoutKitProofRequirement>,
+        unresolvedRequirements: Set<WorkoutKitBlockReason> = [],
         degradation: WorkoutKitDegradation,
         file: StaticString = #filePath,
         line: UInt = #line
@@ -511,6 +634,6 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
         XCTAssertEqual(plan.pushIdentity.requirements, identity, file: file, line: line)
         XCTAssertEqual(plan.proofRequirements, proofRequirements, file: file, line: line)
         XCTAssertEqual(plan.degradation, degradation, file: file, line: line)
-        XCTAssertTrue(plan.unresolvedRequirements.isEmpty, file: file, line: line)
+        XCTAssertEqual(plan.unresolvedRequirements, unresolvedRequirements, file: file, line: line)
     }
 }

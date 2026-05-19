@@ -70,7 +70,7 @@ authority.
 - **Authoring shape** — the wire format for workout / block / set / slot, how each of the 7 primitives serializes, merge rules for library defaults + alternatives + hierarchy walk. See `primitives-data-model/authoring-shape.md`.
 - **Log shape** — the `set_log` row model, three log roles (`slot`, `set_result`, `block_result`), deterministic UUID composition, per-stimulus typed columns, overlay columns, write semantics. See `primitives-data-model/log-shape.md`.
 - **Runtime resolution** — seed-time transform into `ExecutionPlan`, relative-load resolution against `user_parameters`, driver iteration contract over primitive cells, correction semantics via same-UUID upsert. See `primitives-data-model/runtime-resolution.md`.
-- **Cutover posture** — primitive wire/schema/cache/sync/reset cutover with no legacy acceptance path and explicit reset of current local/server QA workout data; remaining native execution/history gaps stay tracked below. See `primitives-data-model/cutover.md`.
+- **Cutover posture** — primitive wire/schema/cache/sync/reset cutover with no legacy acceptance path. Current local/server QA workout data is disposable; the next deployment may delete and recreate the server database instead of preserving old rows. Remaining native execution/history gaps stay tracked below. See `primitives-data-model/cutover.md`.
 
 ### Out of scope
 
@@ -114,9 +114,9 @@ Proof: a unit test with two `user_parameters` updates (bodyweight_kg changes bet
 
 Proof: a test that logs a slot, edits it, and asserts the row count on `set_log` is exactly 1 with the edited values.
 
-**A5. The cutover explicitly resets old QA workout data and remains reversible within dev.** Existing local/server workouts and logs are pre-real-use QA data for this cutover and may be deleted instead of migrated. The reset must be explicit and tested; old data must not silently mix with primitive data. Rolling back the spec still means reverting the server migration + SwiftData version + app code + fixtures in one commit; both sides of the cutover remain runnable.
+**A5. The cutover explicitly resets old QA workout data and remains reversible within dev.** Existing local/server workouts and logs are pre-real-use QA data for this cutover and may be deleted instead of migrated. The next deployment may delete and recreate the server database; no production migration/backfill work is required for those rows. Local cache reset remains explicit, and old data must not silently mix with primitive data. Rolling back the spec still means reverting the server schema/app code/fixtures as one coherent cutover; both sides of the cutover remain runnable.
 
-Proof: reset/cutover tests start from a pre-cutover store with representative QA workouts/logs, apply the primitive cutover, and assert old-shape workouts/logs are gone while fresh primitive workouts can be pulled, executed, logged, and pushed. Bisect across the cutover commit; both sides of the bisect let `uv run pytest` and the app integration tests pass against the fixtures appropriate to that side.
+Proof: local reset/cache tests assert old-shape workouts/logs are cleared before fresh primitive workouts are pulled, executed, logged, and pushed. Server-side proof is deployment posture, not a preservation migration: recreate the database, apply current schema, and accept fresh primitive pushes. Bisect across the cutover commit; both sides of the bisect let `uv run pytest` and the app integration tests pass against the fixtures appropriate to that side.
 
 ### Explicitly not in the acceptance bar
 
@@ -185,11 +185,11 @@ Delivered:
   partial-result input fields, and aggregate result row policy.
 - Production primitive seeding, pre-start preview projection,
   AMRAP/aggregate result entry, and completion summaries route through those
-  semantics. The separate `bug-090` sentinel-progress fix remains open because
-  it needs a dedicated EMOM progress proof slice.
-- Route/sheet lifecycle risk is now separated as `bug-089`, which remains open
-  for deterministic active/rest interval-boundary proof plus simulator
-  confirmation.
+  semantics. The EMOM progress proof now hides sentinel row counts from visible
+  active-block progress and completion block summaries.
+- Route/sheet lifecycle risk from `bug-089` is closed by owning the End
+  confirmation at the stable `ExecutionView` router instead of route-local
+  Active/Rest screens.
 - Narrow app/server legality parity for the primitive timing/traversal and
   aggregate-target rules centralized by this cluster.
 
@@ -215,8 +215,9 @@ Implemented in this cluster:
 - Replaced remaining old-shape wire/schema surfaces with the primitive
   authoring/log contract where this lane owns them: server API models,
   OpenAPI/shared Swift DTOs, SwiftData cache shape, fixtures, and docs.
-- Implemented the explicit destructive reset of old local/server QA workout data
-  required by `cutover.md`.
+- Implemented the explicit local cache reset posture required by `cutover.md`;
+  server QA data does not need preservation because the deployment may recreate
+  the database.
 - Proved pull -> local cache -> `ExecutionPlan` seed -> execution log/result
   grouping -> push -> server readback for representative primitive workouts.
 - Tightened primitive result role query-safety by validating pushed slot,
@@ -231,9 +232,9 @@ Implemented in this cluster:
 
 Remaining in or after closeout:
 
-- Close or narrow `PDM-GAP-003`, `PDM-GAP-004`, `PDM-GAP-005`,
-  `PDM-GAP-006`, and residual `PDM-GAP-007` only where the implementation
-  actually touches those consumers.
+- Close or narrow `PDM-GAP-003`, `PDM-GAP-004`, `PDM-GAP-006`, and residual
+  `PDM-GAP-007` only where the implementation actually touches those
+  consumers. `PDM-GAP-005` is closed as a migration/preservation concern.
 - Keep `EXEC-GAP-008` separate unless the cutover work naturally exposes the
   expanded per-slot editing seam.
 - Preserve external-adapter neutrality: the cutover may add only
@@ -247,7 +248,7 @@ Out of scope unless the architecture review says otherwise:
 - History analytics redesign beyond the query-safety/readback proof needed for
   primitive result roles.
 - Production data migration compatibility; current workouts are QA data and may
-  be reset explicitly.
+  be reset explicitly or removed by recreating the server database.
 
 The foundation-cluster proof bar was:
 
@@ -256,13 +257,15 @@ The foundation-cluster proof bar was:
   visibility.
 - FeatureExecution tests proving seeder delegation, primitive projection
   metrics, AMRAP non-rep partial results, completion summaries without
-  primitive note parsing fallback, and `bug-090`.
+  primitive note parsing fallback, and `bug-090` across active execution and
+  completion summaries.
 - Server ingest tests mirroring the same accept/reject legality grid as
   CoreSession, including role-specific aggregate-target checks. Representative
   server coverage is not enough for this cluster.
-- Deterministic route/sheet lifecycle tests for `bug-089`, covering both
-  active -> rest and rest -> active interval-boundary transitions unless the
-  durable repro proves only one edge.
+- `WorkoutDBUITests.ExecutionEndConfirmationUITests` covers `bug-089` through
+  the real SwiftUI route/alert lifecycle: Active/Rest End controls open the
+  confirmation, route changes dismiss stale alerts, and the user can reopen and
+  end the workout through the stable execution router.
 - `make pre-qa` before simulator QA, then `docs/QA.md` evidence on the bounded
   primitive fixtures named below.
 
@@ -327,12 +330,13 @@ already cover.
 - The completed foundation phase proved the visible primitive execution slice,
   CoreSession semantics, narrow server legality parity, and Today preview
   projection through automated gates and simulator QA. It also produced
-  durable repro rows for `bug-089`, `bug-090`, and `bug-091`; those bugs remain
-  open until their specific route/progress/launch fixes land. The full
-  primitive wire/schema/cache/sync/reset cutover is now implemented in the
-  active cluster; remaining material items are `PDM-GAP-006` residual readback
-  and correction consumers, unsupported primitive bridge shapes, the open bug
-  rows, and the proof matrix above.
+  durable repro rows for `bug-089`, `bug-090`, and `bug-091`; `bug-089` is
+  closed by `ExecutionEndConfirmationUITests`, `bug-090` is closed by
+  execution/completion sentinel-summary tests, and `bug-091` remains a
+  non-blocking launch watchlist item. The full primitive wire/schema/cache/sync/reset cutover is
+  now implemented in the active cluster; remaining material items are
+  `PDM-GAP-006` residual readback and correction consumers, unsupported
+  primitive bridge shapes, and the proof matrix above.
 
 - `PDM-GAP-007`: Primitive composition semantics are now centralized for
   CoreSession app-runtime seeding/projection/result rules and narrow server

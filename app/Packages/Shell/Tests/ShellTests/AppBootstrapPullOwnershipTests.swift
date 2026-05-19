@@ -111,7 +111,7 @@ final class AppBootstrapPullOwnershipTests: XCTestCase {
             exercises: fixture.domainExercises,
             userParameters: []
         ))
-        await AppSyncLocalStateReset.clearCachedServerData(persistence: factory)
+        await AppSyncLocalStateReset.clearLocalServerData(persistence: factory)
         let transport = ScriptedTransport(getOutcomes: [.ok(fixture.json)])
         let baseURL = try XCTUnwrap(URL(string: "https://example.test"))
 

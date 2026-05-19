@@ -50,12 +50,14 @@ extension ActiveView {
                 style: .primary,
                 action: { viewModel.startCurrentSet() }
             )
+            .accessibilityIdentifier("execution.active.start")
         } else if mode == .forTime {
             DSButton(
                 title: "finish",
                 style: .primary,
                 action: { viewModel.logForTimeResult() }
             )
+            .accessibilityIdentifier("execution.active.finish")
         } else if mode == .amrap {
             DSButton(
                 title: "next",
@@ -66,6 +68,7 @@ extension ActiveView {
                     }
                 }
             )
+            .accessibilityIdentifier("execution.active.amrap.next")
         } else if viewModel.isCurrentRoundRobinBatchMode {
             roundRobinBatchButton()
         } else if viewModel.isCurrentBlockCardio {
@@ -76,18 +79,21 @@ extension ActiveView {
                 style: .primary,
                 action: { viewModel.completeCurrentCompositeSlot() }
             )
+            .accessibilityIdentifier("execution.active.composite.next")
         } else if viewModel.isCurrentCompositeSet {
             DSButton(
                 title: strengthLogTitle(content: content),
                 style: .primary,
                 action: { activeSheet = .logSet }
             )
+            .accessibilityIdentifier("execution.active.log.open")
         } else {
             DSButton(
                 title: strengthLogTitle(content: content),
                 style: .primary,
                 action: { activeSheet = .logSet }
             )
+            .accessibilityIdentifier("execution.active.log.open")
         }
     }
 
@@ -99,12 +105,14 @@ extension ActiveView {
                 style: .primary,
                 action: { viewModel.completeCurrentCompositeSlot() }
             )
+            .accessibilityIdentifier("execution.active.composite.next")
         } else {
             DSButton(
                 title: roundRobinBatchTitle(),
                 style: .primary,
                 action: { viewModel.advanceRoundRobinBatchStation() }
             )
+            .accessibilityIdentifier("execution.active.roundrobin.next")
         }
     }
 
@@ -117,11 +125,13 @@ extension ActiveView {
                     style: .primary,
                     action: { viewModel.logCurrentSet() }
                 )
+                .accessibilityIdentifier("execution.active.cardio.log")
                 DSButton(
                     title: "continue",
                     style: .ghost,
                     action: { viewModel.continueContinuousPastTarget() }
                 )
+                .accessibilityIdentifier("execution.active.cardio.continue")
             }
         } else {
             DSButton(
@@ -129,6 +139,7 @@ extension ActiveView {
                 style: .primary,
                 action: { viewModel.logCurrentSet() }
             )
+            .accessibilityIdentifier("execution.active.cardio.log")
         }
     }
 

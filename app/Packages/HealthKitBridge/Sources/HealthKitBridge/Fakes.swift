@@ -121,6 +121,7 @@ public final class FakeHealthPermissionBroker: HealthPermissionBroker, @unchecke
         if let err = storage.shouldFailWith {
             throw err
         }
+        try HealthDataRequestValidator.validateAuthorizationRequests(requests)
         storage.requested.append(contentsOf: requests)
     }
 }
@@ -151,6 +152,7 @@ public final class FakeHealthBatchDataProvider: HealthBatchDataProvider, @unchec
         if let err = shouldFailWith {
             throw err
         }
+        try HealthDataRequestValidator.validateBatchFetchRequests(query.requests)
         storage.queries.append(query)
         return result
     }
@@ -182,6 +184,7 @@ public final class FakeHealthLiveDataProvider: HealthLiveDataProvider, @unchecke
         if let err = shouldFailWith {
             throw err
         }
+        try HealthDataRequestValidator.validateLiveStreamRequests(requests)
         storage.requested.append(requests)
         let scripted = records
         return AsyncThrowingStream { continuation in
@@ -195,4 +198,41 @@ public final class FakeHealthLiveDataProvider: HealthLiveDataProvider, @unchecke
 
 private final class FakeHealthLiveStorage: @unchecked Sendable {
     nonisolated(unsafe) var requested: [[HealthDataRequest]] = []
+}
+
+// MARK: - FixtureWorkoutMetricSource
+
+public final class FixtureWorkoutMetricSource: WorkoutMetricSource, @unchecked Sendable {
+    private let replay: WorkoutMetricReplay
+    private let shouldFailWith: HealthKitError?
+    private let storage = FixtureWorkoutMetricStorage()
+
+    public init(
+        replay: WorkoutMetricReplay,
+        shouldFailWith: HealthKitError? = nil
+    ) {
+        self.replay = replay
+        self.shouldFailWith = shouldFailWith
+    }
+
+    public var startCallCount: Int { storage.startCallCount }
+    public var stopCallCount: Int { storage.stopCallCount }
+
+    public func start() async throws -> AsyncStream<WorkoutMetricEvent> {
+        if let err = shouldFailWith {
+            throw err
+        }
+        storage.startCallCount += 1
+        let stream = replay.stream()
+        return stream
+    }
+
+    public func stop() async {
+        storage.stopCallCount += 1
+    }
+}
+
+private final class FixtureWorkoutMetricStorage: @unchecked Sendable {
+    nonisolated(unsafe) var startCallCount: Int = 0
+    nonisolated(unsafe) var stopCallCount: Int = 0
 }

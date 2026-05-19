@@ -13,6 +13,7 @@ import DesignSystem
 
 public struct ExecutionView: View {
     @State private var viewModel: ExecutionViewModel
+    @State private var showEndConfirm = false
 
     public init(viewModel: ExecutionViewModel) {
         _viewModel = State(initialValue: viewModel)
@@ -29,14 +30,47 @@ public struct ExecutionView: View {
                 // showing TodayView while the session is on `.today`.
                 Color.clear
             case .active:
-                ActiveView(viewModel: viewModel)
+                ActiveView(
+                    viewModel: viewModel,
+                    onEndRequested: requestEndConfirmation
+                )
             case .transition:
                 BlockTransitionView(viewModel: viewModel)
             case .rest:
-                RestView(viewModel: viewModel)
+                RestView(
+                    viewModel: viewModel,
+                    onEndRequested: requestEndConfirmation
+                )
             case .complete:
                 CompleteView(viewModel: viewModel)
             }
         }
+        // Keep End confirmation owned by the stable execution router so
+        // route changes can dismiss it deterministically instead of leaving
+        // route-local alert state attached to a discarded Active/Rest view.
+        .alert("End workout?", isPresented: $showEndConfirm) {
+            Button("Cancel", role: .cancel) {}
+            Button("End", role: .destructive) {
+                viewModel.complete()
+            }
+        } message: {
+            Text("Unlogged sets won't be recorded. You can still save & done.")
+        }
+        .onChange(of: viewModel.state.route) { oldRoute, newRoute in
+            if ExecutionView.shouldDismissEndConfirmation(oldRoute: oldRoute, newRoute: newRoute) {
+                showEndConfirm = false
+            }
+        }
+    }
+
+    static func shouldDismissEndConfirmation(
+        oldRoute: SessionState.Route,
+        newRoute: SessionState.Route
+    ) -> Bool {
+        oldRoute != newRoute
+    }
+
+    private func requestEndConfirmation() {
+        showEndConfirm = true
     }
 }

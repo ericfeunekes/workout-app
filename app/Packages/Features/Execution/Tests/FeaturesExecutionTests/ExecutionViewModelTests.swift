@@ -30,7 +30,8 @@ final class ExecutionViewModelTests: XCTestCase {
         reps: Int = 5,
         loadKg: Double = 100,
         targetRir: Int = 2,
-        restSec: Int = 180
+        restSec: Int = 180,
+        includePrimitivePlan: Bool = false
     ) -> (WorkoutContext, UUID) {
         let userID = UUID()
         let workoutID = UUID()
@@ -56,9 +57,50 @@ final class ExecutionViewModelTests: XCTestCase {
             exerciseID: exerciseID,
             prescriptionJSON: #"{"sets":\#(sets),"reps":\#(reps),"load_kg":\#(loadKg),"target_rir":\#(targetRir),"autoreg":{}}"#
         )
+        var primitiveWorkout: PrimitiveWorkout?
+        var primitivePlan: ExecutionPlan?
+        if includePrimitivePlan {
+            let primitive = PrimitiveWorkout(
+                id: workoutID,
+                name: workout.name,
+                blocks: [
+                    PrimitiveBlock(id: blockID, sets: [
+                        PrimitiveSet(
+                            id: UUID(),
+                            timing: PrimitiveTiming(mode: .setBounded),
+                            traversal: .sequential,
+                            repeatCount: sets,
+                            slots: [
+                                PrimitiveSlot(
+                                    id: itemID,
+                                    exerciseID: exerciseID,
+                                    workTargets: [
+                                        PrimitiveWorkTarget(
+                                            metric: .reps,
+                                            valueForm: .single,
+                                            value: Double(reps),
+                                            role: .completion
+                                        ),
+                                    ],
+                                    load: PrimitiveLoad(
+                                        value: loadKg,
+                                        unit: .lb,
+                                        unitType: .absolute
+                                    )
+                                ),
+                            ]
+                        ),
+                    ]),
+                ]
+            )
+            primitiveWorkout = primitive
+            primitivePlan = try! ExecutionPlan.validated(workout: primitive)
+        }
 
         let ctx = WorkoutContext(
             workout: workout,
+            primitiveWorkout: primitiveWorkout,
+            primitiveExecutionPlan: primitivePlan,
             blocks: [block],
             itemsByBlock: [[item]],
             exercises: [exerciseID: Exercise(id: exerciseID, name: "Bench")],
@@ -528,7 +570,7 @@ final class ExecutionViewModelTests: XCTestCase {
 
     func testSaveAndDoneInvokesLocalCompletionWriterOnce() async throws {
         let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_000))
-        let (ctx, itemID) = makeContext(sets: 2, restSec: 60)
+        let (ctx, itemID) = makeContext(sets: 2, restSec: 60, includePrimitivePlan: true)
         let recorder = CompletionRecorder()
         let vm = ExecutionViewModel(
             context: ctx,
@@ -538,7 +580,7 @@ final class ExecutionViewModelTests: XCTestCase {
             }
         )
         vm.start()
-        // Log both sets so the writer sees set_logs in the expected shape.
+        // Log both sets so the writer sees primitive result rows in the expected shape.
         vm.startCurrentSet()
         vm.logSet(reps: 5, rir: 2)
         vm.advance()
@@ -559,31 +601,23 @@ final class ExecutionViewModelTests: XCTestCase {
         XCTAssertEqual(call.workout.status, .completed)
         XCTAssertEqual(call.workout.completedAt, fixed.now)
         XCTAssertEqual(call.workout.updatedAt, fixed.now)
-        XCTAssertEqual(call.setLogs.count, 2)
-        XCTAssertTrue(call.setLogs.allSatisfy { $0.workoutItemID == itemID })
-        XCTAssertEqual(Set(call.setLogs.map(\.setIndex)), [1, 2])
-        XCTAssertTrue(call.setLogs.allSatisfy { $0.reps == 5 })
+        let logs = call.record.primitiveSetLogs
+        XCTAssertEqual(logs.count, 2)
+        XCTAssertTrue(logs.allSatisfy { $0.slotID == itemID })
+        XCTAssertEqual(Set(logs.map(\.setRepeatIndex)), [0, 1])
+        XCTAssertTrue(logs.allSatisfy { $0.reps == 5 })
         // With `FixedClock`, `clock.now` never advances between log
         // events, so every set's `completedAt` matches the fixed stamp
         // (same clock value at every `.logSet`). The "sets can carry
         // distinct stamps" coverage lives in
         // `testCompletionWriteStampsPerSetTimestamps`, which drives a
         // mutable clock across logSet calls.
-        XCTAssertTrue(call.setLogs.allSatisfy { $0.completedAt == fixed.now })
+        XCTAssertTrue(logs.allSatisfy { $0.completedAt == fixed.now })
     }
 
-    func testSaveAndDoneLocalCacheUsesDeterministicSetLogID() async throws {
-        // Bug-040 regression (server side of the same split).
-        // `writeCompletionToLocalCache` MUST stamp each SetLog.id with the
-        // same deterministic (itemID, setIndex) UUID that
-        // `enqueueLoggedSet` / `enqueueEditedSet` use, otherwise the local
-        // cache and the server row for the same logical set carry
-        // different ids. The History past-set edit path reads from the
-        // local cache, finds the (mis-matched) id, and pushes that to the
-        // server — which then INSERTS a duplicate instead of updating in
-        // place.
+    func testSaveAndDonePrimitiveCompletionUsesStablePrimitiveLogIDs() async throws {
         let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_050))
-        let (ctx, itemID) = makeContext(sets: 2, restSec: 60)
+        let (ctx, _) = makeContext(sets: 2, restSec: 60, includePrimitivePlan: true)
         let recorder = CompletionRecorder()
         let vm = ExecutionViewModel(
             context: ctx,
@@ -607,23 +641,15 @@ final class ExecutionViewModelTests: XCTestCase {
 
         let calls = await recorder.calls
         let call = try XCTUnwrap(calls.first)
-        XCTAssertEqual(call.setLogs.count, 2)
-        for log in call.setLogs {
-            let expected = ExecutionViewModel.setLogID(
-                itemID: itemID, setIndex: log.setIndex
-            )
-            XCTAssertEqual(
-                log.id, expected,
-                "local cache SetLog.id for (itemID, setIndex=\(log.setIndex)) must equal the "
-                + "deterministic id used on the push path — otherwise a later History edit "
-                + "pushes a mismatched id and the server inserts a duplicate row"
-            )
-        }
+        let logs = call.record.primitiveSetLogs.sorted(by: { $0.setRepeatIndex < $1.setRepeatIndex })
+        XCTAssertEqual(logs.count, 2)
+        XCTAssertNotEqual(logs[0].id, logs[1].id)
+        XCTAssertEqual(logs.map(\.id), vm.primitiveSetLogs.sorted(by: { $0.setRepeatIndex < $1.setRepeatIndex }).map(\.id))
     }
 
-    func testSaveAndDoneLocalCachePreservesSkippedWithoutPerformanceMetrics() async throws {
+    func testSaveAndDonePrimitiveCompletionOmitsSkippedSlotRows() async throws {
         let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_075))
-        let (ctx, itemID) = makeContext(sets: 1, restSec: 0)
+        let (ctx, _) = makeContext(sets: 1, restSec: 0, includePrimitivePlan: true)
         let recorder = CompletionRecorder()
         let vm = ExecutionViewModel(
             context: ctx,
@@ -642,19 +668,7 @@ final class ExecutionViewModelTests: XCTestCase {
 
         let calls = await recorder.calls
         let call = try XCTUnwrap(calls.first)
-        let log = try XCTUnwrap(call.setLogs.first)
-        XCTAssertEqual(log.workoutItemID, itemID)
-        XCTAssertEqual(log.setIndex, 1)
-        XCTAssertTrue(log.skipped)
-        XCTAssertNil(log.reps)
-        XCTAssertNil(log.weight)
-        XCTAssertNil(log.weightUnit)
-        XCTAssertNil(log.rir)
-        XCTAssertNil(log.durationSec)
-        XCTAssertNil(log.distanceM)
-        XCTAssertNil(log.hrAvgBpm)
-        XCTAssertNil(log.cadenceAvgSpm)
-        XCTAssertEqual(log.side, .bilateral)
+        XCTAssertTrue(call.record.primitiveSetLogs.isEmpty)
     }
 
     func testCompletionWriteStampsPerSetTimestamps() async throws {
@@ -680,7 +694,7 @@ final class ExecutionViewModelTests: XCTestCase {
         // time that preceded its log.
         let t0 = Date(timeIntervalSince1970: 1_700_000_300)
         let clock = MutableClock(now: t0)
-        let (ctx, _) = makeContext(sets: 3, restSec: 60)
+        let (ctx, _) = makeContext(sets: 3, restSec: 60, includePrimitivePlan: true)
         let recorder = CompletionRecorder()
         let vm = ExecutionViewModel(
             context: ctx,
@@ -728,8 +742,8 @@ final class ExecutionViewModelTests: XCTestCase {
         let calls = await recorder.calls
         XCTAssertEqual(calls.count, 1)
         let call = try XCTUnwrap(calls.first)
-        XCTAssertEqual(call.setLogs.count, 3)
-        let sorted = call.setLogs.sorted(by: { $0.setIndex < $1.setIndex })
+        let sorted = call.record.primitiveSetLogs.sorted(by: { $0.setRepeatIndex < $1.setRepeatIndex })
+        XCTAssertEqual(sorted.count, 3)
         XCTAssertEqual(sorted[0].completedAt, t0)
         XCTAssertEqual(sorted[1].completedAt, t0.addingTimeInterval(30))
         XCTAssertEqual(sorted[2].completedAt, t0.addingTimeInterval(90))
@@ -737,21 +751,6 @@ final class ExecutionViewModelTests: XCTestCase {
         // collapse onto `clock.now` at `saveAndDone`.
         let stamps = Set(sorted.map(\.completedAt))
         XCTAssertEqual(stamps.count, 3, "every set carries its own completedAt")
-        // `startedAt` = rest-ended instant (session-start for set 1).
-        // This proves rest time is NOT folded into set duration. Set 2's
-        // working time = 30-20 = 10s, not 30-0 = 30s. See
-        // `SessionState.workStartedAt`.
-        XCTAssertEqual(sorted[0].startedAt, t0, "set 1 uses session-start anchor")
-        XCTAssertEqual(sorted[1].startedAt, t0.addingTimeInterval(20),
-                       "set 2 startedAt = advance-time (rest-ended), NOT set 1 completedAt")
-        XCTAssertEqual(sorted[2].startedAt, t0.addingTimeInterval(80),
-                       "set 3 startedAt = advance-time (rest-ended), NOT set 2 completedAt")
-        // Working-time sanity check: each set's working duration is
-        // completedAt - startedAt, and must exclude rest.
-        XCTAssertEqual(sorted[1].completedAt.timeIntervalSince(sorted[1].startedAt!), 10,
-                       "set 2 working time = 10s; the 20s rest must NOT be folded in")
-        XCTAssertEqual(sorted[2].completedAt.timeIntervalSince(sorted[2].startedAt!), 10,
-                       "set 3 working time = 10s; the 50s rest must NOT be folded in")
         // Workout-level completedAt reflects `saveAndDone` entry, not
         // any individual set's log moment.
         XCTAssertEqual(call.workout.completedAt, t0.addingTimeInterval(120))
@@ -769,14 +768,7 @@ final class ExecutionViewModelTests: XCTestCase {
         let t0 = Date(timeIntervalSince1970: 1_700_000_400)
         let clock = MutableClock(now: t0)
         let (ctx, _) = makeContext(sets: 2, restSec: 60)
-        let recorder = CompletionRecorder()
-        let vm = ExecutionViewModel(
-            context: ctx,
-            clock: clock,
-            localCompletionWriter: { [recorder] record in
-                await recorder.record(record)
-            }
-        )
+        let vm = ExecutionViewModel(context: ctx, clock: clock)
         // Set Start stamps workStartedAt = t0. Advance clock, then log
         // set 1 at t0+10. Set 1's startedAt = t0, completedAt = t0+10.
         vm.start()
@@ -795,13 +787,7 @@ final class ExecutionViewModelTests: XCTestCase {
         vm.startCurrentSet()
         XCTAssertEqual(vm.state.route, .complete)
 
-        clock.now = t0.addingTimeInterval(200)
-        vm.saveAndDone()
-        try await Task.sleep(nanoseconds: 50_000_000)
-
-        let calls = await recorder.calls
-        let call = try XCTUnwrap(calls.first)
-        let sorted = call.setLogs.sorted(by: { $0.setIndex < $1.setIndex })
+        let sorted = try XCTUnwrap(vm.state.items.first?.sets.sorted(by: { $0.setIndex < $1.setIndex }))
         XCTAssertEqual(sorted.count, 2)
 
         // Set 2's startedAt is the rest-ended stamp, not the prior
@@ -815,7 +801,8 @@ final class ExecutionViewModelTests: XCTestCase {
             "set 2 startedAt must NOT equal set 1 completedAt — that folds rest into set duration"
         )
         // Working duration = completedAt - startedAt.
-        let set2Working = sorted[1].completedAt.timeIntervalSince(sorted[1].startedAt!)
+        let set2CompletedAt = try XCTUnwrap(sorted[1].completedAt)
+        let set2Working = set2CompletedAt.timeIntervalSince(sorted[1].startedAt!)
         XCTAssertEqual(set2Working, 10, "set 2 working time = 10s, not 100s")
     }
 
@@ -828,14 +815,7 @@ final class ExecutionViewModelTests: XCTestCase {
         let t0 = Date(timeIntervalSince1970: 1_700_000_500)
         let clock = MutableClock(now: t0)
         let (ctx, _) = makeContext(sets: 1, restSec: 60)
-        let recorder = CompletionRecorder()
-        let vm = ExecutionViewModel(
-            context: ctx,
-            clock: clock,
-            localCompletionWriter: { [recorder] record in
-                await recorder.record(record)
-            }
-        )
+        let vm = ExecutionViewModel(context: ctx, clock: clock)
         // Set Start stamps workStartedAt = t0. User logs at t0+15.
         vm.start()
         vm.startCurrentSet()
@@ -845,19 +825,13 @@ final class ExecutionViewModelTests: XCTestCase {
         vm.startCurrentSet()
         XCTAssertEqual(vm.state.route, .complete)
 
-        clock.now = t0.addingTimeInterval(60)
-        vm.saveAndDone()
-        try await Task.sleep(nanoseconds: 50_000_000)
-
-        let calls = await recorder.calls
-        let call = try XCTUnwrap(calls.first)
-        let set1 = try XCTUnwrap(call.setLogs.first)
+        let set1 = try XCTUnwrap(vm.state.items.first?.sets.first)
         // First set's startedAt = session-start (NOT nil, NOT the log
         // moment). Work window = completedAt - startedAt = 15s.
         XCTAssertEqual(set1.startedAt, t0, "first set carries session-start as startedAt")
         XCTAssertEqual(set1.completedAt, t0.addingTimeInterval(15))
         XCTAssertEqual(
-            set1.completedAt.timeIntervalSince(set1.startedAt!), 15,
+            try XCTUnwrap(set1.completedAt).timeIntervalSince(set1.startedAt!), 15,
             "first set's working time = 15s (log moment minus session start)"
         )
     }
@@ -1690,7 +1664,6 @@ private final class MutableClock: Clock, @unchecked Sendable {
 private actor CompletionRecorder {
     struct Call {
         let workout: Workout
-        let setLogs: [SetLog]
         let record: WorkoutCompletionRecord
     }
     private(set) var calls: [Call] = []
@@ -1698,7 +1671,6 @@ private actor CompletionRecorder {
     func record(_ record: WorkoutCompletionRecord) {
         calls.append(Call(
             workout: record.workout,
-            setLogs: record.setLogs,
             record: record
         ))
     }

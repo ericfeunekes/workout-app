@@ -132,8 +132,13 @@ public enum WorkoutKitProofRequirement: String, Sendable, Hashable, Codable, Cas
 public enum WorkoutKitBlockReason: String, Sendable, Hashable, Codable, CaseIterable {
     case sourceAmbiguity
     case targetCapabilityUnavailable
+    case targetFamilyUnavailable
+    case deliveryPathUnavailable
+    case exactTargetValuesUnavailable
     case setmarkOnly
     case realDeviceProofRequired
+    case scheduleVisibilityProofRequired
+    case watchStartabilityProofRequired
     case duplicateUpdateProofRequired
     case degradationAcknowledgementRequired
     case activitySupportUnproven

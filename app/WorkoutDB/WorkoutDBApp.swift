@@ -20,8 +20,8 @@
 //   — pull, write to cache, build Today + Execution view models, render.
 //
 // Error posture:
-//   • AppBootstrap throws `tokenRejected` → clear the TokenStore and drop
-//     back to FirstRun. User re-enters creds.
+//   • AppBootstrap throws `tokenRejected` → mark auth recovery and drop
+//     back to FirstRun with the existing connection prefilled.
 //   • AppBootstrap returns `.empty` (pull failed + empty cache) → show a
 //     minimal "no workouts yet" state. User can reopen the app after Claude
 //     pushes a session.
@@ -204,6 +204,13 @@ struct RootView: View {
                     tokenStore: persistence.tokenStore,
                     onComplete: {
                         Task { @MainActor in
+                            let result = await AppSyncLocalStateReset.clearLocalServerData(
+                                persistence: persistence
+                            )
+                            guard result.succeeded else {
+                                await recoverAfterFailedLocalStateReset()
+                                return
+                            }
                             didStartBootstrap = false
                             phase = .bootstrapping
                             await runBootstrap()
@@ -221,7 +228,7 @@ struct RootView: View {
 
             #if DEBUG
             case .healthKitProbe:
-                HealthKitProbeView()
+                HealthKitProbeView(archiveStore: persistence.healthArchiveStore)
             #endif
 
             case .empty(let appSync):
@@ -315,20 +322,18 @@ struct RootView: View {
     /// initiates the work itself (see the double-bootstrap race note on
     /// `RootView`).
     private func performLaunchCheck() {
+        var shouldRecreateLocalServerData = false
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
-        let forceBypass = args.contains("--start-active")
-            || args.contains("--jump-rest")
-            || args.contains("--jump-transition")
-            || args.contains("--jump-complete")
-            || args.contains("--debug-today-plan")
-            || args.contains("--debug-watch-push")
-            || args.contains("--healthkit-sim-spike")
-        if forceBypass {
-            if args.contains("--healthkit-sim-spike") {
+        let debugRoute = DebugLaunchRoute.classify(args: args)
+        if debugRoute.bypassesFirstRun {
+            if debugRoute.showsHealthKitProbe {
                 phase = .healthKitProbe
-            } else {
+            } else if debugRoute.usesDebugSeed {
                 applyDebugLaunchArguments(args: args)
+            } else {
+                runStandaloneDebugProbes(args: args)
+                phase = .empty(appSync: nil)
             }
             return
         }
@@ -338,13 +343,29 @@ struct RootView: View {
             let token = args[serverIdx + 2]
             if let url = URL(string: urlStr) {
                 try? persistence.tokenStore.saveConnection(url: url, token: token)
+                shouldRecreateLocalServerData = true
             }
         }
         #endif
         do {
             if try persistence.tokenStore.loadConnection() != nil {
+                if persistence.authRecoveryStore.isTokenRejected() {
+                    phase = .firstRun(prefill: prefillForCurrentConnection())
+                    return
+                }
                 phase = .bootstrapping
-                Task { @MainActor in await runBootstrap() }
+                Task { @MainActor in
+                    if shouldRecreateLocalServerData {
+                        let result = await AppSyncLocalStateReset.clearLocalServerData(
+                            persistence: persistence
+                        )
+                        guard result.succeeded else {
+                            await recoverAfterFailedLocalStateReset()
+                            return
+                        }
+                    }
+                    await runBootstrap()
+                }
             } else {
                 phase = .firstRun(prefill: nil)
             }
@@ -448,15 +469,9 @@ struct RootView: View {
                 phase = .empty(appSync: appSync)
             }
         } catch AppBootstrapError.tokenRejected {
-            // Server rejected our saved credentials. A new FirstRun can
-            // point at a different server, so clear both the connection and
-            // local server-derived state before accepting new credentials.
-            await AppSyncLocalStateReset.clearConnectionAndCachedServerData(
-                persistence: persistence
-            )
-            await historyVM.load()
+            await AppSyncLocalStateReset.pauseForTokenRejected(persistence: persistence)
             didStartBootstrap = false
-            phase = .firstRun(prefill: nil)
+            phase = .firstRun(prefill: prefillForCurrentConnection())
         } catch {
             // Any other error here is unexpected — bootstrap is supposed
             // to absorb transport failures and return `.empty`. Treat as
@@ -471,12 +486,9 @@ struct RootView: View {
         lifecycleGeneration += 1
         scenePhaseTask?.cancel()
         await currentAppSync()?.retire(trigger: .manualTodayRefresh)
-        await AppSyncLocalStateReset.clearConnectionAndCachedServerData(
-            persistence: persistence
-        )
-        await historyVM.load()
+        await AppSyncLocalStateReset.pauseForTokenRejected(persistence: persistence)
         didStartBootstrap = false
-        phase = .firstRun(prefill: nil)
+        phase = .firstRun(prefill: prefillForCurrentConnection())
     }
 
     private func rerunBootstrapFromReady() async {
@@ -492,7 +504,11 @@ struct RootView: View {
         lifecycleGeneration += 1
         scenePhaseTask?.cancel()
         await currentAppSync()?.retire()
-        await AppSyncLocalStateReset.clearCachedServerData(persistence: persistence)
+        let result = await AppSyncLocalStateReset.clearLocalServerData(persistence: persistence)
+        guard result.succeeded else {
+            await recoverAfterFailedLocalStateReset()
+            return
+        }
         await historyVM.load()
         didStartBootstrap = false
         phase = .bootstrapping
@@ -569,7 +585,13 @@ struct RootView: View {
             applyDebugLaunchJumps(args: args, executionVM: vm)
         }
         sendDebugWatchPayloadIfRequested(args: args)
+        runDebugWorkoutKitProbeIfRequested(args: args)
         phase = .debugSeed(todayVM: todayVM, executionHolder: executionHolder)
+    }
+
+    private func runStandaloneDebugProbes(args: [String]) {
+        sendDebugWatchPayloadIfRequested(args: args)
+        runDebugWorkoutKitProbeIfRequested(args: args)
     }
     #endif
 }
@@ -588,23 +610,10 @@ extension RootView {
     /// the current saved URL + token so FirstRun pre-fills its fields
     /// rather than forcing the user to retype.
     ///
-    /// Order of operations is deliberate:
-    ///   1. Read the current connection for pre-fill BEFORE clearing it.
-    ///   2. Clear `TokenStore` so a subsequent launch (or a failed new
-    ///      connect) cannot accidentally re-enter bootstrap with the
-    ///      stale pair.
-    ///   3. Wipe the local `WorkoutCache`. Per `docs/sync.md` §
-    ///      "Changing servers" pointing at a different server is
-    ///      equivalent to switching users, so the cached workouts /
-    ///      blocks / items / set_logs must go.
-    ///   4. Reset `didStartBootstrap` so the new FirstRun's onComplete
-    ///      can re-enter `runBootstrap()`.
-    ///   5. Flip phase. The new FirstRun VM sees `prefill` and pre-fills
-    ///      both fields.
-    ///
-    /// The sync cursor is cleared with the workout cache. A stale
-    /// `lastSyncAt` after cache wipe would ask the next server for a
-    /// delta into an empty local database.
+    /// Order of operations is deliberate: capture prefill first, clear all
+    /// server-owned local state, clear the token last, then route to FirstRun.
+    /// HealthKit archive data is preserved because HealthKit, not the server,
+    /// is authoritative for those samples.
     func changeServer() async {
         let prefill: FirstRunPrefill
         if let existing = try? persistence.tokenStore.loadConnection() {
@@ -618,12 +627,32 @@ extension RootView {
         lifecycleGeneration += 1
         scenePhaseTask?.cancel()
         await currentAppSync()?.retire()
-        await AppSyncLocalStateReset.clearConnectionAndCachedServerData(
+        let result = await AppSyncLocalStateReset.clearConnectionAndLocalServerData(
             persistence: persistence
         )
+        guard result.succeeded else {
+            await recoverAfterFailedLocalStateReset()
+            return
+        }
         await historyVM.load()
         didStartBootstrap = false
         phase = .firstRun(prefill: prefill)
+    }
+
+    private func prefillForCurrentConnection() -> FirstRunPrefill? {
+        guard let existing = try? persistence.tokenStore.loadConnection() else {
+            return nil
+        }
+        return FirstRunPrefill(
+            url: existing.url.absoluteString,
+            token: existing.token
+        )
+    }
+
+    private func recoverAfterFailedLocalStateReset() async {
+        await historyVM.load()
+        didStartBootstrap = false
+        phase = .firstRun(prefill: prefillForCurrentConnection())
     }
 }
 

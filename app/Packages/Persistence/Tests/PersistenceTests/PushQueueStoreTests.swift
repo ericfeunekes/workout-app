@@ -23,10 +23,10 @@ final class PushQueueStoreTests: XCTestCase {
         let factory = try makeFactory()
         let store = factory.pushQueueStore
 
-        let log = Fixtures.sampleSetLog()
+        let log = Fixtures.samplePrimitiveSetLog()
         let item = PushItem(
             id: UUID(),
-            payload: .setLogs([log]),
+            payload: .primitiveSetLogs([log]),
             enqueuedAt: Date(timeIntervalSince1970: 1_700_000_000),
             attempts: 0
         )
@@ -39,16 +39,39 @@ final class PushQueueStoreTests: XCTestCase {
         XCTAssertEqual(peeked.count, 1)
         XCTAssertEqual(peeked[0].id, item.id)
 
-        if case .setLogs(let logs) = peeked[0].payload {
+        if case .primitiveSetLogs(let logs) = peeked[0].payload {
             XCTAssertEqual(logs.count, 1)
             XCTAssertEqual(logs[0], log)
         } else {
-            XCTFail("expected setLogs payload")
+            XCTFail("expected primitiveSetLogs payload")
         }
 
         try await store.remove(ids: [item.id])
         let isEmptyAfter = try await store.isEmpty()
         XCTAssertTrue(isEmptyAfter)
+    }
+
+    func testClearRemovesEveryQueuedPayload() async throws {
+        let factory = try makeFactory()
+        let store = factory.pushQueueStore
+
+        try await store.enqueue(PushItem(
+            id: UUID(),
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog()]),
+            enqueuedAt: Date(timeIntervalSince1970: 1_700_000_000)
+        ))
+        try await store.enqueue(PushItem(
+            id: UUID(),
+            payload: .events([Event(sessionID: UUID(), kind: "state", name: "queued")]),
+            enqueuedAt: Date(timeIntervalSince1970: 1_700_000_001)
+        ))
+
+        try await store.clear()
+
+        let isEmpty = try await store.isEmpty()
+        let peeked = try await store.peek(max: 10)
+        XCTAssertTrue(isEmpty)
+        XCTAssertEqual(peeked, [])
     }
 
     func testCompletionResultsPayloadRoundTripsThroughStore() async throws {
@@ -61,8 +84,8 @@ final class PushQueueStoreTests: XCTestCase {
         workout.completedAt = completedAt
         workout.notes = "good finish"
         let logs = [
-            Fixtures.sampleSetLog(setIndex: 1),
-            Fixtures.sampleSetLog(setIndex: 2),
+            Fixtures.samplePrimitiveSetLog(workoutID: workoutID, setIndex: 1),
+            Fixtures.samplePrimitiveSetLog(workoutID: workoutID, setIndex: 2),
         ]
         let item = PushItem(
             id: UUID(),
@@ -70,8 +93,7 @@ final class PushQueueStoreTests: XCTestCase {
                 workoutID: workout.id,
                 completedAt: workout.completedAt,
                 notes: workout.notes,
-                setLogs: logs,
-                primitiveSetLogs: []
+                primitiveSetLogs: logs
             ),
             enqueuedAt: Date(timeIntervalSince1970: 1_700_000_000),
             attempts: 0
@@ -81,12 +103,11 @@ final class PushQueueStoreTests: XCTestCase {
         let peeked = try await store.peek(max: 10)
         XCTAssertEqual(peeked.count, 1)
         XCTAssertEqual(peeked[0].dedupKey, "completion:\(workoutID.uuidString.lowercased())")
-        if case .completionResults(let queuedWorkoutID, let queuedCompletedAt, let notes, let queuedLogs, let primitiveLogs) = peeked[0].payload {
+        if case .completionResults(let queuedWorkoutID, let queuedCompletedAt, let notes, let primitiveLogs) = peeked[0].payload {
             XCTAssertEqual(queuedWorkoutID, workoutID)
             XCTAssertEqual(queuedCompletedAt, completedAt)
             XCTAssertEqual(notes, "good finish")
-            XCTAssertEqual(queuedLogs, logs)
-            XCTAssertEqual(primitiveLogs, [])
+            XCTAssertEqual(primitiveLogs, logs)
         } else {
             XCTFail("expected completionResults payload")
         }
@@ -98,7 +119,7 @@ final class PushQueueStoreTests: XCTestCase {
         let workoutID = UUID()
         let staleLog = PushItem(
             id: UUID(),
-            payload: .setLogs([Fixtures.sampleSetLog(setIndex: 1)]),
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog(workoutID: workoutID, setIndex: 1)]),
             enqueuedAt: Date(timeIntervalSince1970: 1_000)
         )
         let staleStatus = PushItem(
@@ -133,8 +154,7 @@ final class PushQueueStoreTests: XCTestCase {
                 workoutID: workoutID,
                 completedAt: Date(timeIntervalSince1970: 2_000),
                 notes: "done",
-                setLogs: [Fixtures.sampleSetLog(setIndex: 1)],
-                primitiveSetLogs: []
+                primitiveSetLogs: [Fixtures.samplePrimitiveSetLog(workoutID: workoutID, setIndex: 1)]
             ),
             enqueuedAt: Date(timeIntervalSince1970: 2_000)
         )
@@ -166,7 +186,7 @@ final class PushQueueStoreTests: XCTestCase {
         let workoutID = UUID()
         let staleLog = PushItem(
             id: UUID(),
-            payload: .setLogs([Fixtures.sampleSetLog(setIndex: 1)]),
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog(workoutID: workoutID, setIndex: 1)]),
             enqueuedAt: Date(timeIntervalSince1970: 1_000)
         )
         let unrelated = PushItem(
@@ -190,8 +210,7 @@ final class PushQueueStoreTests: XCTestCase {
                 workoutID: workoutID,
                 completedAt: Date(timeIntervalSince1970: 2_000),
                 notes: "done",
-                setLogs: [Fixtures.sampleSetLog(setIndex: 1)],
-                primitiveSetLogs: []
+                primitiveSetLogs: [Fixtures.samplePrimitiveSetLog(workoutID: workoutID, setIndex: 1)]
             ),
             enqueuedAt: Date(timeIntervalSince1970: 2_000)
         )
@@ -232,13 +251,13 @@ final class PushQueueStoreTests: XCTestCase {
 
         let a = PushItem(
             id: UUID(),
-            payload: .setLogs([Fixtures.sampleSetLog(setIndex: 1)]),
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog(setIndex: 1)]),
             enqueuedAt: Date(timeIntervalSince1970: 2_000),
             attempts: 0
         )
         let b = PushItem(
             id: UUID(),
-            payload: .setLogs([Fixtures.sampleSetLog(setIndex: 2)]),
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog(setIndex: 2)]),
             enqueuedAt: Date(timeIntervalSince1970: 1_000),
             attempts: 0
         )
@@ -258,13 +277,13 @@ final class PushQueueStoreTests: XCTestCase {
         let id = UUID()
         let first = PushItem(
             id: id,
-            payload: .setLogs([Fixtures.sampleSetLog(setIndex: 1)]),
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog(setIndex: 1)]),
             enqueuedAt: Date(timeIntervalSince1970: 1_700_000_000),
             attempts: 0
         )
         let second = PushItem(
             id: id,
-            payload: .setLogs([Fixtures.sampleSetLog(setIndex: 9)]),
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog(setIndex: 9)]),
             enqueuedAt: Date(timeIntervalSince1970: 1_700_000_500),
             attempts: 3
         )
@@ -274,10 +293,10 @@ final class PushQueueStoreTests: XCTestCase {
         let peeked = try await store.peek(max: 10)
         XCTAssertEqual(peeked.count, 1)
         XCTAssertEqual(peeked[0].attempts, 3)
-        if case .setLogs(let logs) = peeked[0].payload {
+        if case .primitiveSetLogs(let logs) = peeked[0].payload {
             XCTAssertEqual(logs[0].setIndex, 9)
         } else {
-            XCTFail("expected setLogs payload")
+            XCTFail("expected primitiveSetLogs payload")
         }
     }
 
@@ -287,7 +306,7 @@ final class PushQueueStoreTests: XCTestCase {
 
         let item = PushItem(
             id: UUID(),
-            payload: .setLogs([Fixtures.sampleSetLog()]),
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog()]),
             enqueuedAt: Date(timeIntervalSince1970: 1_700_000_000),
             attempts: 0
         )
@@ -305,7 +324,7 @@ final class PushQueueStoreTests: XCTestCase {
 
         let ghost = PushItem(
             id: UUID(),
-            payload: .setLogs([Fixtures.sampleSetLog()]),
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog()]),
             enqueuedAt: Date(timeIntervalSince1970: 1_700_000_000),
             attempts: 5
         )
@@ -316,7 +335,7 @@ final class PushQueueStoreTests: XCTestCase {
     }
 
     /// Regression for the telemetry-isolation fix: `peek(max:)` must
-    /// return `setLogs` / `statusUpdate` / `userParameter` BEFORE
+    /// return `primitiveSetLogs` / `statusUpdate` / `userParameter` BEFORE
     /// `events`, regardless of the chronological enqueue order. Without
     /// the priority weighting, a verbose-mode telemetry burst enqueued
     /// before a fresh set log would push the log behind the tail.
@@ -324,9 +343,9 @@ final class PushQueueStoreTests: XCTestCase {
         let factory = try makeFactory()
         let store = factory.pushQueueStore
 
-        // Two old telemetry events, then a fresh set log that was
+        // Two old telemetry events, then a fresh primitive set log that was
         // enqueued chronologically *later*. If we sorted by enqueuedAt
-        // only, the set log would land last. Priority weighting must
+        // only, the primitive set log would land last. Priority weighting must
         // pull it to position zero.
         let oldTelemetry = PushItem(
             id: UUID(),
@@ -346,7 +365,7 @@ final class PushQueueStoreTests: XCTestCase {
         )
         let freshSetLog = PushItem(
             id: UUID(),
-            payload: .setLogs([Fixtures.sampleSetLog()]),
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog()]),
             enqueuedAt: Date(timeIntervalSince1970: 2_000),
             attempts: 0
         )
@@ -362,13 +381,13 @@ final class PushQueueStoreTests: XCTestCase {
         XCTAssertEqual(peeked[2].id, olderTelemetry.id)
     }
 
-    /// Regression for "no logical dedup; two pushes of the same set_log
-    /// just queue up twice". `PushQueue.enqueueSetLogs` now drops any
-    /// existing queued row carrying the same SetLog.id before inserting
+    /// Regression for "no logical dedup; two pushes of the same primitive_set_log
+    /// just queue up twice". `PushQueue.enqueuePrimitiveSetLogs` now drops any
+    /// existing queued row carrying the same PrimitiveSetLog.id before inserting
     /// the fresh one — so an edit-before-flush collapses to one row with
     /// the latest payload, instead of a stale-then-fresh sequence that
     /// transiently overwrites the corrected server-side bytes.
-    func testPushQueueReplaceInPlaceForSameSetLogId() async throws {
+    func testPushQueueReplaceInPlaceForSamePrimitiveSetLogId() async throws {
         let factory = try makeFactory()
         let store = factory.pushQueueStore
         let queue = PushQueue(
@@ -378,9 +397,14 @@ final class PushQueueStoreTests: XCTestCase {
 
         // First push: 5 reps @ 100 kg.
         let setLogID = UUID()
-        let first = CoreDomain.SetLog(
+        let first = CoreDomain.PrimitiveSetLog(
             id: setLogID,
-            workoutItemID: UUID(),
+            role: .slot,
+            slotID: UUID(),
+            setID: UUID(),
+            blockID: UUID(),
+            workoutID: UUID(),
+            plannedExerciseID: UUID(),
             performedExerciseID: nil,
             setIndex: 3,
             reps: 5,
@@ -389,12 +413,17 @@ final class PushQueueStoreTests: XCTestCase {
             rir: 2,
             completedAt: Date(timeIntervalSince1970: 1_700_000_000)
         )
-        try await queue.enqueueSetLogs([first])
+        try await queue.enqueuePrimitiveSetLogs([first])
 
         // User corrects — same id, bumped reps/load.
-        let corrected = CoreDomain.SetLog(
+        let corrected = CoreDomain.PrimitiveSetLog(
             id: setLogID,  // SAME id
-            workoutItemID: first.workoutItemID,
+            role: first.role,
+            slotID: first.slotID,
+            setID: first.setID,
+            blockID: first.blockID,
+            workoutID: first.workoutID,
+            plannedExerciseID: first.plannedExerciseID,
             performedExerciseID: nil,
             setIndex: 3,
             reps: 8,
@@ -403,18 +432,18 @@ final class PushQueueStoreTests: XCTestCase {
             rir: 1,
             completedAt: Date(timeIntervalSince1970: 1_700_000_030)
         )
-        try await queue.enqueueSetLogs([corrected])
+        try await queue.enqueuePrimitiveSetLogs([corrected])
 
         let all = try await store.peek(max: 10)
         XCTAssertEqual(all.count, 1, "dedup collapses to a single row")
-        if case .setLogs(let logs) = all[0].payload {
+        if case .primitiveSetLogs(let logs) = all[0].payload {
             XCTAssertEqual(logs.count, 1)
             XCTAssertEqual(logs[0].id, setLogID)
             XCTAssertEqual(logs[0].reps, 8, "latest payload wins")
             XCTAssertEqual(logs[0].weight, 102.5)
             XCTAssertEqual(logs[0].rir, 1)
         } else {
-            XCTFail("expected setLogs payload")
+            XCTFail("expected primitiveSetLogs payload")
         }
     }
 
@@ -433,13 +462,13 @@ final class PushQueueStoreTests: XCTestCase {
         // middle one.
         let before = PushItem(
             id: UUID(),
-            payload: .setLogs([Fixtures.sampleSetLog(setIndex: 1)]),
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog(setIndex: 1)]),
             enqueuedAt: Date(timeIntervalSince1970: 1_000),
             attempts: 0
         )
         let after = PushItem(
             id: UUID(),
-            payload: .setLogs([Fixtures.sampleSetLog(setIndex: 2)]),
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog(setIndex: 2)]),
             enqueuedAt: Date(timeIntervalSince1970: 3_000),
             attempts: 0
         )
@@ -488,13 +517,13 @@ final class PushQueueStoreTests: XCTestCase {
 
         let valid1 = PushItem(
             id: UUID(),
-            payload: .setLogs([Fixtures.sampleSetLog(setIndex: 1)]),
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog(setIndex: 1)]),
             enqueuedAt: Date(timeIntervalSince1970: 1_000),
             attempts: 0
         )
         let valid2 = PushItem(
             id: UUID(),
-            payload: .setLogs([Fixtures.sampleSetLog(setIndex: 2)]),
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog(setIndex: 2)]),
             enqueuedAt: Date(timeIntervalSince1970: 3_000),
             attempts: 0
         )
@@ -574,7 +603,7 @@ final class PushQueueStoreTests: XCTestCase {
         // Interleave priorities and enqueue times:
         //   t=1500, priority=1 (event)
         //   t=1000, priority=1 (event)  ← older event
-        //   t=2000, priority=0 (set log)  ← newest but must land first
+        //   t=2000, priority=0 (primitive set log)  ← newest but must land first
         //   t=1800, priority=0 (status)
         let evNew = PushItem(
             id: UUID(),
@@ -594,7 +623,7 @@ final class PushQueueStoreTests: XCTestCase {
         )
         let resultSetLog = PushItem(
             id: UUID(),
-            payload: .setLogs([Fixtures.sampleSetLog(setIndex: 42)]),
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog(setIndex: 42)]),
             enqueuedAt: Date(timeIntervalSince1970: 2_000),
             attempts: 0
         )
@@ -662,31 +691,17 @@ final class PushQueueStoreTests: XCTestCase {
 
         let setLogItem = PushItem(
             id: UUID(),
-            payload: .setLogs([CoreDomain.SetLog(
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog(
                 id: setLogID,
-                workoutItemID: UUID(),
-                performedExerciseID: nil,
-                setIndex: 1,
-                reps: 5,
-                weight: 100,
-                weightUnit: .lb,
-                rir: 2,
-                completedAt: Date(timeIntervalSince1970: 1_000)
+                setIndex: 1
             )]),
             enqueuedAt: Date(timeIntervalSince1970: 1_000)
         )
         let otherSetLogItem = PushItem(
             id: UUID(),
-            payload: .setLogs([CoreDomain.SetLog(
+            payload: .primitiveSetLogs([Fixtures.samplePrimitiveSetLog(
                 id: otherSetLogID,
-                workoutItemID: UUID(),
-                performedExerciseID: nil,
-                setIndex: 2,
-                reps: 5,
-                weight: 100,
-                weightUnit: .lb,
-                rir: 2,
-                completedAt: Date(timeIntervalSince1970: 1_050)
+                setIndex: 2
             )]),
             enqueuedAt: Date(timeIntervalSince1970: 1_050)
         )
@@ -726,7 +741,7 @@ final class PushQueueStoreTests: XCTestCase {
         )
         XCTAssertEqual(
             dedupByID[setLogItem.id],
-            "setLog:\(setLogID.uuidString.lowercased())"
+            "primitiveSetLog:\(setLogID.uuidString.lowercased())"
         )
         XCTAssertEqual(
             dedupByID[statusItem.id],
@@ -739,7 +754,7 @@ final class PushQueueStoreTests: XCTestCase {
 
         // Scoped remove drops only the matching row; siblings untouched.
         let removed = try await store.removeMatchingDedupKey(
-            "setLog:\(setLogID.uuidString.lowercased())"
+            "primitiveSetLog:\(setLogID.uuidString.lowercased())"
         )
         XCTAssertEqual(removed, 1, "exactly one row matched")
         let after = try await store.peek(max: 10)
@@ -751,12 +766,12 @@ final class PushQueueStoreTests: XCTestCase {
 
         // A dedup key with no matches is a clean no-op — not a throw.
         let missRemoved = try await store.removeMatchingDedupKey(
-            "setLog:00000000-0000-0000-0000-000000000000"
+            "primitiveSetLog:00000000-0000-0000-0000-000000000000"
         )
         XCTAssertEqual(missRemoved, 0)
     }
 
-    /// Batch `.setLogs` (multi-log) and `.events` payloads must NOT
+    /// Batch `.primitiveSetLogs` (multi-log) and `.events` payloads must NOT
     /// participate in dedup — their `dedupKey` column must stay nil so
     /// a later scoped remove for some other logical identity cannot
     /// accidentally knock them out of the queue.
@@ -766,9 +781,9 @@ final class PushQueueStoreTests: XCTestCase {
 
         let batch = PushItem(
             id: UUID(),
-            payload: .setLogs([
-                Fixtures.sampleSetLog(setIndex: 1),
-                Fixtures.sampleSetLog(setIndex: 2),
+            payload: .primitiveSetLogs([
+                Fixtures.samplePrimitiveSetLog(setIndex: 1),
+                Fixtures.samplePrimitiveSetLog(setIndex: 2),
             ]),
             enqueuedAt: Date(timeIntervalSince1970: 1_000)
         )

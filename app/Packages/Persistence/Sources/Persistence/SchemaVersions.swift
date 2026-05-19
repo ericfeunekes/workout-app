@@ -1,19 +1,19 @@
 // SchemaVersions.swift
 //
 // Versioned SwiftData schema. The runtime uses the LATEST version
-// (`WorkoutDBSchemaV7`). Older versions are preserved here so SwiftData
+// (`WorkoutDBSchemaV8`). Older versions are preserved here so SwiftData
 // can migrate a store that was written by a previous app build — without
 // the version enum for the old shape, SwiftData has nothing to compare
 // the on-disk store's metadata against and will fail (or, worse, corrupt)
 // the store when the shape doesn't match the single declared schema.
 //
 // Shape contract: every version lists its own `@Model` snapshot. Each
-// snapshot's model classes use the SAME simple name as the live V7 types
+// snapshot's model classes use the SAME simple name as the live V8 types
 // (`WorkoutModel`, `ExerciseModel`, …) so the CoreData entity name is
 // stable across versions — that's what SwiftData diffs to decide whether
 // a migration applies. Nesting the snapshots inside the version enum
 // keeps the Swift-type namespace clear; the rest of the package reads
-// the file-scope V7 types unqualified.
+// the file-scope V8 types unqualified.
 //
 // V1 → V2 is lightweight: V2 only adds optional-nullable `String` columns
 // (`defaultPrescriptionJSON`, `defaultAlternativesJSON` on Exercise;
@@ -55,6 +55,10 @@
 // rows are first-class queryable data. The primitive cutover explicitly
 // permits resetting QA workout/result data, so embedded V6 primitive logs are
 // not preserved.
+//
+// V7 → V8 is lightweight: adds HealthKit archive projection rows. HealthKit is
+// authoritative for the underlying samples; the new rows are local projection
+// state for export/readback and have no existing data to preserve.
 //
 // Shadow @Model types for V1 / V2 / V3 / V4 live in their dedicated
 // `SchemaVersionsV{N}Models.swift` files so the version enum bodies
@@ -216,6 +220,33 @@ public enum WorkoutDBSchemaV7: VersionedSchema {
     }
 }
 
+// MARK: - V8 (HealthKit archive projection)
+
+public enum WorkoutDBSchemaV8: VersionedSchema {
+    public static var versionIdentifier: Schema.Version { Schema.Version(8, 0, 0) }
+
+    public static var models: [any PersistentModel.Type] {
+        [
+            WorkoutModel.self,
+            PrimitiveWorkoutModel.self,
+            PrimitiveSetLogModel.self,
+            HealthDataRecordModel.self,
+            HealthDataDeletionModel.self,
+            HealthBatchCursorModel.self,
+            BlockModel.self,
+            WorkoutItemModel.self,
+            ExerciseModel.self,
+            ExerciseAlternativeModel.self,
+            SetLogModel.self,
+            UserParameterModel.self,
+            AppUserModel.self,
+            SessionSnapshotModel.self,
+            PushItemModel.self,
+            EventModel.self,
+        ]
+    }
+}
+
 // MARK: - Migration plan
 
 public enum WorkoutDBMigrationPlan: SchemaMigrationPlan {
@@ -228,6 +259,7 @@ public enum WorkoutDBMigrationPlan: SchemaMigrationPlan {
             WorkoutDBSchemaV5.self,
             WorkoutDBSchemaV6.self,
             WorkoutDBSchemaV7.self,
+            WorkoutDBSchemaV8.self,
         ]
     }
 
@@ -273,6 +305,10 @@ public enum WorkoutDBMigrationPlan: SchemaMigrationPlan {
             .lightweight(
                 fromVersion: WorkoutDBSchemaV6.self,
                 toVersion: WorkoutDBSchemaV7.self
+            ),
+            .lightweight(
+                fromVersion: WorkoutDBSchemaV7.self,
+                toVersion: WorkoutDBSchemaV8.self
             ),
         ]
     }

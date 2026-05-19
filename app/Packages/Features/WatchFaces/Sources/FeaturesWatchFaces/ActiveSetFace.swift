@@ -13,7 +13,7 @@
 //   Header :  "SET n / N"        · mono caption, uppercase
 //   Hero   :  exercise name       · small caps, body size
 //             prescription        · mono large
-//   Footer :  HR placeholder      · "—" until HealthKit on-watch
+//   Footer :  HR value            · populated by typed metric-source events
 //
 // A single `Button` wraps the whole face so tap visuals (watchOS haptic
 // + highlight) come for free. We use `.buttonStyle(.plain)` to strip
@@ -83,9 +83,9 @@ struct ActiveSetFace: View {
                 .font(DSTypography.caption)
                 .tracking(0.5)
                 .foregroundStyle(DSColors.foregroundDim)
-            Text("—")
+            Text(payload.heartRateBPM.map(String.init) ?? "—")
                 .font(DSTypography.mono)
-                .foregroundStyle(DSColors.foregroundDim)
+                .foregroundStyle(payload.heartRateBPM == nil ? DSColors.foregroundDim : DSColors.foreground)
 
             Spacer()
 

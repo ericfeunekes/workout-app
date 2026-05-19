@@ -28,6 +28,7 @@
 
 import Foundation
 import CoreSession
+import HealthKitBridge
 import WatchBridge
 
 @Observable
@@ -54,19 +55,22 @@ public final class WatchFacesViewModel {
         public let setNumber: Int
         public let setCount: Int
         public let targetRir: Int?
+        public let heartRateBPM: Int?
 
         public init(
             exerciseName: String,
             prescription: String,
             setNumber: Int,
             setCount: Int,
-            targetRir: Int?
+            targetRir: Int?,
+            heartRateBPM: Int? = nil
         ) {
             self.exerciseName = exerciseName
             self.prescription = prescription
             self.setNumber = setNumber
             self.setCount = setCount
             self.targetRir = targetRir
+            self.heartRateBPM = heartRateBPM
         }
     }
 
@@ -94,6 +98,8 @@ public final class WatchFacesViewModel {
     /// subscription loop in `start()`.
     public private(set) var face: Face = .idle
 
+    public private(set) var metricError: HealthKitError?
+
     // MARK: - Tracking state
     //
     // Context the view model needs to translate a tap into the right
@@ -105,6 +111,8 @@ public final class WatchFacesViewModel {
     /// not carry the exercise name) and to resolve tap → setStarted /
     /// setEnded with the correct workout-item ID.
     private var lastActive: LastActiveContext?
+    private var latestHeartRateBPM: Int?
+    private var metricTask: Task<Void, Never>?
 
     /// Minimal per-item context the view model holds between messages.
     /// `workoutItemID` is NOT transmitted in `ActiveBlockPayload` today —
@@ -123,11 +131,16 @@ public final class WatchFacesViewModel {
     // MARK: - Dependencies
 
     private let bridge: any WatchBridge
+    private let metricSource: (any WorkoutMetricSource)?
 
     // MARK: - Init
 
-    public init(bridge: any WatchBridge) {
+    public init(
+        bridge: any WatchBridge,
+        metricSource: (any WorkoutMetricSource)? = nil
+    ) {
         self.bridge = bridge
+        self.metricSource = metricSource
     }
 
     // MARK: - Lifecycle
@@ -137,9 +150,13 @@ public final class WatchFacesViewModel {
     /// once per view-model lifetime — typically from a SwiftUI `.task`
     /// modifier so cancellation tears down with the view.
     public func start() async {
+        defer {
+            metricTask?.cancel()
+        }
         for await message in bridge.messages() {
             handle(message)
         }
+        await metricSource?.stop()
     }
 
     /// Handle a tap on whichever face is currently rendering. Idle taps
@@ -172,12 +189,14 @@ public final class WatchFacesViewModel {
     }
 
     private func applyActiveBlock(_ payload: ActiveBlockPayload) {
+        ensureMetricStreamStarted()
         let active = ActivePayload(
             exerciseName: payload.exerciseName,
             prescription: payload.prescription,
             setNumber: payload.setNumber,
             setCount: payload.setCount,
-            targetRir: payload.targetRir
+            targetRir: payload.targetRir,
+            heartRateBPM: latestHeartRateBPM
         )
         // Track context for tap-resolution. Placeholder UUID is used
         // until ActiveBlockPayload carries the workoutItemID — see the
@@ -197,7 +216,54 @@ public final class WatchFacesViewModel {
 
     private func applyWorkoutComplete() {
         lastActive = nil
+        latestHeartRateBPM = nil
+        metricTask?.cancel()
+        metricTask = nil
+        // swiftlint:disable:next no_direct_task_unstructured
+        Task { [metricSource] in
+            await metricSource?.stop()
+        }
         face = .idle
+    }
+
+    // MARK: - Metrics
+
+    private func ensureMetricStreamStarted() {
+        guard metricTask == nil else { return }
+        // swiftlint:disable:next no_direct_task_unstructured
+        metricTask = Task { @MainActor [weak self] in
+            await self?.startMetricStreamIfAvailable()
+        }
+    }
+
+    private func startMetricStreamIfAvailable() async {
+        guard let metricSource else { return }
+        do {
+            let events = try await metricSource.start()
+            for await event in events {
+                guard !Task.isCancelled else { break }
+                applyMetricEvent(event)
+            }
+        } catch let error as HealthKitError {
+            metricError = error
+        } catch {
+            metricError = .queryFailed(String(describing: error))
+        }
+    }
+
+    private func applyMetricEvent(_ event: WorkoutMetricEvent) {
+        guard case .metric(let tick) = event else { return }
+        guard let bpm = tick.heartRateBPM else { return }
+        latestHeartRateBPM = Int(bpm.rounded())
+        guard case .active(let active) = face else { return }
+        face = .active(ActivePayload(
+            exerciseName: active.exerciseName,
+            prescription: active.prescription,
+            setNumber: active.setNumber,
+            setCount: active.setCount,
+            targetRir: active.targetRir,
+            heartRateBPM: latestHeartRateBPM
+        ))
     }
 
     // MARK: - Outbound sends
@@ -216,14 +282,12 @@ public final class WatchFacesViewModel {
     private func sendSetEnded() {
         guard let ctx = lastActive else { return }
         let now = Date()
-        // HR fields are nil in v1 — HealthKit on-watch integration lands
-        // in v1.1+ (see app/README.md § "Watch (deferred to v1.1+)").
         let message: WatchMessage = .setEnded(
             workoutItemID: ctx.workoutItemID,
             setIndex: ctx.setIndex,
             at: now,
-            bpmAvg: nil,
-            bpmMax: nil
+            bpmAvg: latestHeartRateBPM,
+            bpmMax: latestHeartRateBPM
         )
         dispatchSend(message)
     }

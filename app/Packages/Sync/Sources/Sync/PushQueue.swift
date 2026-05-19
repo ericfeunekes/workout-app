@@ -1,9 +1,9 @@
 // PushQueue.swift
 //
 // The third responsibility split out of SyncManager per HS-1. Holds pending
-// `set_log` and status-update rows, pushes them in batches, removes on 2xx.
+// primitive result and status-update rows, pushes them in batches, removes on 2xx.
 //
-// Idempotency: each `SetLog` carries its app-assigned UUID. Re-pushing is
+// Idempotency: each `PrimitiveSetLog` carries its app-assigned UUID. Re-pushing is
 // safe because the server upserts on UUID (per `docs/sync.md` § "Push
 // protocol"). So on transient failure the queue re-pushes on the next flush
 // with no extra reasoning.
@@ -84,29 +84,6 @@ public actor PushQueue {
         self.telemetry = telemetry
     }
 
-    /// Enqueue a batch of set_logs. Callers typically pass the single log
-    /// that was just written; batching at workout completion is also fine.
-    ///
-    /// Logical dedup: for a single-log payload we drop any queued item that
-    /// carries a `.setLogs` payload containing the same SetLog.id BEFORE
-    /// inserting the fresh one. Otherwise a correction to a just-logged
-    /// set would queue a stale and a fresh copy side-by-side — the server
-    /// upserts on id so both get collapsed, but the stale copy gets pushed
-    /// first and transiently overwrites the corrected bytes on the server
-    /// until the second push resolves. Batch payloads (multi-log arrays)
-    /// are NOT deduped — a workout-completion batch is a distinct logical
-    /// unit and shouldn't shadow individual single-log enqueues.
-    public func enqueueSetLogs(_ logs: [CoreDomain.SetLog]) async throws {
-        if logs.count == 1 {
-            try await dropExistingSetLog(id: logs[0].id)
-        }
-        let item = PushItem(
-            payload: .setLogs(logs),
-            enqueuedAt: clock.now
-        )
-        try await store.enqueue(item)
-    }
-
     public func enqueuePrimitiveSetLogs(_ logs: [CoreDomain.PrimitiveSetLog]) async throws {
         if logs.count == 1 {
             try await dropExistingPrimitiveSetLog(id: logs[0].id)
@@ -157,12 +134,11 @@ public actor PushQueue {
                 workoutID: record.workoutID,
                 completedAt: record.completedAt,
                 notes: record.notes,
-                setLogs: record.setLogs,
                 primitiveSetLogs: record.primitiveSetLogs
             ),
             enqueuedAt: clock.now
         )
-        var keys = Set(record.setLogs.map { "setLog:\($0.id.uuidString.lowercased())" })
+        var keys: Set<String> = []
         for log in record.primitiveSetLogs {
             keys.insert("primitiveSetLog:\(log.id.uuidString.lowercased())")
         }

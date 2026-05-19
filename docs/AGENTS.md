@@ -1,7 +1,7 @@
 ---
 title: docs navigator
 status: accepted
-last_reviewed: 2026-05-17
+last_reviewed: 2026-05-18
 purpose: Index of durable documentation for WorkoutDB. When landing in docs/, start here.
 covers:
   - docs/
@@ -34,14 +34,19 @@ See the repo root `AGENTS.md` for workflow and invariants. Ephemeral/in-progress
 - `modifier-equipment.md` — modifier/equipment authoring vocabulary and gaps; read before adding structured variant, setup, or equipment behavior.
 - `sync.md` — sync cadence, conflict rules, first-run UX, offline behavior, auth posture.
 - `ARCHITECTURE.md` — one-page system map; routes into the spec and per-package READMEs.
-- `TESTING.md` — proof contract (server, app, cross-stack contract).
+- `TESTING.md` — proof contract (server, app, cross-stack contract). Use
+  `testing/` for proof patterns by change shape.
 
 ## Standard surfaces
 
 - `ARCHITECTURE.md` — top-level system map and domain router.
 - `WORKFLOW.md` — operational lifecycle (request → requirements → backlog/plan → implement → verify → close → deploy), CI scope, branching, deploy flow.
 - `sdlc.md` — planning lifecycle: requirements docs, gap index, backlog lanes, active work trees, ephemeral scratch phase plans, implementation plans, and closeout.
-- `TESTING.md` — proof contract; what each test tier covers and how to run it.
+- `TESTING.md` — proof contract; what each test tier covers, how to run it,
+  and how to route into proof patterns.
+- `testing/` — proof-pattern subdocs for implementation plans, reviews, and
+  testing audits. Start at `testing/README.md`, then use
+  `testing/proof-patterns.md` for change-shape selection.
 - `QA.md` — UX QA guide for app-facing work; match proof to claim, use XcodeBuildMCP and `img ask` when visible UI changes, keep `docs/bugs.md` as the only active issue tracker, and leave `scratch/qa-runs/` as raw evidence only.
 - `design-system.md` — DesignSystem package contract for reusable primitives, Dynamic Type, accessibility metadata, hit targets, and Liquid Glass/material posture.
 - `MIGRATIONS.md` — schema migration mechanics for server SQL + SwiftData, the single-user cutover flow, and recovery procedures.

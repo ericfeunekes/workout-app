@@ -129,6 +129,34 @@ enum Fixtures {
         )
     }
 
+    static func samplePrimitiveSetLog(
+        id: UUID = UUID(),
+        role: PrimitiveLogRole = .slot,
+        workoutID: UUID = UUID(),
+        slotID: UUID = UUID(),
+        setID: UUID = UUID(),
+        blockID: UUID = UUID(),
+        plannedExerciseID: UUID = UUID(),
+        setIndex: Int = 1
+    ) -> PrimitiveSetLog {
+        PrimitiveSetLog(
+            id: id,
+            role: role,
+            slotID: slotID,
+            setID: setID,
+            blockID: blockID,
+            workoutID: workoutID,
+            plannedExerciseID: plannedExerciseID,
+            performedExerciseID: nil,
+            setIndex: setIndex,
+            reps: 5,
+            weight: 100.0,
+            weightUnit: .kg,
+            rir: 2,
+            completedAt: baseDate.addingTimeInterval(TimeInterval(setIndex))
+        )
+    }
+
     static func sampleUserParameter(
         id: UUID = UUID(),
         userID: UUID = UUID(),

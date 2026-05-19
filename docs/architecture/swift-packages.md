@@ -29,6 +29,7 @@ execution; edge packages vary.
 | `Core/Telemetry` | (none) | Pure value type `Event` + `TelemetryEmitter` protocol + process-stable `TelemetrySession.id`. Emitters are implemented in `Persistence`; the shape stays in Core so every layer can accept an emitter without pulling in storage. | ✅ | ✅ |
 | `DesignSystem` | `Core/Foundation` (for formatting helpers only) | Visual tokens (colors, type ramp, spacing, motion) and primitives (button, chip, pill, ring, keypad). No routing, no business rules. | ✅ | ✅ |
 | `ExportProfile` | `Core/Foundation`, `Core/Domain`, `Core/Session` | Pure export planning package split into `PrimitiveExportProfile` for vendor-neutral primitive facts and `WorkoutKitExportProfile` for SDK-free WorkoutKit row classification and path prerequisite assessment. No target side effects: no WorkoutKit scheduling/opening, no HealthKit readback, no WatchConnectivity, no persistence. | ✅ | ✅ |
+| `WorkoutKitAdapter` | `Core/Foundation`, `Core/Domain`, `ExportProfile` | Target-side WorkoutKit boundary. Owns SDK-backed plan construction, schedule/open clients, proof-gated push coordination, payload fingerprints, and DEBUG/test diagnostic probes. WorkoutKit imports stay here. May import HealthKit only for WorkoutKit-required activity/location enum construction (`HKWorkoutActivityType`, `HKWorkoutSessionLocationType`). No HealthKit data access/readback, no WatchConnectivity, no persistence, no SwiftUI, no feature logic. | ✅ | ✅ |
 | `schema` | (external — already at `schema/`) | Wire DTOs. Consumed only by `Sync`. | ✅ | ✅ |
 | `Persistence` | `Core/Foundation`, `Core/Domain`, `Core/Prescription`, `Core/Telemetry`, `Sync` | SwiftData stack, migrations, keychain bearer-token storage, `UserDefaults` URL storage, and the SwiftData-backed `TelemetryEmitterImpl`. Mirrors active primitive workouts/logs and exposes protocols (`SessionStore`, `WorkoutCache`, `TokenStore`) used by Features and Sync. Legacy projection storage remains only where the current execution/history bridge still consumes it. | ✅ | ✅ |
 | `Sync` | `Core/Foundation`, `Core/Domain`, `Core/Telemetry`, `schema` | `PullService`, `PushQueue`, `ConnectionManager`. The only package that imports URLSession (enforced by SwiftLint FF-13). Maps primitive DTOs -> Domain at the boundary — nothing outside `Sync` imports `schema`. Push queue routes primitive result rows and telemetry batches to server endpoints. See HS-1. | ✅ | — |
@@ -39,15 +40,15 @@ execution; edge packages vary.
 | `Features/History` | `Core/Foundation`, `Core/Domain`, `Core/Telemetry`, `DesignSystem`, `Persistence`, `Sync` | History tab: list, session detail, by-exercise view, corrective edit surface. | ✅ | — |
 | `Features/Settings` | `DesignSystem`, `Persistence` | Settings screen as data-driven sections (HS-4): server controls, local reset, units, autoreg defaults, diagnostics entry points. | ✅ | — |
 | `Features/FirstRun` | `Core/Foundation`, `DesignSystem`, `Persistence`, `Sync` | Welcome + connection-string entry + first-sync progress. | ✅ | — |
-| `Features/WatchFaces` | `Core/Session`, `DesignSystem`, `WatchBridge` | The watchOS faces (v1.1+ full grammar; v1 minimal: HR, rest countdown, start/end tap). | — | ✅ |
+| `Features/WatchFaces` | `Core/Session`, `DesignSystem`, `HealthKitBridge`, `WatchBridge` | The watchOS faces (v1.1+ full grammar; v1 minimal: HR, rest countdown, start/end tap). Consumes the typed `WorkoutMetricSource` seam; it does not import HealthKit directly. | — | ✅ |
 | `Shell` | `Core/Foundation`, `Core/Domain`, `Core/Session`, `Core/Telemetry`, `DesignSystem`, `Persistence`, `Sync`, `Features/Today`, `Features/Execution`, `Features/History`, `Features/Settings` | Launch-time and root-navigation composition package: builds `SyncAPI`, runs `pullLatest`, writes to `WorkoutCache`, constructs feature view models, owns `RootTabView`, and routes Today/Execution/History/Settings. The **one** package allowed to see multiple `Features/*` at once. Lives at `app/Packages/Shell/` — **not** under `Features/` — because the SwiftLint rule `no_feature_cross_import` only covers the `Features/` directory. Thin: composition, routing, and bootstrap orchestration only; no feature logic. | ✅ | — |
 
 ## Shell targets
 
 | Target | Dependencies | Purpose |
 |---|---|---|
-| `WorkoutDB` (app) | Core packages, `DesignSystem`, `Persistence`, `Sync`, `HealthKitBridge`, `WatchBridge`, iOS `Features/*`, `Shell` | App lifecycle, first-run gate, persistence factory, debug launch routes, and `Shell.RootTabView` hosting. Thin; cross-feature tab routing belongs in Shell. |
-| `WorkoutDBWatch` (watchOS) | Core packages, `DesignSystem`, `Persistence`, `WatchBridge`, `Features/WatchFaces` | Watch app lifecycle and face routing. Thin; phone remains the only server actor. |
+| `WorkoutDB` (app) | Core packages, `DesignSystem`, `Persistence`, `Sync`, `HealthKitBridge`, `WatchBridge`, `WorkoutKitAdapter`, iOS `Features/*`, `Shell` | App lifecycle, first-run gate, persistence factory, debug launch routes, and `Shell.RootTabView` hosting. Thin; cross-feature tab routing belongs in Shell. |
+| `WorkoutDBWatch` (watchOS) | Core packages, `DesignSystem`, `Persistence`, `HealthKitBridge`, `WatchBridge`, `WorkoutKitAdapter`, `Features/WatchFaces` | Watch app lifecycle and face routing. Thin; phone remains the only server actor. `HealthKitBridge` is present for the DEBUG live-workout simulator probe and future typed metric-source wiring; WorkoutKitAdapter is present only for the watchOS open-in-Workout-app proof path. |
 
 ## Forbidden
 
@@ -55,6 +56,10 @@ execution; edge packages vary.
 - Any `Features/*` package declaring a dep on another `Features/*`.
 - Any package named `Utils`, `Helpers`, `Common`, `Shared`, or `Misc`.
 - Any package importing `schema` outside `Sync` or `schema` itself.
+- Any package importing `WorkoutKit` outside `WorkoutKitAdapter`.
+- Any package importing HealthKit for data access outside `HealthKitBridge`.
+  `WorkoutKitAdapter` is the only exception, and only for HealthKit enum types
+  required by WorkoutKit plan construction.
 - `DesignSystem` importing `Features/*` or edge services.
 - A feature package importing another feature package. Shared display seams move
   to `DesignSystem` when visual-only, or to `Core/Session` / a named Core

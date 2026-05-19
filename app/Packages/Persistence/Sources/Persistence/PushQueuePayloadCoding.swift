@@ -3,7 +3,7 @@
 // Serialization boundary for `PushItem.Payload`. Lives beside
 // `PushQueueStoreImpl` so the actor body can stay under SwiftLint's
 // `type_body_length` cap. The envelope types are Codable mirrors of
-// `CoreDomain.SetLog`, `CoreTelemetry.Event`, and the statusUpdate
+// primitive result logs, `CoreTelemetry.Event`, and the statusUpdate
 // parameters — those domain types are deliberately Codable-free (see the
 // module-level docs on `CoreDomain` and `CoreTelemetry`).
 //
@@ -22,7 +22,6 @@ enum PushQueuePayloadCoding {
 
     /// Tag discriminator for the `Envelope` payload.
     enum EnvelopeKind: String, Codable {
-        case setLogs
         case primitiveSetLogs
         case statusUpdate
         case completionResults
@@ -38,7 +37,6 @@ enum PushQueuePayloadCoding {
     /// add an optional field, wire both encode + decode.
     struct Envelope: Codable {
         let kind: EnvelopeKind
-        var setLogs: [CodableSetLog]?
         var primitiveSetLogs: [CodablePrimitiveSetLog]?
         var statusWorkoutID: UUID?
         var statusRaw: String?
@@ -59,7 +57,6 @@ enum PushQueuePayloadCoding {
         static func empty(kind: EnvelopeKind) -> Envelope {
             Envelope(
                 kind: kind,
-                setLogs: nil,
                 primitiveSetLogs: nil,
                 statusWorkoutID: nil,
                 statusRaw: nil,
@@ -150,78 +147,6 @@ enum PushQueuePayloadCoding {
         }
     }
 
-    /// Mirror of `CoreDomain.SetLog` with `Codable`.
-    struct CodableSetLog: Codable {
-        let id: UUID
-        let workoutItemID: UUID
-        let performedExerciseID: UUID?
-        let setIndex: Int
-        let reps: Int?
-        let weight: Double?
-        let weightUnit: String?
-        let durationSec: Double?
-        let distanceM: Double?
-        let rir: Int?
-        let isWarmup: Bool
-        let skipped: Bool?
-        let side: String?
-        let startedAt: Date?
-        let completedAt: Date
-        let hrAvgBpm: Int?
-        let hrMaxBpm: Int?
-        let cadenceAvgSpm: Int?
-        let motionSamplesRef: String?
-        let notes: String?
-
-        init(_ s: SetLog) {
-            id = s.id
-            workoutItemID = s.workoutItemID
-            performedExerciseID = s.performedExerciseID
-            setIndex = s.setIndex
-            reps = s.reps
-            weight = s.weight
-            weightUnit = s.weightUnit?.rawValue
-            durationSec = s.durationSec
-            distanceM = s.distanceM
-            rir = s.rir
-            isWarmup = s.isWarmup
-            skipped = s.skipped
-            side = s.side.rawValue
-            startedAt = s.startedAt
-            completedAt = s.completedAt
-            hrAvgBpm = s.hrAvgBpm
-            hrMaxBpm = s.hrMaxBpm
-            cadenceAvgSpm = s.cadenceAvgSpm
-            motionSamplesRef = s.motionSamplesRef
-            notes = s.notes
-        }
-
-        func toDomain() -> SetLog {
-            SetLog(
-                id: id,
-                workoutItemID: workoutItemID,
-                performedExerciseID: performedExerciseID,
-                setIndex: setIndex,
-                reps: reps,
-                weight: weight,
-                weightUnit: weightUnit.flatMap { WeightUnit(rawValue: $0) },
-                durationSec: durationSec,
-                distanceM: distanceM,
-                rir: rir,
-                isWarmup: isWarmup,
-                skipped: skipped ?? false,
-                side: side.flatMap { SetLogSide(rawValue: $0) } ?? .bilateral,
-                startedAt: startedAt,
-                completedAt: completedAt,
-                hrAvgBpm: hrAvgBpm,
-                hrMaxBpm: hrMaxBpm,
-                cadenceAvgSpm: cadenceAvgSpm,
-                motionSamplesRef: motionSamplesRef,
-                notes: notes
-            )
-        }
-    }
-
     /// Mirror of `CoreTelemetry.Event` with `Codable`.
     struct CodableEvent: Codable {
         let id: UUID
@@ -261,9 +186,6 @@ enum PushQueuePayloadCoding {
     static func encode(_ payload: PushItem.Payload) throws -> Data {
         var envelope: Envelope
         switch payload {
-        case .setLogs(let logs):
-            envelope = .empty(kind: .setLogs)
-            envelope.setLogs = logs.map(CodableSetLog.init)
         case .primitiveSetLogs(let logs):
             envelope = .empty(kind: .primitiveSetLogs)
             envelope.primitiveSetLogs = logs.map(CodablePrimitiveSetLog.init)
@@ -273,12 +195,11 @@ enum PushQueuePayloadCoding {
             envelope.statusRaw = status.rawValue
             envelope.statusCompletedAt = completedAt
             envelope.statusNotes = notes
-        case .completionResults(let workoutID, let completedAt, let notes, let logs, let primitiveLogs):
+        case .completionResults(let workoutID, let completedAt, let notes, let primitiveLogs):
             envelope = .empty(kind: .completionResults)
             envelope.completionWorkoutID = workoutID
             envelope.completionCompletedAt = completedAt
             envelope.completionNotes = notes
-            envelope.setLogs = logs.map(CodableSetLog.init)
             envelope.completionPrimitiveSetLogs = primitiveLogs.map(CodablePrimitiveSetLog.init)
         case .workoutReset(let workoutID):
             envelope = .empty(kind: .workoutReset)
@@ -300,9 +221,6 @@ enum PushQueuePayloadCoding {
         decoder.dateDecodingStrategy = .iso8601
         let envelope = try decoder.decode(Envelope.self, from: data)
         switch envelope.kind {
-        case .setLogs:
-            let logs = (envelope.setLogs ?? []).map { $0.toDomain() }
-            return .setLogs(logs)
         case .primitiveSetLogs:
             let logs = try (envelope.primitiveSetLogs ?? []).map { try $0.toDomain() }
             return .primitiveSetLogs(logs)
@@ -326,7 +244,6 @@ enum PushQueuePayloadCoding {
                 workoutID: workoutID,
                 completedAt: envelope.completionCompletedAt,
                 notes: envelope.completionNotes,
-                setLogs: (envelope.setLogs ?? []).map { $0.toDomain() },
                 primitiveSetLogs: try (envelope.completionPrimitiveSetLogs ?? []).map { try $0.toDomain() }
             )
         case .workoutReset:

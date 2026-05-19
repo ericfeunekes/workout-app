@@ -218,6 +218,25 @@ These rules are authored now; they activate on "Xcode project lands" because Swi
 | Runs | pre-commit + CI |
 | Activation | first Xcode build |
 
+### FF-13A · WorkoutKit import ownership
+
+**Rule:** WorkoutKit side effects live only in `WorkoutKitAdapter`. App shells
+may trigger diagnostics, and `ExportProfile` may classify SDK-free export
+plans, but direct `import WorkoutKit` must not appear outside the adapter
+package.
+
+**Why it matters:** WorkoutKit is an edge SDK with platform-specific scheduling
+and open-in-Workout-app behavior. Keeping imports in one adapter prevents
+primitive execution, export-profile classification, and app shell code from
+accidentally becoming target-side SDK code.
+
+| Field | Value |
+|---|---|
+| Tool | pytest structural test |
+| Config | `tests/architecture/test_workoutkit_boundaries.py` |
+| Enforcement | error |
+| Runs | `make check` / CI |
+
 ### FF-14 · Swift cyclomatic complexity
 
 **Rule:** No Swift function exceeds cyclomatic complexity 10. Same threshold as Python.

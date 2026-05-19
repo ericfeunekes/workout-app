@@ -25,7 +25,7 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         )
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: fixture.context, clock: fixed, push: hooks)
 
@@ -57,10 +57,10 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         XCTAssertEqual(vm.state.cursor.itemIndex, 0)
         XCTAssertEqual(vm.state.cursor.setIndex, 1)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertEqual(logs.count, 2)
-        XCTAssertEqual(logs.map(\.workoutItemID), [fixture.firstItemID, fixture.secondItemID])
-        XCTAssertEqual(logs.map(\.setIndex), [1, 1])
+        XCTAssertEqual(logs.map(\.slotID), [fixture.firstItemID, fixture.secondItemID])
+        XCTAssertEqual(logs.map(\.setIndex), [0, 0])
         XCTAssertEqual(logs.map(\.reps), [5, 4])
         XCTAssertTrue(logs.allSatisfy { $0.durationSec == nil })
     }
@@ -99,7 +99,7 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         )
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: fixture.context, clock: clock, push: hooks)
 
@@ -114,7 +114,7 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         XCTAssertEqual(vm.state.cursor.blockIndex, 0)
         XCTAssertEqual(vm.state.cursor.itemIndex, 0)
         XCTAssertEqual(vm.state.items.first { $0.itemID == fixture.firstItemID }?.sets.first?.done, false)
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertTrue(logs.isEmpty)
     }
 
@@ -155,7 +155,7 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         )
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: fixture.context, clock: clock, push: hooks)
 
@@ -173,14 +173,13 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         XCTAssertEqual(vm.state.route, .active)
         XCTAssertEqual(vm.state.cursor.blockIndex, 1)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertEqual(logs.count, 1)
         let pushed = try XCTUnwrap(logs.first)
-        XCTAssertEqual(pushed.workoutItemID, fixture.firstItemID)
-        XCTAssertEqual(pushed.setIndex, 1)
+        XCTAssertEqual(pushed.slotID, fixture.firstItemID)
+        XCTAssertEqual(pushed.setIndex, 0)
         XCTAssertNil(pushed.reps)
         XCTAssertEqual(pushed.durationSec, 455)
-        XCTAssertEqual(pushed.startedAt, start)
         XCTAssertEqual(pushed.completedAt, clock.now)
     }
 
@@ -197,7 +196,7 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         )
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: fixture.context, clock: clock, push: hooks)
 
@@ -208,7 +207,7 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         XCTAssertEqual(vm.state.route, .active)
         XCTAssertEqual(vm.state.cursor.blockIndex, 0)
         XCTAssertEqual(vm.state.blockEndsAt, start.addingTimeInterval(60))
-        var logs = await recorder.setLogs
+        var logs = await recorder.primitiveSetLogs
         XCTAssertTrue(logs.isEmpty)
 
         vm.logForTimeResult()
@@ -218,7 +217,7 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         XCTAssertEqual(logged.sets.first?.durationSec, 75)
         XCTAssertTrue(vm.state.note.contains("For Time result: 1:15"))
         XCTAssertEqual(vm.state.cursor.blockIndex, 1)
-        logs = await recorder.setLogs
+        logs = await recorder.primitiveSetLogs
         XCTAssertEqual(logs.first?.durationSec, 75)
     }
 

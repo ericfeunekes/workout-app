@@ -198,7 +198,7 @@ public final class SettingsViewModel {
         showDestructiveConfirm = DestructiveConfirm(
             id: "reset-local-data",
             title: "reset local data",
-            message: "THIS WIPES CACHED WORKOUTS · SERVER CONNECTION STAYS",
+            message: "THIS WIPES LOCAL WORKOUTS, SESSION, AND QUEUED PUSHES · SERVER CONNECTION STAYS",
             onConfirm: { [onResetCache] in
                 // swiftlint:disable:next no_direct_task_unstructured
                 Task { await onResetCache() }

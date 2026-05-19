@@ -3,7 +3,9 @@
 
 import PackageDescription
 
-// HealthKitBridge — the only package allowed to import HealthKit (FF-13).
+// HealthKitBridge — the only package allowed to import HealthKit for data
+// access/readback (FF-13). WorkoutKitAdapter has a narrow exception for
+// HealthKit enum types required by WorkoutKit plan construction.
 // Owns the typed data-access boundary for batch archive, post-workout
 // readback, and live metric consumers:
 //   • descriptors, request shapes, normalized records, cursors, and unit

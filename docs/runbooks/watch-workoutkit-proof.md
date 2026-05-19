@@ -85,6 +85,10 @@ xcrun simctl launch <active-phone-device-id> \
   com.ericfeunekes.WorkoutDB --debug-watch-push
 ```
 
+`--debug-watch-push` is a standalone DEBUG probe route. It bypasses first-run
+only so the process can send the synthetic WatchBridge payload; it must not seed
+or clear the workout cache.
+
 With `WorkoutDBWatch` foregrounded, the Watch simulator rendered the pushed
 synthetic active-block payload:
 
@@ -184,6 +188,28 @@ connected and trusted iPhone paired to a real Apple Watch. Once hardware is
 visible to Xcode, run the retained probe to answer schedule visibility,
 startability, same-ID duplicate behavior, changed-payload update behavior, and
 same-ID multi-date behavior.
+
+The app now also includes a DEBUG-only app-hosted diagnostic hook:
+
+```bash
+xcrun simctl launch <active-phone-device-id> \
+  com.ericfeunekes.WorkoutDB --debug-workoutkit-push-probe
+```
+
+For real-device proof, run the same launch argument through Xcode or the device
+launch path and capture the console block between
+`WORKOUTKIT_DIAGNOSTIC_PROBE_BEGIN` and `WORKOUTKIT_DIAGNOSTIC_PROBE_END`.
+This is a standalone DEBUG probe route. It bypasses first-run only so the probe
+can run; it must not seed or clear the workout cache.
+
+The app target calls `WorkoutKitAdapter`'s narrow DEBUG diagnostic facade, not
+the production proof-gated push coordinator and not the adapter's raw
+descriptor/client types. The current hook is schedule-probe evidence only. It
+does not prove open/startability, scheduled-workout visibility on Apple Watch,
+duplicate/update behavior, permissions, or a user-facing export path. The
+production coordinator blocks value-backed payloads until exact target-value
+mapping exists, so these synthetic diagnostic targets do not imply product
+export readiness.
 
 ## Spike probes
 

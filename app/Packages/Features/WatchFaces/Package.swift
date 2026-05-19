@@ -19,6 +19,9 @@ import PackageDescription
 //                     reducer — the phone is authoritative; the watch
 //                     receives rendered payloads via WatchBridge.
 //   - DesignSystem  : tokens + primitives (DSRing, typography, colors).
+//   - HealthKitBridge : typed metric-source seam used by watch metric
+//                     consumers. Tests inject deterministic fixture streams;
+//                     HealthKit API access remains inside HealthKitBridge.
 //   - WatchBridge   : inbound `messages()` stream + outbound `send(_:)`.
 //                     This is the only IPC surface the package sees.
 //
@@ -47,6 +50,7 @@ let package = Package(
     dependencies: [
         .package(path: "../../Core/Session"),
         .package(path: "../../DesignSystem"),
+        .package(path: "../../HealthKitBridge"),
         .package(path: "../../WatchBridge"),
     ],
     targets: [
@@ -55,6 +59,7 @@ let package = Package(
             dependencies: [
                 .product(name: "CoreSession", package: "Session"),
                 .product(name: "DesignSystem", package: "DesignSystem"),
+                .product(name: "HealthKitBridge", package: "HealthKitBridge"),
                 .product(name: "WatchBridge", package: "WatchBridge"),
             ],
             path: "Sources/FeaturesWatchFaces"
@@ -63,6 +68,7 @@ let package = Package(
             name: "FeaturesWatchFacesTests",
             dependencies: [
                 "FeaturesWatchFaces",
+                .product(name: "HealthKitBridge", package: "HealthKitBridge"),
                 .product(name: "WatchBridge", package: "WatchBridge"),
             ],
             path: "Tests/FeaturesWatchFacesTests"

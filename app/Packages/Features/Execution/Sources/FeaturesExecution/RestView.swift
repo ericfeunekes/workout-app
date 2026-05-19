@@ -25,14 +25,9 @@ import WorkoutCoreFoundation
 
 struct RestView: View {
     @Bindable var viewModel: ExecutionViewModel
+    private let onEndRequested: () -> Void
 
     @State var activeSheet: RestSheet?
-
-    // qa-028: End confirmation alert. Same affordance as ActiveView — tap
-    // the inline nav-bar End control → alert → `viewModel.complete()` on
-    // confirm. Alert copy matches across screens so the semantics are
-    // identical regardless of which route the user is on.
-    @State private var showEndConfirm = false
 
     private enum RestProgressDotState {
         case performed
@@ -68,6 +63,11 @@ struct RestView: View {
     // (1s) and same gate (`blockEndsAt != nil || workEndsAt != nil`) as Active.
     private let tickTimer = Timer.publish(every: 1, on: .main, in: .common)
         .autoconnect()
+
+    init(viewModel: ExecutionViewModel, onEndRequested: @escaping () -> Void = {}) {
+        self.viewModel = viewModel
+        self.onEndRequested = onEndRequested
+    }
 
     enum RestSheet: Identifiable {
         case load
@@ -147,24 +147,6 @@ struct RestView: View {
                 viewModel.tickBlockTimer()
             }
         }
-        // qa-028: End-workout confirmation. Same copy / semantics as
-        // ActiveView's alert — ending mid-rest is equally destructive
-        // (the just-logged set counts, but anything remaining in the
-        // session is dropped), so surface the same "you can still save &
-        // done" reassurance.
-        .alert("End workout?", isPresented: $showEndConfirm) {
-            Button("Cancel", role: .cancel) {}
-            Button("End", role: .destructive) {
-                viewModel.complete()
-            }
-        } message: {
-            Text("Unlogged sets won't be recorded. You can still save & done.")
-        }
-        .onChange(of: viewModel.state.route) { oldRoute, newRoute in
-            if RestView.shouldDismissEndConfirmation(oldRoute: oldRoute, newRoute: newRoute) {
-                showEndConfirm = false
-            }
-        }
     }
 
     // MARK: - Nav bar
@@ -177,7 +159,7 @@ struct RestView: View {
         HStack {
             Spacer()
             Button {
-                showEndConfirm = true
+                onEndRequested()
             } label: {
                 Text("end")
                     .font(DSTypography.subLabel)
@@ -570,6 +552,7 @@ struct RestView: View {
             style: .primary,
             action: { viewModel.advance() }
         )
+        .accessibilityIdentifier("execution.rest.next")
     }
 
     private func nextUpCard(_ nextUp: ExecutionNextUpPresentation) -> some View {
@@ -771,10 +754,4 @@ struct RestView: View {
         max(0, now.timeIntervalSince(endsAt ?? now))
     }
 
-    static func shouldDismissEndConfirmation(
-        oldRoute: SessionState.Route,
-        newRoute: SessionState.Route
-    ) -> Bool {
-        oldRoute != newRoute
-    }
 }

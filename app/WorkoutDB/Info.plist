@@ -20,10 +20,6 @@
 	<string>0.0.1</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>NSHealthShareUsageDescription</key>
-	<string>Reads heart rate and cadence during workouts for set logging.</string>
-	<key>NSHealthUpdateUsageDescription</key>
-	<string>Writes workout data to Apple Health so sessions appear in Fitness.</string>
 	<key>NSAppTransportSecurity</key>
 	<dict>
 		<key>NSAllowsLocalNetworking</key>
@@ -37,6 +33,10 @@
 			</dict>
 		</dict>
 	</dict>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Reads heart rate and cadence during workouts for set logging.</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Writes workout data to Apple Health so sessions appear in Fitness.</string>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
@@ -51,6 +51,9 @@
 	<key>UISupportedInterfaceOrientations</key>
 	<array>
 		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 </dict>
 </plist>

@@ -30,11 +30,6 @@ import WorkoutCoreFoundation
 
 // MARK: - Push wiring
 
-/// Fire-and-forget hook invoked when a set is logged. Shell supplies this so
-/// the just-logged `SetLog` is enqueued to `PushQueue` on its way to the
-/// server. `nil` (the default) preserves the pure-offline test path — tests
-/// that don't exercise push can omit this dependency entirely.
-public typealias SetLogEnqueuer = @Sendable (SetLog) async -> Void
 public typealias PrimitiveSetLogEnqueuer = @Sendable (PrimitiveSetLog) async -> Void
 
 /// Hook invoked when Save & Done has produced the canonical app-owned
@@ -69,20 +64,17 @@ public typealias UserParameterEnqueuer = @Sendable (UserParameter) async -> Void
 /// `nil` fields preserve the pure-offline test path; the view model's
 /// persistence extension reads `push` directly.
 public struct ExecutionPushHooks: Sendable {
-    public let onSetLogged: SetLogEnqueuer?
     public let onPrimitiveSetLogged: PrimitiveSetLogEnqueuer?
     public let onWorkoutCompleted: CompletionEnqueuer?
     public let onPushKick: PushFlushKick?
     public let onUserParameterChanged: UserParameterEnqueuer?
 
     public init(
-        onSetLogged: SetLogEnqueuer? = nil,
         onPrimitiveSetLogged: PrimitiveSetLogEnqueuer? = nil,
         onWorkoutCompleted: CompletionEnqueuer? = nil,
         onPushKick: PushFlushKick? = nil,
         onUserParameterChanged: UserParameterEnqueuer? = nil
     ) {
-        self.onSetLogged = onSetLogged
         self.onPrimitiveSetLogged = onPrimitiveSetLogged
         self.onWorkoutCompleted = onWorkoutCompleted
         self.onPushKick = onPushKick

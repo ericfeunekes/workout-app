@@ -199,6 +199,10 @@ final class SettingsViewModelTests: XCTestCase {
         let confirm = vm.showDestructiveConfirm
         XCTAssertEqual(confirm?.id, "reset-local-data")
         XCTAssertEqual(confirm?.title, "reset local data")
+        XCTAssertEqual(
+            confirm?.message,
+            "THIS WIPES LOCAL WORKOUTS, SESSION, AND QUEUED PUSHES · SERVER CONNECTION STAYS"
+        )
     }
 
     func testConfirmResetLocalDataInvokesClosure() async {

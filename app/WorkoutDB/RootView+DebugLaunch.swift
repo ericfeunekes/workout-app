@@ -15,6 +15,7 @@ import FeaturesToday
 import Persistence
 import Shell
 import WatchBridge
+import WorkoutKitAdapter
 
 extension RootView {
 
@@ -69,7 +70,10 @@ extension RootView {
             localCompletionWriter: { [cache, historyVM, todayVM, todayLoader] record in
                 await emitDebugCompletionCacheWrite(record, telemetry: telemetry) {
                     try await cache.saveWorkout(record.workout)
-                    try await cache.saveSetLogs(record.setLogs, workoutID: record.workoutID)
+                    try await cache.savePrimitiveSetLogs(
+                        record.primitiveSetLogs,
+                        workoutID: record.workoutID
+                    )
                 }
                 await todayVM.reload(using: todayLoader)
                 await historyVM.load()
@@ -112,7 +116,10 @@ extension RootView {
             { [cache, historyVM, todayVM, todayLoader, telemetry] record in
                 await emitDebugCompletionCacheWrite(record, telemetry: telemetry) {
                     try await cache.saveWorkout(record.workout)
-                    try await cache.saveSetLogs(record.setLogs, workoutID: record.workoutID)
+                    try await cache.savePrimitiveSetLogs(
+                        record.primitiveSetLogs,
+                        workoutID: record.workoutID
+                    )
                 }
                 await todayVM.reload(using: todayLoader)
                 await historyVM.load()
@@ -204,6 +211,22 @@ extension RootView {
                     if attempt == 5 { return }
                     try? await Task.sleep(nanoseconds: 500_000_000)
                 }
+            }
+        }
+    }
+
+    /// DEBUG-only WorkoutKit side-effect probe. This is evidence collection
+    /// for the real-device gate, not a production export path and not a
+    /// user-facing button.
+    func runDebugWorkoutKitProbeIfRequested(args: [String]) {
+        guard args.contains("--debug-workoutkit-push-probe") else { return }
+        Task.detached {
+            if #available(iOS 17.0, watchOS 10.0, *) {
+                print("WORKOUTKIT_DIAGNOSTIC_PROBE_BEGIN")
+                print(await WorkoutKitDiagnosticProbe.runScheduleProbeJSON())
+                print("WORKOUTKIT_DIAGNOSTIC_PROBE_END")
+            } else {
+                print("WORKOUTKIT_DIAGNOSTIC_PROBE_UNAVAILABLE")
             }
         }
     }
@@ -376,7 +399,7 @@ private func emitDebugCompletionCacheWriteEvent(
 ) {
     let payload = DebugCompletionCacheWriteEventPayload(
         workoutID: record.workoutID.wireID,
-        setLogCount: record.setLogs.count,
+        setLogCount: 0,
         primitiveSetLogCount: record.primitiveSetLogs.count,
         hasNote: record.notes != nil,
         error: errorDescription.map { String($0.prefix(240)) }

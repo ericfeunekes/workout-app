@@ -18,6 +18,7 @@
 // quiet machine and don't flake on a busy one.
 
 import XCTest
+import HealthKitBridge
 import WatchBridge
 @testable import FeaturesWatchFaces
 
@@ -219,8 +220,8 @@ final class WatchFacesViewModelTests: XCTestCase {
         switch setEnded {
         case .setEnded(_, let setIndex, _, let bpmAvg, let bpmMax):
             XCTAssertEqual(setIndex, 3)
-            XCTAssertNil(bpmAvg, "HR is nil until v1.1+ HealthKit on-watch")
-            XCTAssertNil(bpmMax, "HR is nil until v1.1+ HealthKit on-watch")
+            XCTAssertNil(bpmAvg)
+            XCTAssertNil(bpmMax)
         default:
             XCTFail("expected .setEnded in sent log, got \(sent)")
         }
@@ -238,6 +239,143 @@ final class WatchFacesViewModelTests: XCTestCase {
             bridge.sentMessages().isEmpty,
             "idle tap must not send; got \(bridge.sentMessages())"
         )
+    }
+
+    // MARK: - Live metrics
+
+    func testMetricSourceUpdatesActiveFaceHeartRate() async throws {
+        let bridge = FakeWatchBridge()
+        let source = FixtureWorkoutMetricSource(replay: WorkoutMetricReplay(events: [
+            .sessionStarted(elapsedSeconds: 0),
+            .metric(WorkoutMetricTick(elapsedSeconds: 1, heartRateBPM: 121.4)),
+            .metric(WorkoutMetricTick(elapsedSeconds: 2, heartRateBPM: nil, activeEnergyKCal: 1.2)),
+            .paused(elapsedSeconds: 3),
+            .resumed(elapsedSeconds: 4),
+            .metric(WorkoutMetricTick(elapsedSeconds: 5, heartRateBPM: 138.6)),
+        ]))
+        let vm = WatchFacesViewModel(bridge: bridge, metricSource: source)
+        let loop = Task { await vm.start() }
+        defer {
+            bridge.finish()
+            loop.cancel()
+        }
+        try await awaitSubscription()
+
+        bridge.deliver(.pushActiveBlock(ActiveBlockPayload(
+            exerciseName: "Run",
+            prescription: "20 min easy",
+            setNumber: 1,
+            setCount: 1,
+            targetRir: nil
+        )))
+
+        try await waitFor {
+            if case .active(let active) = vm.face {
+                return active.heartRateBPM == 139
+            }
+            return false
+        }
+
+        switch vm.face {
+        case .active(let active):
+            XCTAssertEqual(active.heartRateBPM, 139)
+            XCTAssertEqual(source.startCallCount, 1)
+        default:
+            XCTFail("expected .active with HR, got \(vm.face)")
+        }
+    }
+
+    func testMetricSourceFailureIsExposedWithoutBreakingBridgeMessages() async throws {
+        let bridge = FakeWatchBridge()
+        let source = FixtureWorkoutMetricSource(
+            replay: WorkoutMetricReplay(events: []),
+            shouldFailWith: .notAuthorized
+        )
+        let vm = WatchFacesViewModel(bridge: bridge, metricSource: source)
+        let loop = Task { await vm.start() }
+        defer {
+            bridge.finish()
+            loop.cancel()
+        }
+        try await awaitSubscription()
+
+        bridge.deliver(.pushActiveBlock(ActiveBlockPayload(
+            exerciseName: "Bench",
+            prescription: "5 × 100 kg",
+            setNumber: 1,
+            setCount: 5,
+            targetRir: 2
+        )))
+
+        try await waitFor {
+            if case .active = vm.face {
+                return vm.metricError == .notAuthorized
+            }
+            return false
+        }
+        switch vm.face {
+        case .active(let active):
+            XCTAssertNil(active.heartRateBPM)
+            XCTAssertEqual(active.exerciseName, "Bench")
+        default:
+            XCTFail("expected .active after metric failure, got \(vm.face)")
+        }
+    }
+
+    func testTapInRestSendsLatestHeartRateWithSetEnded() async throws {
+        let bridge = FakeWatchBridge()
+        let source = FixtureWorkoutMetricSource(replay: WorkoutMetricReplay(events: [
+            .metric(WorkoutMetricTick(elapsedSeconds: 1, heartRateBPM: 142)),
+        ]))
+        let vm = WatchFacesViewModel(bridge: bridge, metricSource: source)
+        let loop = Task { await vm.start() }
+        defer {
+            bridge.finish()
+            loop.cancel()
+        }
+        try await awaitSubscription()
+
+        bridge.deliver(.pushActiveBlock(ActiveBlockPayload(
+            exerciseName: "Bench",
+            prescription: "5 × 102.5 kg",
+            setNumber: 2,
+            setCount: 5,
+            targetRir: 2
+        )))
+        try await waitFor {
+            if case .active(let active) = vm.face {
+                return active.heartRateBPM == 142
+            }
+            return false
+        }
+        bridge.deliver(.pushRestTimer(endsAt: Date().addingTimeInterval(60)))
+        try await waitFor {
+            if case .rest = vm.face { return true }
+            return false
+        }
+
+        vm.tap()
+
+        try await waitFor {
+            bridge.sentMessages().contains { msg in
+                if case .setEnded = msg { return true }
+                return false
+            }
+        }
+
+        let sent = bridge.sentMessages()
+        let setEnded = sent.first { msg in
+            if case .setEnded = msg { return true }
+            return false
+        }
+        switch setEnded {
+        case .setEnded(_, let setIndex, _, let bpmAvg, let bpmMax):
+            XCTAssertEqual(setIndex, 2)
+            XCTAssertEqual(bpmAvg, 142)
+            XCTAssertEqual(bpmMax, 142)
+        default:
+            XCTFail("expected .setEnded in sent log, got \(sent)")
+        }
     }
 
     // MARK: - Helpers

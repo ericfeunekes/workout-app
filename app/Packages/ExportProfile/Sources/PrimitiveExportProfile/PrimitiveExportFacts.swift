@@ -256,6 +256,22 @@ public enum PrimitiveExportProfileBuilder {
         {
             ambiguities.insert(.multipleCompatibleIntervalInterpretations)
         }
+        if axes.metrics.contains(.distance),
+           !axes.hasLoad,
+           !axes.metrics.contains(.loadCarried)
+        {
+            ambiguities.insert(.missingSourceFact)
+        }
+        if axes.metrics.contains(.duration),
+           !axes.hasLoad,
+           !axes.hasRest,
+           !axes.setTimings.contains(.timeBounded)
+        {
+            ambiguities.insert(.missingSourceFact)
+        }
+        if axes.setTimings.contains(.timeBounded), axes.hasRest, !axes.hasLoad {
+            ambiguities.insert(.missingSourceFact)
+        }
         return ambiguities
     }
 }

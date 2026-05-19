@@ -24,15 +24,12 @@ import WorkoutCoreFoundation
 
 struct ActiveView: View {
     @Bindable var viewModel: ExecutionViewModel
+    private let onEndRequested: () -> Void
 
     // `internal` so ActiveView extensions can open the small set of modal
     // routes from their owning controls while the body keeps one sheet seam.
     @State var activeSheet: ActiveSheet?
 
-    // qa-028: End confirmation alert. Tapping the nav-bar End button
-    // surfaces the alert instead of firing `complete()` directly so a
-    // stray tap mid-workout doesn't silently skip remaining sets.
-    @State private var showEndConfirm = false
     @State private var timerNow = Date()
 
     // Time-cap tick source (bug-042). `TimelineView` is a render-time
@@ -43,6 +40,11 @@ struct ActiveView: View {
     // `autoconnect()` handles start/stop with view lifecycle.
     private let tickTimer = Timer.publish(every: 1, on: .main, in: .common)
         .autoconnect()
+
+    init(viewModel: ExecutionViewModel, onEndRequested: @escaping () -> Void = {}) {
+        self.viewModel = viewModel
+        self.onEndRequested = onEndRequested
+    }
 
     var body: some View {
         ZStack {
@@ -118,24 +120,6 @@ struct ActiveView: View {
         .sheet(item: $activeSheet) { sheet in
             activeSheetContent(for: sheet)
         }
-        // qa-028: confirm before force-completing. Ending mid-workout is
-        // destructive (unlogged sets vanish), so a stray tap or sweaty
-        // finger mis-press shouldn't skip the rest of the session without
-        // a beat of intent. Confirm → `viewModel.complete()` flips the
-        // route to `.complete`; user can still Save & Done from there.
-        .alert("End workout?", isPresented: $showEndConfirm) {
-            Button("Cancel", role: .cancel) {}
-            Button("End", role: .destructive) {
-                viewModel.complete()
-            }
-        } message: {
-            Text("Unlogged sets won't be recorded. You can still save & done.")
-        }
-        .onChange(of: viewModel.state.route) { oldRoute, newRoute in
-            if ActiveView.shouldDismissEndConfirmation(oldRoute: oldRoute, newRoute: newRoute) {
-                showEndConfirm = false
-            }
-        }
     }
 
     // MARK: - Nav bar
@@ -152,7 +136,7 @@ struct ActiveView: View {
                 if currentTimingMode == .amrap {
                     activeSheet = .metconResult
                 } else {
-                    showEndConfirm = true
+                    onEndRequested()
                 }
             } label: {
                 Text("end")
@@ -347,13 +331,6 @@ struct ActiveView: View {
     static func shouldRenderBlockProgress(_ progress: BlockProgressPresentation?) -> Bool {
         guard let progress else { return false }
         return progress.totalSets > 0
-    }
-
-    static func shouldDismissEndConfirmation(
-        oldRoute: SessionState.Route,
-        newRoute: SessionState.Route
-    ) -> Bool {
-        oldRoute != newRoute
     }
 
     static func blockProgressSummary(_ progress: BlockProgressPresentation) -> String {

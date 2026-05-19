@@ -19,7 +19,7 @@ actor FakePushQueueStore: PushQueueStore {
     /// this to assert that dedup does NOT peek the whole queue.
     private(set) var peekCallCount = 0
     /// Number of times `removeMatchingDedupKey` has been invoked.
-    /// perf-002 test uses this to assert that each `enqueueSetLogs` /
+    /// perf-002 test uses this to assert that each primitive-log enqueue /
     /// `enqueueStatusUpdate` / `enqueueUserParameter` drives exactly one
     /// scoped dedup call.
     private(set) var removeMatchingDedupKeyCallCount = 0
@@ -85,6 +85,10 @@ actor FakePushQueueStore: PushQueueStore {
 
     func isEmpty() async throws -> Bool {
         items.isEmpty
+    }
+
+    func clear() async throws {
+        items.removeAll()
     }
 
     /// Test-only — peek without the max cap.

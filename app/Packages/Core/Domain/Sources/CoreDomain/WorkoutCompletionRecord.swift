@@ -14,18 +14,15 @@ import WorkoutCoreFoundation
 /// Save & Done time.
 public struct WorkoutCompletionRecord: Sendable, Hashable {
     public var workout: Workout
-    public var setLogs: [SetLog]
     public var primitiveSetLogs: [PrimitiveSetLog]
 
     public init(
         workout: Workout,
-        setLogs: [SetLog],
         primitiveSetLogs: [PrimitiveSetLog] = []
     ) {
         precondition(workout.status == .completed, "WorkoutCompletionRecord requires completed status")
         precondition(workout.completedAt != nil, "WorkoutCompletionRecord requires completedAt")
         self.workout = workout
-        self.setLogs = setLogs
         self.primitiveSetLogs = primitiveSetLogs
     }
 

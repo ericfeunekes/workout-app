@@ -32,7 +32,10 @@ or imported-result semantics.
 ## Platform grounding
 
 Apple's WorkoutKit supports creating, previewing, opening, exporting, and
-scheduling workout plans for the Workout app on Apple Watch. It supports common
+scheduling workout plans for the Workout app on Apple Watch. This repo's
+current adapter only models scheduling from iPhone and opening from watchOS;
+preview/save UI is a future path and is not emitted by the production
+coordinator. WorkoutKit supports common
 WorkoutKit workout shapes such as single-goal, pacer, custom interval, and
 multi-sport workouts. Local Xcode 16.4 SDK inspection shows scheduling APIs are
 available to iOS, while `WorkoutPlan.openInWorkoutApp()` is watchOS-only in the
@@ -128,9 +131,9 @@ Phase 1 mapping matrix:
 
 | Setmark archetype | Primitive axes / dominant metric | WorkoutKit candidate | Support state | Preserved for Apple | Omitted or collapsed | Apple-visible result | Setmark result claim | Planner state |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Continuous cardio | Time or distance target; sequential traversal; cardio domain | `SingleGoalWorkout` | Native candidate | Activity type, location, time/distance/energy goal | Setmark block/set hierarchy | Workout completed with elapsed time, distance/energy when available | No Setmark result claim from push | Block until real-device schedule/start and duplicate/update proof |
-| Pace-target run or ride | Distance plus target time/pace; cardio domain | `PacerWorkout` where supported | Native candidate | Activity, distance, target time / pacing intent | Setmark notes and non-pace targets | Workout completed against Apple pacing model | No Setmark result claim from push | Block until real-device proof |
-| Simple cardio intervals | Time or distance bounded work/rest steps; sequential traversal | `CustomWorkout` with interval blocks/steps | Native or degraded candidate | Step order, work/rest duration or distance, activity | Step names on lower OS floors, detailed Setmark hierarchy | Interval workout completion | No Setmark result claim from push | Block until simulator build plus real-device proof |
+| Continuous cardio | Time or distance target; sequential traversal; source activity not yet explicit in primitives | `SingleGoalWorkout` | Native candidate, currently source-ambiguous | Time/distance goal once exact values exist | Activity type/location until authored source fact exists; Setmark block/set hierarchy | Workout completed with elapsed time, distance/energy when available | No Setmark result claim from push | Block until source activity fact, exact target mapping, and real-device schedule/start proof |
+| Pace-target run or ride | Distance plus target time/pace; cardio domain | `PacerWorkout` where supported | Future candidate; not emitted by current classifier/adapter | None yet | Pacer payload construction and source activity | Workout completed against Apple pacing model | No Setmark result claim from push | Block until target mapper and real-device proof |
+| Simple cardio intervals | Time or distance bounded work/rest steps; sequential traversal | `CustomWorkout` with interval blocks/steps | Native or degraded candidate, currently source-ambiguous | Step order and work/rest cadence once exact values exist | Activity type until authored source fact exists; step names on lower OS floors; detailed Setmark hierarchy | Interval workout completion | No Setmark result claim from push | Block until source activity fact, exact interval mapping, and real-device proof |
 | Segmented continuous workout | Sequential blocks in one modality; time/distance segments | `CustomWorkout` | Degraded | Segment order and broad goals | Rich segment intent, result roles below Apple step level | Custom workout completion | No Setmark result claim from push | Block until adapter proof |
 | Straight strength / set based | Repeated sets/slots; strength domain; reps/load are Setmark-owned | `SingleGoalWorkout` or `CustomWorkout` with functional-strength activity and open/time goals | Degraded | Activity category, broad duration or open workout | Load, reps, RIR, alternatives, per-slot/set results | Strength workout duration/energy/HR only | No Setmark result claim from push | Requires degradation acknowledgement plus real-device path proof |
 | Density strength | Time-bounded strength block; work density is Setmark-owned | `CustomWorkout` time block or open functional-strength workout | Degraded | Time cap/duration and activity category | Round count, reps/load density semantics | Timed strength workout completion | No Setmark result claim from push; density score remains Setmark-only | Requires degradation acknowledgement plus proof |
@@ -147,7 +150,7 @@ Phase 1 mapping matrix:
 | Skill / isometric hold | Duration or open hold; skill/static domain | `SingleGoalWorkout` time/open or `CustomWorkout` step | Degraded | Duration/open activity | Skill quality, hold standard, side/position detail | Timed/open workout completion | No Setmark result claim from push | Requires degradation acknowledgement plus proof |
 | Mobility / recovery flow | Time-bounded low-intensity sequence | `SingleGoalWorkout` time or `CustomWorkout` with mind-body/flexibility-like activity where available | Native or degraded candidate | Duration, broad recovery activity | Pose/sequence detail and notes | Workout duration | No Setmark result claim from push | Block until activity support probe |
 | Standalone rest / recovery | Timer-only rest or recovery block | No export by itself | Setmark-only | Nothing | Timer-only semantics are not a useful Apple workout | None | None | Do not export standalone; can be collapsed inside adjacent custom workout if safe |
-| Swim / bike / run | Multi-sport sequence | `SwimBikeRunWorkout` | Native candidate | Sport order and broad goals | Setmark-specific block identity and notes | Multi-sport workout completion | No Setmark result claim from push | Block until real-device proof |
+| Swim / bike / run | Multi-sport sequence | `SwimBikeRunWorkout` | Future candidate; not emitted by current classifier/adapter | None yet | Multi-sport payload construction and source sport order | Multi-sport workout completion | No Setmark result claim from push | Block until target mapper and real-device proof |
 | Max-effort / open-result overlay | Any domain with Setmark-owned result overlay | Underlying archetype candidate only | Degraded or Setmark-only | Underlying workout activity/goal | Max result, score, PR, success criteria | Underlying workout completion | No Setmark result claim from push; max/open score remains Setmark-owned | Candidate only if underlying row is supportable and result loss is explicit |
 
 This matrix deliberately avoids load, reps, RIR, and per-slot strength result
@@ -199,8 +202,17 @@ Push proof must answer these cases before user-facing implementation:
 ## Current gaps
 
 - `WATCHKIT-GAP-002`: The vendor-neutral export profile and fake-backed
-  WorkoutKit classifier now exist in `app/Packages/ExportProfile`, but no app
-  package wraps real WorkoutKit scheduling/opening.
+  WorkoutKit classifier exist in `app/Packages/ExportProfile`, and
+  `app/Packages/WorkoutKitAdapter` now owns the production WorkoutKit push
+  entrypoint, platform gates, real schedule/open clients, and DEBUG/test
+  diagnostics. No
+  user-facing export button or export tracking persistence exists yet, and the
+  production coordinator blocks value-backed WorkoutKit payloads where the pure
+  export profile only records goal shape. Cardio-like rows also remain blocked
+  until primitives carry source activity/location semantics; the adapter no
+  longer guesses cycling for generic cardio. DEBUG diagnostics may still use
+  synthetic targets for evidence collection. Product export must wait for exact
+  target-value mapping plus the real-device proof in `WATCHKIT-GAP-004`.
 - `WATCHKIT-GAP-003`: Completion/reconciliation is a separate future lane, not
   a prerequisite for push-only WorkoutKit handoff.
 - `WATCHKIT-GAP-004`: Local watchOS simulator infrastructure exists and proves

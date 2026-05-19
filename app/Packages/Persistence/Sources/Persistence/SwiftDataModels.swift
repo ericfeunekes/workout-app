@@ -21,8 +21,8 @@
 //     overwrites on UUID); we do not want those overwrites to cascade into
 //     historical set_logs. Keep the link loose.
 //
-// These file-scope classes are the latest `WorkoutDBSchemaV7` shape
-// (post-perf-002 PushItem `priority` + `dedupKey` columns). The V1
+// These file-scope classes are the latest `WorkoutDBSchemaV8` shape
+// (HealthKit archive projection plus earlier primitive/cache columns). The V1
 // (pre-006), V2 (post-006, pre-R1.4), and V3 (R1.4, pre-perf-002)
 // shapes are preserved as shadow @Model types inside their respective
 // `WorkoutDBSchemaVN` enums in their dedicated models files so
@@ -167,6 +167,92 @@ public final class PrimitiveSetLogModel {
         self.rir = rir
         self.isWarmup = isWarmup
         self.completedAt = completedAt
+    }
+}
+
+// MARK: - HealthKit archive projection
+
+@Model
+public final class HealthDataRecordModel {
+    @Attribute(.unique) public var id: UUID
+    public var externalID: String
+    public var descriptorID: String
+    public var sampleKindRaw: String
+    public var sourceBundleIdentifier: String?
+    public var start: Date?
+    public var end: Date?
+    public var unit: String?
+    public var valueJSON: String
+    public var metadataJSON: String
+    public var firstSeenAt: Date
+    public var lastSeenAt: Date
+
+    public init(
+        id: UUID,
+        externalID: String,
+        descriptorID: String,
+        sampleKindRaw: String,
+        sourceBundleIdentifier: String?,
+        start: Date?,
+        end: Date?,
+        unit: String?,
+        valueJSON: String,
+        metadataJSON: String,
+        firstSeenAt: Date,
+        lastSeenAt: Date
+    ) {
+        self.id = id
+        self.externalID = externalID
+        self.descriptorID = descriptorID
+        self.sampleKindRaw = sampleKindRaw
+        self.sourceBundleIdentifier = sourceBundleIdentifier
+        self.start = start
+        self.end = end
+        self.unit = unit
+        self.valueJSON = valueJSON
+        self.metadataJSON = metadataJSON
+        self.firstSeenAt = firstSeenAt
+        self.lastSeenAt = lastSeenAt
+    }
+}
+
+@Model
+public final class HealthDataDeletionModel {
+    @Attribute(.unique) public var id: UUID
+    public var descriptorID: String
+    public var externalID: String
+    public var observedAt: Date
+
+    public init(
+        id: UUID,
+        descriptorID: String,
+        externalID: String,
+        observedAt: Date
+    ) {
+        self.id = id
+        self.descriptorID = descriptorID
+        self.externalID = externalID
+        self.observedAt = observedAt
+    }
+}
+
+@Model
+public final class HealthBatchCursorModel {
+    @Attribute(.unique) public var id: UUID
+    public var requestSetKey: String
+    public var cursor: String
+    public var updatedAt: Date
+
+    public init(
+        id: UUID,
+        requestSetKey: String,
+        cursor: String,
+        updatedAt: Date
+    ) {
+        self.id = id
+        self.requestSetKey = requestSetKey
+        self.cursor = cursor
+        self.updatedAt = updatedAt
     }
 }
 

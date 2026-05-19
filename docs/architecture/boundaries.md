@@ -87,7 +87,7 @@ Notes:
 1. **Pure Core.** `Core/*` packages are unit-testable with zero mocks. If a Core test needs a stubbed clock, network, or database, the side effect has leaked inward.
 2. **Features are siblings.** One Feature never imports another. If two Features need the same thing, it moves to Core.
 3. **Wire types stop at Sync.** `schema` DTOs don't cross the Sync boundary. Sync maps DTOs to Domain types; Features see only Domain types.
-4. **Edge I/O is named.** Disk (Persistence), network (Sync), HealthKit (HealthKitBridge), watch IPC (WatchBridge). If a new effect appears (audio, location, camera), it gets its own named package.
+4. **Edge I/O is named.** Disk (Persistence), network (Sync), HealthKit data access/readback (HealthKitBridge), watch IPC (WatchBridge), and WorkoutKit scheduling/opening (WorkoutKitAdapter). WorkoutKitAdapter may use HealthKit activity/location enum types only because WorkoutKit plan construction requires them; HealthKit stores, queries, authorization, samples, builders, and readback still belong outside WorkoutKitAdapter. If a new effect appears (audio, location, camera), it gets its own named package.
 5. **DesignSystem is visual-only.** Tokens, primitives, animations. No routing logic, no business rules.
 6. **The app shell is thin.** `WorkoutDB.app` and `Shell` compose packages,
    host root navigation, and wire cross-feature view models. They are not where

@@ -1,7 +1,7 @@
 ---
 title: Architecture
 status: accepted
-last_reviewed: 2026-05-17
+last_reviewed: 2026-05-18
 purpose: One-page system map + domain router. Summarizes the shape; routes to the spec and per-package READMEs for detail.
 covers:
   - docs/
@@ -75,17 +75,20 @@ and `docs/sync.md` for sync + first-run behavior.
 
 The app is split into local SwiftPM packages. `Core/*` owns pure domain,
 prescription, autoregulation, session, telemetry, and utility logic.
-`Persistence`, `Sync`, `HealthKitBridge`, and `WatchBridge` own named side
-effects. `Features/*` owns Today, Execution, History, Settings, FirstRun, and
-WatchFaces. `Shell` owns bootstrap, root tab composition, cross-feature view
-model wiring, and push-flusher lifecycle. See
+`Persistence`, `Sync`, `HealthKitBridge`, `WatchBridge`, and
+`WorkoutKitAdapter` own named side effects. `Features/*` owns Today,
+Execution, History, Settings, FirstRun, and WatchFaces. `Shell` owns bootstrap,
+root tab composition, cross-feature view model wiring, and push-flusher lifecycle. See
 `docs/architecture/swift-packages.md` for the authoritative package graph and
 allowed dependencies.
 
 HealthKit data access is routed through `HealthKitBridge` only. Consumers
 declare typed batch or live data requests; the bridge owns HealthKit
 identifiers, units, permissions, query mechanics, and simulator/device proof
-boundaries. See `docs/healthkit-data-access.md`.
+boundaries. `WorkoutKitAdapter` has a narrow exception for HealthKit
+activity/location enum types that Apple's WorkoutKit plan constructors require;
+it must not own HealthKit data access or readback. See
+`docs/healthkit-data-access.md`.
 
 ### `schema/` — Shared schema
 Single source of truth for cross-stack data contracts. Committed `openapi.json` is the wire contract; hand-written Swift Codable DTOs under `Sources/WorkoutDBSchema/` mirror the server's Pydantic schemas. Cross-decoded fixtures live in `fixtures/`. See `schema/README.md`.
@@ -130,7 +133,8 @@ See `docs/sync.md` for the full rules, and the spec § "Persistence architecture
 - Early Apple Watch delivery → `docs/features/watch-workoutkit-handoff.md`
 - Later custom Watch execution → `docs/features/watch-primary-execution.md` and `docs/watch-metrics.md`
 - HealthKit batch/live data module → `docs/healthkit-data-access.md`
-- Proof contract → `docs/TESTING.md`
+- Proof contract → `docs/TESTING.md`; reusable proof patterns →
+  `docs/testing/`
 - Server specifics → `server/README.md`
 - App specifics → `app/README.md` (the in-app behavior contract lives here)
 - Cross-stack schema → `schema/README.md`

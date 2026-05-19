@@ -85,12 +85,41 @@ final class ExecutionViewModelPushTests: XCTestCase {
         XCTAssertNil(log.performedExerciseID)
     }
 
-    func testSkipCurrentSetEnqueuesSkippedSetLogWithoutPerformanceMetrics() async throws {
+    func testPrimitiveSlotLogEmitsRowShapedTelemetry() async throws {
+        let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_001))
+        let (ctx, itemID) = PushTestFixtures.context(
+            sets: 4, reps: 5, loadKg: 100, includePrimitivePlan: true
+        )
+        let telemetry = TelemetryRecorder()
+        let vm = ExecutionViewModel(context: ctx, clock: fixed, telemetry: telemetry)
+        vm.start()
+        vm.startCurrentSet()
+        vm.logSet(reps: 5, rir: 2)
+
+        let event = try XCTUnwrap(
+            telemetry.events.first { $0.name == "execution.primitive_result_recorded" }
+        )
+        XCTAssertEqual(event.kind, "state")
+        XCTAssertEqual(event.workoutID, ctx.workout.id)
+        let log = try XCTUnwrap(vm.primitiveSetLogs.first)
+        XCTAssertEqual(event.setLogID, log.id)
+        let payload = try XCTUnwrap(event.dataJSON)
+        XCTAssertTrue(payload.contains(#""role":"slot""#))
+        XCTAssertTrue(payload.contains(#""log_id":"\#(log.id.wireID)""#))
+        XCTAssertTrue(payload.contains(#""workout_id":"\#(ctx.workout.id.wireID)""#))
+        XCTAssertTrue(payload.contains(#""slot_id":"\#(itemID.wireID)""#))
+        XCTAssertTrue(payload.contains(#""reps":5"#))
+        XCTAssertTrue(payload.contains(#""rir":2"#))
+        XCTAssertTrue(payload.contains(#""weight":100"#))
+        XCTAssertTrue(payload.contains(#""weight_unit":"lb""#))
+    }
+
+    func testSkipCurrentSetDoesNotEnqueuePrimitiveResultMetrics() async throws {
         let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_100))
-        let (ctx, itemID) = PushTestFixtures.context(sets: 2, reps: 5, loadKg: 100)
+        let (ctx, _) = PushTestFixtures.context(sets: 2, reps: 5, loadKg: 100)
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
@@ -102,21 +131,9 @@ final class ExecutionViewModelPushTests: XCTestCase {
 
         let set = try XCTUnwrap(vm.state.items.first?.sets.first)
         XCTAssertTrue(set.done)
-        XCTAssertTrue(set.skipped)
         XCTAssertEqual(vm.state.route, .rest)
-        let logs = await recorder.setLogs
-        let log = try XCTUnwrap(logs.first)
-        XCTAssertEqual(log.workoutItemID, itemID)
-        XCTAssertEqual(log.setIndex, 1)
-        XCTAssertTrue(log.skipped)
-        XCTAssertNil(log.reps)
-        XCTAssertNil(log.weight)
-        XCTAssertNil(log.weightUnit)
-        XCTAssertNil(log.rir)
-        XCTAssertNil(log.durationSec)
-        XCTAssertNil(log.distanceM)
-        XCTAssertEqual(log.side, .bilateral)
-        XCTAssertEqual(log.completedAt, fixed.now)
+        let logs = await recorder.primitiveSetLogs
+        XCTAssertTrue(logs.isEmpty, "skips are state transitions, not primitive result metrics")
     }
 
     func testCompleteAloneDoesNotPublishCompletion() async throws {
@@ -130,8 +147,8 @@ final class ExecutionViewModelPushTests: XCTestCase {
         let recorder = EnqueueRecorder()
         let kickRecorder = KickRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in
-                await recorder.appendSet(log)
+            onPrimitiveSetLogged: { [recorder] log in
+                await recorder.appendPrimitiveSet(log)
             },
             onWorkoutCompleted: { [recorder] record in
                 await recorder.appendCompletion(record)
@@ -242,7 +259,11 @@ final class ExecutionViewModelPushTests: XCTestCase {
         XCTAssertEqual(completion.workout.id, vm.state.workoutID)
         XCTAssertEqual(completion.workout.status, .completed)
         XCTAssertEqual(completion.workout.completedAt, fixed.now)
-        XCTAssertEqual(completion.setLogs.count, 0, "no set was logged on explicit End path")
+        XCTAssertEqual(
+            completion.primitiveSetLogs.count,
+            0,
+            "no primitive result was logged on explicit End path"
+        )
         let kicks = await kickRecorder.count
         XCTAssertEqual(kicks, 1, "one kick per terminal push, not two")
     }
@@ -328,6 +349,78 @@ final class ExecutionViewModelPushTests: XCTestCase {
         XCTAssertEqual(log.rounds, 7)
         XCTAssertEqual(log.durationSec, 300)
         XCTAssertEqual(log.completedAt, fixed.now)
+    }
+
+    func testSaveAndDoneTelemetryMatchesPrimitiveOutcomeReadback() async throws {
+        let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_123))
+        let ctx = PushTestFixtures.primitiveContext()
+        let recorder = EnqueueRecorder()
+        let telemetry = TelemetryRecorder()
+        let hooks = ExecutionPushHooks(
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
+            }
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks, telemetry: telemetry)
+
+        vm.recordPrimitiveSetResult(
+            blockIndex: 0,
+            setIndexInBlock: 0,
+            reps: 4,
+            rounds: 7,
+            durationSec: 300,
+            distanceM: 1_000,
+            weight: 45,
+            weightUnit: .kg
+        )
+        vm.complete()
+        vm.saveAndDone(note: "mixed primitive result", bodyweightKg: nil)
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let completions = await recorder.completions
+        let completion = try XCTUnwrap(completions.first)
+        XCTAssertEqual(completion.primitiveSetLogs.count, 1)
+        let log = try XCTUnwrap(completion.primitiveSetLogs.first)
+        XCTAssertEqual(log.role, .setResult)
+        XCTAssertEqual(log.workoutID, ctx.workout.id)
+        XCTAssertEqual(log.reps, 4)
+        XCTAssertEqual(log.rounds, 7)
+        XCTAssertEqual(log.durationSec, 300)
+        XCTAssertEqual(log.distanceM, 1_000)
+        XCTAssertEqual(log.weight, 45)
+        XCTAssertEqual(log.weightUnit, .kg)
+        XCTAssertEqual(log.completedAt, fixed.now)
+
+        let primitiveEvent = try XCTUnwrap(
+            telemetry.events.first { $0.name == "execution.primitive_result_recorded" }
+        )
+        XCTAssertEqual(primitiveEvent.workoutID, ctx.workout.id)
+        XCTAssertEqual(primitiveEvent.setLogID, log.id)
+        let primitivePayload = try XCTUnwrap(primitiveEvent.dataJSON)
+        XCTAssertTrue(primitivePayload.contains(#""role":"set_result""#))
+        XCTAssertTrue(primitivePayload.contains(#""rounds":7"#))
+        XCTAssertTrue(primitivePayload.contains(#""duration_sec":300"#))
+        XCTAssertTrue(primitivePayload.contains(#""distance_m":1000"#))
+        XCTAssertTrue(primitivePayload.contains(#""weight":45"#))
+        XCTAssertTrue(primitivePayload.contains(#""weight_unit":"kg""#))
+
+        let completionEvents = telemetry.events.filter {
+            $0.name.hasPrefix("execution.completion_")
+        }
+        XCTAssertEqual(
+            completionEvents.map(\.name),
+            [
+                "execution.completion_record_built",
+                "execution.completion_publish_finished",
+                "execution.completion_local_writer_completed",
+            ]
+        )
+        let builtPayload = try XCTUnwrap(completionEvents.first?.dataJSON)
+        XCTAssertTrue(builtPayload.contains(#""set_log_count":0"#))
+        XCTAssertTrue(builtPayload.contains(#""primitive_set_log_count":1"#))
+        XCTAssertTrue(builtPayload.contains(#""has_note":true"#))
+        XCTAssertTrue(builtPayload.contains(#""workout_id":"\#(ctx.workout.id.wireID)""#))
     }
 
     func testNilEnqueuersPreserveExistingBehavior() async throws {
@@ -548,15 +641,10 @@ actor EnqueueRecorder {
         let notes: String?
     }
 
-    private(set) var setLogs: [SetLog] = []
     private(set) var primitiveSetLogs: [PrimitiveSetLog] = []
     private(set) var statusUpdates: [StatusObservation] = []
     private(set) var completions: [WorkoutCompletionRecord] = []
     private(set) var userParameters: [UserParameter] = []
-
-    func appendSet(_ log: SetLog) {
-        setLogs.append(log)
-    }
 
     func appendPrimitiveSet(_ log: PrimitiveSetLog) {
         primitiveSetLogs.append(log)

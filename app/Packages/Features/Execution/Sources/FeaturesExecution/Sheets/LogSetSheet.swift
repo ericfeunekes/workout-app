@@ -199,6 +199,7 @@ struct LogSetSheet: View {
                         style: .primary,
                         action: { model.commit() }
                     )
+                    .accessibilityIdentifier("logset.commit")
                 }
             }
             .padding(DSSpacing.xl)

@@ -58,6 +58,56 @@ final class TabataAutoLogPushTests: XCTestCase {
         makeTabataContext(prescriptionJSON: #"{}"#)
     }
 
+    private func makePrimitiveCardioTabataContext() -> (WorkoutContext, UUID) {
+        let (ctx, itemID) = makeCardioTabataContext()
+        let blockID = ctx.blocks[0].id
+        let exerciseID = ctx.itemsByBlock[0][0].exerciseID
+        let primitive = PrimitiveWorkout(
+            id: ctx.workout.id,
+            name: ctx.workout.name,
+            blocks: [
+                PrimitiveBlock(id: blockID, sets: [
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: PrimitiveTiming(
+                            mode: .timeBounded,
+                            intervalSec: Int(TabataDriver.workSec),
+                            rounds: TabataDriver.rounds
+                        ),
+                        traversal: .sequential,
+                        repeatCount: TabataDriver.rounds,
+                        slots: [
+                            PrimitiveSlot(
+                                id: itemID,
+                                exerciseID: exerciseID,
+                                workTargets: [
+                                    PrimitiveWorkTarget(
+                                        metric: .duration,
+                                        valueForm: .single,
+                                        value: TabataDriver.workSec,
+                                        role: .completion
+                                    ),
+                                ]
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        let primitiveContext = WorkoutContext(
+            workout: ctx.workout,
+            primitiveWorkout: primitive,
+            primitiveExecutionPlan: try! ExecutionPlan.validated(workout: primitive),
+            blocks: ctx.blocks,
+            itemsByBlock: ctx.itemsByBlock,
+            exercises: ctx.exercises,
+            lastPerformed: ctx.lastPerformed,
+            alternativesByItem: ctx.alternativesByItem,
+            userParameters: ctx.userParameters
+        )
+        return (primitiveContext, itemID)
+    }
+
     /// A strength-shaped Tabata round is manually judged work. When the
     /// 20s window expires, the app should enter the 10s rest but leave
     /// the row unlogged instead of fabricating a completed 0-rep set.
@@ -67,7 +117,7 @@ final class TabataAutoLogPushTests: XCTestCase {
         let (ctx, itemID) = makeTabataContext()
         let recorder = AutoLogEnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.append(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitive(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
         vm.start()
@@ -84,7 +134,7 @@ final class TabataAutoLogPushTests: XCTestCase {
         // so the recorder sees the call only after that task runs.
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertTrue(logs.isEmpty, "missed strength Tabata work must not push a fake SetLog")
         let item = try XCTUnwrap(vm.state.items.first { $0.itemID == itemID })
         XCTAssertEqual(item.sets.first?.done, false)
@@ -99,7 +149,7 @@ final class TabataAutoLogPushTests: XCTestCase {
         let (ctx, itemID) = makeCardioTabataContext()
         let recorder = AutoLogEnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.append(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitive(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
         vm.start()
@@ -108,11 +158,11 @@ final class TabataAutoLogPushTests: XCTestCase {
         vm.tickBlockTimer()
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertEqual(logs.count, 1, "one cardio work-window expiry = one pushed SetLog")
         let log = try XCTUnwrap(logs.first)
-        XCTAssertEqual(log.workoutItemID, itemID)
-        XCTAssertEqual(log.setIndex, 1, "first round = setIndex 1")
+        XCTAssertEqual(log.slotID, itemID)
+        XCTAssertEqual(log.setIndex, 0, "primitive slot index is zero-based")
         XCTAssertEqual(log.durationSec, TabataDriver.workSec)
         XCTAssertNil(log.reps)
         XCTAssertNil(log.rir)
@@ -129,7 +179,7 @@ final class TabataAutoLogPushTests: XCTestCase {
         let (ctx, _) = makeTabataContext()
         let recorder = AutoLogEnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.append(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitive(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
         vm.start()
@@ -149,7 +199,7 @@ final class TabataAutoLogPushTests: XCTestCase {
         vm.tickBlockTimer()
         try await Task.sleep(nanoseconds: 20_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertTrue(logs.isEmpty,
             "repeated ticks inside the rest phase must not enqueue a fake strength log")
     }
@@ -194,11 +244,11 @@ final class TabataAutoLogPushTests: XCTestCase {
     func testCardioTabataAutoLogUpdatesLocalCacheOnSave() async throws {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let clock = TabataAutoLogClock(now: start)
-        let (ctx, itemID) = makeCardioTabataContext()
+        let (ctx, itemID) = makePrimitiveCardioTabataContext()
         let pushRecorder = AutoLogEnqueueRecorder()
         let cacheRecorder = AutoLogCompletionRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [pushRecorder] log in await pushRecorder.append(log) }
+            onPrimitiveSetLogged: { [pushRecorder] log in await pushRecorder.appendPrimitive(log) }
         )
         let vm = ExecutionViewModel(
             context: ctx,
@@ -240,7 +290,7 @@ final class TabataAutoLogPushTests: XCTestCase {
         let calls = await cacheRecorder.calls
         XCTAssertEqual(calls.count, 1, "saveAndDone invokes the cache writer once")
         let call = try XCTUnwrap(calls.first)
-        let cachedSetLogs = call.setLogs.filter { $0.workoutItemID == itemID }
+        let cachedSetLogs = call.primitiveSetLogs.filter { $0.slotID == itemID }
         XCTAssertEqual(
             cachedSetLogs.count, TabataDriver.rounds,
             "each of the 8 cardio Tabata rounds lands in the local cache"
@@ -252,7 +302,7 @@ final class TabataAutoLogPushTests: XCTestCase {
             XCTAssertNil(log.rir)
         }
         // And the push path saw the same 8 rows, deterministic id each.
-        let pushed = await pushRecorder.setLogs
+        let pushed = await pushRecorder.primitiveSetLogs
         XCTAssertEqual(pushed.count, TabataDriver.rounds)
         let pushedIDs = Set(pushed.map(\.id))
         let cachedIDs = Set(cachedSetLogs.map(\.id))
@@ -274,13 +324,13 @@ private final class TabataAutoLogClock: Clock, @unchecked Sendable {
     init(now: Date) { self.now = now }
 }
 
-/// Records SetLogs routed through the push hook. Actor-isolated so the
+/// Records primitive logs routed through the push hook. Actor-isolated so the
 /// main-actor `Task` closures can safely append without data-race warnings.
 private actor AutoLogEnqueueRecorder {
-    private(set) var setLogs: [SetLog] = []
+    private(set) var primitiveSetLogs: [PrimitiveSetLog] = []
 
-    func append(_ log: SetLog) {
-        setLogs.append(log)
+    func appendPrimitive(_ log: PrimitiveSetLog) {
+        primitiveSetLogs.append(log)
     }
 }
 
@@ -289,11 +339,11 @@ private actor AutoLogEnqueueRecorder {
 private actor AutoLogCompletionRecorder {
     struct Call {
         let workout: Workout
-        let setLogs: [SetLog]
+        let primitiveSetLogs: [PrimitiveSetLog]
     }
     private(set) var calls: [Call] = []
 
     func record(_ record: WorkoutCompletionRecord) {
-        calls.append(Call(workout: record.workout, setLogs: record.setLogs))
+        calls.append(Call(workout: record.workout, primitiveSetLogs: record.primitiveSetLogs))
     }
 }

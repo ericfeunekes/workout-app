@@ -5,7 +5,7 @@
 // `type_body_length` cap. These helpers are called from the public
 // `enqueue*` entry points and drop any existing queued row that shares
 // the logical identity of the payload about to be inserted — same
-// SetLog.id, same (workoutID, status) pair, or same UserParameter.id.
+// PrimitiveSetLog.id, same (workoutID, status) pair, or same UserParameter.id.
 //
 // Why dedup at enqueue time, not at flush time? Two back-to-back
 // enqueues without a flush in between would otherwise leave a stale and
@@ -29,17 +29,6 @@ import CoreDomain
 import WorkoutCoreFoundation
 
 extension PushQueue {
-
-    /// Drop every queued row whose payload is a single-log `.setLogs`
-    /// carrying `id`. Batch payloads (multi-log arrays) are NOT deduped —
-    /// a workout-completion batch is a distinct logical unit and
-    /// shouldn't shadow individual single-log enqueues. The batch payload
-    /// never gets a persisted `dedupKey` (see `Payload.dedupKey`) so the
-    /// scoped fetch below cannot accidentally catch it.
-    func dropExistingSetLog(id: UUID) async throws {
-        let key = "setLog:\(id.uuidString.lowercased())"
-        _ = try await store.removeMatchingDedupKey(key)
-    }
 
     func dropExistingPrimitiveSetLog(id: UUID) async throws {
         let key = "primitiveSetLog:\(id.uuidString.lowercased())"

@@ -1,7 +1,7 @@
 # Common commands for local development. Every target is a thin wrapper over
 # uv / swift so the source of truth stays in pyproject.toml and Package.swift.
 
-.PHONY: help setup dev test test-python test-swift test-core test-app-packages test-app-xcode \
+.PHONY: help setup dev test test-python test-swift test-core test-app-packages test-app-xcode test-execution-ui test-workout-type-ui test-healthkit-ui assert-healthkit-watch-sim-log \
         test-sync-real-http check-app pre-qa lint format check regen-schema xcodegen xcode-mcp-tools qa-ready qa-runtime-ready clean \
         db-backup db-restore deploy deploy-rollback server-status server-logs
 
@@ -16,7 +16,38 @@ _ENV_DB_PATH := $(shell awk -F= '/^WORKOUTDB_DB_PATH=/{print $$2}' .env 2>/dev/n
 LOCAL_DB_PATH ?= $(if $(WORKOUTDB_DB_PATH),$(WORKOUTDB_DB_PATH),$(if $(_ENV_DB_PATH),$(_ENV_DB_PATH),./workoutdb.sqlite))
 XCODE_MCP_PATH := /usr/local/bin:/opt/homebrew/bin:$(PATH)
 XCODEGEN_PATH := /usr/local/bin:/opt/homebrew/bin:$(PATH)
-IOS_SIMULATOR ?= iPhone 16 Pro
+IOS_SIMULATOR ?= iPhone 17
+XCODE_RESULT_ROOT ?= /tmp/workoutdb-xcresults-$(shell date +%Y%m%d%H%M%S)
+HEALTHKIT_PREFLIGHT_DERIVED_DATA ?= $(XCODE_RESULT_ROOT)/HealthKitEntitlementPreflight
+PROBE_LOG ?=
+
+WORKOUT_TYPE_UI_TESTS := \
+	testStraightSetsCanLaunchPerformOneActionAndEnd \
+	testSupersetCanLaunchPerformOneActionAndEnd \
+	testCircuitCanLaunchPerformOneActionAndEnd \
+	testContinuousCanLaunchPerformOneActionAndEnd \
+	testAccumulateCanLaunchPerformOneActionAndEnd \
+	testCustomCanLaunchPerformOneActionAndEnd \
+	testRestCanLaunchPerformOneActionAndEnd \
+	testEmomCanLaunchPerformOneActionAndEnd \
+	testAmrapCanLaunchPerformOneActionAndEnd \
+	testForTimeCanLaunchPerformOneActionAndEnd \
+	testIntervalsCanLaunchPerformOneActionAndEnd \
+	testTabataCanLaunchPerformOneActionAndEnd \
+	testTimerGauntletStrengthCanLaunchPerformOneActionAndEnd \
+	testTimerGauntletClockedCanLaunchPerformOneActionAndEnd \
+	testTimerGauntletEnduranceCanLaunchPerformOneActionAndEnd \
+	testPrimitiveCapstoneFastCanLaunchPerformOneActionAndEnd \
+	testPrimitiveChipperCanLaunchPerformOneActionAndEnd \
+	testPrimitiveIntervalsCanLaunchPerformOneActionAndEnd \
+	testPrimitiveCarryCircuitCanLaunchPerformOneActionAndEnd \
+	testPrimitiveStrengthDensityCanLaunchPerformOneActionAndEnd
+
+WORKOUT_TYPE_UI_DATA_TESTS := \
+	ExecutionWorkoutTypeMatrixDataTests
+
+EXECUTION_UI_TESTS := \
+	testEndConfirmationOpensFromRest
 
 help:  ## Show this help
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*?##/ {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -51,6 +82,7 @@ test-app-packages: test-core  ## Run every Swift package test target under app/P
 	cd app/Packages/HealthKitBridge && swift run HealthKitBridgeTests
 	cd app/Packages/Persistence && swift test
 	cd app/Packages/WatchBridge && swift test
+	cd app/Packages/WorkoutKitAdapter && swift test
 	cd app/Packages/Features/Today && swift test
 	cd app/Packages/Features/Execution && swift test
 	cd app/Packages/Features/FirstRun && swift test
@@ -62,12 +94,63 @@ test-app-packages: test-core  ## Run every Swift package test target under app/P
 test-app-xcode: xcodegen  ## Build app target and run the generated iOS app compile/link smoke on a simulator
 	xcodebuild test -project app/WorkoutDB.xcodeproj -scheme WorkoutDB \
 	  -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' \
-	  -configuration Debug CODE_SIGNING_ALLOWED=NO
+	  -configuration Debug CODE_SIGNING_ALLOWED=NO \
+	  -only-testing:WorkoutDBTests
+
+test-execution-ui: xcodegen  ## Run execution-focused XCUITests on a simulator
+	mkdir -p "$(XCODE_RESULT_ROOT)"
+	@for test_name in $(EXECUTION_UI_TESTS); do \
+	  xcrun simctl shutdown "$(IOS_SIMULATOR)" >/dev/null 2>&1 || true; \
+	  xcrun simctl boot "$(IOS_SIMULATOR)" >/dev/null 2>&1 || true; \
+	  xcrun simctl bootstatus "$(IOS_SIMULATOR)" -b; \
+	  xcrun simctl terminate "$(IOS_SIMULATOR)" com.ericfeunekes.WorkoutDB >/dev/null 2>&1 || true; \
+	  xcodebuild test -project app/WorkoutDB.xcodeproj -scheme WorkoutDB \
+	    -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' \
+	    -configuration Debug CODE_SIGNING_ALLOWED=NO \
+	    -resultBundlePath "$(XCODE_RESULT_ROOT)/$${test_name}.xcresult" \
+	    -only-testing:WorkoutDBUITests/ExecutionEndConfirmationUITests/$${test_name} || exit $$?; \
+	done
+
+test-workout-type-ui: xcodegen  ## Run every timing mode and composed primitive execution XCUITest
+	mkdir -p "$(XCODE_RESULT_ROOT)"
+	@for test_name in $(WORKOUT_TYPE_UI_DATA_TESTS); do \
+	  xcodebuild test -project app/WorkoutDB.xcodeproj -scheme WorkoutDB \
+	    -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' \
+	    -configuration Debug CODE_SIGNING_ALLOWED=NO \
+	    -resultBundlePath "$(XCODE_RESULT_ROOT)/$${test_name}.xcresult" \
+	    -only-testing:WorkoutDBUITests/$${test_name} || exit $$?; \
+	done
+	@for test_name in $(WORKOUT_TYPE_UI_TESTS); do \
+	  xcrun simctl boot "$(IOS_SIMULATOR)" >/dev/null 2>&1 || true; \
+	  xcrun simctl bootstatus "$(IOS_SIMULATOR)" -b; \
+	  xcrun simctl terminate "$(IOS_SIMULATOR)" com.ericfeunekes.WorkoutDB >/dev/null 2>&1 || true; \
+	  xcodebuild test -project app/WorkoutDB.xcodeproj -scheme WorkoutDB \
+	    -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' \
+	    -configuration Debug CODE_SIGNING_ALLOWED=NO \
+	    -resultBundlePath "$(XCODE_RESULT_ROOT)/$${test_name}.xcresult" \
+	    -only-testing:WorkoutDBUITests/ExecutionWorkoutTypeMatrixUITests/$${test_name} || exit $$?; \
+	done
+
+test-healthkit-ui: xcodegen  ## Run signed HealthKit archive/projection simulator proof
+	@mkdir -p "$(XCODE_RESULT_ROOT)"
+	xcodebuild build -project app/WorkoutDB.xcodeproj -scheme WorkoutDB \
+	  -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' \
+	  -configuration Debug \
+	  -derivedDataPath "$(HEALTHKIT_PREFLIGHT_DERIVED_DATA)"
+	@simulated_entitlements="$(HEALTHKIT_PREFLIGHT_DERIVED_DATA)/Build/Intermediates.noindex/WorkoutDB.build/Debug-iphonesimulator/WorkoutDB.build/WorkoutDB.app-Simulated.xcent"; if [ ! -f "$$simulated_entitlements" ]; then echo "HealthKit simulator preflight failed: Xcode did not emit WorkoutDB.app-Simulated.xcent."; exit 1; fi; if [ "$$(/usr/libexec/PlistBuddy -c 'Print :com.apple.developer.healthkit' "$$simulated_entitlements" 2>/dev/null)" != "true" ]; then echo "HealthKit simulator preflight failed: WorkoutDB.app-Simulated.xcent does not include com.apple.developer.healthkit."; exit 1; fi
+	xcodebuild test -project app/WorkoutDB.xcodeproj -scheme WorkoutDB \
+	  -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' \
+	  -configuration Debug \
+	  -only-testing:WorkoutDBUITests/HealthKitAuthorizationUITests
+
+assert-healthkit-watch-sim-log:  ## Assert XcodeBuildMCP watch HealthKit probe log. Usage: make assert-healthkit-watch-sim-log PROBE_LOG=/path/log.txt
+	@test -n "$(PROBE_LOG)" || { echo "usage: make assert-healthkit-watch-sim-log PROBE_LOG=/path/to/xcodebuildmcp-runtime.log"; exit 2; }
+	uv run python app/Integration/healthkit_watch_sim/assert_live_workout_probe.py "$(PROBE_LOG)"
 
 test-sync-real-http:  ## Run FastAPI + SQLite + Swift URLSession primitive sync probe
 	uv run pytest app/Integration/sync_real_http/test_sync_real_http.py
 
-check-app: test-app-packages test-app-xcode  ## Current local app pre-QA gate
+check-app: test-app-packages test-app-xcode test-execution-ui  ## Current local app pre-QA gate
 
 lint:  ## ruff check + import-linter
 	uv run ruff check .

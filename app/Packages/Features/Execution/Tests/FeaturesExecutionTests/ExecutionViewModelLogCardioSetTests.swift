@@ -211,7 +211,7 @@ final class ExecutionViewModelLogCardioSetTests: XCTestCase {
         let (ctx, itemID) = Self.intervalsContext(intervalCount: 10)
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
@@ -226,16 +226,13 @@ final class ExecutionViewModelLogCardioSetTests: XCTestCase {
         )
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertEqual(logs.count, 1)
         let log = try XCTUnwrap(logs.first)
-        XCTAssertEqual(log.workoutItemID, itemID)
-        XCTAssertEqual(log.setIndex, 1)
+        XCTAssertEqual(log.slotID, itemID)
+        XCTAssertEqual(log.setIndex, 0)
         XCTAssertEqual(log.durationSec, 96.5)
         XCTAssertEqual(log.distanceM, 400.0)
-        XCTAssertEqual(log.hrAvgBpm, 165)
-        XCTAssertEqual(log.cadenceAvgSpm, 184)
-        XCTAssertEqual(log.startedAt, startedAt)
         XCTAssertEqual(log.completedAt, fixed.now)
         // Cardio rows must NOT carry strength-shaped fields.
         XCTAssertNil(log.reps)
@@ -253,7 +250,7 @@ final class ExecutionViewModelLogCardioSetTests: XCTestCase {
         let (ctx, itemID) = Self.continuousContext()
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
@@ -267,14 +264,12 @@ final class ExecutionViewModelLogCardioSetTests: XCTestCase {
         )
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertEqual(logs.count, 1)
         let log = try XCTUnwrap(logs.first)
-        XCTAssertEqual(log.workoutItemID, itemID)
+        XCTAssertEqual(log.slotID, itemID)
         XCTAssertEqual(log.durationSec, 1805.0)
         XCTAssertEqual(log.distanceM, 5000.0)
-        XCTAssertEqual(log.hrAvgBpm, 142)
-        XCTAssertEqual(log.cadenceAvgSpm, 172)
         // Continuous has no rest — the VM should route to .complete
         // after the single log.
         XCTAssertEqual(vm.state.route, .complete)

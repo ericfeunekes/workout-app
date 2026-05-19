@@ -2,7 +2,7 @@
 title: Development workflow
 status: stable
 date: 2026-04-17
-last_reviewed: 2026-05-17
+last_reviewed: 2026-05-18
 purpose: "How work progresses in this repo — the lifecycle from request to deployed code, and the rules that hold across every cycle."
 covers:
   - AGENTS.md
@@ -74,7 +74,10 @@ Plans capture: what's changing, which files, what proves it works, what the clos
 
 Apply the plan. A few standing rules:
 
-- **Complete cutovers.** Schema change means server migration + SwiftData version bump + API + contract test + spec update, all in one commit. See `docs/MIGRATIONS.md` for the mechanics.
+- **Complete cutovers.** Schema change means server migration + SwiftData
+  version bump + API + contract test + spec update, all in one commit unless
+  the owning spec invokes the destructive cutover exception in
+  `docs/MIGRATIONS.md`. See `docs/MIGRATIONS.md` for the mechanics.
 - **No legacy paths, no feature flags.** Change fully or don't change at all.
 - **Resolve nitpicks in the moment.** Small inconsistency, off naming, dead code — fix now, don't accumulate a list.
 - **Trust the harness.** If a decision is in `AGENTS.md`, `docs/MIGRATIONS.md`, or a spec, it's load-bearing — don't re-debate it in conversation.
@@ -103,6 +106,10 @@ Before closeout:
   for visible iOS behavior, record and review video with `img ask --video` when
   visible UI changes, use tests/readbacks/logs for state and sync claims, and
   use real devices for Watch, HealthKit, or device-only claims.
+- When implementation, review, QA, or a testing audit reveals an unclear test
+  type or approach, decide whether `docs/TESTING.md` needs a reusable
+  proof-pattern update. Add general guidance for future work in that risk class;
+  do not document every one-off example.
 - For non-trivial changes: **always** dispatch an independent reviewer agent — self-review by the implementer catches nothing new
 
 The pre-push git hook enforces the Python checks automatically. Full app
@@ -216,7 +223,16 @@ Quality stays high via local hygiene, not via CI fan-out:
 - **Pre-commit hook**: ruff format + ruff check --fix on staged files.
 - **Pre-push hook**: import-linter + full `pytest` run.
 - **Manual current local gate**: `make pre-qa` for server/schema/app package
-  tests and app scheme compile/link smoke.
+  tests, app scheme compile/link smoke, and code-signing-free execution UI
+  smoke. Broader timing-mode UI matrix proof stays behind
+  `make test-workout-type-ui`, and route-change alert dismissal stays opt-in
+  until it has a deterministic route driver.
+- **Entitlement-dependent UI proof**: run named signed targets such as
+  `make test-healthkit-ui` separately when the claim depends on HealthKit
+  archive/projection behavior in the current simulator authorization state. Do
+  not claim fresh authorization-sheet UX unless the run resets permissions and
+  observes the sheet. Do not fold those into the code-signing-disabled smoke
+  gate.
 - **Manual QA readiness**: `make qa-ready` for XcodeBuildMCP availability
   before simulator/device QA.
 
@@ -280,7 +296,75 @@ No long-lived feature branches. No release branches. If a change is too big to s
 
 ## Versioning & releases
 
-No semver, no tags, no release notes. The home server and the app always run the same schema version (enforced by `docs/MIGRATIONS.md`'s version handshake). If a release artifact is ever needed (e.g., for backup or rollback), tag the commit with `deploy/YYYY-MM-DD` — cheap and manual.
+No semver, no long-lived release branches, and no public release-note process.
+The home server and the app always run the same schema version (enforced by
+`docs/MIGRATIONS.md`'s version handshake). If a release artifact is ever needed
+for backup or rollback, tag the commit with `deploy/YYYY-MM-DD` — cheap and
+manual.
+
+### Personal TestFlight release
+
+TestFlight is the app release channel for Eric's phone. A release is ready only
+when it is traceable from a verified commit through an uploaded App Store
+Connect build and an assigned internal TestFlight group. The release process
+must be repeatable from the CLI by an agent or by Eric without opening Xcode
+for routine archive/export/upload work.
+
+Release inputs:
+
+- a clean commit or explicitly named dirty-tree exception
+- current local gates for the change shape (`make pre-qa` before app-facing
+  QA, plus any entitlement/device proof the claim needs)
+- regenerated Xcode project from `app/project.yml`
+- monotonically increasing marketing/build version fields
+- App Store Connect app, bundle IDs, HealthKit capability, distribution
+  certificate, App Store provisioning profiles, and upload credentials
+
+Release outputs:
+
+- signed archive and exported `.ipa`
+- successful App Store Connect upload result
+- processed build with export-compliance answered
+- build assigned to the `Internal Testing` group
+- final readback that the group has the expected tester count and build count
+
+Signing material is a release secret, not source control. Agents must not store
+certificates, provisioning profiles, private keys, keychain passwords, or App
+Store Connect API private keys in the repo. The release path should use a
+dedicated release keychain or explicit temporary keychain rather than the login
+keychain. A temporary keychain is acceptable when it is created for one release,
+used non-interactively by `xcodebuild`, and deleted or left in `/tmp` only as a
+short-lived artifact. A durable local release keychain is acceptable if it has a
+narrow password policy, is not the login keychain, and its setup is documented
+outside the repo with secrets retrieved from 1Password.
+
+App Store Connect API keys should be scoped to the smallest role that can
+upload builds and manage TestFlight assignment. Admin-scoped keys are allowed
+only as a bootstrap escape hatch. After bootstrap, replace them with a
+least-privilege key and document how to rotate or revoke the key. The repo may
+document key IDs, profile names, bundle IDs, and expected file locations, but
+never the private key material.
+
+The release automation should fail closed:
+
+- refuse duplicate build numbers before archive
+- refuse missing or stale provisioning profile names before export
+- refuse upload if the `.ipa` was not produced by the current archive step
+- surface App Store Connect processing, compliance, and group-assignment state
+  as explicit readbacks instead of assuming upload equals availability
+- keep server/app schema-version mismatch as a stop condition, not a warning
+
+Current gaps:
+
+- `RELEASE-GAP-001`: The CLI release flow is still manual command knowledge,
+  not a checked-in target/runbook with preflight, archive, export, upload, and
+  App Store Connect readback.
+- `RELEASE-GAP-002`: Release secret handling is not hardened. The bootstrap run
+  used a temporary keychain and an Admin-scoped App Store Connect API key; the
+  durable requirement is a documented dedicated release keychain posture plus
+  least-privilege upload credentials and rotation guidance.
+- `RELEASE-GAP-003`: Version/build-number management is manual, so duplicate
+  TestFlight build rejection is still easy.
 
 ## After context loss
 

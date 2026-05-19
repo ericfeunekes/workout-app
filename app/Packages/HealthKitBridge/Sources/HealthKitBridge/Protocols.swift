@@ -33,6 +33,8 @@ public enum HealthKitError: Error, Equatable, Sendable {
     case notAuthorized
     /// HealthKit itself failed the underlying query. Message is for logs.
     case queryFailed(String)
+    /// A consumer asked for a descriptor this provider cannot map or query.
+    case unsupportedType(String)
     /// The typed contract exists, but this provider path is not implemented yet.
     case notImplemented(String)
 }
@@ -91,4 +93,12 @@ public protocol HealthBatchDataProvider: Sendable {
 public protocol HealthLiveDataProvider: Sendable {
     func stream(for requests: [HealthDataRequest]) async throws
         -> AsyncThrowingStream<HealthDataRecord, Error>
+}
+
+/// App-level live metric source. This is the replayable seam used by feature
+/// and watch metric consumers; concrete adapters may be backed by HealthKit
+/// live data, watchOS simulator samples, or deterministic fixtures.
+public protocol WorkoutMetricSource: Sendable {
+    func start() async throws -> AsyncStream<WorkoutMetricEvent>
+    func stop() async
 }

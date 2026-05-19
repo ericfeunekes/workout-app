@@ -153,6 +153,65 @@ final class CompleteViewLedgerSwapTests: XCTestCase {
         XCTAssertEqual(entries.first?.summary, "AMRAP result: 3 rounds + 4 reps")
     }
 
+    func testBlockResultsAMRAPFallbackCountsLoggedStationsWithoutSentinelTotal() {
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let context = makeContext(
+            itemID: itemID,
+            plannedExerciseID: exerciseID,
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Burpee")],
+            timingMode: .amrap,
+            timingConfigJSON: #"{"time_cap_sec":600}"#,
+            blockName: "Ten minute AMRAP"
+        )
+        let itemLog = SessionState.ItemLog(
+            itemID: itemID,
+            sets: [
+                makeSet(index: 1, load: nil, unit: .kg, reps: 10, rir: nil),
+                makeSet(index: 2, load: nil, unit: .kg, reps: 10, rir: nil, done: false),
+            ]
+        )
+
+        let entries = CompleteView.blockResultEntries(
+            context: context,
+            items: [itemLog],
+            note: ""
+        )
+
+        XCTAssertEqual(entries.first?.summary, "1 stations logged")
+        XCTAssertFalse(
+            entries.first?.summary.contains("2") ?? true,
+            "AMRAP fallback should not render a denominator when the metcon note is absent"
+        )
+    }
+
+    func testBlockResultsDoNotRenderEMOMSentinelRowsAsCompletionTotal() {
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let context = makeContext(
+            itemID: itemID,
+            plannedExerciseID: exerciseID,
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Deadlift")],
+            timingMode: .emom,
+            timingConfigJSON: #"{"interval_sec":60,"total_minutes":12}"#,
+            blockName: "Strength Density EMOM"
+        )
+        let itemLog = SessionState.ItemLog(
+            itemID: itemID,
+            sets: (1...300).map { index in
+                makeSet(index: index, load: 140, unit: .kg, reps: 3, rir: nil, done: false)
+            }
+        )
+
+        let entries = CompleteView.blockResultEntries(context: context, items: [itemLog], note: "")
+
+        XCTAssertEqual(entries.first?.summary, "0 sets logged")
+        XCTAssertFalse(
+            entries.first?.summary.contains("300") ?? true,
+            "EMOM completion summary must not render internal sentinel row counts"
+        )
+    }
+
     func testBlockResultsPreferPrimitiveAggregateSetResults() {
         let exerciseID = UUID()
         let itemID = UUID()
@@ -288,14 +347,15 @@ final class CompleteViewLedgerSwapTests: XCTestCase {
         load: Double?,
         unit: WeightUnit,
         reps: Int,
-        rir: Int?
+        rir: Int?,
+        done: Bool = true
     ) -> SetPlan {
         SetPlan(
             setIndex: index,
             loadKg: load,
             unit: unit,
             reps: reps,
-            done: true,
+            done: done,
             adjust: nil,
             rir: rir
         )

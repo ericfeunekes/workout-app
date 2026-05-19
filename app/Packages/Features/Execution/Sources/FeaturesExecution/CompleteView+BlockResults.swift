@@ -99,7 +99,8 @@ extension CompleteView {
             return amrapResult(note: note) ?? loggedCountSummary(
                 blockItems: blockItems,
                 itemLogs: itemLogs,
-                noun: "stations"
+                noun: "stations",
+                includeTotal: false
             )
         case .forTime, .continuous, .intervals, .tabata, .custom:
             return cardioOrCountSummary(blockItems: blockItems, itemLogs: itemLogs)
@@ -107,7 +108,14 @@ extension CompleteView {
             return accumulateSummary(block: block, blockItems: blockItems, itemLogs: itemLogs)
         case .rest:
             return "completed rest"
-        case .straightSets, .superset, .circuit, .emom:
+        case .emom:
+            return loggedCountSummary(
+                blockItems: blockItems,
+                itemLogs: itemLogs,
+                noun: "sets",
+                includeTotal: false
+            )
+        case .straightSets, .superset, .circuit:
             return loggedCountSummary(blockItems: blockItems, itemLogs: itemLogs, noun: "sets")
         }
     }
@@ -126,12 +134,14 @@ extension CompleteView {
     private static func loggedCountSummary(
         blockItems: [WorkoutItem],
         itemLogs: [SessionState.ItemLog],
-        noun: String
+        noun: String,
+        includeTotal: Bool = true
     ) -> String {
         let rows = rowsForBlock(blockItems: blockItems, itemLogs: itemLogs)
         let total = rows.count
         let done = rows.filter(\.done).count
         guard total > 0 else { return "completed" }
+        guard includeTotal else { return "\(done) \(noun) logged" }
         return "\(done) / \(total) \(noun) completed"
     }
 

@@ -108,8 +108,13 @@ implicit side effect of this foreground lifecycle work.
 A 401 from pull or push is auth rejection, not offline. The app-sync owner must
 surface one recovery path:
 
-- Pull 401 clears or invalidates the saved connection and routes back to
-  FirstRun / connection entry.
+- Pull 401 pauses normal sync and routes back to FirstRun / connection entry
+  with the current server URL/token prefilled. The saved connection, local
+  workout cache, live session snapshot, `last_performed` display cache, push
+  queue, and HealthKit archive projection stay intact until the user explicitly
+  submits a replacement connection or chooses a destructive reset path. The
+  pause is durable across relaunch through an auth-recovery marker, so launch
+  does not immediately retry the same rejected token.
 - Push 401 stops push flushing and leaves queued writes durable. The next
   recovery action must route through the same connection entry path rather than
   silently retrying forever.
@@ -306,7 +311,20 @@ Subsequent (non-first) syncs are not all-or-nothing — an interrupted pull leav
 
 ### Changing servers
 
-`Settings → Change server` is destructive. Changing the server URL is equivalent to switching to a different user's data, so it wipes the local cache before the next sync. A confirmation dialog ("CHANGING SERVERS WIPES LOCAL DATA") guards the action.
+`Settings → Change server` is destructive. Changing the server URL is equivalent
+to switching to a different user's data, so it wipes server-owned local state:
+the authoritative workout cache, live session snapshot, `last_performed`
+display cache, queued outbound pushes, and `lastSyncAt`. The token is cleared
+only after those destructive clears succeed, so a partial failure cannot leave
+the app stranded without the prior connection. HealthKit archive projection data
+is not server-owned and is preserved. A confirmation dialog ("CHANGING SERVERS
+WIPES LOCAL DATA") guards the action.
+
+`Settings → Reset local data` keeps the current connection but clears the same
+server-owned local state: workout cache, live session snapshot,
+`last_performed`, queued outbound pushes, and `lastSyncAt`. HealthKit archive
+projection data is preserved. If any destructive clear fails, the app does not
+advance routes or pretend the reset completed.
 
 ---
 
@@ -456,8 +474,9 @@ The Watch has two possible execution paths:
 
 - **WorkoutKit handoff:** Apple's Workout app owns the live Watch workout.
   Setmark does not own HR slots, haptics, start/end-set actions, or event replay
-  in this lane. The iPhone exports eligible workouts and imports only proven
-  completion/result facts.
+  in this lane. The iPhone-side work is limited to planned-workout export,
+  scheduling, or opening through WorkoutKit. HealthKit completion/result
+  readback is a separate future lane.
 - **Custom Setmark Watch app:** the later watch-primary path owns HR, haptics,
   start/end-set, custom metric views, and offline event replay.
 

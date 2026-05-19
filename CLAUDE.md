@@ -151,9 +151,16 @@ make test-core           # fast Core + Sync package subset
 make test-app-packages   # every wired app package test target
 make xcodegen            # regenerate app/WorkoutDB.xcodeproj from project.yml
 make test-app-xcode      # generated app compile/link smoke on simulator
+make test-execution-ui   # execution XCUITest proof; code-signing-free
+make test-healthkit-ui   # signed HealthKit authorization/projection UI proof
 make pre-qa              # current local pre-QA gate before docs/QA.md
 make qa-ready            # verify XcodeBuildMCP before simulator/device QA
 ```
+
+For TestFlight/App Store distribution from an agent session, avoid login-keychain
+password prompts by importing the distribution certificate into a dedicated
+temporary keychain and passing it to Xcode with
+`OTHER_CODE_SIGN_FLAGS = --keychain <path>`.
 
 **CI** (`.github/workflows/ci.yml`): Linux only, server tests + ruff on push and PR. iOS build/test deferred until the app exists and we revisit public-vs-private repo. See `docs/WORKFLOW.md` § "CI scope" for the budget math.
 
@@ -180,12 +187,13 @@ This repo has one user (Eric) and one prod deployment (also Eric). There is no "
 - **Resolve nitpicks at the time.** Naming is off → rename it now. Tiny inconsistency → fix it now. We do not carry a "small stuff to clean up later" list. Technical debt accumulated here will outlive the short-term pain of resolving it immediately.
 - **No legacy fallback code.** v1 (Python CLI, YAML, Google Calendar, intents, muscle/movement/equipment tables) is gone. Don't resurrect any of it. If you see a code path "in case the old thing is still around," delete it.
 - **Local data preservation is explicit per cutover.** Workout logs on Eric's phone are normally the only data worth preserving through schema changes; everything else can be re-pushed by Claude. For the primitives cutover, current local/server workouts are QA data and may be reset instead of migrated. Do not assume preservation or deletion silently — the owning spec must say which applies.
-- **Schema changes are always cutovers.** Server migration + SwiftData version bump + API update + contract test + spec update all ship together. App and server schema versions are always identical in the running system — see `docs/MIGRATIONS.md` for the flow.
+- **Pre-production server-state cutovers prefer recreation.** While this app is still QA/pre-production, do not keep legacy preservation paths for local server identity changes unless Eric explicitly requests them. Prefer destructive local recreation: clear coupled local cache/session/queue/cursor state and rebuild from the selected server.
+- **Schema changes are always cutovers.** Server migration + SwiftData version bump + API update + contract test + spec update all ship together unless the owning spec invokes the destructive cutover exception in `docs/MIGRATIONS.md`. App and server schema versions are always identical in the running system — see `docs/MIGRATIONS.md` for the flow.
 
 ### Migrations
 
 - **Migrations are append-only and idempotent.** `server/db/migrations/NNN_*.sql` — never edit a merged migration.
-- **Every schema change is a coordinated cutover** across server migration, SwiftData versioned schema, API models, contract test, and the spec. See `docs/MIGRATIONS.md` for the detailed flow.
+- **Every schema change is a coordinated cutover** across server migration, SwiftData versioned schema, API models, contract test, and the spec unless the owning spec invokes the destructive cutover exception. See `docs/MIGRATIONS.md` for the detailed flow.
 - **Local set_logs need an explicit migration decision.** SwiftData migrations use lightweight stages where possible. When a stage can't be lightweight, either export → transform → re-import is explicit and documented, or the owning cutover spec explicitly permits resetting QA data.
 
 ### Architectural enforcement

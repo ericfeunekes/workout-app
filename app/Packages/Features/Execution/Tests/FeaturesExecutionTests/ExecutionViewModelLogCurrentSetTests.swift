@@ -2,17 +2,17 @@
 //
 // Regression coverage for the R2.12 cardio-dispatch bug: pre-R2.12,
 // `ActiveView`'s primary log button opened `LogSetSheet` for every
-// block, so cardio sessions enqueued strength-shaped SetLog rows
+// block, so cardio sessions enqueued strength-shaped result rows
 // (reps=0, durationSec=nil). The fix adds a VM-level `logCurrentSet`
 // that inspects the current block's timing mode and routes to either
 // `logSet(reps:rir:)` (strength) or `logCardioSet(...)` (cardio).
 //
 // These tests pin the routing contract:
-//   * strength blocks → `logSet` path: the pushed SetLog carries reps
+//   * strength blocks → `logSet` path: the primitive log carries reps
 //     and (if authored) weight.
-//   * intervals blocks → `logCardioSet` path: SetLog carries
+//   * intervals blocks → `logCardioSet` path: the primitive log carries
 //     durationSec derived from the timing config's work shape.
-//   * continuous blocks → `logCardioSet` path: SetLog carries
+//   * continuous blocks → `logCardioSet` path: the primitive log carries
 //     durationSec derived from elapsed `clock.now - workStartedAt`.
 //   * ActiveView no longer calls `logSet(reps:rir:)` from its primary
 //     button action — the only `logSet(reps:rir:)` reference left is
@@ -226,7 +226,7 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         let (ctx, itemID) = Self.strengthContext()
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
@@ -239,17 +239,16 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         vm.logCurrentSet(reps: 5, rir: 2)
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertEqual(logs.count, 1)
         let log = try XCTUnwrap(logs.first)
-        XCTAssertEqual(log.workoutItemID, itemID)
+        XCTAssertEqual(log.slotID, itemID)
         XCTAssertEqual(log.reps, 5, "strength path carries reps")
         XCTAssertEqual(log.rir, 2)
         XCTAssertEqual(log.weight, 100)
         XCTAssertEqual(log.weightUnit, .kg)
         XCTAssertNil(log.durationSec, "strength path must NOT populate durationSec")
         XCTAssertNil(log.distanceM)
-        XCTAssertNil(log.hrAvgBpm)
     }
 
     func testLogCurrentSetRoutesToLogCardioSetForIntervals() async throws {
@@ -269,7 +268,7 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         let (ctx, itemID) = Self.intervalsContext()
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
         vm.start()
@@ -283,11 +282,11 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         vm.logCurrentSet()
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertEqual(logs.count, 1, "cardio path must push exactly one SetLog")
         let log = try XCTUnwrap(logs.first)
-        XCTAssertEqual(log.workoutItemID, itemID)
-        XCTAssertEqual(log.setIndex, 1)
+        XCTAssertEqual(log.slotID, itemID)
+        XCTAssertEqual(log.setIndex, 0)
         XCTAssertEqual(
             try XCTUnwrap(log.durationSec),
             83,
@@ -312,7 +311,7 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         let (ctx, itemID) = Self.continuousContext()
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
         vm.start()
@@ -325,17 +324,16 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         vm.logCurrentSet()
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertEqual(logs.count, 1)
         let log = try XCTUnwrap(logs.first)
-        XCTAssertEqual(log.workoutItemID, itemID)
+        XCTAssertEqual(log.slotID, itemID)
         XCTAssertEqual(
             try XCTUnwrap(log.durationSec),
             1805,
             accuracy: 0.001,
             "continuous duration = elapsed since workStartedAt"
         )
-        XCTAssertEqual(log.startedAt, t0)
         XCTAssertNil(log.distanceM, "no authored distance → nil")
         XCTAssertNil(log.reps)
         XCTAssertNil(log.weight)
@@ -355,7 +353,7 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         )
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
         vm.start()
@@ -370,9 +368,9 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         vm.logCurrentSet()
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         let log = try XCTUnwrap(logs.first)
-        XCTAssertEqual(log.workoutItemID, itemID)
+        XCTAssertEqual(log.slotID, itemID)
         XCTAssertNil(log.reps)
         XCTAssertEqual(log.weight, 53)
         XCTAssertEqual(log.weightUnit, .lb)
@@ -391,7 +389,7 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         )
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
         vm.start()
@@ -406,7 +404,7 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         vm.logCurrentSet()
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         let log = try XCTUnwrap(logs.first)
         XCTAssertNil(log.reps)
         XCTAssertEqual(log.weight, 40)
@@ -426,7 +424,7 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         )
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
         vm.start()
@@ -443,9 +441,9 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
         vm.logCurrentSet()
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         let log = try XCTUnwrap(logs.first)
-        XCTAssertEqual(log.workoutItemID, itemID)
+        XCTAssertEqual(log.slotID, itemID)
         XCTAssertNil(log.reps)
         XCTAssertEqual(log.weight, 20)
         XCTAssertEqual(log.weightUnit, .lb)

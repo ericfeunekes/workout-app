@@ -988,19 +988,20 @@ public enum ExecutionPreviewSeed {
         var slots: [PrimitiveSlot] = []
 
         for (position, item) in items.enumerated() {
+            let itemID = UUID()
             let exerciseID = exerciseIDByName[item.name] ?? UUID()
             exerciseIDByName[item.name] = exerciseID
             exercises[exerciseID] = Exercise(id: exerciseID, name: item.name)
             lastPerformed[exerciseID] = "recent: target hit"
             workoutItems.append(WorkoutItem(
-                id: UUID(),
+                id: itemID,
                 blockID: blockID,
                 position: position,
                 exerciseID: exerciseID,
                 prescriptionJSON: item.prescriptionJSON
             ))
             slots.append(PrimitiveSlot(
-                id: UUID(),
+                id: itemID,
                 exerciseID: exerciseID,
                 workTargets: slotTargets[position],
                 load: slotLoads[position]

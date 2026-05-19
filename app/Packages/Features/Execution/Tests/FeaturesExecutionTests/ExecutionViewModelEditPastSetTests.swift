@@ -4,11 +4,11 @@
 // local-only) and bug-017 (no telemetry on edit). The invariants under
 // test:
 //
-//   - `editPastSet` enqueues a `SetLog` through `push.onSetLogged`.
+//   - `editPastSet` enqueues a `PrimitiveSetLog` through the primitive push hook.
 //   - The pushed UUID is DETERMINISTIC from `(itemID, setIndex)` — the
 //     original log and every subsequent edit push share the same id so
 //     the server upserts in place rather than inserting a second row.
-//   - The pushed payload carries the POST-edit `reps` / `weight` / `rir`
+//   - The primitive payload carries the POST-edit `reps` / `weight` / `rir`
 //     (so the edit isn't silently reverted on the wire).
 //   - `execution.past_set_edited` telemetry fires once per edit, tagged
 //     with workoutID + setLogID and a payload carrying `itemID` +
@@ -37,7 +37,7 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         let (ctx, itemID) = Fixtures.context()
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
@@ -45,19 +45,19 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         vm.logSet(reps: 5, rir: 2)
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let originalUUID = await recorder.setLogs.first?.id
+        let originalUUID = await recorder.primitiveSetLogs.first?.id
         XCTAssertNotNil(originalUUID)
 
         vm.editPastSet(itemID: itemID, setIndex: 1, loadKg: 95, reps: nil, rir: nil)
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertEqual(logs.count, 2, "edit must enqueue a second push")
         let second = try XCTUnwrap(logs.last)
         XCTAssertEqual(second.id, originalUUID,
                        "edit UUID must match original so server upserts in place")
-        XCTAssertEqual(second.setIndex, 1)
-        XCTAssertEqual(second.workoutItemID, itemID)
+        XCTAssertEqual(second.setIndex, 0)
+        XCTAssertEqual(second.slotID, itemID)
     }
 
     func testEditPastSetEnqueuesWithUpdatedValues() async throws {
@@ -68,7 +68,7 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         let (ctx, itemID) = Fixtures.context()
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
@@ -79,7 +79,7 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         vm.editPastSet(itemID: itemID, setIndex: 1, loadKg: nil, reps: 4, rir: 1)
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertEqual(logs.count, 2)
         let edited = try XCTUnwrap(logs.last)
         XCTAssertEqual(edited.reps, 4)
@@ -169,7 +169,7 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         let (ctx, itemID) = Fixtures.context()
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: clock, push: hooks)
         vm.start()
@@ -185,7 +185,7 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         vm.editPastSet(itemID: itemID, setIndex: 1, loadKg: nil, reps: 4, rir: nil)
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertEqual(logs.count, 2, "edit must enqueue a second push")
         let original = try XCTUnwrap(logs.first)
         let edited = try XCTUnwrap(logs.last)
@@ -205,7 +205,7 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         let (ctx, itemID) = Fixtures.context()
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
-            onSetLogged: { [recorder] log in await recorder.appendSet(log) }
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
         )
         let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
         vm.start()
@@ -217,7 +217,7 @@ final class ExecutionViewModelEditPastSetTests: XCTestCase {
         vm.editPastSet(itemID: itemID, setIndex: 1, loadKg: nil, reps: 3, rir: nil)
         try await Task.sleep(nanoseconds: 50_000_000)
 
-        let logs = await recorder.setLogs
+        let logs = await recorder.primitiveSetLogs
         XCTAssertEqual(logs.count, 3, "1 original log + 2 edits = 3 pushes")
         let ids = Set(logs.map(\.id))
         XCTAssertEqual(ids.count, 1, "all three pushes share one UUID")

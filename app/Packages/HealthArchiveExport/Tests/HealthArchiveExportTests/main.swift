@@ -450,3 +450,37 @@ runAsyncCase("next attempt is scoped by server namespace") {
     try expectEqual(serverABatch.queries.count, 1)
     try expectEqual(serverBBatch.queries.count, 1)
 }
+
+runAsyncCase("next attempt is scoped by request set on the same server") {
+    let store = try PersistenceFactory.makeInMemory()
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 200, body: uploadResponse(cursor: "cursor-all"))),
+        .response(HTTPResponse(status: 200, body: uploadResponse(cursor: "cursor-subset"))),
+    ])
+    let batch = FakeHealthBatchDataProvider(result: HealthBatchResult(
+        records: [],
+        nextCursor: HealthBatchCursor("cursor")
+    ))
+    let coordinator = makeCoordinator(transport: transport, batch: batch, store: store)
+    let runtime = HealthArchiveExportRuntime(coordinator: coordinator)
+    let serverURL = URL(string: "http://localhost:8000")!
+    await store.healthArchiveExportStateStore.setAutomaticEnabled(true)
+
+    _ = try await expect(
+        runtime.exportIfDue(serverURL: serverURL),
+        "first request set should be due"
+    )
+    let suppressed = try await runtime.exportIfDue(serverURL: serverURL)
+    try expect(suppressed == nil, "unchanged request set should wait for next attempt")
+
+    await store.healthArchiveExportStateStore.setScope(.explicitDescriptorIDs([
+        HealthDataTypeRegistry.heartRate.id,
+    ]))
+    let changedScope = try await expect(
+        runtime.exportIfDue(serverURL: serverURL),
+        "same-server scope change should be due"
+    )
+
+    try expectEqual(changedScope.trigger, .foregroundCatchUp)
+    try expectEqual(batch.queries.count, 2)
+}

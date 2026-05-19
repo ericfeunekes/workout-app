@@ -35,7 +35,9 @@ On launch (or after FirstRun succeeds), the shell checks `TokenStore.loadConnect
 - `BootstrapLoadingView` is inert — no `.task` modifier — another layer of the double-bootstrap fix (`WorkoutDBApp.swift:155-159`, `375-386`)
 - `EmptyStateView.onRetry` clears `didStartBootstrap` before re-entering (`WorkoutDBApp.swift:165-174`)
 - Keychain read failure on launch → treat as no connection (`WorkoutDBApp.swift:237-240`)
-- `PersistenceFactory.makeDefault` throw → fall back to in-memory; if that also throws → `fatalError` (`WorkoutDBApp.swift:122-139`)
+- `PersistenceFactory.makeDefault` throw → production hard-fails with
+  `fatalError`; DEBUG launch fast-paths still use explicit in-memory stores
+  (`WorkoutDBApp.swift:122-139`)
 - `executionVMHolder` captured STRONGLY in the session-mutation binding (`WorkoutDBApp.swift:272-284`, `359-368`) — fixed this session; weak capture silently broke "start workout"
 - `pull.pull` feeds `since: lastSyncAt` on subsequent launches (`AppBootstrap.swift:135-136`) — server returns only changed rows
 

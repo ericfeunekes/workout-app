@@ -13,18 +13,18 @@ extension SettingsView {
     @ViewBuilder
     func rowView(_ row: SettingsRow) -> some View {
         switch row {
-        case .info(_, let label, let value):
-            infoRow(label: label, value: value)
-        case .picker(_, let label, let options, let selected, let onPick):
-            pickerRow(label: label, options: options, selected: selected, onPick: onPick)
-        case .toggle(_, let label, let isOn, let onToggle):
-            toggleRow(label: label, isOn: isOn, onToggle: onToggle)
-        case .action(_, let label, let destructive, let onTap):
-            actionRow(label: label, destructive: destructive, onTap: onTap)
+        case .info(let id, let label, let value):
+            infoRow(id: id, label: label, value: value)
+        case .picker(let id, let label, let options, let selected, let onPick):
+            pickerRow(id: id, label: label, options: options, selected: selected, onPick: onPick)
+        case .toggle(let id, let label, let isOn, let onToggle):
+            toggleRow(id: id, label: label, isOn: isOn, onToggle: onToggle)
+        case .action(let id, let label, let destructive, let onTap):
+            actionRow(id: id, label: label, destructive: destructive, onTap: onTap)
         }
     }
 
-    func infoRow(label: String, value: String) -> some View {
+    func infoRow(id: String, label: String, value: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: DSSpacing.md) {
             Text(label)
                 .font(DSTypography.body)
@@ -34,12 +34,15 @@ extension SettingsView {
                 .font(DSTypography.mono)
                 .monospacedDigit()
                 .foregroundStyle(DSColors.foregroundMuted)
+                .accessibilityIdentifier(id)
         }
         .padding(.vertical, DSSpacing.lg)
         .padding(.horizontal, DSSpacing.xl)
+        .accessibilityElement(children: .contain)
     }
 
     func pickerRow(
+        id: String,
         label: String,
         options: [String],
         selected: String,
@@ -65,12 +68,15 @@ extension SettingsView {
             }
             .pickerStyle(.segmented)
             .fixedSize()
+            .accessibilityIdentifier(id)
         }
         .padding(.vertical, DSSpacing.md)
         .padding(.horizontal, DSSpacing.xl)
+        .accessibilityIdentifier("settings.row.\(id)")
     }
 
     func actionRow(
+        id: String,
         label: String,
         destructive: Bool,
         onTap: @escaping @Sendable () -> Void
@@ -87,9 +93,11 @@ extension SettingsView {
             .contentShape(Rectangle())
         })
         .buttonStyle(.plain)
+        .accessibilityIdentifier(id)
     }
 
     func toggleRow(
+        id: String,
         label: String,
         isOn: Bool,
         onToggle: @escaping @Sendable (Bool) -> Void
@@ -108,5 +116,6 @@ extension SettingsView {
         .toggleStyle(.switch)
         .padding(.vertical, DSSpacing.md)
         .padding(.horizontal, DSSpacing.xl)
+        .accessibilityIdentifier(id)
     }
 }

@@ -224,11 +224,19 @@ public struct HealthArchiveExportCoordinator: Sendable {
     }
 
     public func shouldRunAutomaticExport(serverURL: URL) async -> Bool {
-        let snapshot = await stateStore.loadSnapshot(
-            serverNamespace: normalizedServerNamespace(serverURL)
-        )
+        let serverNamespace = normalizedServerNamespace(serverURL)
+        let snapshot = await stateStore.loadSnapshot(serverNamespace: serverNamespace)
         guard snapshot.automaticEnabled else { return false }
         if snapshot.status == .failed { return true }
+        guard let expectedRequestSetKey = try? requestSetKey(
+            serverNamespace: serverNamespace,
+            scope: snapshot.scope
+        ) else {
+            return true
+        }
+        if snapshot.requestSetKey != expectedRequestSetKey {
+            return true
+        }
         guard let nextAttemptAt = snapshot.nextAttemptAt else { return true }
         return nextAttemptAt <= now()
     }
@@ -280,6 +288,16 @@ public struct HealthArchiveExportCoordinator: Sendable {
         case .explicitDescriptorIDs:
             return "explicit"
         }
+    }
+
+    private func requestSetKey(
+        serverNamespace: String,
+        scope: HealthArchiveExportScope
+    ) throws -> String {
+        let descriptors = try effectiveDescriptors(for: scope)
+        let fingerprint = descriptorFingerprint(descriptors)
+        let scopeSlug = scopeSlug(scope)
+        return "\(serverNamespace)|\(scopeSlug)|\(fingerprint)"
     }
 
     private func nextAttempt(after date: Date) -> Date {

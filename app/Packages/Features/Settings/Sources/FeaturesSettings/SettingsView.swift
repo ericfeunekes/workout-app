@@ -67,6 +67,9 @@ public struct SettingsView: View {
                 Text(confirm.message)
             }
         )
+        .task {
+            await viewModel.refreshAsync()
+        }
     }
 
     // MARK: - Section + row rendering

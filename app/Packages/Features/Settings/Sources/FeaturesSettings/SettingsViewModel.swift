@@ -83,11 +83,14 @@ public final class SettingsViewModel {
     let autoregStore: any AutoregDefaultsStore
     let unitsStore: any UnitsPreferenceStore
     let syncMetadata: any SyncMetadataStore
+    let healthArchiveExportState: any HealthArchiveExportStateStore
+    let healthArchiveDescriptorOptions: [HealthArchiveDescriptorOption]
     let buildInfo: BuildInfo
     let pairedWatchProvider: @MainActor () -> String?
     let onSyncNow: @Sendable () async -> Void
     let onResetCache: @Sendable () async -> Void
     let onChangeServer: @Sendable () async -> Void
+    let onHealthArchiveExportNow: @Sendable () async -> Void
     let now: @MainActor () -> Date
 
     // MARK: - Cached derived state (rebuilt on mutation)
@@ -100,6 +103,7 @@ public final class SettingsViewModel {
     /// are async), so first paint before `.task` fires shows the
     /// placeholder.
     var cachedLastSyncAt: Date?
+    var cachedHealthArchiveExport: HealthArchiveExportSnapshot
 
     // MARK: - Init
 
@@ -118,26 +122,34 @@ public final class SettingsViewModel {
         autoregStore: any AutoregDefaultsStore = UserDefaultsAutoregStore(),
         unitsStore: any UnitsPreferenceStore = UserDefaultsUnitsStore(),
         syncMetadata: any SyncMetadataStore,
+        healthArchiveExportState: any HealthArchiveExportStateStore =
+            UserDefaultsHealthArchiveExportStateStore(),
+        healthArchiveDescriptorOptions: [HealthArchiveDescriptorOption] = [],
         buildInfo: BuildInfo = .fromMainBundle(),
         pairedWatchProvider: @escaping @MainActor () -> String? = { nil },
         onSyncNow: @escaping @Sendable () async -> Void = {},
         onResetCache: @escaping @Sendable () async -> Void = {},
         onChangeServer: @escaping @Sendable () async -> Void = {},
+        onHealthArchiveExportNow: @escaping @Sendable () async -> Void = {},
         now: @escaping @MainActor () -> Date = { Date() }
     ) {
         self.tokenStore = tokenStore
         self.autoregStore = autoregStore
         self.unitsStore = unitsStore
         self.syncMetadata = syncMetadata
+        self.healthArchiveExportState = healthArchiveExportState
+        self.healthArchiveDescriptorOptions = healthArchiveDescriptorOptions
         self.buildInfo = buildInfo
         self.pairedWatchProvider = pairedWatchProvider
         self.onSyncNow = onSyncNow
         self.onResetCache = onResetCache
         self.onChangeServer = onChangeServer
+        self.onHealthArchiveExportNow = onHealthArchiveExportNow
         self.now = now
         self.cachedAutoregDefaults = autoregStore.load()
         self.cachedUnits = unitsStore.load()
         self.cachedLastSyncAt = nil
+        self.cachedHealthArchiveExport = HealthArchiveExportSnapshot()
         rebuild()
     }
 
@@ -158,6 +170,10 @@ public final class SettingsViewModel {
     /// latest pull.
     public func refreshAsync() async {
         cachedLastSyncAt = await syncMetadata.getLastSyncAt()
+        let serverNamespace = currentServerNamespace()
+        cachedHealthArchiveExport = await healthArchiveExportState.loadSnapshot(
+            serverNamespace: serverNamespace
+        )
         cachedAutoregDefaults = autoregStore.load()
         cachedUnits = unitsStore.load()
         rebuild()
@@ -172,6 +188,7 @@ public final class SettingsViewModel {
             buildServerSection(),
             buildDeviceSection(),
             buildAutoregSection(),
+            buildHealthArchiveSection(),
             buildDataSection(),
         ]
     }
@@ -236,5 +253,52 @@ public final class SettingsViewModel {
         rebuild()
     }
 
-    // Display helpers and formatters live in `SettingsViewModel+Sections.swift`.
+    func exportHealthArchiveNow() {
+        // swiftlint:disable:next no_direct_task_unstructured
+        Task { @MainActor [weak self, onHealthArchiveExportNow] in
+            await onHealthArchiveExportNow()
+            await self?.refreshAsync()
+        }
+    }
+
+    func pickHealthArchiveScopeMode(_ mode: String) async {
+        if mode == "all supported" {
+            await healthArchiveExportState.setScope(.allSupported)
+        } else {
+            let ids = explicitDescriptorIDsForEditing()
+            await healthArchiveExportState.setScope(.explicitDescriptorIDs(
+                healthArchiveDescriptorOptions.map(\.id).filter { ids.contains($0) }
+            ))
+        }
+        await refreshAsync()
+    }
+
+    func setHealthArchiveAutomatic(_ enabled: Bool) async {
+        await healthArchiveExportState.setAutomaticEnabled(enabled)
+        await refreshAsync()
+    }
+
+    func toggleHealthArchiveDescriptor(id: String, enabled: Bool) async {
+        var ids = explicitDescriptorIDsForEditing()
+        if enabled {
+            ids.insert(id)
+        } else if ids.count > 1 {
+            ids.remove(id)
+        }
+        await healthArchiveExportState.setScope(.explicitDescriptorIDs(
+            healthArchiveDescriptorOptions.map(\.id).filter { ids.contains($0) }
+        ))
+        await refreshAsync()
+    }
+
+    private func explicitDescriptorIDsForEditing() -> Set<String> {
+        let optionIDs = healthArchiveDescriptorOptions.map(\.id)
+        switch cachedHealthArchiveExport.scope {
+        case .allSupported:
+            return Set(optionIDs)
+        case .explicitDescriptorIDs(let ids):
+            let filtered = ids.filter { optionIDs.contains($0) }
+            return Set(filtered.isEmpty ? optionIDs : filtered)
+        }
+    }
 }

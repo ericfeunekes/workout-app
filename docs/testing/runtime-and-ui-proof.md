@@ -63,7 +63,9 @@ For action-heavy UI tests, make the matrix or helper assert:
 - force-ending a workout is not used as a substitute for the target action
 
 `make test-execution-ui` and `make test-workout-type-ui` are the current named
-targets for execution-route UI proof.
+targets for execution-route UI proof. `make test-workout-type-ui-repeat`
+repeats the full workout-type matrix into separate result roots and verifies
+the expected result-bundle count for runner-stability claims.
 
 ## DesignSystem And Accessibility
 

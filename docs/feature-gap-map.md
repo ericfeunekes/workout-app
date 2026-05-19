@@ -78,6 +78,7 @@ gap in the owning docs. Git history is the archive.
 | `SETTINGS-GAP-002` | `docs/features/settings.md` | Sync now, change server, reset, units, telemetry export/debug, token recovery, and autoreg defaults need one visible behavior surface with proof. | `implementation` |
 | `SETTINGS-GAP-003` | `docs/features/settings.md`, `docs/architecture/hotspots.md` | Section-as-type Settings architecture lacks feature-level acceptance and QA proof. | `proof` |
 | `SETTINGS-GAP-004` | `docs/features/settings.md`, `docs/features/telemetry.md` | Diagnostics/export rows remain target behavior only where telemetry gaps call for them. | `implementation` |
+| `SETTINGS-GAP-005` | `docs/features/settings.md`, `docs/healthkit-data-access.md` | HealthKit personal archive export controls now include descriptor subset selection, manual export, automatic toggle, next-attempt status, and current-server status. Remaining work: BGTask-backed schedule proof, richer last-run summary, and failure display. | `implementation` |
 | `FIRST-GAP-001` | `docs/features/firstrun.md` | Trailing-slash normalization is not built. | `implementation` |
 | `FIRST-GAP-002` | `docs/features/firstrun.md` | QR/unified connection-string setup remains deferred. | `implementation` |
 | `TELEM-GAP-001` | `docs/features/telemetry.md` | Emit coverage is partial. | `proof` |
@@ -93,15 +94,17 @@ gap in the owning docs. Git history is the archive.
 | `TRANS-GAP-003` | `docs/features/block-transition.md` | Route/direction integration is deferred to a later mapping feature. | `implementation` |
 | `SYNC-GAP-001` | `docs/sync.md` | Stale live-session expiry remains undecided. | `decision` |
 | `SYNC-GAP-003` | `docs/sync.md` | Cloudflare Access endpoint needs a narrow endpoint spike with identity and capability proof. | `spike` |
+| `SYNC-GAP-004` | `docs/sync.md` | APNs/silent-push server-nudged sync is an unplanned stub; future requirements should define app token registration, server token storage, silent-push payloads, background pull handling, telemetry, and foreground catch-up. | `requirements` |
 | `TEST-GAP-002` | `docs/TESTING.md` | App-hosted Xcode tests are only compile/link smoke; no real launch-time or composition invariant exists. | `proof` |
 | `TEST-GAP-003` | `docs/TESTING.md` | No real-device proof harness exists for Watch, HealthKit, and device-only behavior. | `proof` |
 | `TEST-GAP-004` | `docs/TESTING.md`, `docs/sync.md` | App-sync foreground/background lifecycle has package proof for the Shell coordinator, but no simulator/app-root lifecycle evidence proving the `scenePhase` path in a running app. | `proof` |
 | `TEST-GAP-005` | `docs/TESTING.md`, `docs/QA.md`, `docs/ios-dev-loop.md` | Runtime cost and object-lifetime baselines need ETTrace/memgraph proof lanes. | `proof` |
-| `RELEASE-GAP-001` | `docs/WORKFLOW.md` | TestFlight release is still manual command knowledge, not a checked-in target/runbook with preflight, archive, export, upload, and App Store Connect readback. | `implementation` |
-| `RELEASE-GAP-002` | `docs/WORKFLOW.md` | Release secret handling is not hardened beyond bootstrap: dedicated release keychain posture, least-privilege App Store Connect upload credentials, and rotation guidance are missing. | `implementation` |
-| `RELEASE-GAP-003` | `docs/WORKFLOW.md` | Version/build-number management is manual, so duplicate TestFlight build rejection remains easy. | `implementation` |
+| `RELEASE-GAP-001` | `docs/WORKFLOW.md` | Manifest-backed TestFlight release automation exists, but still needs an end-to-end upload proof from a committed ref before the manual-command gap can close. | `proof` |
+| `RELEASE-GAP-002` | `docs/WORKFLOW.md` | Dedicated non-login signing keychain and least-privilege App Store Connect key are configured; still needs end-to-end proof that the path runs with no Eric password prompts. | `proof` |
+| `RELEASE-GAP-003` | `docs/WORKFLOW.md` | Build-number bumping and duplicate preflight checks exist; close after a real manifest-backed TestFlight upload proves the guard. | `proof` |
 | `HKDATA-GAP-003` | `docs/healthkit-data-access.md`, `docs/TESTING.md` | Real Watch-backed live metric delivery is unproven until a physical iPhone + Apple Watch diagnostic run succeeds. | `proof` |
-| `HKDATA-GAP-005` | `docs/healthkit-data-access.md`, `docs/TESTING.md` | WatchOS simulator live-workout diagnostic now proves HealthKit authorization, HKWorkoutSession/HKLiveWorkoutBuilder lifecycle, simulated metric delivery, and builder save through XcodeBuildMCP; product screens still need to consume the typed metric-source contract instead of the diagnostic runner. | `implementation` |
+| `HKDATA-GAP-005` | `docs/healthkit-data-access.md`, `docs/TESTING.md` | WatchOS simulator live-workout diagnostic now proves HealthKit authorization, HKWorkoutSession/HKLiveWorkoutBuilder lifecycle, simulated metric delivery, and builder save through XcodeBuildMCP; watch UI and phone execution consume the typed metric/message path locally. Remaining implementation scope is richer metric coverage and a more deterministic watch simulator trigger; real sensors/sync stay in `HKDATA-GAP-003`. | `implementation` |
+| `HKDATA-GAP-006` | `docs/healthkit-data-access.md`, `docs/features/settings.md` | Personal archive export to the home server now covers all-supported/manual export, explicit subsets, foreground catch-up through the shared runtime, server endpoint/schema/storage, Sync upload, local export state, Settings trigger/status controls, local projection proof, and server-side SQLite ingestion proof. Remaining work: BGTask scheduling, richer schedule/status copy, and BGTask/manual shared-runner proof. | `implementation` |
 | `DS-GAP-001` | `docs/design-system.md` | Semantic/scalable typography and hero/timer Dynamic Type rules are incomplete. | `implementation` |
 | `DS-GAP-002` | `docs/design-system.md` | Interactive primitives do not centrally guarantee accessibility metadata and 44 pt target expectations. | `implementation` |
 | `DS-GAP-003` | `docs/design-system.md`, `docs/QA.md` | Active, Rest, LogSetSheet, SetEditSheet, and History need Dynamic Type and accessibility proof using `snapshot_ui`. | `proof` |
@@ -110,7 +113,7 @@ gap in the owning docs. Git history is the archive.
 | `APPINTENT-GAP-002` | `docs/features/app-intents.md` | Handoff routes for Today, Active, and History are not specified in app routing or debug launch terms. | `requirements` |
 | `APPINTENT-GAP-003` | `docs/features/app-intents.md` | Mutation intents are deferred until offline, auth, persistence, telemetry, and confirmation semantics are defined. | `requirements` |
 | `APPINTENT-GAP-004` | `docs/features/app-intents.md` | App entity identity for workouts/sessions is not specified. | `requirements` |
-| `WATCHKIT-GAP-002` | `docs/features/watch-workoutkit-handoff.md` | WorkoutKitAdapter owns the production WorkoutKit push entrypoint, platform gates, real schedule/open clients, and DEBUG diagnostics; production push blocks value-backed payloads until exact target-value mapping, user-facing export, and export tracking persistence exist. | `implementation` |
+| `WATCHKIT-GAP-002` | `docs/features/watch-workoutkit-handoff.md` | WorkoutKitAdapter owns the production WorkoutKit push entrypoint, platform gates, real schedule/open clients, and DEBUG diagnostics; production push blocks descriptor-incomplete payloads until exact target values, interval steps, user-facing export, and export tracking persistence exist. | `implementation` |
 | `WATCHKIT-GAP-003` | `docs/features/watch-workoutkit-handoff.md` | Results/reconciliation is a separate future lane, not part of push-only WorkoutKit handoff. | `requirements` |
 | `WATCHKIT-GAP-004` | `docs/features/watch-workoutkit-handoff.md` | Local watch simulator build/install/launch and iOS-to-Watch custom content push proof exist; scratch real-device WorkoutKit schedule/open probes typecheck, but no physical iPhone/Watch is visible to Xcode yet. | `spike` |
 | `WATCHCUSTOM-GAP-001` | `docs/features/watch-primary-execution.md` | Custom Watch protocol/platform identity, stale-action rejection, and phone inbox need future proof if custom Watch is promoted. | `spike` |
@@ -123,12 +126,6 @@ gap in the owning docs. Git history is the archive.
 | `MOD-GAP-002` | `docs/modifier-equipment.md` | Canonical examples across strength, carries, substitutions, unilateral variants, and labels are incomplete. | `requirements` |
 | `MOD-GAP-003` | `docs/modifier-equipment.md` | Cross-variant history aggregation is undefined. | `decision` |
 | `MOD-GAP-004` | `docs/modifier-equipment.md` | No schema change is justified until a concrete query/sync/UI behavior requires it. | `decision` |
-| `PDM-GAP-002` | `docs/specs/primitives-data-model/authoring-shape.md` | Authoring-shape open questions need disposition before code relies on them. | `decision` |
-| `PDM-GAP-003` | `docs/specs/primitives-data-model/log-shape.md` | Log/result roles must stay query-safe without competing aggregates from slot rows. | `proof` |
-| `PDM-GAP-004` | `docs/specs/primitives-data-model/runtime-resolution.md` | Runtime resolution must preserve offline execution and seed-time parameter pinning. | `proof` |
-| `PDM-GAP-006` | `docs/specs/primitives-data-model/log-shape.md` | Partial-result controls and completion summaries still collapse non-rep primitive metrics such as distance, duration, and carried load. | `implementation` |
-| `PDM-GAP-007` | `docs/specs/primitives-data-model.md` | Primitive composition semantics are not centralized across seeding, projection, result entry, completion summaries, correction, persistence grouping, sync payloads, and server validation. Active cluster narrows this to CoreSession app-runtime semantics plus server legality parity; residual scope must name History correction, correction UI outside execution completion, and any untouched sync/persistence consumers. | `implementation` |
-| `PDM-GAP-008` | `docs/specs/primitives-data-model.md`, `docs/specs/primitives-data-model/authoring-shape.md`, `docs/specs/primitives-data-model/runtime-resolution.md` | Primitive composition legality is not fully enforced beyond timing/traversal cells; timer-only workouts, timer-only blocks, unsupported zero-slot sets, and aggregate result targets on no-work scopes must be rejected. | `implementation` |
 
 ## Maintenance
 

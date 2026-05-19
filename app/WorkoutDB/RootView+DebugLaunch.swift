@@ -195,6 +195,7 @@ extension RootView {
         Task.detached {
             let bridge = LiveWatchBridge()
             let message = WatchMessage.pushActiveBlock(ActiveBlockPayload(
+                workoutItemID: UUID(),
                 exerciseName: "Bench Press",
                 prescription: "5 reps @ 102 lb",
                 setNumber: 2,

@@ -71,6 +71,8 @@ public struct HealthKitSimulatorArchiveProbeResult: Codable, Sendable {
     public var projectionMatchedRecords: Bool
     public var projectionCursorValue: String?
     public var projectionMatchedCursor: Bool
+    public var projectionStoreKind: String?
+    public var projectionReopenMatched: Bool
     public var representativeRecordIDs: [String]
 
     public init(
@@ -103,6 +105,8 @@ public struct HealthKitSimulatorArchiveProbeResult: Codable, Sendable {
         projectionMatchedRecords: Bool = false,
         projectionCursorValue: String? = nil,
         projectionMatchedCursor: Bool = false,
+        projectionStoreKind: String? = nil,
+        projectionReopenMatched: Bool = false,
         representativeRecordIDs: [String] = []
     ) {
         self.runID = runID
@@ -134,6 +138,8 @@ public struct HealthKitSimulatorArchiveProbeResult: Codable, Sendable {
         self.projectionMatchedRecords = projectionMatchedRecords
         self.projectionCursorValue = projectionCursorValue
         self.projectionMatchedCursor = projectionMatchedCursor
+        self.projectionStoreKind = projectionStoreKind
+        self.projectionReopenMatched = projectionReopenMatched
         self.representativeRecordIDs = representativeRecordIDs
     }
 
@@ -145,7 +151,9 @@ public struct HealthKitSimulatorArchiveProbeResult: Codable, Sendable {
         projectionRecordExternalIDs: [String] = [],
         projectionMatchedRecords: Bool = false,
         projectionCursorValue: String? = nil,
-        projectionMatchedCursor: Bool = false
+        projectionMatchedCursor: Bool = false,
+        projectionStoreKind: String? = nil,
+        projectionReopenMatched: Bool = false
     ) -> Self {
         var copy = self
         copy.projectionPersisted = success
@@ -156,6 +164,8 @@ public struct HealthKitSimulatorArchiveProbeResult: Codable, Sendable {
         copy.projectionMatchedRecords = projectionMatchedRecords
         copy.projectionCursorValue = projectionCursorValue
         copy.projectionMatchedCursor = projectionMatchedCursor
+        copy.projectionStoreKind = projectionStoreKind
+        copy.projectionReopenMatched = projectionReopenMatched
         return copy
     }
 }

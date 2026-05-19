@@ -125,6 +125,61 @@ final class WorkoutCacheTests: XCTestCase {
         XCTAssertEqual(loaded, [primitive])
     }
 
+    func testPrimitiveWorkoutActivityIntentSurvivesOnDiskReopen() async throws {
+        let storeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("primitive-activity-intent-\(UUID().uuidString).store")
+        let tokenService = "com.ericfeunekes.WorkoutDB.token.test.\(UUID().uuidString)"
+        let workoutID = UUID(uuidString: "10000000-0000-4000-8000-000000000231")!
+        let oldPayload = PrimitiveWorkout(
+            id: workoutID,
+            name: "Old payload",
+            blocks: [
+                PrimitiveBlock(id: UUID(uuidString: "20000000-0000-4000-8000-000000000231")!, sets: [
+                    PrimitiveSet(
+                        id: UUID(uuidString: "30000000-0000-4000-8000-000000000231")!,
+                        timing: PrimitiveTiming(mode: .setBounded),
+                        slots: []
+                    ),
+                ]),
+            ]
+        )
+        var newPayload = oldPayload
+        newPayload.name = "New payload"
+        newPayload.activityIntent = ActivityIntent(
+            activityDomain: .mixedModal,
+            preservationPolicy: .preserveStructure
+        )
+
+        do {
+            let factory = try PersistenceFactory.makeOnDisk(
+                storeURL: storeURL,
+                tokenServiceName: tokenService
+            )
+            try await factory.workoutCache.save(PulledDataset(primitiveWorkouts: [oldPayload]))
+        }
+        do {
+            let reopened = try PersistenceFactory.makeOnDisk(
+                storeURL: storeURL,
+                tokenServiceName: tokenService
+            )
+            let loaded = try await reopened.workoutCache.loadPrimitiveWorkouts()
+            XCTAssertEqual(loaded, [oldPayload])
+            XCTAssertNil(loaded[0].activityIntent)
+            try await reopened.workoutCache.save(PulledDataset(primitiveWorkouts: [newPayload]))
+        }
+        do {
+            let reopened = try PersistenceFactory.makeOnDisk(
+                storeURL: storeURL,
+                tokenServiceName: tokenService
+            )
+            let loaded = try await reopened.workoutCache.loadPrimitiveWorkouts()
+            XCTAssertEqual(loaded, [newPayload])
+            XCTAssertEqual(loaded[0].activityIntent?.activityDomain, .mixedModal)
+            XCTAssertEqual(loaded[0].activityIntent?.environment, .unspecified)
+            XCTAssertEqual(loaded[0].activityIntent?.preservationPolicy, .preserveStructure)
+        }
+    }
+
     func testPrimitiveWorkoutUpsertReplacesPayload() async throws {
         let factory = try makeFactory()
         let cache = factory.workoutCache
@@ -216,6 +271,9 @@ final class WorkoutCacheTests: XCTestCase {
             reps: 4,
             durationSec: 300,
             rounds: 7,
+            skipped: true,
+            side: .left,
+            notes: "scaled after warmup",
             completedAt: completedAt
         )
 
@@ -230,6 +288,180 @@ final class WorkoutCacheTests: XCTestCase {
         XCTAssertEqual(loaded[0].reps, 4)
         XCTAssertEqual(loaded[0].rounds, 7)
         XCTAssertEqual(loaded[0].durationSec, 300)
+        XCTAssertTrue(loaded[0].skipped)
+        XCTAssertEqual(loaded[0].side, .left)
+        XCTAssertEqual(loaded[0].notes, "scaled after warmup")
+    }
+
+    func testPrimitiveSetLogsRoundTripSlotSetAndBlockResultFields() async throws {
+        let factory = try makeFactory()
+        let cache = factory.workoutCache
+        let workoutID = UUID(uuidString: "10000000-0000-4000-8000-000000000133")!
+        let blockID = UUID(uuidString: "20000000-0000-4000-8000-000000000133")!
+        let setID = UUID(uuidString: "30000000-0000-4000-8000-000000000133")!
+        let slotID = UUID(uuidString: "40000000-0000-4000-8000-000000000133")!
+        let plannedExerciseID = UUID(uuidString: "50000000-0000-4000-8000-000000000133")!
+        let performedExerciseID = UUID(uuidString: "50000000-0000-4000-8000-000000000134")!
+        let completedAt = Fixtures.baseDate.addingTimeInterval(1_200)
+        let logs = [
+            PrimitiveSetLog(
+                id: UUID(uuidString: "60000000-0000-4000-8000-000000000133")!,
+                role: .slot,
+                slotID: slotID,
+                setID: setID,
+                blockID: blockID,
+                workoutID: nil,
+                plannedExerciseID: plannedExerciseID,
+                performedExerciseID: performedExerciseID,
+                setIndex: 0,
+                setRepeatIndex: 1,
+                blockRepeatIndex: 2,
+                reps: 12,
+                weight: 24,
+                weightUnit: .kg,
+                durationSec: 42,
+                distanceM: 15,
+                rir: 1,
+                hrAvgBpm: 150,
+                hrMaxBpm: 172,
+                isWarmup: true,
+                skipped: false,
+                side: .right,
+                notes: "changed side",
+                completedAt: completedAt
+            ),
+            PrimitiveSetLog(
+                id: UUID(uuidString: "60000000-0000-4000-8000-000000000134")!,
+                role: .setResult,
+                setID: setID,
+                blockID: blockID,
+                workoutID: workoutID,
+                setIndex: 0,
+                setRepeatIndex: 0,
+                blockRepeatIndex: 0,
+                reps: 7,
+                durationSec: 300,
+                distanceM: 1_000,
+                rounds: 3,
+                notes: "set score",
+                completedAt: completedAt.addingTimeInterval(1)
+            ),
+            PrimitiveSetLog(
+                id: UUID(uuidString: "60000000-0000-4000-8000-000000000135")!,
+                role: .blockResult,
+                blockID: blockID,
+                workoutID: workoutID,
+                setIndex: 0,
+                durationSec: 900,
+                notes: "block score",
+                completedAt: completedAt.addingTimeInterval(2)
+            ),
+        ]
+
+        try await cache.savePrimitiveSetLogs(logs, workoutID: workoutID)
+
+        let loaded = try await cache.loadPrimitiveSetLogs(workoutID: workoutID)
+        XCTAssertEqual(loaded.count, 3)
+        XCTAssertEqual(Set(loaded.map(\.role)), Set([.slot, .setResult, .blockResult]))
+        XCTAssertTrue(loaded.allSatisfy { $0.workoutID == workoutID })
+
+        let slot = try XCTUnwrap(loaded.first { $0.role == .slot })
+        XCTAssertEqual(slot.slotID, slotID)
+        XCTAssertEqual(slot.setID, setID)
+        XCTAssertEqual(slot.blockID, blockID)
+        XCTAssertEqual(slot.plannedExerciseID, plannedExerciseID)
+        XCTAssertEqual(slot.performedExerciseID, performedExerciseID)
+        XCTAssertEqual(slot.setRepeatIndex, 1)
+        XCTAssertEqual(slot.blockRepeatIndex, 2)
+        XCTAssertEqual(slot.reps, 12)
+        XCTAssertEqual(slot.weight, 24)
+        XCTAssertEqual(slot.weightUnit, .kg)
+        XCTAssertEqual(slot.durationSec, 42)
+        XCTAssertEqual(slot.distanceM, 15)
+        XCTAssertEqual(slot.rir, 1)
+        XCTAssertEqual(slot.hrAvgBpm, 150)
+        XCTAssertEqual(slot.hrMaxBpm, 172)
+        XCTAssertTrue(slot.isWarmup)
+        XCTAssertFalse(slot.skipped)
+        XCTAssertEqual(slot.side, .right)
+        XCTAssertEqual(slot.notes, "changed side")
+
+        let setResult = try XCTUnwrap(loaded.first { $0.role == .setResult })
+        XCTAssertEqual(setResult.rounds, 3)
+        XCTAssertEqual(setResult.distanceM, 1_000)
+        XCTAssertEqual(setResult.notes, "set score")
+        let blockResult = try XCTUnwrap(loaded.first { $0.role == .blockResult })
+        XCTAssertEqual(blockResult.durationSec, 900)
+        XCTAssertEqual(blockResult.notes, "block score")
+    }
+
+    func testPrimitiveSetLogsExerciseQueryReturnsRawRowsForConsumerSemantics() async throws {
+        let factory = try makeFactory()
+        let cache = factory.workoutCache
+        let workoutID = UUID(uuidString: "10000000-0000-4000-8000-000000000233")!
+        let plannedExerciseID = UUID(uuidString: "50000000-0000-4000-8000-000000000233")!
+        let performedExerciseID = UUID(uuidString: "50000000-0000-4000-8000-000000000234")!
+        let completedAt = Fixtures.baseDate.addingTimeInterval(1_400)
+        let logs = [
+            PrimitiveSetLog(
+                id: UUID(uuidString: "60000000-0000-4000-8000-000000000233")!,
+                role: .slot,
+                slotID: UUID(uuidString: "40000000-0000-4000-8000-000000000233")!,
+                workoutID: workoutID,
+                plannedExerciseID: plannedExerciseID,
+                performedExerciseID: performedExerciseID,
+                setIndex: 0,
+                reps: 5,
+                weight: 100,
+                weightUnit: .kg,
+                completedAt: completedAt
+            ),
+            PrimitiveSetLog(
+                id: UUID(uuidString: "60000000-0000-4000-8000-000000000234")!,
+                role: .slot,
+                slotID: UUID(uuidString: "40000000-0000-4000-8000-000000000234")!,
+                workoutID: workoutID,
+                plannedExerciseID: plannedExerciseID,
+                setIndex: 0,
+                reps: 6,
+                completedAt: completedAt.addingTimeInterval(-60)
+            ),
+            PrimitiveSetLog(
+                id: UUID(uuidString: "60000000-0000-4000-8000-000000000235")!,
+                role: .setResult,
+                workoutID: workoutID,
+                plannedExerciseID: performedExerciseID,
+                setIndex: 0,
+                rounds: 3,
+                completedAt: completedAt.addingTimeInterval(60)
+            ),
+            PrimitiveSetLog(
+                id: UUID(uuidString: "60000000-0000-4000-8000-000000000236")!,
+                role: .slot,
+                slotID: UUID(uuidString: "40000000-0000-4000-8000-000000000236")!,
+                workoutID: workoutID,
+                plannedExerciseID: performedExerciseID,
+                setIndex: 0,
+                skipped: true,
+                completedAt: completedAt.addingTimeInterval(120)
+            ),
+        ]
+
+        try await cache.savePrimitiveSetLogs(logs, workoutID: workoutID)
+
+        let performedRows = try await cache.loadPrimitiveSetLogs(
+            exerciseID: performedExerciseID,
+            limit: 10
+        )
+        XCTAssertEqual(performedRows.map(\.id), [logs[3].id, logs[2].id, logs[0].id])
+        XCTAssertEqual(performedRows.map(\.role), [.slot, .setResult, .slot])
+        XCTAssertEqual(performedRows.map(\.skipped), [true, false, false])
+
+        let plannedRows = try await cache.loadPrimitiveSetLogs(
+            exerciseID: plannedExerciseID,
+            limit: 10
+        )
+        XCTAssertEqual(plannedRows.map(\.id), [logs[1].id])
     }
 
     func testFilterWorkoutsByStatus() async throws {

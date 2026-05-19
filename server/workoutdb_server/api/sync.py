@@ -259,7 +259,12 @@ def _upsert_primitive_set_log(db: DbSession, payload: PrimitiveSetLogIn) -> Prim
         "distance_m",
         "rounds",
         "rir",
+        "hr_avg_bpm",
+        "hr_max_bpm",
         "is_warmup",
+        "skipped",
+        "side",
+        "notes",
         "completed_at",
     ):
         setattr(row, field, getattr(payload, field))

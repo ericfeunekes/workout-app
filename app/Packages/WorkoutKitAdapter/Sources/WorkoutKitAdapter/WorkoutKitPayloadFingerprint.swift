@@ -19,7 +19,6 @@ public struct WorkoutKitPayloadFingerprint: Sendable, Hashable, Codable, CustomS
             workoutID: plan.workoutID.uuidString.lowercased(),
             rowID: plan.rowID,
             supportState: plan.supportState,
-            payload: plan.payload,
             pushIdentity: plan.pushIdentity,
             degradation: plan.degradation,
             descriptor: descriptor,
@@ -36,7 +35,6 @@ private struct FingerprintPayload: Encodable {
     var workoutID: String
     var rowID: WorkoutKitMatrixRowID
     var supportState: WorkoutKitSupportState
-    var payload: WorkoutKitPayloadBlueprint
     var pushIdentity: WorkoutKitPushIdentity
     var degradation: WorkoutKitDegradation?
     var descriptor: WorkoutKitPlanDescriptor

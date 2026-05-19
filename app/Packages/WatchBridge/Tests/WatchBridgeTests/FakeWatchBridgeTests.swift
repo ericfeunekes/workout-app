@@ -51,6 +51,7 @@ final class FakeWatchBridgeTests: XCTestCase {
 
         let fixtures: [WatchMessage] = [
             .pushActiveBlock(ActiveBlockPayload(
+            workoutItemID: UUID(),
                 exerciseName: "Bench",
                 prescription: "5 reps @ 80 kg",
                 setNumber: 1,

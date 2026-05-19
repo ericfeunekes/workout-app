@@ -129,7 +129,7 @@ final class WorkoutKitPushCoordinatorTests: XCTestCase {
                 shape: .singleGoal,
                 activitySelection: .cardio,
                 goal: .time
-            )),
+            ), descriptor: .incomplete([.exactTargetValuesUnavailable])),
             path: .scheduleOnPhone,
             occurrence: occurrence(),
             proofs: completeScheduleProofs()
@@ -141,6 +141,82 @@ final class WorkoutKitPushCoordinatorTests: XCTestCase {
         XCTAssertTrue(assessment.blockingReasons.contains(.exactTargetValuesUnavailable))
         let scheduledCount = await client.scheduledRequestCount()
         XCTAssertEqual(scheduledCount, 0)
+    }
+
+    func testOpenCustomIntervalsDoNotCallSchedulerUntilDescriptorIsConcrete() async {
+        let client = FakeWorkoutKitSchedulingClient()
+        let coordinator = makeIOSCoordinator(client: client)
+        let outcome = await coordinator.push(WorkoutKitPushRequest(
+            plan: plan(payload: WorkoutKitPayloadBlueprint(
+                shape: .customIntervals,
+                activitySelection: .mixed,
+                goal: .open,
+                steps: [WorkoutKitStepBlueprint(preservesOrder: true, preservesWorkRestCadence: false)]
+            ), descriptor: .incomplete([.exactTargetValuesUnavailable])),
+            path: .scheduleOnPhone,
+            occurrence: occurrence(),
+            proofs: completeScheduleProofs()
+        ))
+
+        guard case .blocked(let assessment) = outcome else {
+            return XCTFail("expected blocked, got \(outcome)")
+        }
+        XCTAssertTrue(assessment.blockingReasons.contains(.exactTargetValuesUnavailable))
+        let scheduledCount = await client.scheduledRequestCount()
+        XCTAssertEqual(scheduledCount, 0)
+    }
+
+    func testProductionDescriptorRejectsIncompleteCustomIntervals() throws {
+        let incomplete = plan(payload: WorkoutKitPayloadBlueprint(
+            shape: .customIntervals,
+            activitySelection: .mixed,
+            goal: .open,
+            steps: [WorkoutKitStepBlueprint(preservesOrder: true, preservesWorkRestCadence: false)]
+        ), descriptor: .incomplete([.exactTargetValuesUnavailable]))
+
+        XCTAssertThrowsError(try WorkoutKitPlanFactory.descriptor(for: incomplete)) { error in
+            XCTAssertEqual(error as? WorkoutKitAdapterError, .incompleteWorkoutKitDescriptor)
+        }
+    }
+
+    func testProductionDescriptorUsesResolvedConcreteValues() throws {
+        let time = plan(
+            payload: WorkoutKitPayloadBlueprint(
+                shape: .singleGoal,
+                activitySelection: .running,
+                goal: .time
+            ),
+            descriptor: .resolved(WorkoutKitResolvedDescriptorBlueprint(
+                activitySelection: .running,
+                goal: .timeSeconds(1_234)
+            ))
+        )
+        let timeDescriptor = try WorkoutKitPlanFactory.descriptor(for: time)
+        XCTAssertEqual(timeDescriptor.activity, .running)
+        XCTAssertEqual(timeDescriptor.goal, .timeSeconds(1_234))
+
+        let intervals = plan(
+            payload: WorkoutKitPayloadBlueprint(
+                shape: .customIntervals,
+                activitySelection: .hiit,
+                goal: .intervalSteps,
+                steps: [WorkoutKitStepBlueprint(preservesOrder: true, preservesWorkRestCadence: true)]
+            ),
+            descriptor: .resolved(WorkoutKitResolvedDescriptorBlueprint(
+                activitySelection: .hiit,
+                goal: .open,
+                steps: [
+                    WorkoutKitDescriptorStep(purpose: .work, goal: .timeSeconds(45)),
+                    WorkoutKitDescriptorStep(purpose: .recovery, goal: .timeSeconds(15)),
+                ],
+                intervalIterations: 3
+            ))
+        )
+        let intervalDescriptor = try WorkoutKitPlanFactory.descriptor(for: intervals)
+        XCTAssertEqual(intervalDescriptor.activity, .hiit)
+        XCTAssertEqual(intervalDescriptor.goal, .open)
+        XCTAssertEqual(intervalDescriptor.intervalSteps.map(\.goal), [.timeSeconds(45), .timeSeconds(15)])
+        XCTAssertEqual(intervalDescriptor.intervalIterations, 3)
     }
 
     func testSetmarkOnlyNeverCallsScheduler() async {
@@ -301,7 +377,7 @@ final class WorkoutKitPushCoordinatorTests: XCTestCase {
         let client = FakeWorkoutKitSchedulingClient()
         let runner = WorkoutKitDiagnosticProbeRunner(client: client)
         let events = await runner.runScheduleProbe(
-            plan: WorkoutKitDiagnosticProbeFixture.scheduleProbePlan(),
+            descriptor: WorkoutKitDiagnosticProbeFixture.scheduleProbeDescriptor(),
             occurrence: occurrence()
         )
 
@@ -311,9 +387,9 @@ final class WorkoutKitPushCoordinatorTests: XCTestCase {
     }
 
     func testDiagnosticFixtureKeepsExportTypesBehindAdapterBoundary() throws {
-        let plan = WorkoutKitDiagnosticProbeFixture.scheduleProbePlan()
-        XCTAssertEqual(plan.workoutName, "Setmark WorkoutKit Probe")
-        XCTAssertTrue(plan.unresolvedRequirements.contains(.exactTargetValuesUnavailable))
+        let descriptor = WorkoutKitDiagnosticProbeFixture.scheduleProbeDescriptor()
+        XCTAssertEqual(descriptor.displayName, "Setmark WorkoutKit Probe")
+        XCTAssertEqual(descriptor.goal, .timeSeconds(20 * 60))
 
         let fixedNow = Date(timeIntervalSinceReferenceDate: 800_000_000)
         let date = WorkoutKitDiagnosticProbeFixture.scheduleProbeOccurrence(
@@ -369,9 +445,13 @@ private func plan(
     deliveryPaths: Set<WorkoutKitDeliveryPath> = [.scheduleOnPhone, .openOnWatch],
     payload: WorkoutKitPayloadBlueprint = WorkoutKitPayloadBlueprint(
         shape: .singleGoal,
-        activitySelection: .cardio,
+        activitySelection: .running,
         goal: .open
     ),
+    descriptor: WorkoutKitDescriptorBlueprint = .resolved(WorkoutKitResolvedDescriptorBlueprint(
+        activitySelection: .running,
+        goal: .open
+    )),
     degradation: WorkoutKitDegradation? = nil,
     unresolvedRequirements: Set<WorkoutKitBlockReason> = []
 ) -> WorkoutKitExportPlan {
@@ -391,7 +471,8 @@ private func plan(
         degradation: degradation,
         proofRequirements: [.sdkCompile, .simulatorConstruction],
         unresolvedRequirements: unresolvedRequirements,
-        sourceAmbiguities: []
+        sourceAmbiguities: [],
+        descriptor: descriptor
     )
 }
 

@@ -146,6 +146,10 @@ Scope:
   and WatchFaces.
 - Persistence behavior against SwiftData containers and Keychain/defaults
   wrappers where available.
+- `TokenStore` logic through an injected Keychain client: save/load/clear,
+  overwrite, defaults mirror, durable payload shape, and legacy raw-token
+  migration. These package tests prove the app-owned persistence semantics, not
+  the real Security framework boundary.
 - Sync behavior against deterministic transports and queues.
 - Watch/HealthKit bridge behavior against fakes where real device behavior is
   not being claimed.
@@ -179,6 +183,7 @@ Run:
 make test-app-xcode
 make test-execution-ui
 make test-workout-type-ui
+make test-tokenstore-keychain-ui
 make test-healthkit-ui
 ```
 
@@ -193,6 +198,15 @@ instead of relying on wall-clock timer passage.
 
 `make test-workout-type-ui` is opt-in. Run it when a change claims coverage
 across timing modes or composed primitive execution cases.
+`make test-workout-type-ui-repeat` repeats that full matrix into separate
+result roots and fails if any run does not produce the expected bundle count.
+Use it when the claim is runner stability, not just per-row behavior.
+
+`make test-tokenstore-keychain-ui` is a signed simulator target for the real
+Security/Keychain boundary. Run it when the claim depends on real Keychain
+write/read/delete or legacy raw-token migration through `SecItem*`. It sits
+outside the code-signing-free default smoke because unsigned app-hosted tests
+cannot exercise that boundary reliably.
 
 `make test-healthkit-ui` is a signed simulator target. Run it only when the
 claim depends on HealthKit authorization, batch/archive HealthKit reads, or
@@ -208,9 +222,11 @@ Current harness: `make test-sync-real-http` starts FastAPI against a temporary
 SQLite database, seeds primitive workout data through real HTTP, drives the
 Swift Sync stack through `URLSessionTransport`, writes through SwiftData,
 pushes slot and aggregate primitive results back, and reads the server database
-to prove persistence plus same-UUID upsert for the slot row. Aggregate rows are
-currently proven for persistence, not repeated upsert. It is wired into
-`make pre-qa`.
+to prove persistence plus same-UUID upsert for the slot row. It also pushes one
+grouped completion artifact containing `slot`, `set_result`, and
+`block_result` rows, verifies `sync/pull` API readback for the eligible slot
+row, and verifies server persistence for aggregate rows, completed-workout
+status, and queue drain. It is wired into `make pre-qa`.
 
 ## Pre-QA Gate
 
@@ -224,11 +240,13 @@ composes:
 - `make check-app` for every wired app package test plus the generated iOS app
   scheme compile/link smoke and code-signing-free execution UI proof
 
-Entitlement-dependent probes, such as `make test-healthkit-ui`, sit outside
+Entitlement-dependent or signed-boundary probes, such as
+`make test-tokenstore-keychain-ui` and `make test-healthkit-ui`, sit outside
 `make pre-qa` because `test-app-xcode` intentionally runs with
-`CODE_SIGNING_ALLOWED=NO`. Run the signed target when the claim depends on
-HealthKit authorization, batch/archive HealthKit reads, or local archive
-projection. It is not live Apple Watch metric proof.
+`CODE_SIGNING_ALLOWED=NO`. Run the signed target when the claim depends on real
+Keychain behavior, HealthKit authorization, batch/archive HealthKit reads, or
+local archive projection. These targets are narrow boundary proof, not live
+Apple Watch metric proof.
 
 `make pre-qa` does not replace QA. It proves the deterministic and
 realistic-local layers currently wired in the repo. If the behavior depends on

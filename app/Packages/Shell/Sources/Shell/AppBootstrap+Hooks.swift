@@ -14,6 +14,7 @@ import FeaturesExecution
 import FeaturesToday
 import Persistence
 import Sync
+import WatchBridge
 import WorkoutCoreFoundation
 
 extension AppBootstrap {
@@ -142,6 +143,7 @@ extension AppBootstrap {
         let afterLocalCompletion: (@Sendable () async -> Void)?
         let onManualRefreshTokenRejected: (@Sendable @MainActor () async -> Void)?
         let appSync: AppSyncCoordinator
+        let watchBridge: (any WatchBridge)?
         /// Observable holder the shell uses to both (a) route the Today
         /// start binding to the current VM and (b) drive RootTabView's
         /// routing against `holder.vm.state.route`. The completion
@@ -267,6 +269,9 @@ extension AppBootstrap {
         // `ExecutionViewModel+Persistence.swift` for the guards).
         await initialVM.restoreIfPossible()
         inputs.executionHolder.vm = initialVM
+        if let watchBridge = inputs.watchBridge {
+            inputs.executionHolder.connectWatchBridge(watchBridge)
+        }
         return .ready(
             todayVM: todayVM,
             executionHolder: inputs.executionHolder,

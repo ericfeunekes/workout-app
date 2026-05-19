@@ -54,9 +54,11 @@ then runs the app-hosted authorization/archive projection proof.
 This target proves the signed debug probe can request HealthKit authorization,
 write/fetch synthetic samples, write and read the probe's injected archive
 projection store, and handle anchored deletions/cursors in the current
-simulator state. It is not deterministic fresh authorization-sheet UX proof
-unless the run also resets HealthKit permissions and observes the sheet, and it
-does not prove the production `Application Support/default.store` path.
+simulator state. The probe runs against the default on-disk store when
+`WORKOUTDB_HEALTHKIT_PROBE_DEFAULT_STORE=1` and reopens a fresh store handle to
+prove records, tombstones, and cursor state survive outside the original
+process object. It is not deterministic fresh authorization-sheet UX proof
+unless the run also resets HealthKit permissions and observes the sheet.
 
 ### Tier 3: watchOS simulator live-workout contract proof
 
@@ -69,6 +71,11 @@ reliability. The current debug entry point is the watch launch argument
 `--healthkit-live-workout-probe`, which prints
 `HEALTHKIT_LIVE_WORKOUT_PROBE_JSON_BEGIN/END` around the structured probe
 result.
+
+`make test-healthkit-watch-sim` asserts the latest XcodeBuildMCP watch app log
+for the live-workout probe sentinels and required result fields. XcodeBuildMCP
+remains the launch/log-capture owner; Health permissions are not resettable
+through `simctl privacy`, so first-run authorization remains a runtime boundary.
 
 Captured probe logs are asserted with
 `make assert-healthkit-watch-sim-log PROBE_LOG=/path/to/runtime.log`. This

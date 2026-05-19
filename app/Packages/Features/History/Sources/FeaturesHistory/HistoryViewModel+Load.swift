@@ -61,12 +61,18 @@ extension HistoryViewModel {
             workoutIDs: completed.map(\.id)
         )
 
+        let primitiveWorkouts = try await cache.loadPrimitiveWorkouts()
+        let primitiveWorkoutByID = Dictionary(
+            uniqueKeysWithValues: primitiveWorkouts.map { ($0.id, $0) }
+        )
+
         var sessions: [SessionDetail] = []
         sessions.reserveCapacity(completed.count)
         for workout in completed {
             let session = try await buildSession(
                 for: workout,
                 items: itemsByWorkout[workout.id] ?? [],
+                primitiveWorkout: primitiveWorkoutByID[workout.id],
                 bodyweightHistory: bodyweightHistory
             )
             sessions.append(session)
@@ -80,22 +86,35 @@ extension HistoryViewModel {
     private func buildSession(
         for workout: Workout,
         items: [WorkoutItem],
+        primitiveWorkout: PrimitiveWorkout?,
         bodyweightHistory: [UserParameter]
     ) async throws -> SessionDetail {
         let logs = try await cache.loadSetLogs(workoutID: workout.id)
+        let primitiveLogs = try await cache.loadPrimitiveSetLogs(workoutID: workout.id)
         var lookup: [WorkoutItemID: ExerciseID] = [:]
         lookup.reserveCapacity(items.count)
         for item in items {
             lookup[item.id] = item.exerciseID
         }
+        if let primitiveWorkout {
+            for block in primitiveWorkout.blocks {
+                for set in block.sets {
+                    for slot in set.slots {
+                        lookup[slot.id] = slot.exerciseID
+                    }
+                }
+            }
+        }
         let bodyweight = Self.bodyweight(
             for: workout,
             setLogs: logs,
+            primitiveSetLogs: primitiveLogs,
             history: bodyweightHistory
         )
         return SessionDetail(
             workout: workout,
-            setLogs: logs,
+            setLogs: primitiveWorkout == nil ? logs : [],
+            primitiveSetLogs: primitiveLogs,
             plannedExerciseByItem: lookup,
             bodyweightKg: bodyweight
         )
@@ -115,11 +134,14 @@ extension HistoryViewModel {
     static func bodyweight(
         for workout: Workout,
         setLogs: [SetLog],
+        primitiveSetLogs: [PrimitiveSetLog] = [],
         history: [UserParameter]
     ) -> Double? {
         guard let completedAt = workout.completedAt else { return nil }
         let end = completedAt.addingTimeInterval(120)
-        let start: Date = setLogs.compactMap(\.startedAt).min()
+        let primitiveStart = primitiveSetLogs.map(\.completedAt).min()
+        let start: Date = primitiveStart
+            ?? setLogs.compactMap(\.startedAt).min()
             ?? setLogs.map(\.completedAt).min()
             ?? workout.scheduledDate
             ?? completedAt.addingTimeInterval(-3 * 60 * 60)

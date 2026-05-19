@@ -37,6 +37,17 @@ public enum WorkoutKitSupportState: String, Sendable, Hashable, Codable, CaseIte
     case unsupported
 }
 
+public enum WorkoutKitClassificationCategory: String, Sendable, Hashable, Codable, CaseIterable {
+    case firstClass
+    case lossyPushable
+    case broadTrackerWithDisclosedLoss
+    case needsSourceChoice
+    case proofBlocked
+    case misleading
+    case setmarkOnly
+    case unsupported
+}
+
 public enum WorkoutKitSelectionPolicy: Sendable, Hashable, Codable {
     case exact(WorkoutKitCandidateFamily)
     case firstSupported([WorkoutKitCandidateFamily])
@@ -52,7 +63,15 @@ public enum WorkoutKitPayloadShape: String, Sendable, Hashable, Codable, CaseIte
 
 public enum WorkoutKitActivitySelection: String, Sendable, Hashable, Codable, CaseIterable {
     case cardio
+    case running
+    case cycling
+    case rowing
+    case swimming
+    case walking
+    case hiking
     case functionalStrength
+    case traditionalStrength
+    case hiit
     case mixed
     case carry
     case recovery
@@ -65,6 +84,22 @@ public enum WorkoutKitGoalBlueprint: String, Sendable, Hashable, Codable, CaseIt
     case distance
     case intervalSteps
     case none
+}
+
+public enum WorkoutKitDescriptorCompleteness: String, Sendable, Hashable, Codable, CaseIterable {
+    case complete
+    case incomplete
+}
+
+public enum WorkoutKitAdmissionState: String, Sendable, Hashable, Codable, CaseIterable {
+    case pushReady
+    case sourceChoiceRequired
+    case descriptorIncomplete
+    case degradationAcknowledgementRequired
+    case proofBlocked
+    case setmarkOnly
+    case unsupported
+    case misleading
 }
 
 public struct WorkoutKitStepBlueprint: Sendable, Hashable, Codable {
@@ -102,6 +137,151 @@ public struct WorkoutKitPayloadBlueprint: Sendable, Hashable, Codable {
     }
 }
 
+public enum WorkoutKitDescriptorGoal: Sendable, Hashable, Codable {
+    case open
+    case timeSeconds(Double)
+    case distanceMeters(Double)
+}
+
+public enum WorkoutKitDescriptorStepPurpose: String, Sendable, Hashable, Codable, CaseIterable {
+    case work
+    case recovery
+}
+
+public struct WorkoutKitDescriptorStep: Sendable, Hashable, Codable {
+    public var purpose: WorkoutKitDescriptorStepPurpose
+    public var goal: WorkoutKitDescriptorGoal
+
+    public init(purpose: WorkoutKitDescriptorStepPurpose, goal: WorkoutKitDescriptorGoal) {
+        self.purpose = purpose
+        self.goal = goal
+    }
+}
+
+public struct WorkoutKitResolvedDescriptorBlueprint: Sendable, Hashable, Codable {
+    public var activitySelection: WorkoutKitActivitySelection
+    public var location: WorkoutKitResolvedLocation
+    public var goal: WorkoutKitDescriptorGoal
+    public var steps: [WorkoutKitDescriptorStep]
+    public var intervalIterations: Int
+
+    public init(
+        activitySelection: WorkoutKitActivitySelection,
+        location: WorkoutKitResolvedLocation = .unknown,
+        goal: WorkoutKitDescriptorGoal,
+        steps: [WorkoutKitDescriptorStep] = [],
+        intervalIterations: Int = 1
+    ) {
+        self.activitySelection = activitySelection
+        self.location = location
+        self.goal = goal
+        self.steps = steps
+        self.intervalIterations = intervalIterations
+    }
+}
+
+public enum WorkoutKitDescriptorBlueprint: Sendable, Hashable, Codable {
+    case resolved(WorkoutKitResolvedDescriptorBlueprint)
+    case incomplete(Set<WorkoutKitBlockReason>)
+
+    public var completeness: WorkoutKitDescriptorCompleteness {
+        switch self {
+        case .resolved:
+            .complete
+        case .incomplete:
+            .incomplete
+        }
+    }
+
+    public var incompleteReasons: Set<WorkoutKitBlockReason> {
+        switch self {
+        case .resolved:
+            []
+        case .incomplete(let reasons):
+            reasons
+        }
+    }
+}
+
+public struct WorkoutKitPlanDescriptor: Sendable, Hashable, Codable {
+    public var id: UUID
+    public var displayName: String
+    public var family: WorkoutKitCandidateFamily
+    public var activity: WorkoutKitResolvedActivity
+    public var location: WorkoutKitResolvedLocation
+    public var goal: WorkoutKitResolvedGoal
+    public var intervalSteps: [WorkoutKitResolvedIntervalStep]
+    public var intervalIterations: Int
+
+    public init(
+        id: UUID,
+        displayName: String,
+        family: WorkoutKitCandidateFamily,
+        activity: WorkoutKitResolvedActivity,
+        location: WorkoutKitResolvedLocation = .unknown,
+        goal: WorkoutKitResolvedGoal,
+        intervalSteps: [WorkoutKitResolvedIntervalStep] = [],
+        intervalIterations: Int = 1
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.family = family
+        self.activity = activity
+        self.location = location
+        self.goal = goal
+        self.intervalSteps = intervalSteps
+        self.intervalIterations = intervalIterations
+    }
+}
+
+public enum WorkoutKitResolvedActivity: String, Sendable, Hashable, Codable, CaseIterable {
+    case running
+    case cycling
+    case rowing
+    case swimming
+    case hiking
+    case functionalStrength
+    case traditionalStrength
+    case hiit
+    case mixedCardio
+    case walking
+    case flexibility
+    case other
+}
+
+public enum WorkoutKitResolvedLocation: String, Sendable, Hashable, Codable, CaseIterable {
+    case unknown
+    case indoor
+    case outdoor
+}
+
+public enum WorkoutKitResolvedGoal: Sendable, Hashable, Codable {
+    case open
+    case timeSeconds(Double)
+    case distanceMeters(Double)
+}
+
+public struct WorkoutKitResolvedIntervalStep: Sendable, Hashable, Codable {
+    public enum Purpose: String, Sendable, Hashable, Codable {
+        case work
+        case recovery
+    }
+
+    public var purpose: Purpose
+    public var goal: WorkoutKitResolvedGoal
+
+    public init(purpose: Purpose, goal: WorkoutKitResolvedGoal) {
+        self.purpose = purpose
+        self.goal = goal
+    }
+}
+
+public enum WorkoutKitDescriptorResolutionError: Error, Sendable, Hashable, Codable {
+    case nonConstructible(Set<WorkoutKitBlockReason>)
+    case unsupportedSelectionPolicy
+    case unsupportedPayloadShape(WorkoutKitPayloadShape)
+}
+
 public enum WorkoutKitPushIdentityRequirement: String, Sendable, Hashable, Codable, CaseIterable {
     case stableWorkoutPlanID
     case payloadFingerprint
@@ -131,6 +311,8 @@ public enum WorkoutKitProofRequirement: String, Sendable, Hashable, Codable, Cas
 
 public enum WorkoutKitBlockReason: String, Sendable, Hashable, Codable, CaseIterable {
     case sourceAmbiguity
+    case needsSourceChoice
+    case misleadingRepresentation
     case targetCapabilityUnavailable
     case targetFamilyUnavailable
     case deliveryPathUnavailable
@@ -142,6 +324,12 @@ public enum WorkoutKitBlockReason: String, Sendable, Hashable, Codable, CaseIter
     case duplicateUpdateProofRequired
     case degradationAcknowledgementRequired
     case activitySupportUnproven
+}
+
+public enum WorkoutKitSourceChoice: String, Sendable, Hashable, Codable, CaseIterable {
+    case activityDomain
+    case environment
+    case preservationPolicy
 }
 
 public enum WorkoutKitVisibleResult: String, Sendable, Hashable, Codable, CaseIterable {
@@ -203,6 +391,73 @@ public struct WorkoutKitExportPlan: Sendable, Hashable, Codable {
     public var proofRequirements: Set<WorkoutKitProofRequirement>
     public var unresolvedRequirements: Set<WorkoutKitBlockReason>
     public var sourceAmbiguities: Set<PrimitiveExportAmbiguity>
+    public var classificationCategories: Set<WorkoutKitClassificationCategory>
+    public var sourceChoicesRequired: Set<WorkoutKitSourceChoice>
+    public var descriptor: WorkoutKitDescriptorBlueprint
+
+    public var requiresExactTargetValues: Bool {
+        descriptor.incompleteReasons.contains(.exactTargetValuesUnavailable)
+    }
+
+    public var admissionState: WorkoutKitAdmissionState {
+        if unresolvedRequirements.contains(.needsSourceChoice)
+            || unresolvedRequirements.contains(.sourceAmbiguity)
+        {
+            return .sourceChoiceRequired
+        }
+        if unresolvedRequirements.contains(.misleadingRepresentation) {
+            return .misleading
+        }
+        if supportState == .setmarkOnly || unresolvedRequirements.contains(.setmarkOnly) {
+            return .setmarkOnly
+        }
+        if supportState == .unsupported
+            || unresolvedRequirements.contains(.targetCapabilityUnavailable)
+            || unresolvedRequirements.contains(.targetFamilyUnavailable)
+        {
+            return .unsupported
+        }
+        if descriptor.completeness == .incomplete
+            || unresolvedRequirements.contains(.exactTargetValuesUnavailable)
+        {
+            return .descriptorIncomplete
+        }
+        if supportState == .degraded
+            && proofRequirements.contains(.degradationAcknowledgement)
+            && !unresolvedRequirements.contains(.degradationAcknowledgementRequired)
+        {
+            return .degradationAcknowledgementRequired
+        }
+        if !unresolvedRequirements.isEmpty || !proofRequirements.isEmpty {
+            return .proofBlocked
+        }
+        return .pushReady
+    }
+
+    public func resolvedPlanDescriptor() throws -> WorkoutKitPlanDescriptor {
+        guard supportState != .unsupported,
+              supportState != .setmarkOnly,
+              payload.shape != .noPayload
+        else {
+            throw WorkoutKitDescriptorResolutionError.unsupportedPayloadShape(payload.shape)
+        }
+        guard case .resolved(let resolved) = descriptor else {
+            throw WorkoutKitDescriptorResolutionError.nonConstructible(
+                descriptor.incompleteReasons.union(unresolvedRequirements)
+            )
+        }
+        let family = try resolvedCandidateFamily()
+        return WorkoutKitPlanDescriptor(
+            id: workoutID,
+            displayName: workoutName,
+            family: family,
+            activity: Self.resolvedActivity(from: resolved.activitySelection),
+            location: resolved.location,
+            goal: Self.resolvedGoal(from: resolved.goal),
+            intervalSteps: resolved.steps.map(Self.resolvedIntervalStep(from:)),
+            intervalIterations: resolved.intervalIterations
+        )
+    }
 
     public init(
         workoutID: WorkoutID,
@@ -216,7 +471,10 @@ public struct WorkoutKitExportPlan: Sendable, Hashable, Codable {
         degradation: WorkoutKitDegradation?,
         proofRequirements: Set<WorkoutKitProofRequirement>,
         unresolvedRequirements: Set<WorkoutKitBlockReason>,
-        sourceAmbiguities: Set<PrimitiveExportAmbiguity>
+        sourceAmbiguities: Set<PrimitiveExportAmbiguity>,
+        classificationCategories: Set<WorkoutKitClassificationCategory> = [],
+        sourceChoicesRequired: Set<WorkoutKitSourceChoice> = [],
+        descriptor: WorkoutKitDescriptorBlueprint
     ) {
         self.workoutID = workoutID
         self.workoutName = workoutName
@@ -230,6 +488,107 @@ public struct WorkoutKitExportPlan: Sendable, Hashable, Codable {
         self.proofRequirements = proofRequirements
         self.unresolvedRequirements = unresolvedRequirements
         self.sourceAmbiguities = sourceAmbiguities
+        self.classificationCategories = classificationCategories
+        self.sourceChoicesRequired = sourceChoicesRequired
+        self.descriptor = descriptor
+    }
+
+    private func resolvedCandidateFamily() throws -> WorkoutKitCandidateFamily {
+        switch selectionPolicy {
+        case .exact(let family):
+            return family
+        case .firstSupported(let families):
+            guard let family = families.first else {
+                throw WorkoutKitDescriptorResolutionError.unsupportedSelectionPolicy
+            }
+            return family
+        case .none:
+            throw WorkoutKitDescriptorResolutionError.unsupportedSelectionPolicy
+        }
+    }
+
+    private static func resolvedGoal(
+        from goal: WorkoutKitDescriptorGoal
+    ) -> WorkoutKitResolvedGoal {
+        switch goal {
+        case .open:
+            .open
+        case .timeSeconds(let seconds):
+            .timeSeconds(seconds)
+        case .distanceMeters(let meters):
+            .distanceMeters(meters)
+        }
+    }
+
+    private static func resolvedIntervalStep(
+        from step: WorkoutKitDescriptorStep
+    ) -> WorkoutKitResolvedIntervalStep {
+        WorkoutKitResolvedIntervalStep(
+            purpose: step.purpose == .work ? .work : .recovery,
+            goal: resolvedGoal(from: step.goal)
+        )
+    }
+
+    private static func resolvedActivity(
+        from selection: WorkoutKitActivitySelection
+    ) -> WorkoutKitResolvedActivity {
+        switch selection {
+        case .running:
+            .running
+        case .cycling:
+            .cycling
+        case .rowing:
+            .rowing
+        case .swimming:
+            .swimming
+        case .hiking:
+            .hiking
+        case .functionalStrength:
+            .functionalStrength
+        case .traditionalStrength:
+            .traditionalStrength
+        case .hiit:
+            .hiit
+        case .mixed:
+            .mixedCardio
+        case .walking, .carry:
+            .walking
+        case .recovery:
+            .flexibility
+        case .cardio, .unknown:
+            .other
+        }
+    }
+}
+
+public struct WorkoutKitClassificationReport: Sendable, Hashable, Codable {
+    public var plan: WorkoutKitExportPlan
+    public var sourceFactsConsulted: ActivityIntent?
+    public var missingSourceChoices: Set<WorkoutKitSourceChoice>
+    public var categories: Set<WorkoutKitClassificationCategory>
+    public var preservedFacts: Set<WorkoutKitExportFact>
+    public var omittedFacts: Set<WorkoutKitExportFact>
+    public var blockingReasons: Set<WorkoutKitBlockReason>
+    public var neutralFactRemedies: [WorkoutKitSourceChoice: String]
+
+    public init(
+        plan: WorkoutKitExportPlan,
+        sourceFactsConsulted: ActivityIntent?,
+        missingSourceChoices: Set<WorkoutKitSourceChoice>,
+        categories: Set<WorkoutKitClassificationCategory>,
+        preservedFacts: Set<WorkoutKitExportFact>,
+        omittedFacts: Set<WorkoutKitExportFact>,
+        blockingReasons: Set<WorkoutKitBlockReason>,
+        neutralFactRemedies: [WorkoutKitSourceChoice: String] = [:]
+    ) {
+        self.plan = plan
+        self.sourceFactsConsulted = sourceFactsConsulted
+        self.missingSourceChoices = missingSourceChoices
+        self.categories = categories
+        self.preservedFacts = preservedFacts
+        self.omittedFacts = omittedFacts
+        self.blockingReasons = blockingReasons
+        self.neutralFactRemedies = neutralFactRemedies
     }
 }
 

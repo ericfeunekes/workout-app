@@ -22,6 +22,8 @@ import SwiftUI
 ///   - disabled: Disables taps and tones the fill down.
 ///   - action: Callback fired on tap.
 public struct DSButton: View {
+    public static let minimumHeight: CGFloat = 56
+
     public enum ButtonStyle {
         case primary
         case ghost
@@ -49,9 +51,12 @@ public struct DSButton: View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 17, weight: .semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, DSSpacing.xl)
                 .padding(.horizontal, DSSpacing.xl + DSSpacing.sm)
+                .frame(minHeight: Self.minimumHeight)
                 .foregroundStyle(foreground)
                 .background(background)
                 .overlay(

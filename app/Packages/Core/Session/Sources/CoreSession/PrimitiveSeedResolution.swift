@@ -34,6 +34,8 @@ public extension ExecutionPlan {
         distanceM: Double? = nil,
         weight: Double? = nil,
         weightUnit: WeightUnit? = nil,
+        hrAvgBpm: Int? = nil,
+        hrMaxBpm: Int? = nil,
         completedAt: Date
     ) -> PrimitiveSetLog {
         blocks[blockIndex].sets[setIndexInBlock].setResultLog(
@@ -46,6 +48,8 @@ public extension ExecutionPlan {
             distanceM: distanceM,
             weight: weight,
             weightUnit: weightUnit,
+            hrAvgBpm: hrAvgBpm,
+            hrMaxBpm: hrMaxBpm,
             completedAt: completedAt
         )
     }

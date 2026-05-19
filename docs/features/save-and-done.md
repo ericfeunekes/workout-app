@@ -15,7 +15,7 @@ covers:
 # save-and-done
 
 ## What it does
-On the `.complete` route the user sees a per-exercise ledger, an optional body-weight field, an optional note field, and a single "save & done" button (`CompleteView.swift`). Tapping it calls `ExecutionViewModel.saveAndDone(note:bodyweightKg:)`, which does five things in order: (1) builds one local `WorkoutCompletionRecord` from the completed `Workout` plus all `done` SetLogs, (2) publishes that record through `onWorkoutCompleted` so REST durably queues one grouped `completionResults` payload carrying both final `set_logs` and the completed `status_update`, then kicks the flusher, (3) awaits the local `WorkoutCache` writer for that same record so the History tab can see it immediately when the best-effort cache write succeeds, (4) if the user typed a body weight, fires the `onUserParameterChanged` hook with a fresh `UserParameter{key:"bodyweight_kg",source:.appLog}` — Shell wires that to `WorkoutCache.saveUserParameter` + `SyncAPI.pushUserParameter` which enqueues `POST /api/user-parameters` (bug-011 fix), and (5) only after the durable completion queue handoff succeeds, dispatches `.save(freshItems:, freshStructure:)` through the reducer which flips route → `.today` and empties the log, then clears `SessionStore` so next launch won't resume.
+On the `.complete` route the user sees a per-exercise ledger, an optional body-weight field, an optional note field, and a single "save & done" button (`CompleteView.swift`). Tapping it calls `ExecutionViewModel.saveAndDone(note:bodyweightKg:)`, which does five things in order: (1) builds one local `WorkoutCompletionRecord` from the completed `Workout`, derived History cache rows, and primitive result rows, (2) publishes that record through `onWorkoutCompleted` so REST durably queues one grouped `completionResults` payload carrying both final `primitive_set_logs` and the completed `status_update`, then kicks the flusher, (3) awaits the local `WorkoutCache` writer for that same record so the History tab can see it immediately when the best-effort cache write succeeds, (4) if the user typed a body weight, fires the `onUserParameterChanged` hook with a fresh `UserParameter{key:"bodyweight_kg",source:.appLog}` — Shell wires that to `WorkoutCache.saveUserParameter` + `SyncAPI.pushUserParameter` which enqueues `POST /api/user-parameters` (bug-011 fix), and (5) only after the durable completion queue handoff succeeds, dispatches `.save(freshItems:, freshStructure:)` through the reducer which flips route → `.today` and empties the log, then clears `SessionStore` so next launch won't resume.
 
 **Note dictation is deferred** — the `saveAndDone` doc comment carries a TODO linking the open question. The TextField is the minimum UI that unblocks bug-012; the mic affordance is a polish item.
 
@@ -25,7 +25,7 @@ On the `.complete` route the user sees a per-exercise ledger, an optional body-w
 - **Inputs:** `viewModel.state` (all logged sets), `viewModel.context.workout` (template id/name/tags), `clock.now`.
 - **Outputs / side effects:**
   - `onWorkoutCompleted(WorkoutCompletionRecord)` enqueues one grouped completion result and `onPushKick()` fires so the flusher drains immediately.
-  - `localCompletionWriter(WorkoutCompletionRecord)` attempts the same completed workout, legacy set logs, and primitive set logs in `WorkoutCache` via best-effort `saveWorkout` + `saveSetLogs` + `savePrimitiveSetLogs`.
+  - `localCompletionWriter(WorkoutCompletionRecord)` attempts the same completed workout, derived history set-log cache rows, and primitive set logs in `WorkoutCache` via best-effort `saveWorkout` + `saveSetLogs` + `savePrimitiveSetLogs`.
   - `SessionState` → route `.today`, `items == []`, `structure` empty.
   - `SessionStore` row deleted (`SessionStore.swift:56`).
   - Telemetry proof events: `execution.completion_record_built`,
@@ -48,8 +48,8 @@ On the `.complete` route the user sees a per-exercise ledger, an optional body-w
 - Auto-advance path vs explicit End button both route through `saveAndDone` for the terminal completion publication (R2.5, `docs/open-questions.md:282`). Before the fix, the auto-advance path left the server's workout row `planned` forever. `complete()` itself no longer enqueues — the terminal push is owned exclusively by `saveAndDone` so force-complete + save-and-done no longer double-pushes (`ExecutionViewModel.swift:393-405`).
 - Re-entrancy guard on `saveAndDone` (R2.11 — `ExecutionViewModel+SaveAndDone.swift`): a rapid double-tap or a SwiftUI re-render that fires the tap action twice is dropped on the floor. First call sets an `@MainActor`-isolated in-flight marker (weak-to-strong `NSMapTable`); subsequent calls see the marker and return silently. Without this, a duplicate bodyweight `UserParameter` row would land in the append-only `user_parameters` table forever. Views also bind `.disabled(viewModel.saveAndDoneInFlight)` as belt-and-suspenders.
 - `localCompletionWriter` is `nil` in the pure-offline test path — `writeCompletionToLocalCache` returns early.
-- `SetLog` is only emitted for sets with `set.done == true` (`ExecutionViewModel+Push.swift:127`).
-- Each cache-write SetLog is stamped with the deterministic `setLogID(itemID:setIndex:)` UUID (`ExecutionViewModel+Push.swift:584`) — same derivation used by the per-set push enqueue, so local-cache ids MATCH push-queue ids for the same `(itemID, setIndex)` (R1.3b-v2 — see `ExecutionViewModel+Push.swift:45`).
+- Primitive result rows are only emitted for sets with `set.done == true`; derived History cache rows are built from the same completed state for local display.
+- Each derived History cache row is stamped with the deterministic `setLogID(itemID:setIndex:)` UUID so local History can reconcile one logical set across completion rewrites. Primitive push rows use `ExecutionPlan` coordinates and primitive UUIDs.
 - Completion publisher (`syncAPI.pushCompletion`) must succeed before the live session is cleared. The persistent push queue then owns retries of the grouped completion item.
 - Local cache writes are wrapped in `try?` — a failed local write just means History waits for the next pull.
 
@@ -65,7 +65,7 @@ On the `.complete` route the user sees a per-exercise ledger, an optional body-w
 ### S1. Happy path — auto-advance → save & done
 - **setup:** Seeded push workout, offline-capable build.
 - **steps:** Log every prescribed set; after the last set, cursor auto-advances through `.rest` → `.complete`. Tap "save & done".
-- **expected:** Route flips to `.today`; workout appears in History list immediately when the best-effort local cache writer succeeds; push queue drains a grouped `completionResults` payload with set logs and completed status; `SessionStore` row cleared.
+- **expected:** Route flips to `.today`; workout appears in History list immediately when the best-effort local cache writer succeeds; push queue drains a grouped `completionResults` payload with primitive set logs and completed status; `SessionStore` row cleared.
 - **notes:** This is the regression path for the fix in `docs/open-questions.md:282`.
 
 ### S2. Happy path — explicit End button → save & done

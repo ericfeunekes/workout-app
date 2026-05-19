@@ -162,6 +162,8 @@ public struct ExecutionSet: Equatable, Sendable {
         distanceM: Double? = nil,
         weight: Double? = nil,
         weightUnit: WeightUnit? = nil,
+        hrAvgBpm: Int? = nil,
+        hrMaxBpm: Int? = nil,
         completedAt: Date
     ) -> PrimitiveSetLog {
         let coordinate = PrimitiveLogCoordinate(
@@ -186,6 +188,8 @@ public struct ExecutionSet: Equatable, Sendable {
             durationSec: durationSec,
             distanceM: distanceM,
             rounds: rounds,
+            hrAvgBpm: hrAvgBpm,
+            hrMaxBpm: hrMaxBpm,
             completedAt: completedAt
         )
     }
@@ -360,6 +364,8 @@ public extension ExecutionSlot {
         durationSec: Double? = nil,
         distanceM: Double? = nil,
         rir: Int?,
+        hrAvgBpm: Int? = nil,
+        hrMaxBpm: Int? = nil,
         completedAt: Date
     ) -> PrimitiveSetLog {
         let coordinate = PrimitiveLogCoordinate(
@@ -389,6 +395,8 @@ public extension ExecutionSlot {
             durationSec: durationSec,
             distanceM: distanceM,
             rir: rir,
+            hrAvgBpm: hrAvgBpm,
+            hrMaxBpm: hrMaxBpm,
             isWarmup: isWarmup,
             completedAt: completedAt
         )

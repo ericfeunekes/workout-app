@@ -4,6 +4,7 @@ import Foundation
 import Persistence
 import Sync
 import WorkoutCoreFoundation
+import WorkoutKitExportProfile
 
 @main
 struct PrimitiveSyncProbe {
@@ -21,14 +22,16 @@ struct PrimitiveSyncProbe {
         try await expectBadTokenIsRejected(baseURL: baseURL)
 
         let transport = URLSessionTransport(baseURL: baseURL)
-        let persistence = try PersistenceFactory.makeInMemory()
-        let api = SyncAPI(
+        let storeURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("PrimitiveSyncProbe-\(UUID().uuidString).store")
+        let initialPersistence = try PersistenceFactory.makeOnDisk(storeURL: storeURL)
+        let pullAPI = SyncAPI(
             transport: transport,
-            store: persistence.pushQueueStore,
+            store: initialPersistence.pushQueueStore,
             tokenProvider: { token }
         )
 
-        let pull = try await api.pullLatest(since: nil as Date?)
+        let pull = try await pullAPI.pullLatest(since: nil as Date?)
         let dataset = PulledDataset(
             workouts: pull.workouts.map { $0.workout },
             primitiveWorkouts: pull.primitiveWorkouts,
@@ -39,11 +42,30 @@ struct PrimitiveSyncProbe {
             exercises: pull.exercises,
             userParameters: pull.userParameters
         )
-        try await persistence.workoutCache.save(dataset)
+        try await initialPersistence.workoutCache.save(dataset)
 
+        let persistence = try PersistenceFactory.makeOnDisk(storeURL: storeURL)
+        let api = SyncAPI(
+            transport: transport,
+            store: persistence.pushQueueStore,
+            tokenProvider: { token }
+        )
         let primitiveWorkouts = try await persistence.workoutCache.loadPrimitiveWorkouts()
-        try expect(primitiveWorkouts.count == 1, "expected one primitive workout")
-        let workout = primitiveWorkouts[0]
+        try expect(
+            primitiveWorkouts.contains { $0.id == ProbeIDs.executionWorkout },
+            "expected execution primitive workout"
+        )
+        try expect(
+            primitiveWorkouts.contains { $0.id == ProbeIDs.sourceFactWorkout },
+            "expected source-fact primitive workout"
+        )
+        guard let workout = primitiveWorkouts.first(where: { $0.id == ProbeIDs.executionWorkout }) else {
+            throw ProbeError.failedExpectation("expected execution primitive workout")
+        }
+        guard let sourceFactWorkout = primitiveWorkouts.first(where: { $0.id == ProbeIDs.sourceFactWorkout }) else {
+            throw ProbeError.failedExpectation("expected source-fact primitive workout")
+        }
+        try expectSourceFactClassification(sourceFactWorkout)
         let plan = try ExecutionPlan.validated(workout: workout, userParameters: [:])
 
         guard let block = workout.blocks.first,
@@ -84,6 +106,13 @@ struct PrimitiveSyncProbe {
         )
         try expect(aggregateLog.role == .setResult, "expected aggregate set-result log")
         try await push(log: aggregateLog, workoutID: workout.id, api: api, persistence: persistence)
+
+        try await pushMixedRoleCompletion(
+            plan: plan,
+            pulledWorkout: pull.workouts.first { $0.workout.id == workout.id }!.workout,
+            api: api,
+            persistence: persistence
+        )
         try await expectInvalidPerformedExerciseRejected(baseURL: baseURL, token: token)
     }
 
@@ -99,6 +128,33 @@ struct PrimitiveSyncProbe {
         throw ProbeError.failedExpectation("expected token rejection")
     }
 
+    private static func expectSourceFactClassification(_ workout: PrimitiveWorkout) throws {
+        try expect(
+            workout.activityIntent?.activityDomain == .running,
+            "expected running activity intent after SwiftData reopen"
+        )
+        try expect(
+            workout.activityIntent?.preservationPolicy == .preservePrimaryActivity,
+            "expected preservation policy after SwiftData reopen"
+        )
+        try expect(
+            workout.activityIntent?.environment == .unspecified,
+            "expected defaulted environment after SwiftData reopen"
+        )
+        let report = try WorkoutKitExportClassifier().report(for: workout)
+        try expect(report.plan.rowID == .continuousCardio, "expected continuous cardio source-fact row")
+        try expect(report.plan.payload.activitySelection == .running, "expected running WorkoutKit activity")
+        try expect(report.missingSourceChoices.isEmpty, "expected no missing source choices")
+        try expect(
+            !report.blockingReasons.contains(.sourceAmbiguity),
+            "expected no source ambiguity after source-fact readback"
+        )
+        try expect(
+            report.plan.admissionState == .proofBlocked,
+            "expected source-fact proof to remain separate from WorkoutKit push readiness"
+        )
+    }
+
     private static func push(
         log: PrimitiveSetLog,
         workoutID: WorkoutID,
@@ -112,6 +168,84 @@ struct PrimitiveSyncProbe {
         let result = try await api.flushPushQueue()
         try expect(result.remaining == 0, "expected empty push queue")
         try expect(result.pushed == 1, "expected one primitive set log push")
+    }
+
+    private static func pushMixedRoleCompletion(
+        plan: ExecutionPlan,
+        pulledWorkout: Workout,
+        api: SyncAPI,
+        persistence: PersistenceFactory
+    ) async throws {
+        guard let firstSet = plan.blocks.first?.sets.first,
+              let firstSlot = firstSet.slots.first
+        else {
+            throw ProbeError.failedExpectation("expected execution plan with one slot")
+        }
+        let completedAt = Date(timeIntervalSince1970: 1_768_516_920)
+        let slotLog = firstSlot.slotLog(
+            workoutID: plan.workoutID,
+            blockRepeatIndex: 0,
+            setRepeatIndex: 0,
+            setIndex: 1,
+            reps: 9,
+            weight: 42,
+            weightUnit: .kg,
+            rir: 1,
+            completedAt: completedAt
+        )
+        let setLog = plan.setResultLog(
+            blockIndex: 0,
+            setIndexInBlock: 0,
+            blockRepeatIndex: 0,
+            setRepeatIndex: 0,
+            rounds: 4,
+            durationSec: 360,
+            completedAt: completedAt
+        )
+        let blockLog = plan.blockResultLog(
+            blockIndex: 0,
+            blockRepeatIndex: 0,
+            durationSec: 360,
+            completedAt: completedAt
+        )
+        var completedWorkout = pulledWorkout
+        completedWorkout.status = .completed
+        completedWorkout.notes = "mixed role completion probe"
+        completedWorkout.completedAt = completedAt
+        completedWorkout.updatedAt = completedAt
+        let record = WorkoutCompletionRecord(
+            workout: completedWorkout,
+            primitiveSetLogs: [slotLog, setLog, blockLog]
+        )
+
+        try await persistence.workoutCache.save(
+            PulledDataset(workouts: [completedWorkout])
+        )
+        try await persistence.workoutCache.savePrimitiveSetLogs(
+            record.primitiveSetLogs,
+            workoutID: plan.workoutID
+        )
+        let cached = try await persistence.workoutCache.loadPrimitiveSetLogs(workoutID: plan.workoutID)
+        try expect(
+            Set(cached.map(\.role)).isSuperset(of: [.slot, .setResult, .blockResult]),
+            "expected mixed-role completion artifact in SwiftData cache"
+        )
+        guard let cachedSlot = cached.first(where: { $0.id == slotLog.id }) else {
+            throw ProbeError.failedExpectation("expected grouped slot in SwiftData cache")
+        }
+        try expect(cachedSlot.setIndex == 1, "expected grouped slot commit coordinate")
+        try expect(cachedSlot.weight == 42, "expected grouped slot weight in SwiftData cache")
+        try expect(cachedSlot.weightUnit == .kg, "expected grouped slot weight unit in SwiftData cache")
+        try await api.pushCompletion(record)
+        let result = try await api.flushPushQueue()
+        try expect(
+            result.remaining == 0,
+            "expected empty push queue after completion, got pushed=\(result.pushed) remaining=\(result.remaining)"
+        )
+        try expect(
+            result.pushed == 1,
+            "expected one grouped completion push, got pushed=\(result.pushed) remaining=\(result.remaining)"
+        )
     }
 
     private static func expectInvalidPerformedExerciseRejected(
@@ -184,6 +318,11 @@ struct PrimitiveSyncProbe {
             throw ProbeError.failedExpectation(message)
         }
     }
+}
+
+private enum ProbeIDs {
+    static let executionWorkout = UUID(uuidString: "22222222-2222-4222-8222-222222222222")!
+    static let sourceFactWorkout = UUID(uuidString: "22222222-2222-4222-8222-222222222223")!
 }
 
 private enum ProbeError: Error, CustomStringConvertible {

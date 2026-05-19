@@ -19,6 +19,7 @@
 
 import Foundation
 import FeaturesExecution
+import WatchBridge
 
 /// Observable wrapper around the currently-active `ExecutionViewModel`.
 /// The shell constructs one holder at bootstrap, passes it to the
@@ -37,8 +38,42 @@ public final class ExecutionVMHolder {
     /// The currently-active execution view model, or `nil` when the
     /// user has no planned workouts remaining.
     public var vm: ExecutionViewModel?
+    private var watchBridgeTask: Task<Void, Never>?
 
     public init(vm: ExecutionViewModel? = nil) {
         self.vm = vm
+    }
+
+    public func connectWatchBridge(_ bridge: any WatchBridge) {
+        watchBridgeTask?.cancel()
+        watchBridgeTask = Task { @MainActor [weak self, bridge] in
+            for await message in bridge.messages() {
+                guard let self else { return }
+                routeWatchMessage(message)
+            }
+        }
+    }
+
+    private func routeWatchMessage(_ message: WatchMessage) {
+        switch message {
+        case .setStarted(let workoutItemID, let setIndex, _):
+            vm?.applyWatchSetStarted(workoutItemID: workoutItemID, setIndex: setIndex)
+        case .setEnded(let workoutItemID, let setIndex, _, let bpmAvg, let bpmMax):
+            vm?.applyWatchSetEnded(
+                workoutItemID: workoutItemID,
+                setIndex: setIndex,
+                bpmAvg: bpmAvg,
+                bpmMax: bpmMax
+            )
+        case .quickLog(let workoutItemID, let setIndex, let reps, let rir):
+            vm?.applyWatchQuickLog(
+                workoutItemID: workoutItemID,
+                setIndex: setIndex,
+                reps: reps,
+                rir: rir
+            )
+        case .pushActiveBlock, .pushRestTimer, .pushWorkoutComplete:
+            return
+        }
     }
 }

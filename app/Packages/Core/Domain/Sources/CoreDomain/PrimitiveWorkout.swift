@@ -9,12 +9,65 @@ import WorkoutCoreFoundation
 public struct PrimitiveWorkout: Sendable, Hashable, Codable {
     public var id: WorkoutID
     public var name: String
+    public var activityIntent: ActivityIntent?
     public var blocks: [PrimitiveBlock]
 
-    public init(id: WorkoutID, name: String, blocks: [PrimitiveBlock]) {
+    public init(
+        id: WorkoutID,
+        name: String,
+        activityIntent: ActivityIntent? = nil,
+        blocks: [PrimitiveBlock]
+    ) {
         self.id = id
         self.name = name
+        self.activityIntent = activityIntent
         self.blocks = blocks
+    }
+}
+
+public enum ActivityDomain: String, Sendable, Hashable, CaseIterable, Codable {
+    case running
+    case cycling
+    case rowing
+    case swimming
+    case walking
+    case hiking
+    case functionalStrength = "functional_strength"
+    case traditionalStrength = "traditional_strength"
+    case hiit
+    case mobility
+    case mixedModal = "mixed_modal"
+    case carry
+    case other
+}
+
+public enum ActivityEnvironment: String, Sendable, Hashable, CaseIterable, Codable {
+    case indoor
+    case outdoor
+    case unspecified
+}
+
+public enum ActivityPreservationPolicy: String, Sendable, Hashable, CaseIterable, Codable {
+    case preservePrimaryActivity = "preserve_primary_activity"
+    case preserveStructure = "preserve_structure"
+    case preserveElapsedTime = "preserve_elapsed_time"
+    case preserveDistance = "preserve_distance"
+    case preserveMixedModality = "preserve_mixed_modality"
+}
+
+public struct ActivityIntent: Sendable, Hashable, Codable {
+    public var activityDomain: ActivityDomain
+    public var environment: ActivityEnvironment
+    public var preservationPolicy: ActivityPreservationPolicy?
+
+    public init(
+        activityDomain: ActivityDomain,
+        environment: ActivityEnvironment = .unspecified,
+        preservationPolicy: ActivityPreservationPolicy? = nil
+    ) {
+        self.activityDomain = activityDomain
+        self.environment = environment
+        self.preservationPolicy = preservationPolicy
     }
 }
 
@@ -232,7 +285,12 @@ public struct PrimitiveSetLog: Sendable, Hashable {
     public var distanceM: Double?
     public var rounds: Int?
     public var rir: Int?
+    public var hrAvgBpm: Int?
+    public var hrMaxBpm: Int?
     public var isWarmup: Bool
+    public var skipped: Bool
+    public var side: SetLogSide
+    public var notes: String?
     public var completedAt: Date
 
     public init(
@@ -254,7 +312,12 @@ public struct PrimitiveSetLog: Sendable, Hashable {
         distanceM: Double? = nil,
         rounds: Int? = nil,
         rir: Int? = nil,
+        hrAvgBpm: Int? = nil,
+        hrMaxBpm: Int? = nil,
         isWarmup: Bool = false,
+        skipped: Bool = false,
+        side: SetLogSide = .bilateral,
+        notes: String? = nil,
         completedAt: Date
     ) {
         self.id = id
@@ -275,7 +338,12 @@ public struct PrimitiveSetLog: Sendable, Hashable {
         self.distanceM = distanceM
         self.rounds = rounds
         self.rir = rir
+        self.hrAvgBpm = hrAvgBpm
+        self.hrMaxBpm = hrMaxBpm
         self.isWarmup = isWarmup
+        self.skipped = skipped
+        self.side = side
+        self.notes = notes
         self.completedAt = completedAt
     }
 }

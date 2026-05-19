@@ -1127,6 +1127,10 @@ private final class MutableFakeCache: WorkoutCache, @unchecked Sendable {
 
     func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [PrimitiveSetLog] { [] }
 
+    func loadPrimitiveSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [PrimitiveSetLog] {
+        []
+    }
+
     func loadSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [SetLog] {
         []
     }

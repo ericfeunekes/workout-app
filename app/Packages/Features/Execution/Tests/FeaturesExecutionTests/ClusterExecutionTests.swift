@@ -222,9 +222,42 @@ final class ClusterExecutionTests: XCTestCase {
             exerciseID: exerciseID,
             prescriptionJSON: prescriptionJSON
         )
+        let primitiveWorkout = PrimitiveWorkout(
+            id: workoutID,
+            name: workout.name,
+            blocks: [
+                PrimitiveBlock(
+                    id: blockID,
+                    sets: [
+                        PrimitiveSet(
+                            id: UUID(),
+                            timing: PrimitiveTiming(mode: .setBounded),
+                            traversal: .sequential,
+                            slots: [
+                                PrimitiveSlot(
+                                    id: itemID,
+                                    exerciseID: exerciseID,
+                                    workTargets: [
+                                        PrimitiveWorkTarget(
+                                            metric: .reps,
+                                            valueForm: .single,
+                                            value: 5,
+                                            role: .completion
+                                        ),
+                                    ],
+                                    load: PrimitiveLoad(value: 100, unit: .lb, unitType: .absolute)
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ]
+        )
         return (
             WorkoutContext(
                 workout: workout,
+                primitiveWorkout: primitiveWorkout,
+                primitiveExecutionPlan: ExecutionPlan(workout: primitiveWorkout),
                 blocks: [block],
                 itemsByBlock: [[item]],
                 exercises: [exerciseID: Exercise(id: exerciseID, name: "Bench Press")]
@@ -281,9 +314,55 @@ final class ClusterExecutionTests: XCTestCase {
             exerciseID: rowExerciseID,
             prescriptionJSON: #"{"reps":10,"load_kg":22,"weight_unit":"kg","target_rir":2}"#
         )
+        let primitiveWorkout = PrimitiveWorkout(
+            id: workoutID,
+            name: workout.name,
+            blocks: [
+                PrimitiveBlock(
+                    id: blockID,
+                    sets: [
+                        PrimitiveSet(
+                            id: UUID(),
+                            timing: PrimitiveTiming(mode: .setBounded),
+                            traversal: .sequential,
+                            slots: [
+                                PrimitiveSlot(
+                                    id: clusterItemID,
+                                    exerciseID: clusterExerciseID,
+                                    workTargets: [
+                                        PrimitiveWorkTarget(
+                                            metric: .reps,
+                                            valueForm: .single,
+                                            value: 5,
+                                            role: .completion
+                                        ),
+                                    ],
+                                    load: PrimitiveLoad(value: 24, unit: .kg, unitType: .absolute)
+                                ),
+                                PrimitiveSlot(
+                                    id: rowItemID,
+                                    exerciseID: rowExerciseID,
+                                    workTargets: [
+                                        PrimitiveWorkTarget(
+                                            metric: .reps,
+                                            valueForm: .single,
+                                            value: 10,
+                                            role: .completion
+                                        ),
+                                    ],
+                                    load: PrimitiveLoad(value: 22, unit: .kg, unitType: .absolute)
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ]
+        )
         return (
             WorkoutContext(
                 workout: workout,
+                primitiveWorkout: primitiveWorkout,
+                primitiveExecutionPlan: ExecutionPlan(workout: primitiveWorkout),
                 blocks: [block],
                 itemsByBlock: [[cluster, row]],
                 exercises: [

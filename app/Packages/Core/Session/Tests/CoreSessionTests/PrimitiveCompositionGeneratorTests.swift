@@ -448,7 +448,7 @@ private struct GeneratedPrimitiveCase {
 
     func expectedAggregateMetric(for set: ExecutionSet) -> PrimitiveResultMetric? {
         if set.workTargets.contains(where: { $0.metric == .rounds && $0.role == .observation }) {
-            return .reps
+            return .rounds
         }
         if set.workTargets.contains(where: { $0.metric == .duration && $0.role == .observation }) {
             return .duration

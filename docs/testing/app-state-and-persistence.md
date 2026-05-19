@@ -48,6 +48,12 @@ Exercise:
 - destructive reset when data should be removed
 - migration path when schema changes
 
+`TokenStore` package tests follow this pattern through an injected Keychain
+client. That proves app-owned payload, defaults mirror, clear, overwrite, and
+legacy migration behavior while keeping `make pre-qa` independent from flaky
+macOS SwiftPM Keychain writes. Real Security/Keychain behavior is a separate
+signed simulator boundary proven by `make test-tokenstore-keychain-ui`.
+
 ### Sync and queue ownership
 
 Use deterministic transports for package-level logic and realistic-local probes

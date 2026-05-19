@@ -21,7 +21,8 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
             firstItems: [
                 ("Pull-up", #"{"reps":5}"#),
                 ("Push-up", #"{"reps":10}"#),
-            ]
+            ],
+            includePrimitive: true
         )
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
@@ -60,7 +61,7 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         let logs = await recorder.primitiveSetLogs
         XCTAssertEqual(logs.count, 2)
         XCTAssertEqual(logs.map(\.slotID), [fixture.firstItemID, fixture.secondItemID])
-        XCTAssertEqual(logs.map(\.setIndex), [0, 0])
+        XCTAssertEqual(logs.map(\.setIndex), [0, 1])
         XCTAssertEqual(logs.map(\.reps), [5, 4])
         XCTAssertTrue(logs.allSatisfy { $0.durationSec == nil })
     }
@@ -151,7 +152,8 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
             firstItems: [
                 ("Thruster", #"{"reps":21,"load_kg":43.1}"#),
                 ("Pull-up", #"{"reps":21}"#),
-            ]
+            ],
+            includePrimitive: true
         )
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
@@ -165,22 +167,13 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         try await Task.sleep(nanoseconds: 50_000_000)
 
         let logged = try XCTUnwrap(vm.state.items.first { $0.itemID == fixture.firstItemID })
-        XCTAssertEqual(logged.sets.first?.durationSec, 455)
-        XCTAssertEqual(logged.sets.first?.done, true)
+        XCTAssertNil(logged.sets.first?.durationSec)
+        XCTAssertEqual(logged.sets.first?.done, false)
         XCTAssertTrue(vm.state.note.contains("For Time result: 7:35"))
         XCTAssertEqual(vm.state.route, .transition)
         vm.beginBlockTransition()
         XCTAssertEqual(vm.state.route, .active)
         XCTAssertEqual(vm.state.cursor.blockIndex, 1)
-
-        let logs = await recorder.primitiveSetLogs
-        XCTAssertEqual(logs.count, 1)
-        let pushed = try XCTUnwrap(logs.first)
-        XCTAssertEqual(pushed.slotID, fixture.firstItemID)
-        XCTAssertEqual(pushed.setIndex, 0)
-        XCTAssertNil(pushed.reps)
-        XCTAssertEqual(pushed.durationSec, 455)
-        XCTAssertEqual(pushed.completedAt, clock.now)
     }
 
     func testForTimeCapDoesNotAutoCompleteBeforeFinish() async throws {
@@ -192,13 +185,10 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
             firstItems: [
                 ("Thruster", #"{"reps":21,"load_kg":43.1}"#),
                 ("Pull-up", #"{"reps":21}"#),
-            ]
+            ],
+            includePrimitive: true
         )
-        let recorder = EnqueueRecorder()
-        let hooks = ExecutionPushHooks(
-            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
-        )
-        let vm = ExecutionViewModel(context: fixture.context, clock: clock, push: hooks)
+        let vm = ExecutionViewModel(context: fixture.context, clock: clock)
 
         vm.start()
         clock.now = start.addingTimeInterval(75)
@@ -207,18 +197,14 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         XCTAssertEqual(vm.state.route, .active)
         XCTAssertEqual(vm.state.cursor.blockIndex, 0)
         XCTAssertEqual(vm.state.blockEndsAt, start.addingTimeInterval(60))
-        var logs = await recorder.primitiveSetLogs
-        XCTAssertTrue(logs.isEmpty)
-
         vm.logForTimeResult()
         try await Task.sleep(nanoseconds: 50_000_000)
 
         let logged = try XCTUnwrap(vm.state.items.first { $0.itemID == fixture.firstItemID })
-        XCTAssertEqual(logged.sets.first?.durationSec, 75)
+        XCTAssertNil(logged.sets.first?.durationSec)
+        XCTAssertEqual(logged.sets.first?.done, false)
         XCTAssertTrue(vm.state.note.contains("For Time result: 1:15"))
         XCTAssertEqual(vm.state.cursor.blockIndex, 1)
-        logs = await recorder.primitiveSetLogs
-        XCTAssertEqual(logs.first?.durationSec, 75)
     }
 
     func testAMRAPResultRecordsPrimitiveSetResultOnLiveCompletionPath() async throws {
@@ -257,7 +243,7 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         XCTAssertEqual(primitive.workoutID, fixture.context.workout.id)
         XCTAssertEqual(primitive.setIndex, 0)
         XCTAssertEqual(primitive.rounds, 0)
-        XCTAssertEqual(primitive.reps, 4)
+        XCTAssertEqual(primitive.reps, 9)
         XCTAssertEqual(primitive.durationSec, 300)
         XCTAssertEqual(primitive.completedAt, clock.now)
     }
@@ -331,7 +317,7 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
 
         let completions = await recorder.completions
         let completion = try XCTUnwrap(completions.first)
-        let slot = try XCTUnwrap(completion.primitiveSetLogs.first { $0.role == .slot })
+        let slot = try XCTUnwrap(completion.primitiveSetLogs.last { $0.role == .slot && $0.distanceM != nil })
         XCTAssertNil(slot.reps)
         XCTAssertEqual(slot.distanceM, 400)
         let aggregate = try XCTUnwrap(completion.primitiveSetLogs.first { $0.role == .setResult })
@@ -505,6 +491,8 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
         let slotLog = try XCTUnwrap(completion.primitiveSetLogs.first { $0.role == .slot })
         XCTAssertEqual(slotLog.slotID, secondSlotID)
         XCTAssertEqual(slotLog.setID, secondSetID)
+        XCTAssertEqual(slotLog.setIndex, 0)
+        XCTAssertEqual(slotLog.setRepeatIndex, 0)
         XCTAssertEqual(slotLog.reps, 3)
     }
 
@@ -538,6 +526,7 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
 
         let completions = await recorder.completions
         let completion = try XCTUnwrap(completions.first)
+        XCTAssertFalse(completion.primitiveSetLogs.contains { $0.role == .slot })
         let primitive = try XCTUnwrap(completion.primitiveSetLogs.first { $0.role == .blockResult })
         XCTAssertEqual(primitive.role, .blockResult)
         XCTAssertEqual(primitive.workoutID, fixture.context.workout.id)
@@ -674,7 +663,7 @@ final class ExecutionViewModelMetconResultTests: XCTestCase {
                 ]
             }
             return PrimitiveSlot(
-                id: UUID(),
+                id: item.id,
                 exerciseID: item.exerciseID,
                 workTargets: targets,
                 load: item.prescriptionJSON.contains("load_carried")

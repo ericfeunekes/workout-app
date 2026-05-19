@@ -105,6 +105,73 @@ The bridge must be explicit about what survives the mapping:
   scheduling belong to a WorkoutKit adapter boundary. Results/readback belongs
   to a separate module if later promoted.
 
+### Neutral source facts
+
+Some export choices cannot be inferred from primitive structure. A distance
+target might be a run, row, ride, loaded carry, or station inside a mixed
+workout. The durable workout contract therefore carries a small
+vendor-neutral `activity_intent` object at the primitive workout root. This is
+source truth about what the workout is trying to preserve, not an instruction
+to any one export adapter.
+
+V1 source facts:
+
+| Field | Values | Required for Setmark execution? | Export meaning |
+| --- | --- | --- | --- |
+| `activity_domain` | `running`, `cycling`, `rowing`, `swimming`, `walking`, `hiking`, `functional_strength`, `traditional_strength`, `hiit`, `mobility`, `mixed_modal`, `carry`, `other` | No | Broad authored activity family. Missing means source-dependent export rows return `needsSourceChoice`; the classifier must not guess from distance, duration, load, or reps alone. |
+| `environment` | `indoor`, `outdoor`, `unspecified` | No | Where the workout is intended to happen when that changes the target mapping. Missing defaults to `unspecified`; resolved descriptors preserve `indoor` and `outdoor` and translate `unspecified` to unknown location. Target adapters may block when a concrete location is required. |
+| `preservation_policy` | `preserve_primary_activity`, `preserve_structure`, `preserve_elapsed_time`, `preserve_distance`, `preserve_mixed_modality` | No | What truth should survive when a mixed workout cannot preserve everything in the target. Missing is allowed for single-domain workouts but produces `needsSourceChoice` for Hyrox/run-station and other mixed-domain rows where the choice changes meaning. |
+
+The object itself may be omitted. Omission never makes a workout invalid in
+Setmark. It only prevents the export profile from pretending to know which
+external representation is honest. Future targets may reuse these same facts;
+new target-specific fields still belong outside primitive workout, block, set,
+slot, and log records.
+
+Ownership and wire semantics:
+
+- Claude-authored workout pushes are the normal author of `activity_intent`.
+  Server create/update APIs validate and persist it. Sync, Persistence, Today,
+  Shell, WorkoutKitAdapter, and HealthKitBridge are not allowed to invent,
+  normalize by heuristic, or mutate the facts.
+- Manual/app-created workouts may omit `activity_intent`; that omission means
+  source-dependent export rows must ask for source choice instead of guessing.
+- On the API and sync wire, `activity_intent` is a sibling of
+  `primitive_blocks` on the primitive workout root. It is not nested in a block,
+  set, slot, log, or adapter-specific object.
+- Omitted `activity_intent` and explicit `null` both mean “no source facts.”
+  Read and sync responses materialize that as `activity_intent: null`;
+  classifiers treat it as absent.
+- If `activity_intent` is present, `activity_domain` is required,
+  `environment` defaults to `unspecified` and is materialized on readback, and
+  `preservation_policy` may be omitted only when the source activity choice does
+  not change the export meaning. Mixed-domain rows that need the policy return
+  `needsSourceChoice`.
+- Target adapters may read the neutral facts only after `ExportProfile` has
+  classified them. Candidate-family choice, degradation meaning,
+  Apple-visible result, source-choice state, and misleading-block decisions
+  belong to `ExportProfile`.
+
+Hyrox-style workouts use the same neutral facts. If the workout is "running
+with hard stations," `activity_domain=running` plus
+`preservation_policy=preserve_primary_activity` can admit a lossy running-first
+export that discloses station loss. If the workout is a mixed event where
+station structure matters most, `activity_domain=mixed_modal` plus
+`preservation_policy=preserve_structure` should prefer a broad custom/mixed
+representation. Without that explicit policy, the WorkoutKit classifier must
+return `needsSourceChoice`; if the requested preservation policy would make the
+Apple-visible result misleading, it must block as `misleading` rather than
+silently push.
+
+Minimum Hyrox/run-station V1 matrix:
+
+| Activity intent | Expected classification |
+| --- | --- |
+| No `activity_intent`, or `activity_domain=mixed_modal` with missing `preservation_policy` | `needsSourceChoice`; no target guess. |
+| `activity_domain=running`, `preservation_policy=preserve_primary_activity` | Lossy running-first candidate; station work is disclosed as Setmark-only. |
+| `activity_domain=mixed_modal`, `preservation_policy=preserve_structure` | Lossy mixed/custom candidate; run distance may be collapsed or disclosed depending on target fit. |
+| `activity_domain=running`, `preservation_policy=preserve_structure` for a station-heavy mixed workout | `misleading`; the requested policy conflicts with the visible running-first result. |
+
 The mapping table is a durable artifact of this feature. It names each Setmark
 shape, primitive axes, Apple workout candidate, preserved facts,
 omitted/collapsed facts, Apple-visible result, push identity requirements, and
@@ -131,9 +198,9 @@ Phase 1 mapping matrix:
 
 | Setmark archetype | Primitive axes / dominant metric | WorkoutKit candidate | Support state | Preserved for Apple | Omitted or collapsed | Apple-visible result | Setmark result claim | Planner state |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Continuous cardio | Time or distance target; sequential traversal; source activity not yet explicit in primitives | `SingleGoalWorkout` | Native candidate, currently source-ambiguous | Time/distance goal once exact values exist | Activity type/location until authored source fact exists; Setmark block/set hierarchy | Workout completed with elapsed time, distance/energy when available | No Setmark result claim from push | Block until source activity fact, exact target mapping, and real-device schedule/start proof |
+| Continuous cardio | One concrete time or distance target; sequential traversal; source activity fact required | `SingleGoalWorkout` | Native when `activity_intent` is present and the resolved descriptor preserves the single target; otherwise `needsSourceChoice` or descriptor-incomplete | Authored activity family, concrete time/distance goal, and authored indoor/outdoor location when present | Setmark block/set hierarchy; unspecified location remains unknown | Workout completed with elapsed time, distance/energy when available | No Setmark result claim from push | Block until source activity fact, exact descriptor mapping, and real-device schedule/start proof |
 | Pace-target run or ride | Distance plus target time/pace; cardio domain | `PacerWorkout` where supported | Future candidate; not emitted by current classifier/adapter | None yet | Pacer payload construction and source activity | Workout completed against Apple pacing model | No Setmark result claim from push | Block until target mapper and real-device proof |
-| Simple cardio intervals | Time or distance bounded work/rest steps; sequential traversal | `CustomWorkout` with interval blocks/steps | Native or degraded candidate, currently source-ambiguous | Step order and work/rest cadence once exact values exist | Activity type until authored source fact exists; step names on lower OS floors; detailed Setmark hierarchy | Interval workout completion | No Setmark result claim from push | Block until source activity fact, exact interval mapping, and real-device proof |
+| Simple cardio intervals | Time-bounded work/rest steps; sequential traversal; source activity fact required | `CustomWorkout` with interval blocks/steps | Native or degraded when `activity_intent` is present and the resolved descriptor preserves the authored work/rest metric; otherwise `needsSourceChoice` or descriptor-incomplete | Authored activity family, step order, concrete work/rest cadence, and repeat count | Step names on lower OS floors; detailed Setmark hierarchy | Interval workout completion | No Setmark result claim from push | Block until source activity fact, exact descriptor mapping, and real-device proof |
 | Segmented continuous workout | Sequential blocks in one modality; time/distance segments | `CustomWorkout` | Degraded | Segment order and broad goals | Rich segment intent, result roles below Apple step level | Custom workout completion | No Setmark result claim from push | Block until adapter proof |
 | Straight strength / set based | Repeated sets/slots; strength domain; reps/load are Setmark-owned | `SingleGoalWorkout` or `CustomWorkout` with functional-strength activity and open/time goals | Degraded | Activity category, broad duration or open workout | Load, reps, RIR, alternatives, per-slot/set results | Strength workout duration/energy/HR only | No Setmark result claim from push | Requires degradation acknowledgement plus real-device path proof |
 | Density strength | Time-bounded strength block; work density is Setmark-owned | `CustomWorkout` time block or open functional-strength workout | Degraded | Time cap/duration and activity category | Round count, reps/load density semantics | Timed strength workout completion | No Setmark result claim from push; density score remains Setmark-only | Requires degradation acknowledgement plus proof |
@@ -205,14 +272,16 @@ Push proof must answer these cases before user-facing implementation:
   WorkoutKit classifier exist in `app/Packages/ExportProfile`, and
   `app/Packages/WorkoutKitAdapter` now owns the production WorkoutKit push
   entrypoint, platform gates, real schedule/open clients, and DEBUG/test
-  diagnostics. No
-  user-facing export button or export tracking persistence exists yet, and the
-  production coordinator blocks value-backed WorkoutKit payloads where the pure
-  export profile only records goal shape. Cardio-like rows also remain blocked
+  diagnostics. `ExportProfile` owns the SDK-free resolved descriptor contract;
+  the adapter translates only resolved descriptors to WorkoutKit SDK objects.
+  No user-facing export button or export tracking persistence exists yet, and
+  descriptor-incomplete rows remain blocked until the pure export profile can
+  provide exact target and step mapping. Cardio-like rows also remain blocked
   until primitives carry source activity/location semantics; the adapter no
-  longer guesses cycling for generic cardio. DEBUG diagnostics may still use
-  synthetic targets for evidence collection. Product export must wait for exact
-  target-value mapping plus the real-device proof in `WATCHKIT-GAP-004`.
+  longer guesses cycling for generic cardio. DEBUG diagnostics use a separate
+  synthetic descriptor for evidence collection and do not imply product export
+  readiness. Product export must wait for exact target/step mapping plus the
+  real-device proof in `WATCHKIT-GAP-004`.
 - `WATCHKIT-GAP-003`: Completion/reconciliation is a separate future lane, not
   a prerequisite for push-only WorkoutKit handoff.
 - `WATCHKIT-GAP-004`: Local watchOS simulator infrastructure exists and proves

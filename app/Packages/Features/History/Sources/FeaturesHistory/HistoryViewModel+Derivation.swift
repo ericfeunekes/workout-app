@@ -6,6 +6,7 @@
 
 import Foundation
 import CoreDomain
+import CoreSession
 import WorkoutCoreFoundation
 
 extension HistoryViewModel {
@@ -80,6 +81,19 @@ extension HistoryViewModel {
         for session in sessions {
             for id in session.performedExerciseIDs {
                 counts[id, default: 0] += 1
+            }
+            for log in session.primitiveSetLogs where log.resultSemantics.isByExerciseEligible {
+                let displayID = log.performedExerciseID ?? log.plannedExerciseID
+                guard let displayID, let weight = log.weight else { continue }
+                let unit = log.weightUnit ?? .kg
+                unitCounts[displayID, default: [:]][unit, default: 0] += 1
+                let existing = bestByUnit[displayID, default: [:]][unit] ?? 0
+                if weight > existing {
+                    bestByUnit[displayID, default: [:]][unit] = weight
+                }
+            }
+            if !session.primitiveSetLogs.isEmpty {
+                continue
             }
             for log in session.setLogs where !log.skipped {
                 let displayID = log.performedExerciseID

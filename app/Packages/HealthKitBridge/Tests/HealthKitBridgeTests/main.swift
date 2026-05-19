@@ -431,9 +431,9 @@ runCase("LiveHealthDataProvider exposes finite supported batch registry") {
     try expect(ids.contains(HealthDataTypeRegistry.bodyMass.id))
     try expect(ids.contains(HealthDataTypeRegistry.stepCount.id))
     try expect(ids.contains(HealthDataTypeRegistry.activeEnergyBurned.id))
+    try expect(ids.contains(HealthDataTypeRegistry.runningSpeed.id))
     try expect(ids.contains(HealthDataTypeRegistry.sleepAnalysis.id))
     try expect(ids.contains(HealthDataTypeRegistry.workout.id))
-    try expect(!ids.contains(HealthDataTypeRegistry.runningSpeed.id))
 }
 
 runCase("LiveHealthDataProvider derives permission sets from request access") {
@@ -451,13 +451,18 @@ runCase("LiveHealthDataProvider derives permission sets from request access") {
 }
 
 runCase("LiveHealthDataProvider rejects unsupported registry types explicitly") {
+    let unsupported = HealthDataTypeDescriptor(
+        id: "HKQuantityTypeIdentifierUnsupportedFixture",
+        kind: .quantity,
+        defaultUnit: "count"
+    )
     do {
         _ = try LiveHealthDataProvider.debugPermissionSet(for: [
-            HealthDataRequest(type: HealthDataTypeRegistry.runningSpeed, delivery: .batch),
+            HealthDataRequest(type: unsupported, delivery: .batch),
         ])
         try expect(false, "expected unsupported type")
     } catch let err as HealthKitError {
-        try expectEqual(err, .unsupportedType(HealthDataTypeRegistry.runningSpeed.id))
+        try expectEqual(err, .unsupportedType(unsupported.id))
     }
 }
 

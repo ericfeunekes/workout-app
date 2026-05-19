@@ -11,6 +11,7 @@
 
 import Foundation
 import CoreDomain
+import CoreSession
 import Persistence
 import WorkoutCoreFoundation
 
@@ -83,25 +84,29 @@ public final class ExerciseDetailViewModel {
         isLoading = true
         defer { isLoading = false }
 
-        let logs: [SetLog]
         do {
-            logs = try await cache.loadSetLogs(
+            let primitiveLogs = try await cache.loadPrimitiveSetLogs(
                 exerciseID: exerciseID,
                 limit: fetchLimit
+            )
+            let logs = Self.mergeRecentLogs(
+                Self.projectPrimitiveLogs(
+                    primitiveLogs.filter(\.resultSemantics.isByExerciseEligible)
+                ),
+                limit: fetchLimit
+            )
+            let trend = TrendComputation.compute(setLogs: logs, calendar: calendar)
+            trendDisplay = trend.displayString
+            recentSessions = Self.buildRecentRows(
+                setLogs: logs,
+                calendar: calendar,
+                workoutIDByItem: workoutIDByItem
             )
         } catch {
             // Leave the current state — the view just shows the empty
             // recent-sessions case.
             return
         }
-
-        let trend = TrendComputation.compute(setLogs: logs, calendar: calendar)
-        trendDisplay = trend.displayString
-        recentSessions = Self.buildRecentRows(
-            setLogs: logs,
-            calendar: calendar,
-            workoutIDByItem: workoutIDByItem
-        )
     }
 
     // MARK: - Pure helpers
@@ -163,6 +168,40 @@ public final class ExerciseDetailViewModel {
                 display: display
             )
         }
+    }
+
+    static func projectPrimitiveLogs(_ logs: [PrimitiveSetLog]) -> [SetLog] {
+        logs.map { log in
+            SetLog(
+                id: log.id,
+                workoutItemID: log.slotID ?? log.id,
+                performedExerciseID: log.performedExerciseID,
+                setIndex: log.setIndex,
+                reps: log.reps,
+                weight: log.weight,
+                weightUnit: log.weightUnit,
+                durationSec: log.durationSec,
+                distanceM: log.distanceM,
+                rir: log.rir,
+                isWarmup: log.isWarmup,
+                skipped: log.skipped,
+                side: log.side,
+                completedAt: log.completedAt,
+                hrAvgBpm: log.hrAvgBpm,
+                hrMaxBpm: log.hrMaxBpm,
+                notes: log.notes
+            )
+        }
+    }
+
+    static func mergeRecentLogs(_ logs: [SetLog], limit: Int) -> [SetLog] {
+        guard limit > 0 else { return [] }
+        return Array(logs.sorted { lhs, rhs in
+            if lhs.completedAt != rhs.completedAt {
+                return lhs.completedAt > rhs.completedAt
+            }
+            return lhs.id.uuidString < rhs.id.uuidString
+        }.prefix(limit))
     }
 
     /// "MON APR 14 · 4 × 100 kg × 5 · RIR 1.5".

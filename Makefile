@@ -1,9 +1,9 @@
 # Common commands for local development. Every target is a thin wrapper over
 # uv / swift so the source of truth stays in pyproject.toml and Package.swift.
 
-.PHONY: help setup dev test test-python test-swift test-core test-app-packages test-app-xcode test-execution-ui test-workout-type-ui test-healthkit-ui assert-healthkit-watch-sim-log \
+.PHONY: help setup dev test test-python test-swift test-core test-app-packages test-app-xcode test-execution-ui test-workout-type-ui test-workout-type-ui-repeat test-tokenstore-keychain-ui test-healthkit-ui test-healthkit-watch-sim assert-healthkit-watch-sim-log \
         test-sync-real-http check-app pre-qa lint format check regen-schema xcodegen xcode-mcp-tools qa-ready qa-runtime-ready clean \
-        db-backup db-restore deploy deploy-rollback server-status server-logs
+        release-bump-build release-preflight release-testflight release-status release-resume db-backup db-restore deploy deploy-rollback server-status server-logs
 
 # Deploy / ops targets. Override HOST on the command line (e.g. `make deploy HOST=workoutdb.tail-xyz.ts.net`).
 HOST ?= workoutdb-server
@@ -18,8 +18,17 @@ XCODE_MCP_PATH := /usr/local/bin:/opt/homebrew/bin:$(PATH)
 XCODEGEN_PATH := /usr/local/bin:/opt/homebrew/bin:$(PATH)
 IOS_SIMULATOR ?= iPhone 17
 XCODE_RESULT_ROOT ?= /tmp/workoutdb-xcresults-$(shell date +%Y%m%d%H%M%S)
+WORKOUT_TYPE_UI_REPEAT_COUNT ?= 3
 HEALTHKIT_PREFLIGHT_DERIVED_DATA ?= $(XCODE_RESULT_ROOT)/HealthKitEntitlementPreflight
 PROBE_LOG ?=
+RELEASE_CONFIG ?=
+RELEASE_ARGS := $(if $(RELEASE_CONFIG),--config $(RELEASE_CONFIG),)
+RELEASE_REF ?= HEAD
+RELEASE_PREFLIGHT_ARGS := $(if $(RELEASE_SKIP_REMOTE),--skip-remote,)
+RELEASE_GATE_CMD ?= make pre-qa
+RELEASE_GATE_ARGS := $(if $(RELEASE_GATE_OVERRIDE),--gate-override "$(RELEASE_GATE_OVERRIDE)",--gate-cmd "$(RELEASE_GATE_CMD)")
+RELEASE_VERSION ?=
+RELEASE_BUILD ?=
 
 WORKOUT_TYPE_UI_TESTS := \
 	testStraightSetsCanLaunchPerformOneActionAndEnd \
@@ -41,10 +50,13 @@ WORKOUT_TYPE_UI_TESTS := \
 	testPrimitiveChipperCanLaunchPerformOneActionAndEnd \
 	testPrimitiveIntervalsCanLaunchPerformOneActionAndEnd \
 	testPrimitiveCarryCircuitCanLaunchPerformOneActionAndEnd \
-	testPrimitiveStrengthDensityCanLaunchPerformOneActionAndEnd
+	testPrimitiveStrengthDensityCanLaunchPerformOneActionAndEnd \
+	testPrimitiveCapstoneSaveAndDoneRendersHistoryPrimitiveRows
 
 WORKOUT_TYPE_UI_DATA_TESTS := \
 	ExecutionWorkoutTypeMatrixDataTests
+
+WORKOUT_TYPE_UI_EXPECTED_BUNDLES := $(shell expr $(words $(WORKOUT_TYPE_UI_DATA_TESTS)) + $(words $(WORKOUT_TYPE_UI_TESTS)))
 
 EXECUTION_UI_TESTS := \
 	testEndConfirmationOpensFromRest
@@ -79,6 +91,7 @@ test-core:  ## Run Core + Sync executable Swift package tests (CLT-compatible)
 test-app-packages: test-core  ## Run every Swift package test target under app/Packages
 	cd app/Packages/DesignSystem && swift run DesignSystemTests
 	cd app/Packages/ExportProfile && swift test
+	cd app/Packages/HealthArchiveExport && swift run HealthArchiveExportTests
 	cd app/Packages/HealthKitBridge && swift run HealthKitBridgeTests
 	cd app/Packages/Persistence && swift test
 	cd app/Packages/WatchBridge && swift test
@@ -130,6 +143,26 @@ test-workout-type-ui: xcodegen  ## Run every timing mode and composed primitive 
 	    -resultBundlePath "$(XCODE_RESULT_ROOT)/$${test_name}.xcresult" \
 	    -only-testing:WorkoutDBUITests/ExecutionWorkoutTypeMatrixUITests/$${test_name} || exit $$?; \
 	done
+	@actual_bundles=$$(find "$(XCODE_RESULT_ROOT)" -maxdepth 1 -name '*.xcresult' | wc -l | tr -d ' '); \
+	  if [ "$$actual_bundles" != "$(WORKOUT_TYPE_UI_EXPECTED_BUNDLES)" ]; then \
+	    echo "Expected $(WORKOUT_TYPE_UI_EXPECTED_BUNDLES) workout-type result bundles under $(XCODE_RESULT_ROOT), found $$actual_bundles"; \
+	    exit 1; \
+	  fi
+
+test-workout-type-ui-repeat: xcodegen  ## Repeat the full workout-type UI matrix to prove runner stability
+	@for run_index in $$(seq 1 $(WORKOUT_TYPE_UI_REPEAT_COUNT)); do \
+	  run_root="$(XCODE_RESULT_ROOT)/workout-type-run-$${run_index}"; \
+	  echo "Workout-type UI repeat $$run_index/$(WORKOUT_TYPE_UI_REPEAT_COUNT): $$run_root"; \
+	  $(MAKE) test-workout-type-ui XCODE_RESULT_ROOT="$$run_root" IOS_SIMULATOR="$(IOS_SIMULATOR)" || exit $$?; \
+	done
+
+test-tokenstore-keychain-ui: xcodegen  ## Run signed simulator proof for real TokenStore Keychain read/write/delete
+	@mkdir -p "$(XCODE_RESULT_ROOT)"
+	xcodebuild test -project app/WorkoutDB.xcodeproj -scheme WorkoutDB \
+	  -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' \
+	  -configuration Debug \
+	  -resultBundlePath "$(XCODE_RESULT_ROOT)/TokenStoreKeychainBoundaryTests.xcresult" \
+	  -only-testing:WorkoutDBKeychainTests
 
 test-healthkit-ui: xcodegen  ## Run signed HealthKit archive/projection simulator proof
 	@mkdir -p "$(XCODE_RESULT_ROOT)"
@@ -141,11 +174,15 @@ test-healthkit-ui: xcodegen  ## Run signed HealthKit archive/projection simulato
 	xcodebuild test -project app/WorkoutDB.xcodeproj -scheme WorkoutDB \
 	  -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' \
 	  -configuration Debug \
+	  -resultBundlePath "$(XCODE_RESULT_ROOT)/HealthKitAuthorizationUITests.xcresult" \
 	  -only-testing:WorkoutDBUITests/HealthKitAuthorizationUITests
 
 assert-healthkit-watch-sim-log:  ## Assert XcodeBuildMCP watch HealthKit probe log. Usage: make assert-healthkit-watch-sim-log PROBE_LOG=/path/log.txt
 	@test -n "$(PROBE_LOG)" || { echo "usage: make assert-healthkit-watch-sim-log PROBE_LOG=/path/to/xcodebuildmcp-runtime.log"; exit 2; }
 	uv run python app/Integration/healthkit_watch_sim/assert_live_workout_probe.py "$(PROBE_LOG)"
+
+test-healthkit-watch-sim:  ## Assert the latest XcodeBuildMCP watch HealthKit live-workout probe log
+	uv run python app/Integration/healthkit_watch_sim/assert_latest_live_workout_probe.py
 
 test-sync-real-http:  ## Run FastAPI + SQLite + Swift URLSession primitive sync probe
 	uv run pytest app/Integration/sync_real_http/test_sync_real_http.py
@@ -190,6 +227,22 @@ qa-runtime-ready: qa-ready  ## Verify local tools used by ETTrace/memgraph runti
 	@xcrun xctrace version >/dev/null
 	@xcrun simctl help >/dev/null
 	@mkdir -p scratch/qa-runs
+
+release-bump-build:  ## Increment app/project.yml CFBundleVersion. Override BUILD= for explicit value.
+	uv run python deploy/release/testflight.py bump-build $(if $(BUILD),--to $(BUILD),)
+
+release-preflight:  ## Verify TestFlight release can run non-interactively for RELEASE_REF
+	uv run python deploy/release/testflight.py $(RELEASE_ARGS) preflight $(RELEASE_PREFLIGHT_ARGS) --release-ref "$(RELEASE_REF)"
+
+release-testflight:  ## Archive, export, upload, and assign committed RELEASE_REF to TestFlight
+	uv run python deploy/release/testflight.py $(RELEASE_ARGS) release --release-ref "$(RELEASE_REF)" $(RELEASE_GATE_ARGS)
+
+release-status:  ## Read back current app/project.yml build status from App Store Connect
+	uv run python deploy/release/testflight.py $(RELEASE_ARGS) status $(if $(RELEASE_VERSION),--version "$(RELEASE_VERSION)",) $(if $(RELEASE_BUILD),--build "$(RELEASE_BUILD)",)
+
+release-resume:  ## Resume TestFlight assignment/readiness from MANIFEST=/path/manifest.json
+	@test -n "$(MANIFEST)" || { echo "usage: make release-resume MANIFEST=/path/to/manifest.json"; exit 2; }
+	uv run python deploy/release/testflight.py $(RELEASE_ARGS) resume --manifest "$(MANIFEST)"
 
 clean:  ## Remove .pytest_cache, .ruff_cache, schema/.build, app/.build, Xcode DerivedData
 	rm -rf .pytest_cache .ruff_cache schema/.build

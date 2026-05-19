@@ -115,7 +115,11 @@ Direction-based, no conflict resolution:
 - Server → app: primitive workouts, exercises, user_parameters,
   `last_performed` summaries
 - App → server: primitive result rows, workout status changes,
-  workout reset requests, body-weight-at-completion as a `user_parameters` row
+  workout reset requests, body-weight-at-completion as a `user_parameters` row,
+  and selected HealthKit archive records/tombstones for the personal export lane
+
+HealthKit archive uploads use `POST /api/health/archive`; the app advances
+its delivery cursor only after the server commits and acknowledges the upload.
 
 Cadence: on app open + on log write + ~60s foreground retry. Conflict rule: server wins for prescriptions, app wins for logs, live session is frozen. First-run: connection string (URL + bearer token) via paste or QR — no login surface.
 

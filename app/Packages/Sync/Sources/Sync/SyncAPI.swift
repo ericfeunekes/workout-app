@@ -17,6 +17,7 @@ import WorkoutCoreFoundation
 public final class SyncAPI: Sendable {
     public let pull: PullService
     public let push: PushQueue
+    public let healthArchive: HealthArchiveUploading
     public let connection: ConnectionManager
     private let tokenProvider: @Sendable () async -> String?
     /// Emitter for network.* events. Defaults to a no-op emitter in tests /
@@ -26,12 +27,14 @@ public final class SyncAPI: Sendable {
     public init(
         pull: PullService,
         push: PushQueue,
+        healthArchive: HealthArchiveUploading,
         connection: ConnectionManager,
         tokenProvider: @escaping @Sendable () async -> String?,
         telemetry: TelemetryEmitter = NoopTelemetryEmitter()
     ) {
         self.pull = pull
         self.push = push
+        self.healthArchive = healthArchive
         self.connection = connection
         self.tokenProvider = tokenProvider
         self.telemetry = telemetry
@@ -63,6 +66,7 @@ public final class SyncAPI: Sendable {
                 clock: clock,
                 telemetry: telemetry
             ),
+            healthArchive: HealthArchiveUploadService(transport: transport),
             connection: ConnectionManager(),
             tokenProvider: tokenProvider,
             telemetry: telemetry
@@ -154,6 +158,37 @@ public final class SyncAPI: Sendable {
     /// log flows through this path.
     public func pushUserParameter(_ param: CoreDomain.UserParameter) async throws {
         try await push.enqueueUserParameter(param)
+    }
+
+    public func uploadHealthArchive(
+        _ request: HealthArchiveUploadRequest
+    ) async throws -> HealthArchiveUploadResult {
+        guard let token = await tokenProvider() else {
+            await connection.observe(.tokenRejected)
+            throw SyncError.tokenRejected
+        }
+        if await !connection.allowsRequests {
+            throw SyncError.tokenRejected
+        }
+        do {
+            let result = try await healthArchive.upload(request, bearerToken: token)
+            telemetry.emit(Event(
+                sessionID: TelemetrySession.id,
+                kind: "network",
+                name: "network.response",
+                dataJSON: #"{"path":"/api/health/archive","status":200}"#
+            ))
+            return result
+        } catch let err as SyncError {
+            telemetry.emit(Event(
+                sessionID: TelemetrySession.id,
+                kind: "network",
+                name: "network.error",
+                dataJSON: #"{"path":"/api/health/archive","error":"\#(err)"}"#
+            ))
+            try await publish(err)
+            throw err
+        }
     }
 
     /// Drive the push queue. Callers should invoke this after each log write

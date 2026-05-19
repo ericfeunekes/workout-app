@@ -68,7 +68,7 @@ public struct PushFlusherAdapter: ForegroundPushFlushing {
 
 @MainActor
 public final class AppSyncCoordinator: Sendable {
-    let syncAPI: SyncAPI
+    public let syncAPI: SyncAPI
     private let persistence: PersistenceFactory
     private let telemetry: TelemetryEmitter
     private var flusher: (any ForegroundPushFlushing)!

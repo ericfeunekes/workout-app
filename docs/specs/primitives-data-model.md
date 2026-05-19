@@ -1,6 +1,6 @@
 ---
 title: Primitives data model
-status: accepted — active primitive contract with residual runtime gaps
+status: accepted — primitive cutover closed with follow-on app gaps routed elsewhere
 date: 2026-04-28
 last_reviewed: 2026-05-18
 purpose: Replace today's per-timing-mode prescription/log model with 7 composable primitives serialized under a Block > Set > Slot hierarchy, so every new workout pattern is a composition of existing primitives rather than a new enum case.
@@ -49,6 +49,16 @@ The primitives are: **Exercise** (identity), **Structure** (the hierarchy itself
 
 Plus orthogonal overlays: `skipped`, `notes`, `warmup` flag, `manual` flag, `side` (reserved for per-side logging).
 
+The primitive workout root may also carry `activity_intent`, a
+vendor-neutral export source-facts object defined by
+`docs/features/watch-workoutkit-handoff.md`. It is not one of the seven
+execution primitives and does not change Setmark execution legality. It tells
+export profiles what the authored workout is trying to preserve when primitive
+structure alone is ambiguous, for example running-first Hyrox versus
+mixed-structure Hyrox. Missing `activity_intent` means Setmark may still
+execute the workout, but target export profiles must return a source-choice
+state instead of guessing.
+
 Every pattern today's 12 timing modes express is a composition over this tree. Straight-sets, supersets, circuits, clusters, EMOM, AMRAP, for-time, intervals, continuous, target-bounded, cap-bounded — each is a specific `(set.timing × set.traversal × set.repeat × block.timer × block.repeat)` cell. New patterns land as new compositions, not new enum values.
 
 The concept-level discussion of the primitives and why they were chosen has
@@ -84,7 +94,11 @@ authority.
   slot, or log nodes. Primitive nodes carry vendor-neutral structure, timing,
   targets, loads, stimuli, overlays, stable IDs, and result roles. External
   adapter profiles inspect those facts and classify support outside the
-  primitive execution contract.
+  primitive execution contract. `activity_intent` is the narrow
+  vendor-neutral exception at the primitive workout root: it may describe
+  authored activity domain, environment, and preservation policy, but must not
+  use target names such as `workoutkit_activity`, `apple_activity`,
+  `HKWorkoutActivityType`, or `strava_type`.
 - **Legacy acceptance windows.** The cutover does not accept both old and new workout shapes after it lands. Existing server-side prescriptions can be re-pushed by Claude in the primitive shape. Current completed local logs are QA data for this pre-real-use cutover and may be reset rather than migrated.
 
 ## Acceptance criteria
@@ -193,22 +207,20 @@ Delivered:
 - Narrow app/server legality parity for the primitive timing/traversal and
   aggregate-target rules centralized by this cluster.
 
-Residual scope after this cluster:
+Residual scope after this foundation cluster:
 
 - History correction and any correction UI outside execution completion.
-- Full closure of every `PDM-GAP-007` consumer, including untouched
-  sync/persistence consumers when no encoding or payload behavior changes.
 - New primitive wire fields, new SwiftData migrations, and new sync payload
   semantics unless implementation exposes a real encoding gap.
 - Cross-runtime server/app sync proof, which belongs to the next contract
   cutover cluster because it must exercise the real URLSession/FastAPI/SQLite
   boundary.
 
-### Current implementation cluster
+### Completed contract cutover and sync/readback cluster
 
-The active cluster is the primitive contract cutover and sync/readback proof.
-It proves that primitive workouts can move through the real system, not only
-that the app runtime can reason about primitive fixtures.
+The primitive contract cutover and sync/readback cluster proves that primitive
+workouts can move through the real system, not only that the app runtime can
+reason about primitive fixtures.
 
 Implemented in this cluster:
 
@@ -230,14 +242,13 @@ Implemented in this cluster:
   `workout_id` / primitive set-log identifiers or an explicitly documented
   equivalent readback.
 
-Remaining in or after closeout:
+Closeout status:
 
-- Close or narrow `PDM-GAP-003`, `PDM-GAP-004`, `PDM-GAP-006`, and residual
-  `PDM-GAP-007` only where the implementation actually touches those
-  consumers. `PDM-GAP-005` is closed as a migration/preservation concern.
-- Keep `EXEC-GAP-008` separate unless the cutover work naturally exposes the
-  expanded per-slot editing seam.
-- Preserve external-adapter neutrality: the cutover may add only
+- `PDM-GAP-002`, `PDM-GAP-003`, `PDM-GAP-004`, `PDM-GAP-005`, `PDM-GAP-006`,
+  `PDM-GAP-007`, and `PDM-GAP-008` are closed. Primitive residuals now route through
+  feature-owned app gaps instead of a continuing primitive trunk.
+- `EXEC-GAP-008` remains separate for expanded per-slot editing.
+- External-adapter neutrality is preserved: the cutover added only
   vendor-neutral primitive fields. WorkoutKit, Strava, HealthKit, or other
   export capability mapping remains an adapter/profile layer over the
   primitive contract.
@@ -249,6 +260,58 @@ Out of scope unless the architecture review says otherwise:
   primitive result roles.
 - Production data migration compatibility; current workouts are QA data and may
   be reset explicitly or removed by recreating the server database.
+
+### Completed completion/history remediation cluster
+
+The completion/history remediation closed the main primitive-result authority
+gap: completion was writing primitive rows while History and some completion
+copy still reasoned from legacy rows or internal row counts.
+
+Delivered:
+
+- `CoreSession` classifies primitive result rows by role and metric semantics:
+  `slot` rows are exercise-level facts, `set_result` rows are set aggregates,
+  and `block_result` rows are block aggregates. Sentinel/internal rows are not
+  athlete progress.
+- The primitive coordinate contract is unified across app, server, schema, and
+  docs: `set_index` is commit sequence within the current
+  `(block_repeat_index, set_repeat_index)` set instance, not authored slot
+  ordinal.
+- Completion summaries and History detail both consume that classification.
+  Athlete-facing strings remain feature-local; the semantic authority does not
+  live in either feature.
+- History loads primitive workouts and primitive set logs for completed
+  sessions, renders primitive session details, computes picker/top-load/trend
+  inputs from eligible slot rows through CoreSession-aware consumers, excludes
+  aggregate rows from by-exercise metrics, preserves bodyweight-window binding,
+  and reset removes primitive rows from rendered History. Completed primitive
+  workouts do not use legacy `SetLog` rows as fallback authority.
+- Explicit-End completion preserves already logged primitive rows across EMOM,
+  intervals, Tabata, for-time, continuous, AMRAP, and a composed primitive
+  case.
+- Persistence, Shell, and real HTTP proof now cover slot, set-result, and
+  block-result rows through local SwiftData, Save & Done wiring, push queue
+  flush, `sync/pull` API readback for eligible slot rows, and server SQLite
+  persistence for aggregate rows and nonzero slot commit coordinates.
+- The workout-type UI matrix has a focused Save & Done -> History primitive
+  readback sentinel for the capstone flow. The full matrix runner is now a
+  repeatable gate: `make test-workout-type-ui-repeat` runs the matrix multiple
+  times into distinct result roots and fails on missing bundles.
+
+Closed by this cluster:
+
+- `bug-096`: History detail does not render saved completion results.
+- `bug-097`: early-ending EMOM loses the interval that was just logged.
+- `bug-098`: for-time completion summary uses row-count copy instead of
+  workout-result language.
+
+Residual scope:
+
+- `HISTORY-GAP-002` remains open for primitive-native post-workout correction.
+- `HISTORY-GAP-001` and `MOD-GAP-003` remain open for taxonomy, unilateral,
+  cross-variant, and analytics redesign.
+- Workout-type UI matrix runner stability is closed by the repeat gate and
+  three-pass bundle-count proof.
 
 The foundation-cluster proof bar was:
 
@@ -327,30 +390,23 @@ already cover.
 
 ## Current gaps
 
-- The completed foundation phase proved the visible primitive execution slice,
-  CoreSession semantics, narrow server legality parity, and Today preview
-  projection through automated gates and simulator QA. It also produced
-  durable repro rows for `bug-089`, `bug-090`, and `bug-091`; `bug-089` is
-  closed by `ExecutionEndConfirmationUITests`, `bug-090` is closed by
-  execution/completion sentinel-summary tests, and `bug-091` remains a
-  non-blocking launch watchlist item. The full primitive wire/schema/cache/sync/reset cutover is
-  now implemented in the active cluster; remaining material items are
-  `PDM-GAP-006` residual readback and correction consumers, unsupported
-  primitive bridge shapes, and the proof matrix above.
+No active `PDM-GAP-*` rows remain. The primitive cutover is closed as the data
+model trunk: wire/schema/cache/sync/reset, runtime semantics, completion and
+History read models, aggregate result roles, no-work rejection, grouped
+completion push, real HTTP readback, and repeatable workout-type QA are now
+covered by the owning tests and docs.
 
-- `PDM-GAP-007`: Primitive composition semantics are now centralized for
-  CoreSession app-runtime seeding/projection/result rules and narrow server
-  legality parity. Residual surfaces remain open wherever primitive meaning can
-  still be inferred outside that contract: History correction, correction UI
-  outside execution completion, persistence grouping, sync payload
-  construction, server readback/query semantics, and any feature consumer
-  touched by the full cutover.
+Follow-on work is intentionally routed to app lanes instead of keeping a
+permanent primitive trunk:
 
-- `PDM-GAP-008`: Primitive composition legality is not yet fully centralized
-  beyond the timing/traversal matrix. The contract must reject no-work
-  compositions that look structurally valid but are not meaningful executable
-  workouts, including timer-only workouts, timer-only blocks, unsupported
-  zero-slot sets, and aggregate result targets attached to no executable work.
+- History correction and correction UI outside execution completion live in
+  `HISTORY-GAP-002`, `PASTEDIT-GAP-001`, and the Set editing lane.
+- Taxonomy, cross-variant, unilateral, and analytics questions live in
+  `HISTORY-GAP-001` and `MOD-GAP-003`.
+- Runtime-cost/object-lifetime proof lives in `EXEC-GAP-012` and
+  `TEST-GAP-005`.
+- Future primitive cells or new consumers should open a new owning gap only
+  when a concrete feature needs them; unsupported cells fail closed today.
 
 ## Open questions
 

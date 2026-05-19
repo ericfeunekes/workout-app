@@ -210,15 +210,15 @@ Autoreg doesn't consume `bodyweight_kg`. But if a future prescription shape uses
 - **Assumption:** (a) — defaults are for fallback rendering; the authoritative rules come from the prescription.
 - **Disposition:** decide-next. Worth a one-line note in `docs/prescription.md` § "Autoregulation" clarifying the precedence.
 
-### Watch → phone message integration (phone-side subscriber missing)
-The Features/WatchFaces slice (2026-04-18) wired the watch-side: it subscribes to `WatchBridge.messages()` and sends `.setStarted` / `.setEnded` on tap. But the **phone-side subscriber** that translates those incoming messages into `SessionMutation`s on `ExecutionViewModel` does not exist. Watch taps currently go nowhere on the phone.
-- **Assumption:** a small `WatchInbox` observer type owned by Shell, wired on bootstrap, subscribes to `WatchBridge.messages()` and dispatches to the active `ExecutionViewModel`.
-- **Disposition:** defer-to-v1.1+. Per Eric's direction, watch work is on hold until hands-on iOS-app feedback — the watch isn't needed for the first real workout.
-
-### Watch `ActiveBlockPayload` lacks `workoutItemID`
-WatchFaces generates a local UUID per active-block arrival because the wire payload doesn't carry the item ID. Works for one-round displays; breaks if the phone replaces the active block with another before the watch logs its tap.
-- **Assumption:** add `workoutItemID: UUID` to `ActiveBlockPayload` when watch work resumes.
-- **Disposition:** defer-to-v1.1+.
+### Watch → phone real-device delivery
+The phone-side subscriber now exists: Shell wires `WatchBridge.messages()` into
+the active `ExecutionViewModel`, and watch set events use the real
+`workoutItemID` instead of a placeholder. Package tests prove local
+consumption, log mutation, HR annotation, and push payload enqueue behavior.
+- **Open boundary:** inactive/background WatchConnectivity delivery, real Watch
+  HealthKit sensor data, and phone/watch sync timing still require physical
+  iPhone + Apple Watch proof.
+- **Disposition:** defer-to-v1.1+. Track as a real-device proof lane.
 
 ### Watch `RestFace` ring anchor resets on payload replacement
 Ring total-duration is captured on first render via `@State anchor`. If the phone sends a new `pushRestTimer(endsAt:)` mid-rest, the ring jumps. Phone currently sends one timer per rest, so not a v1 issue.

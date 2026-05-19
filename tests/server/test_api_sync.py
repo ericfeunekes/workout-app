@@ -29,6 +29,7 @@ def _primitive_workout_payload(
     set_work_target: list[dict] | None = None,
     slot_id: str = "40000000-0000-4000-8000-000000000001",
     status: str = "planned",
+    activity_intent: dict | None = None,
 ) -> dict:
     return {
         "id": workout_id,
@@ -36,6 +37,7 @@ def _primitive_workout_payload(
         "scheduled_date": "2026-04-20",
         "status": status,
         "source": "claude",
+        "activity_intent": activity_intent,
         "primitive_blocks": [
             {
                 "id": block_id,
@@ -90,6 +92,10 @@ def _primitive_slot_log(
     block_repeat_index: int = 0,
     reps: int | None = 5,
     weight: float | None = 100,
+    weight_unit: str | None = "kg",
+    skipped: bool = False,
+    side: str = "bilateral",
+    notes: str | None = None,
     completed_at: str = "2026-04-20T07:30:00Z",
 ) -> dict:
     return {
@@ -105,7 +111,10 @@ def _primitive_slot_log(
         "block_repeat_index": block_repeat_index,
         "reps": reps,
         "weight": weight,
-        "weight_unit": "kg" if weight is not None else None,
+        "weight_unit": weight_unit if weight is not None or skipped else None,
+        "skipped": skipped,
+        "side": side,
+        "notes": notes,
         "completed_at": completed_at,
     }
 
@@ -153,6 +162,41 @@ def test_pull_returns_primitive_workouts_user_parameters_and_last_performed(
     assert body["last_performed"][0]["exercise_id"] == exercise_id
     assert body["last_performed"][0]["last_set_logs"][0]["weight"] == 100.0
     assert "prescription_json" not in body["last_performed"][0]
+
+
+def test_pull_returns_activity_intent_null_and_present_shapes(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout_without_intent = _create_primitive_workout(
+        client,
+        exercise_id,
+        workout_id="10000000-0000-4000-8000-000000000101",
+        block_id="20000000-0000-4000-8000-000000000101",
+        set_id="30000000-0000-4000-8000-000000000101",
+        slot_id="40000000-0000-4000-8000-000000000101",
+    )
+    workout_with_intent = _create_primitive_workout(
+        client,
+        exercise_id,
+        workout_id="10000000-0000-4000-8000-000000000102",
+        block_id="20000000-0000-4000-8000-000000000102",
+        set_id="30000000-0000-4000-8000-000000000102",
+        slot_id="40000000-0000-4000-8000-000000000102",
+        activity_intent={
+            "activity_domain": "mixed_modal",
+            "preservation_policy": "preserve_structure",
+        },
+    )
+
+    response = client.get("/api/sync/pull")
+
+    assert response.status_code == 200, response.text
+    by_id = {workout["id"]: workout for workout in response.json()["workouts"]}
+    assert by_id[workout_without_intent["id"]]["activity_intent"] is None
+    assert by_id[workout_with_intent["id"]]["activity_intent"] == {
+        "activity_domain": "mixed_modal",
+        "environment": "unspecified",
+        "preservation_policy": "preserve_structure",
+    }
 
 
 def test_pull_rejects_invalid_persisted_primitive_block(client, test_engine, test_user_id) -> None:
@@ -368,10 +412,42 @@ def test_push_primitive_slot_log_and_status(client, test_engine) -> None:
         assert row is not None
         assert row.role == "slot"
         assert row.planned_exercise_id == exercise_id
+        assert row.skipped is False
+        assert row.side == "bilateral"
+        assert row.notes is None
         workout_row = session.get(Workout, workout["id"])
         assert workout_row is not None
         assert workout_row.status == "completed"
         assert workout_row.notes == "good session"
+
+
+def test_push_skipped_primitive_slot_preserves_overlay_row(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    workout = _create_primitive_workout(client, exercise_id)
+    log = _primitive_slot_log(
+        log_id="88888888-8888-4888-8888-888888888887",
+        reps=None,
+        weight=None,
+        weight_unit="lb",
+        skipped=True,
+        side="left",
+        notes="skipped achy shoulder",
+    )
+
+    response = client.post("/api/sync/results", json={"primitive_set_logs": [log]})
+
+    assert response.status_code == 200, response.text
+    with Session(test_engine) as session:
+        row = session.get(PrimitiveSetLog, log["id"])
+        assert row is not None
+        assert row.workout_id == workout["id"]
+        assert row.planned_exercise_id == exercise_id
+        assert row.reps is None
+        assert row.weight is None
+        assert row.weight_unit == "lb"
+        assert row.skipped is True
+        assert row.side == "left"
+        assert row.notes == "skipped achy shoulder"
 
 
 def test_push_rejects_extra_fields_inside_primitive_result(client, test_engine) -> None:
@@ -697,7 +773,7 @@ def test_push_rejects_out_of_bounds_primitive_block_repeat_index(client, test_en
     assert "block_repeat_index outside workout" in response.text
 
 
-def test_push_rejects_slot_log_with_wrong_slot_position(client, test_engine) -> None:
+def test_push_accepts_nonzero_slot_commit_index(client, test_engine) -> None:
     exercise_id = _seed_exercise(test_engine)
     _create_primitive_workout(client, exercise_id)
 
@@ -713,8 +789,28 @@ def test_push_rejects_slot_log_with_wrong_slot_position(client, test_engine) -> 
         },
     )
 
+    assert response.status_code == 200, response.text
+    with Session(test_engine) as session:
+        row = session.get(PrimitiveSetLog, "88888888-8888-4888-8888-88888888888f")
+        assert row is not None
+        assert row.set_index == 1
+
+
+def test_push_rejects_negative_primitive_commit_index(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    _create_primitive_workout(client, exercise_id)
+
+    payload = _primitive_slot_log(
+        log_id="88888888-8888-4888-8888-8888888888af",
+        set_index=-1,
+    )
+    response = client.post(
+        "/api/sync/results",
+        json={"primitive_set_logs": [payload]},
+    )
+
     assert response.status_code == 422
-    assert "set_index outside workout" in response.text
+    assert "greater than or equal to 0" in response.text
 
 
 def test_push_rejects_primitive_log_referencing_wrong_slot(client, test_engine) -> None:

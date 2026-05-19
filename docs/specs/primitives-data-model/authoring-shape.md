@@ -703,13 +703,11 @@ Warm-up ramp is a set with multiple slots (same exercise, ascending load, `is_wa
 
 ## Current gaps
 
-- `PDM-GAP-002`: Authoring-shape open questions need explicit disposition
-  before code relies on the ambiguous shape. Current preferences favor
-  structural multi-slot authoring for drop sets and clusters, and seed-time
-  relative-load resolution as pinned in `runtime-resolution.md`.
-- Bridge implementation note: current server/app bridge tests do not prove the
-  accepted `target_bounded.params.target` shape. That proof belongs to the
-  primitive-only contract cutover, not the bridge legality suite.
+No active authoring-shape PDM gaps remain. The open authoring choices needed by
+the cutover have explicit dispositions: drop sets and clusters use structural
+multi-slot authoring, relative load resolves at seed time, unsupported
+primitive cells fail closed, and new authoring variants should open a new
+feature-owned gap only when a concrete workout requires them.
 
 ## Open questions
 

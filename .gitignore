@@ -15,6 +15,8 @@ axe-video-*.mp4
 
 # Secrets
 .env
+.release.env
+.env.release
 *.db
 *.db-journal
 

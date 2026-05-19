@@ -16,6 +16,7 @@ import PackageDescription
 // Dependencies:
 //   - Persistence : WorkoutCache, TokenStore, SyncMetadataStore
 //   - Sync        : SyncAPI, HTTPTransport, URLSessionTransport, DTOMapping
+//   - WatchBridge : phone-side watch message inbox
 //   - FeaturesToday     : TodayLoader, TodayContext, TodayViewModel
 //   - FeaturesExecution : WorkoutContext, ExecutionViewModel
 //   - FeaturesHistory   : HistoryView, HistoryViewModel (for RootTabView)
@@ -46,6 +47,7 @@ let package = Package(
         .package(path: "../DesignSystem"),
         .package(path: "../Persistence"),
         .package(path: "../Sync"),
+        .package(path: "../WatchBridge"),
         .package(path: "../Features/Today"),
         .package(path: "../Features/Execution"),
         .package(path: "../Features/History"),
@@ -62,6 +64,7 @@ let package = Package(
                 .product(name: "DesignSystem", package: "DesignSystem"),
                 .product(name: "Persistence", package: "Persistence"),
                 .product(name: "Sync", package: "Sync"),
+                .product(name: "WatchBridge", package: "WatchBridge"),
                 .product(name: "FeaturesToday", package: "Today"),
                 .product(name: "FeaturesExecution", package: "Execution"),
                 .product(name: "FeaturesHistory", package: "History"),
@@ -79,6 +82,7 @@ let package = Package(
                 .product(name: "CoreTelemetry", package: "Telemetry"),
                 .product(name: "Persistence", package: "Persistence"),
                 .product(name: "Sync", package: "Sync"),
+                .product(name: "WatchBridge", package: "WatchBridge"),
                 .product(name: "FeaturesToday", package: "Today"),
                 .product(name: "FeaturesExecution", package: "Execution"),
                 .product(name: "FeaturesHistory", package: "History"),

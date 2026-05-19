@@ -37,7 +37,7 @@ struct WorkoutKitDiagnosticProbeRunner: Sendable {
     }
 
     func runScheduleProbe(
-        plan: WorkoutKitExportPlan,
+        descriptor: WorkoutKitPlanDescriptor,
         occurrence: DateComponents
     ) async -> [WorkoutKitDiagnosticProbeEvent] {
         var events: [WorkoutKitDiagnosticProbeEvent] = []
@@ -49,7 +49,6 @@ struct WorkoutKitDiagnosticProbeRunner: Sendable {
                 scheduledCount: support.scheduledCount,
                 maxAllowedCount: support.maxAllowedCount
             ))
-            let descriptor = try WorkoutKitPlanFactory.descriptor(for: plan)
             try await client.schedule(descriptor, at: occurrence)
             let after = try await client.support()
             events.append(WorkoutKitDiagnosticProbeEvent(
@@ -69,9 +68,8 @@ struct WorkoutKitDiagnosticProbeRunner: Sendable {
         return events
     }
 
-    func runOpenProbe(plan: WorkoutKitExportPlan) async -> WorkoutKitDiagnosticProbeEvent {
+    func runOpenProbe(descriptor: WorkoutKitPlanDescriptor) async -> WorkoutKitDiagnosticProbeEvent {
         do {
-            let descriptor = try WorkoutKitPlanFactory.descriptor(for: plan)
             try await client.open(descriptor)
             return WorkoutKitDiagnosticProbeEvent(
                 label: "open",
@@ -100,28 +98,13 @@ struct WorkoutKitDiagnosticProbeRunner: Sendable {
 }
 
 enum WorkoutKitDiagnosticProbeFixture {
-    static func scheduleProbePlan() -> WorkoutKitExportPlan {
-        WorkoutKitExportPlan(
-            workoutID: UUID(uuidString: "10000000-0000-4000-8000-000000000201")!,
-            workoutName: "Setmark WorkoutKit Probe",
-            rowID: .continuousCardio,
-            deliveryPaths: [.scheduleOnPhone, .openOnWatch],
-            selectionPolicy: .exact(.singleGoal),
-            supportState: .native,
-            payload: WorkoutKitPayloadBlueprint(
-                shape: .singleGoal,
-                activitySelection: .cardio,
-                goal: .time
-            ),
-            pushIdentity: WorkoutKitPushIdentity(requirements: [
-                .stableWorkoutPlanID,
-                .payloadFingerprint,
-                .occurrenceDateComponents,
-            ]),
-            degradation: nil,
-            proofRequirements: [.sdkCompile, .simulatorConstruction],
-            unresolvedRequirements: [.exactTargetValuesUnavailable],
-            sourceAmbiguities: []
+    static func scheduleProbeDescriptor() -> WorkoutKitPlanDescriptor {
+        WorkoutKitPlanDescriptor(
+            id: UUID(uuidString: "10000000-0000-4000-8000-000000000201")!,
+            displayName: "Setmark WorkoutKit Probe",
+            family: .singleGoal,
+            activity: .other,
+            goal: .timeSeconds(20 * 60)
         )
     }
 
@@ -143,7 +126,7 @@ public enum WorkoutKitDiagnosticProbe {
         if #available(iOS 17.0, watchOS 10.0, *) {
             let runner = WorkoutKitDiagnosticProbeRunner(client: LiveWorkoutKitSchedulingClient())
             let events = await runner.runScheduleProbe(
-                plan: WorkoutKitDiagnosticProbeFixture.scheduleProbePlan(),
+                descriptor: WorkoutKitDiagnosticProbeFixture.scheduleProbeDescriptor(),
                 occurrence: WorkoutKitDiagnosticProbeFixture.scheduleProbeOccurrence()
             )
             return WorkoutKitDiagnosticProbeRunner.encodedJSON(events)

@@ -77,12 +77,73 @@ def test_create_primitive_workout(client, test_engine, test_user_id) -> None:
 
     assert body["name"] == "Tuesday Legs"
     assert body["user_id"] == test_user_id
+    assert body["activity_intent"] is None
     assert "blocks" not in body
     assert body["primitive_blocks"][0]["sets"][0]["slots"][0]["exercise_id"] == exercise_id
 
     readback = client.get(f"/api/workouts/{body['id']}")
     assert readback.status_code == 200
+    assert readback.json()["activity_intent"] is None
     assert readback.json()["primitive_blocks"] == body["primitive_blocks"]
+
+
+def test_create_preserves_activity_intent_as_workout_source_fact(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(
+        exercise_id,
+        activity_intent={
+            "activity_domain": "running",
+            "preservation_policy": "preserve_primary_activity",
+        },
+    )
+
+    response = client.post("/api/workouts", json=payload)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["activity_intent"] == {
+        "activity_domain": "running",
+        "environment": "unspecified",
+        "preservation_policy": "preserve_primary_activity",
+    }
+
+
+def test_create_rejects_target_specific_activity_intent_fields(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    payload = _workout_payload(
+        exercise_id,
+        activity_intent={
+            "activity_domain": "running",
+            "environment": "outdoor",
+            "workoutkit_activity": "outdoorRun",
+        },
+    )
+
+    response = client.post("/api/workouts", json=payload)
+
+    assert response.status_code == 422
+    assert "workoutkit_activity" in response.text
+
+
+def test_update_can_clear_activity_intent_without_replacing_primitives(client, test_engine) -> None:
+    exercise_id = _seed_exercise(test_engine)
+    create = client.post(
+        "/api/workouts",
+        json=_workout_payload(
+            exercise_id,
+            activity_intent={
+                "activity_domain": "mixed_modal",
+                "preservation_policy": "preserve_structure",
+            },
+        ),
+    )
+    assert create.status_code == 200, create.text
+    workout_id = create.json()["id"]
+
+    response = client.put(f"/api/workouts/{workout_id}", json={"activity_intent": None})
+
+    assert response.status_code == 200, response.text
+    assert response.json()["activity_intent"] is None
+    assert response.json()["primitive_blocks"] == create.json()["primitive_blocks"]
 
 
 def test_read_rejects_invalid_persisted_primitive_block(client, test_engine, test_user_id) -> None:
@@ -194,6 +255,38 @@ def test_read_rejects_empty_persisted_primitive_array(client, test_engine, test_
     response = client.get("/api/workouts/10000000-0000-4000-8000-000000000013")
     assert response.status_code == 500
     assert "Persisted primitive workout 10000000-0000-4000-8000-000000000013 is invalid" in (
+        response.text
+    )
+
+
+def test_read_rejects_invalid_persisted_activity_intent_json(
+    client, test_engine, test_user_id
+) -> None:
+    with Session(test_engine) as session:
+        session.add(
+            Workout(
+                id="10000000-0000-4000-8000-000000000015",
+                user_id=test_user_id,
+                name="Bad source facts",
+                status="planned",
+                source="claude",
+                activity_intent_json='["not","an","object"]',
+                primitive_blocks_json=(
+                    '[{"id":"20000000-0000-4000-8000-000000000015",'
+                    '"sets":[{"id":"30000000-0000-4000-8000-000000000015",'
+                    '"timing":{"mode":"set_bounded"},'
+                    '"slots":[{"id":"40000000-0000-4000-8000-000000000015",'
+                    f'"exercise_id":"{_BACK_SQUAT}"'
+                    "}]}]}]"
+                ),
+            )
+        )
+        session.commit()
+
+    response = client.get("/api/workouts/10000000-0000-4000-8000-000000000015")
+
+    assert response.status_code == 500
+    assert "Persisted primitive workout 10000000-0000-4000-8000-000000000015 is invalid" in (
         response.text
     )
 

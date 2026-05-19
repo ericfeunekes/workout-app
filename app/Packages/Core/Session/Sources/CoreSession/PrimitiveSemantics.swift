@@ -14,6 +14,7 @@ public enum PrimitiveSemanticError: Error, Equatable, Sendable {
 }
 
 public enum PrimitiveResultMetric: Equatable, Sendable {
+    case rounds
     case reps
     case distance
     case duration
@@ -22,6 +23,7 @@ public enum PrimitiveResultMetric: Equatable, Sendable {
 
     public var primitiveMetric: PrimitiveMetric {
         switch self {
+        case .rounds: .rounds
         case .reps: .reps
         case .distance: .distance
         case .duration: .duration
@@ -38,6 +40,43 @@ public struct PrimitiveResultInputContract: Equatable, Sendable {
     public init(metric: PrimitiveResultMetric, target: PrimitiveWorkTarget?) {
         self.metric = metric
         self.target = target
+    }
+}
+
+public enum PrimitiveResultScope: Equatable, Sendable {
+    case exercise
+    case setAggregate
+    case blockAggregate
+}
+
+public struct PrimitiveResultLogSemantics: Equatable, Sendable {
+    public let role: PrimitiveLogRole
+    public let scope: PrimitiveResultScope
+    public let isByExerciseEligible: Bool
+    public let isAggregate: Bool
+    public let isSkipped: Bool
+    public let primaryMetric: PrimitiveResultMetric?
+    public let secondaryMetrics: [PrimitiveResultMetric]
+    public let isSentinel: Bool
+
+    public init(
+        role: PrimitiveLogRole,
+        scope: PrimitiveResultScope,
+        isByExerciseEligible: Bool,
+        isAggregate: Bool,
+        isSkipped: Bool,
+        primaryMetric: PrimitiveResultMetric?,
+        secondaryMetrics: [PrimitiveResultMetric],
+        isSentinel: Bool
+    ) {
+        self.role = role
+        self.scope = scope
+        self.isByExerciseEligible = isByExerciseEligible
+        self.isAggregate = isAggregate
+        self.isSkipped = isSkipped
+        self.primaryMetric = primaryMetric
+        self.secondaryMetrics = secondaryMetrics
+        self.isSentinel = isSentinel
     }
 }
 
@@ -95,6 +134,47 @@ public enum PrimitiveSemantics {
     }
 }
 
+public extension PrimitiveSetLog {
+    var resultSemantics: PrimitiveResultLogSemantics {
+        let scope: PrimitiveResultScope
+        let isByExerciseEligible: Bool
+        switch role {
+        case .slot:
+            scope = .exercise
+            isByExerciseEligible = !skipped
+        case .setResult:
+            scope = .setAggregate
+            isByExerciseEligible = false
+        case .blockResult:
+            scope = .blockAggregate
+            isByExerciseEligible = false
+        }
+
+        let metrics = primitiveResultMetrics
+        return PrimitiveResultLogSemantics(
+            role: role,
+            scope: scope,
+            isByExerciseEligible: isByExerciseEligible,
+            isAggregate: role != .slot,
+            isSkipped: skipped,
+            primaryMetric: metrics.first,
+            secondaryMetrics: Array(metrics.dropFirst()),
+            isSentinel: role != .slot && metrics.isEmpty
+        )
+    }
+
+    var primitiveResultMetrics: [PrimitiveResultMetric] {
+        var metrics: [PrimitiveResultMetric] = []
+        if rounds != nil { metrics.append(.rounds) }
+        if reps != nil { metrics.append(.reps) }
+        if distanceM != nil { metrics.append(.distance) }
+        if durationSec != nil { metrics.append(.duration) }
+        if weight != nil { metrics.append(.loadCarried) }
+        if metrics.isEmpty, role == .slot, !skipped { metrics.append(.completion) }
+        return metrics
+    }
+}
+
 public extension ExecutionPlan {
     static func validated(
         workout: PrimitiveWorkout,
@@ -126,7 +206,7 @@ public extension ExecutionSet {
     }
 
     var aggregateResultMetric: PrimitiveResultMetric? {
-        if observationTarget(.rounds) != nil { return .reps }
+        if observationTarget(.rounds) != nil { return .rounds }
         if observationTarget(.duration) != nil { return .duration }
         if observationTarget(.distance) != nil { return .distance }
         if observationTarget(.loadCarried) != nil { return .loadCarried }

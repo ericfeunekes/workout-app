@@ -6,6 +6,7 @@ final class HealthKitAuthorizationUITests: XCTestCase {
         let app = XCUIApplication()
         app.terminate()
         app.launchArguments = ["--healthkit-sim-spike"]
+        app.launchEnvironment["WORKOUTDB_HEALTHKIT_PROBE_DEFAULT_STORE"] = "1"
         app.launch()
         defer { app.terminate() }
 
@@ -21,7 +22,8 @@ final class HealthKitAuthorizationUITests: XCTestCase {
         let proof = NSPredicate(format: """
         label CONTAINS %@ AND label CONTAINS %@ AND label CONTAINS %@ AND label CONTAINS %@ AND \
         label CONTAINS %@ AND label CONTAINS %@ AND label CONTAINS %@ AND label CONTAINS %@ AND \
-        label CONTAINS %@ AND label CONTAINS %@ AND label CONTAINS %@
+        label CONTAINS %@ AND label CONTAINS %@ AND label CONTAINS %@ AND label CONTAINS %@ AND \
+        label CONTAINS %@
         """,
         #""authorizationRequestCompleted" : true"#,
         #""archiveFetchSucceeded" : true"#,
@@ -33,7 +35,9 @@ final class HealthKitAuthorizationUITests: XCTestCase {
         #""deletedRecordMatchedFirstPass" : true"#,
         #""projectionMatchedDeletedRecord" : true"#,
         #""projectionMatchedRecords" : true"#,
-        #""projectionMatchedCursor" : true"#)
+        #""projectionMatchedCursor" : true"#,
+        #""projectionStoreKind" : "default_on_disk""#,
+        #""projectionReopenMatched" : true"#)
         let proofExpectation = expectation(for: proof, evaluatedWith: output)
         let proofResult = XCTWaiter().wait(for: [proofExpectation], timeout: 20)
 
@@ -55,6 +59,8 @@ final class HealthKitAuthorizationUITests: XCTestCase {
         XCTAssertFalse(decoded.projectionRecordExternalIDs.isEmpty)
         XCTAssertEqual(decoded.firstCursorValue, decoded.secondFetchCursorInput)
         XCTAssertEqual(decoded.secondCursorValue, decoded.projectionCursorValue)
+        XCTAssertEqual(decoded.projectionStoreKind, "default_on_disk")
+        XCTAssertTrue(decoded.projectionReopenMatched)
         let expectedPersistedRecordIDs = decoded.representativeRecordIDs
             .filter { !decoded.deletedExternalIDs.contains($0) }
         XCTAssertFalse(expectedPersistedRecordIDs.isEmpty)
@@ -149,4 +155,6 @@ private struct HealthKitArchiveProbeProof: Decodable {
     let deletedExternalIDs: [String]
     let projectionDeletedExternalIDs: [String]
     let archiveFetchError: String?
+    let projectionStoreKind: String?
+    let projectionReopenMatched: Bool
 }

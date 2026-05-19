@@ -84,6 +84,35 @@ public enum HealthDataTypeRegistry {
     )
 }
 
+public struct HealthArchiveDescriptor: Sendable, Equatable {
+    public let type: HealthDataTypeDescriptor
+    public let label: String
+
+    public init(type: HealthDataTypeDescriptor, label: String) {
+        self.type = type
+        self.label = label
+    }
+}
+
+public enum HealthArchiveDescriptorCatalog {
+    public static let supportedBatchDescriptors: [HealthArchiveDescriptor] = [
+        HealthArchiveDescriptor(type: HealthDataTypeRegistry.heartRate, label: "heart rate"),
+        HealthArchiveDescriptor(type: HealthDataTypeRegistry.bodyMass, label: "body mass"),
+        HealthArchiveDescriptor(type: HealthDataTypeRegistry.stepCount, label: "steps"),
+        HealthArchiveDescriptor(
+            type: HealthDataTypeRegistry.activeEnergyBurned,
+            label: "active energy"
+        ),
+        HealthArchiveDescriptor(type: HealthDataTypeRegistry.runningSpeed, label: "running speed"),
+        HealthArchiveDescriptor(type: HealthDataTypeRegistry.sleepAnalysis, label: "sleep"),
+        HealthArchiveDescriptor(type: HealthDataTypeRegistry.workout, label: "workouts"),
+    ]
+
+    public static func supportedBatchTypes() -> [HealthDataTypeDescriptor] {
+        supportedBatchDescriptors.map(\.type)
+    }
+}
+
 public struct HealthDataRequest: Codable, Sendable, Equatable, Hashable {
     public let type: HealthDataTypeDescriptor
     public let access: HealthDataAccessMode

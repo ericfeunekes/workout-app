@@ -457,6 +457,37 @@ class PrimitiveBlockIn(_UuidInputBase):
         return self
 
 
+class ActivityIntentIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    activity_domain: Literal[
+        "running",
+        "cycling",
+        "rowing",
+        "swimming",
+        "walking",
+        "hiking",
+        "functional_strength",
+        "traditional_strength",
+        "hiit",
+        "mobility",
+        "mixed_modal",
+        "carry",
+        "other",
+    ]
+    environment: Literal["indoor", "outdoor", "unspecified"] = "unspecified"
+    preservation_policy: (
+        Literal[
+            "preserve_primary_activity",
+            "preserve_structure",
+            "preserve_elapsed_time",
+            "preserve_distance",
+            "preserve_mixed_modality",
+        ]
+        | None
+    ) = None
+
+
 class WorkoutCreate(_UuidInputBase):
     """Accepts a full primitive workout tree (blocks → sets → slots) in one request.
 
@@ -472,6 +503,7 @@ class WorkoutCreate(_UuidInputBase):
     source: Literal["claude", "manual"] = "claude"
     notes: str | None = None
     tags_json: str | None = None
+    activity_intent: ActivityIntentIn | None = None
     primitive_blocks: list[PrimitiveBlockIn] = Field(min_length=1)
 
 
@@ -485,6 +517,7 @@ class WorkoutUpdate(_UuidInputBase):
     status: Literal["planned", "active", "completed", "skipped"] | None = None
     notes: str | None = None
     tags_json: str | None = None
+    activity_intent: ActivityIntentIn | None = None
     completed_at: UtcDatetimeIn | None = None
     primitive_blocks: list[PrimitiveBlockIn] | None = Field(default=None, min_length=1)
 
@@ -500,6 +533,7 @@ class WorkoutRead(_UuidReadBase):
     source: str
     notes: str | None
     tags_json: str | None
+    activity_intent: ActivityIntentIn | None = None
     created_at: UtcDatetime
     updated_at: UtcDatetime
     completed_at: UtcDatetime | None
@@ -542,13 +576,13 @@ class PrimitiveSetLogIn(_UuidInputBase):
             "description": (
                 "Primitive result row. The role selects the coordinate grammar: "
                 "slot rows identify block/set/slot and must include set_index "
-                "as the slot ordinal within the authored set; set_result rows "
-                "identify block/set, use set_index 0 as their aggregate "
-                "sentinel, and cannot carry slot or exercise ids; block_result "
-                "rows identify block, use set_index and set_repeat_index 0 as "
-                "aggregate sentinels, and cannot carry set, slot, or exercise "
-                "ids. Runtime validation also verifies the coordinates against "
-                "the persisted primitive workout tree."
+                "as the commit sequence within the block/set repeat instance; "
+                "set_result rows identify block/set, use set_index 0 as their "
+                "aggregate sentinel, and cannot carry slot or exercise ids; "
+                "block_result rows identify block, use set_index and "
+                "set_repeat_index 0 as aggregate sentinels, and cannot carry "
+                "set, slot, or exercise ids. Runtime validation also verifies "
+                "the coordinates against the persisted primitive workout tree."
             ),
             "oneOf": [
                 {
@@ -607,7 +641,12 @@ class PrimitiveSetLogIn(_UuidInputBase):
     distance_m: float | None = None
     rounds: int | None = None
     rir: int | None = Field(default=None, ge=0, le=5)
+    hr_avg_bpm: int | None = None
+    hr_max_bpm: int | None = None
     is_warmup: bool = False
+    skipped: bool = False
+    side: Literal["left", "right", "bilateral"] = "bilateral"
+    notes: str | None = None
     completed_at: UtcDatetimeIn
 
     @model_validator(mode="after")
@@ -667,7 +706,12 @@ class PrimitiveSetLogRead(_UuidReadBase):
     distance_m: float | None
     rounds: int | None
     rir: int | None
+    hr_avg_bpm: int | None
+    hr_max_bpm: int | None
     is_warmup: bool
+    skipped: bool
+    side: str
+    notes: str | None
     completed_at: UtcDatetime
 
 
@@ -790,6 +834,112 @@ class SyncPullOut(_UuidReadBase):
     exercises: list[ExerciseRead]
     user_parameters: list[UserParameterRead]
     last_performed: list[ExerciseLastPerformed]
+    server_time: UtcDatetime
+
+
+# ---------- HealthKit personal archive ----------
+
+
+class HealthArchiveValueIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    kind: Literal["quantity", "category", "workout", "text", "unsupported"]
+    quantity_value: float | None = None
+    unit: str | None = None
+    category_value: int | None = None
+    workout_activity_type: str | None = None
+    duration_seconds: float | None = None
+    total_energy_kcal: float | None = None
+    text: str | None = None
+    reason: str | None = None
+
+    @model_validator(mode="after")
+    def _matches_kind(self) -> "HealthArchiveValueIn":
+        if self.kind == "quantity":
+            if self.quantity_value is None or self.unit is None:
+                raise ValueError("quantity health archive values require quantity_value and unit")
+        elif self.kind == "category":
+            if self.category_value is None:
+                raise ValueError("category health archive values require category_value")
+        elif self.kind == "workout":
+            if self.workout_activity_type is None or self.duration_seconds is None:
+                raise ValueError(
+                    "workout health archive values require "
+                    "workout_activity_type and duration_seconds"
+                )
+        elif self.kind == "text":
+            if self.text is None:
+                raise ValueError("text health archive values require text")
+        elif self.kind == "unsupported" and self.reason is None:
+            raise ValueError("unsupported health archive values require reason")
+        return self
+
+
+def _normalize_uuid_string(value: str) -> str:
+    lowered = value.lower()
+    try:
+        _uuid.UUID(lowered)
+    except ValueError as exc:
+        raise ValueError(f"id is not a valid UUID: {value!r}") from exc
+    return lowered
+
+
+class HealthArchiveRecordIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    external_id: str
+    descriptor_id: str
+    sample_kind: Literal[
+        "quantity",
+        "category",
+        "workout",
+        "characteristic",
+        "correlation",
+        "clinical",
+    ]
+    source_bundle_identifier: str | None = None
+    start_at: UtcDatetimeIn | None = None
+    end_at: UtcDatetimeIn | None = None
+    value: HealthArchiveValueIn
+    metadata: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("id")
+    @classmethod
+    def _validate_id(cls, value: str) -> str:
+        return _normalize_uuid_string(value)
+
+
+class HealthArchiveTombstoneIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    descriptor_id: str
+    external_id: str
+    observed_at: UtcDatetimeIn
+
+    @field_validator("id")
+    @classmethod
+    def _validate_id(cls, value: str) -> str:
+        return _normalize_uuid_string(value)
+
+
+class HealthArchiveUploadIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_set_key: str = Field(min_length=1)
+    server_namespace: str = Field(min_length=1)
+    descriptor_fingerprint: str = Field(min_length=1)
+    next_cursor: str | None = None
+    records: list[HealthArchiveRecordIn] = Field(default_factory=list)
+    tombstones: list[HealthArchiveTombstoneIn] = Field(default_factory=list)
+
+
+class HealthArchiveUploadOut(BaseModel):
+    request_set_key: str
+    acknowledged_cursor: str | None
+    records_received: int
+    tombstones_received: int
     server_time: UtcDatetime
 
 

@@ -40,7 +40,6 @@ class PrimitiveLogTreeIndex:
         self.set_to_block: dict[str, str] = {}
         self.slot_to_set: dict[str, str] = {}
         self.slot_to_exercise: dict[str, str] = {}
-        self.slot_to_index: dict[str, int] = {}
         for block in blocks:
             block_id = block["id"]
             self.block_by_id[block_id] = block
@@ -48,11 +47,10 @@ class PrimitiveLogTreeIndex:
                 set_id = primitive_set["id"]
                 self.set_by_id[set_id] = primitive_set
                 self.set_to_block[set_id] = block_id
-                for slot_index, slot in enumerate(primitive_set.get("slots", [])):
+                for slot in primitive_set.get("slots", []):
                     slot_id = slot["id"]
                     self.slot_to_set[slot_id] = set_id
                     self.slot_to_exercise[slot_id] = slot["exercise_id"]
-                    self.slot_to_index[slot_id] = slot_index
 
 
 def validate_primitive_log_references(log: PrimitiveLogLike, blocks: list[dict]) -> None:
@@ -103,8 +101,6 @@ def _validate_set_result_log(log: PrimitiveLogLike, primitive_set: PrimitiveTree
 def _validate_slot_log(log: PrimitiveLogLike, index: PrimitiveLogTreeIndex) -> None:
     if log.slot_id is None or index.slot_to_set.get(log.slot_id) != log.set_id:
         _raise_invalid_primitive_log("slot_id", log)
-    if index.slot_to_index.get(log.slot_id) != log.set_index:
-        _raise_invalid_primitive_log("set_index", log)
     if (
         log.planned_exercise_id is not None
         and index.slot_to_exercise.get(log.slot_id) != log.planned_exercise_id

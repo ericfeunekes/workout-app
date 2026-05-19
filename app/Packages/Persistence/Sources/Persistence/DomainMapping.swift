@@ -124,7 +124,12 @@ extension PrimitiveSetLogModel {
             distanceM: distanceM,
             rounds: rounds,
             rir: rir,
+            hrAvgBpm: hrAvgBpm,
+            hrMaxBpm: hrMaxBpm,
             isWarmup: isWarmup,
+            skipped: skipped,
+            side: SetLogSide(rawValue: sideRaw) ?? .bilateral,
+            notes: notes,
             completedAt: completedAt
         )
     }
@@ -149,7 +154,12 @@ extension PrimitiveSetLogModel {
             distanceM: log.distanceM,
             rounds: log.rounds,
             rir: log.rir,
+            hrAvgBpm: log.hrAvgBpm,
+            hrMaxBpm: log.hrMaxBpm,
             isWarmup: log.isWarmup,
+            skipped: log.skipped,
+            sideRaw: log.side.rawValue,
+            notes: log.notes,
             completedAt: log.completedAt
         )
     }
@@ -172,7 +182,12 @@ extension PrimitiveSetLogModel {
         distanceM = log.distanceM
         rounds = log.rounds
         rir = log.rir
+        hrAvgBpm = log.hrAvgBpm
+        hrMaxBpm = log.hrMaxBpm
         isWarmup = log.isWarmup
+        skipped = log.skipped
+        sideRaw = log.side.rawValue
+        notes = log.notes
         completedAt = log.completedAt
     }
 }

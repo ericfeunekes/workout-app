@@ -203,6 +203,7 @@ public enum WatchMessage: Sendable, Equatable, Codable {
 }
 
 public struct ActiveBlockPayload: Sendable, Equatable, Codable {
+    public let workoutItemID: UUID
     public let exerciseName: String
     /// Pre-formatted human string, e.g. "5 reps @ 102.5 kg". WatchBridge does
     /// no formatting of its own — the iPhone builds the string using Core
@@ -213,12 +214,14 @@ public struct ActiveBlockPayload: Sendable, Equatable, Codable {
     public let targetRir: Int?
 
     public init(
+        workoutItemID: UUID,
         exerciseName: String,
         prescription: String,
         setNumber: Int,
         setCount: Int,
         targetRir: Int?
     ) {
+        self.workoutItemID = workoutItemID
         self.exerciseName = exerciseName
         self.prescription = prescription
         self.setNumber = setNumber

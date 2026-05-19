@@ -35,6 +35,7 @@ import FeaturesHistory
 import FeaturesToday
 import Persistence
 import Sync
+import WatchBridge
 import WorkoutCoreFoundation
 
 /// Possible outcomes of a launch-time bootstrap.
@@ -88,7 +89,8 @@ public enum AppBootstrap {
         onManualRefreshTokenRejected: (@Sendable @MainActor () async -> Void)? = nil,
         onEmptyTodayRefresh: (@Sendable @MainActor () async -> Bool)? = nil,
         historyViewModel: HistoryViewModel? = nil,
-        executionHolder: ExecutionVMHolder? = nil
+        executionHolder: ExecutionVMHolder? = nil,
+        watchBridge: (any WatchBridge)? = nil
     ) async throws -> BootstrapResult {
         // Complete the telemetry emitter → push queue wire-up BEFORE the
         // first emit. `PersistenceFactory.prepareTelemetry()` is idempotent
@@ -148,7 +150,8 @@ public enum AppBootstrap {
             afterLocalCompletion: afterLocalCompletion,
             onManualRefreshTokenRejected: onManualRefreshTokenRejected,
             executionHolder: executionHolder,
-            appSync: appSync
+            appSync: appSync,
+            watchBridge: watchBridge
         ))
     }
 
@@ -164,6 +167,7 @@ public enum AppBootstrap {
         let onManualRefreshTokenRejected: (@Sendable @MainActor () async -> Void)?
         let executionHolder: ExecutionVMHolder?
         let appSync: AppSyncCoordinator
+        let watchBridge: (any WatchBridge)?
     }
 
     /// Post-load assembly. Extracted so `bootstrap(...)` stays under
@@ -195,6 +199,7 @@ public enum AppBootstrap {
             afterLocalCompletion: inputs.afterLocalCompletion,
             onManualRefreshTokenRejected: inputs.onManualRefreshTokenRejected,
             appSync: inputs.appSync,
+            watchBridge: inputs.watchBridge,
             executionHolder: inputs.executionHolder ?? ExecutionVMHolder()
         ))
     }

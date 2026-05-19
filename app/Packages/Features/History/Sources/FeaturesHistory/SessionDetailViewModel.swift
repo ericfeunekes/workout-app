@@ -7,6 +7,7 @@
 
 import Foundation
 import CoreDomain
+import CoreSession
 import WorkoutCoreFoundation
 
 @Observable
@@ -75,6 +76,7 @@ public final class SessionDetailViewModel {
         self.workoutNote = session.workout.notes?.nilIfEmpty
         self.cards = Self.buildCards(
             setLogs: session.setLogs,
+            primitiveSetLogs: session.primitiveSetLogs,
             plannedExerciseByItem: session.plannedExerciseByItem,
             exerciseName: exerciseName
         )
@@ -119,9 +121,16 @@ public final class SessionDetailViewModel {
     ///     still render even when the items lookup is empty.
     static func buildCards(
         setLogs: [SetLog],
+        primitiveSetLogs: [PrimitiveSetLog] = [],
         plannedExerciseByItem: [WorkoutItemID: ExerciseID],
         exerciseName: [ExerciseID: String]
     ) -> [ExerciseCard] {
+        if !primitiveSetLogs.isEmpty {
+            return buildPrimitiveCards(
+                primitiveSetLogs: primitiveSetLogs,
+                exerciseName: exerciseName
+            )
+        }
         var order: [UUID] = []
         var bucket: [UUID: [SetLog]] = [:]
         for log in setLogs {
@@ -145,6 +154,61 @@ public final class SessionDetailViewModel {
             return ExerciseCard(
                 id: id,
                 name: exerciseName[id] ?? "(unknown exercise)",
+                setRows: rows,
+                note: note
+            )
+        }
+    }
+
+    static func buildPrimitiveCards(
+        primitiveSetLogs: [PrimitiveSetLog],
+        exerciseName: [ExerciseID: String]
+    ) -> [ExerciseCard] {
+        var order: [UUID] = []
+        var bucket: [UUID: [PrimitiveSetLog]] = [:]
+        var names: [UUID: String] = [:]
+        for log in primitiveSetLogs where !log.resultSemantics.isSentinel {
+            let id: UUID
+            let name: String
+            switch log.resultSemantics.scope {
+            case .exercise:
+                id = log.performedExerciseID ?? log.plannedExerciseID ?? log.slotID ?? log.id
+                name = exerciseName[id] ?? "(unknown exercise)"
+            case .setAggregate:
+                id = log.setID ?? log.id
+                name = "set result"
+            case .blockAggregate:
+                id = log.blockID ?? log.id
+                name = "block result"
+            }
+            if bucket[id] == nil {
+                bucket[id] = []
+                order.append(id)
+                names[id] = name
+            }
+            bucket[id]?.append(log)
+        }
+
+        return order.map { id in
+            let logs = (bucket[id] ?? []).sorted { lhs, rhs in
+                if lhs.blockRepeatIndex != rhs.blockRepeatIndex {
+                    return lhs.blockRepeatIndex < rhs.blockRepeatIndex
+                }
+                if lhs.setRepeatIndex != rhs.setRepeatIndex {
+                    return lhs.setRepeatIndex < rhs.setRepeatIndex
+                }
+                if lhs.setIndex != rhs.setIndex {
+                    return lhs.setIndex < rhs.setIndex
+                }
+                return lhs.completedAt < rhs.completedAt
+            }
+            let rows = logs.enumerated().map { index, log -> SetRow in
+                SetRow(id: log.id, display: formatPrimitiveRow(log, displayIndex: index))
+            }
+            let note = primitiveNotes(logs)
+            return ExerciseCard(
+                id: id,
+                name: names[id] ?? "(unknown result)",
                 setRows: rows,
                 note: note
             )
@@ -198,6 +262,58 @@ public final class SessionDetailViewModel {
         return parts.joined(separator: " · ")
     }
 
+    static func formatPrimitiveRow(_ log: PrimitiveSetLog, displayIndex: Int = 0) -> String {
+        var parts: [String] = [primitiveRowPrefix(log, displayIndex: displayIndex)]
+        if log.skipped {
+            parts.append("SKIPPED")
+            appendSide(log.side, to: &parts)
+            return parts.joined(separator: " · ")
+        }
+
+        var metrics: [String] = []
+        if let rounds = log.rounds {
+            metrics.append("\(rounds) round\(rounds == 1 ? "" : "s")")
+        }
+        if let weight = log.weight {
+            let unit = log.weightUnit ?? .kg
+            metrics.append("\(formatKilograms(weight)) \(unit.rawValue)")
+        } else if log.role == .slot, log.reps != nil, log.durationSec == nil, log.distanceM == nil {
+            metrics.append("BW")
+        }
+        if let reps = log.reps {
+            metrics.append("\(reps) rep\(reps == 1 ? "" : "s")")
+        }
+        if let duration = log.durationSec {
+            metrics.append(formatDuration(seconds: duration))
+        }
+        if let distance = log.distanceM {
+            metrics.append(formatCardioDistance(distance))
+        }
+        if metrics.isEmpty {
+            metrics.append("completed")
+        }
+        parts.append(metrics.joined(separator: " + "))
+        appendSide(log.side, to: &parts)
+        if let rir = log.rir {
+            parts.append("RIR \(rir)")
+        }
+        if let hrAvg = log.hrAvgBpm {
+            parts.append("HR \(hrAvg)")
+        }
+        return parts.joined(separator: " · ")
+    }
+
+    private static func primitiveRowPrefix(_ log: PrimitiveSetLog, displayIndex: Int) -> String {
+        switch log.resultSemantics.scope {
+        case .exercise:
+            return "SET \(displayIndex + 1)"
+        case .setAggregate:
+            return "SET"
+        case .blockAggregate:
+            return "BLOCK"
+        }
+    }
+
     private static func appendSide(_ side: SetLogSide, to parts: inout [String]) {
         switch side {
         case .bilateral:
@@ -215,6 +331,19 @@ public final class SessionDetailViewModel {
         let notes = logs.compactMap { $0.notes?.nilIfEmpty }
         guard !notes.isEmpty else { return nil }
         return notes.joined(separator: " · ")
+    }
+
+    static func primitiveNotes(_ logs: [PrimitiveSetLog]) -> String? {
+        let notes = logs.compactMap { $0.notes?.nilIfEmpty }
+        guard !notes.isEmpty else { return nil }
+        return notes.joined(separator: " · ")
+    }
+
+    private static func formatCardioDistance(_ metres: Double) -> String {
+        if metres >= 1000 {
+            return String(format: "%.1f km", metres / 1000.0)
+        }
+        return "\(Int(metres.rounded())) m"
     }
 }
 

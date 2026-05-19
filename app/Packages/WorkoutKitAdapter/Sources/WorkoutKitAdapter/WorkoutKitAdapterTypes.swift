@@ -86,6 +86,7 @@ public enum WorkoutKitAdapterError: Error, Sendable, Hashable, Codable, CustomSt
     case unsupportedPayloadShape(WorkoutKitPayloadShape)
     case unsupportedSelectionPolicy
     case unsupportedDeliveryPath(WorkoutKitDeliveryPath)
+    case incompleteWorkoutKitDescriptor
     case unsupportedPlatform(String)
     case schedulerUnavailable
     case capacityExceeded(maxAllowed: Int)
@@ -102,6 +103,8 @@ public enum WorkoutKitAdapterError: Error, Sendable, Hashable, Codable, CustomSt
             "WorkoutKit adapter cannot choose a candidate from this selection policy."
         case .unsupportedDeliveryPath(let path):
             "WorkoutKit adapter does not support delivery path '\(path.rawValue)'."
+        case .incompleteWorkoutKitDescriptor:
+            "WorkoutKit adapter cannot construct a production plan until target values and interval steps are concrete."
         case .unsupportedPlatform(let message):
             message
         case .schedulerUnavailable:
@@ -113,68 +116,5 @@ public enum WorkoutKitAdapterError: Error, Sendable, Hashable, Codable, CustomSt
         case .liveWorkoutKitFailure(let message):
             message
         }
-    }
-}
-
-struct WorkoutKitPlanDescriptor: Sendable, Hashable, Codable {
-    var id: UUID
-    var displayName: String
-    var family: WorkoutKitCandidateFamily
-    var activity: WorkoutKitAdapterActivity
-    var location: WorkoutKitAdapterLocation
-    var goal: WorkoutKitAdapterGoal
-    var intervalSteps: [WorkoutKitAdapterIntervalStep]
-
-    init(
-        id: UUID,
-        displayName: String,
-        family: WorkoutKitCandidateFamily,
-        activity: WorkoutKitAdapterActivity,
-        location: WorkoutKitAdapterLocation = .unknown,
-        goal: WorkoutKitAdapterGoal,
-        intervalSteps: [WorkoutKitAdapterIntervalStep] = []
-    ) {
-        self.id = id
-        self.displayName = displayName
-        self.family = family
-        self.activity = activity
-        self.location = location
-        self.goal = goal
-        self.intervalSteps = intervalSteps
-    }
-}
-
-enum WorkoutKitAdapterActivity: String, Sendable, Hashable, Codable, CaseIterable {
-    case cycling
-    case functionalStrength
-    case mixedCardio
-    case walking
-    case flexibility
-    case other
-}
-
-enum WorkoutKitAdapterLocation: String, Sendable, Hashable, Codable, CaseIterable {
-    case unknown
-    case outdoor
-}
-
-enum WorkoutKitAdapterGoal: Sendable, Hashable, Codable {
-    case open
-    case timeSeconds(Double)
-    case distanceMeters(Double)
-}
-
-struct WorkoutKitAdapterIntervalStep: Sendable, Hashable, Codable {
-    enum Purpose: String, Sendable, Hashable, Codable {
-        case work
-        case recovery
-    }
-
-    var purpose: Purpose
-    var goal: WorkoutKitAdapterGoal
-
-    init(purpose: Purpose, goal: WorkoutKitAdapterGoal) {
-        self.purpose = purpose
-        self.goal = goal
     }
 }

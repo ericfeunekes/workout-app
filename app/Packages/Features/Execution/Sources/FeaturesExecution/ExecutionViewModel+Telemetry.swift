@@ -382,6 +382,9 @@ private struct PrimitiveResultRecordedEventPayload: Encodable {
     let rounds: Int?
     let rir: Int?
     let isWarmup: Bool
+    let skipped: Bool
+    let side: String
+    let notes: String?
 
     init(log: PrimitiveSetLog) {
         self.role = log.role.rawValue
@@ -403,6 +406,9 @@ private struct PrimitiveResultRecordedEventPayload: Encodable {
         self.rounds = log.rounds
         self.rir = log.rir
         self.isWarmup = log.isWarmup
+        self.skipped = log.skipped
+        self.side = log.side.rawValue
+        self.notes = log.notes
     }
 
     enum CodingKeys: String, CodingKey {
@@ -425,6 +431,9 @@ private struct PrimitiveResultRecordedEventPayload: Encodable {
         case rounds
         case rir
         case isWarmup = "is_warmup"
+        case skipped
+        case side
+        case notes
     }
 }
 

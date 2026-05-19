@@ -45,9 +45,12 @@ import FeaturesFirstRun
 import FeaturesHistory
 import FeaturesSettings
 import FeaturesToday
+import HealthArchiveExport
+import HealthKitBridge
 import Persistence
 import Shell
 import Sync
+import WatchBridge
 
 @main
 struct WorkoutDBApp: App {
@@ -138,6 +141,7 @@ struct RootView: View {
     @State private var didStartBootstrap: Bool = false
     @State private var lifecycleGeneration: Int = 0
     @State private var scenePhaseTask: Task<Void, Never>?
+    @State private var healthArchiveRuntime: HealthArchiveExportRuntime?
     @Environment(\.scenePhase) private var scenePhase
 
     /// HistoryViewModel is hoisted to RootView so it survives body
@@ -151,6 +155,7 @@ struct RootView: View {
     /// `localCompletionWriter`. Extensions in sibling files can only
     /// reach `internal` members.
     @State var historyVM: HistoryViewModel
+    let watchBridge: LiveWatchBridge
 
     /// Shared persistence — the shell consults it on launch, passes it to
     /// AppBootstrap, and hands the TokenStore slice down to FirstRun.
@@ -161,6 +166,7 @@ struct RootView: View {
     init() {
         let persistence = Self.makePersistence()
         self.persistence = persistence
+        self.watchBridge = LiveWatchBridge()
         self._historyVM = State(
             wrappedValue: HistoryViewModel(
                 cache: persistence.workoutCache,
@@ -170,7 +176,11 @@ struct RootView: View {
     }
 
     private static func makePersistence() -> PersistenceFactory {
-        if ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil {
+        let environment = ProcessInfo.processInfo.environment
+        let forceDefaultHealthKitProbeStore = environment[
+            "WORKOUTDB_HEALTHKIT_PROBE_DEFAULT_STORE"
+        ] == "1"
+        if environment["XCTestConfigurationFilePath"] != nil && !forceDefaultHealthKitProbeStore {
             do {
                 return try PersistenceFactory.makeInMemory()
             } catch {
@@ -181,18 +191,7 @@ struct RootView: View {
         do {
             return try PersistenceFactory.makeDefault()
         } catch {
-            // SwiftData should not fail at module load. If it does, fall
-            // back to in-memory so the app at least launches — the user
-            // sees the empty state rather than a crash.
-            do {
-                return try PersistenceFactory.makeInMemory()
-            } catch {
-                // In-memory SwiftData failing means the SwiftData runtime
-                // itself is broken — there is no meaningful fallback and
-                // the app cannot function. Crash loudly so the failure is
-                // obvious rather than producing silent misbehaviour.
-                fatalError("PersistenceFactory.makeInMemory() failed: \(error)")
-            }
+            fatalError("PersistenceFactory.makeDefault() failed: \(error)")
         }
     }
 
@@ -301,6 +300,8 @@ struct RootView: View {
         SettingsViewModel(
             tokenStore: persistence.tokenStore,
             syncMetadata: persistence.syncMetadataStore,
+            healthArchiveExportState: persistence.healthArchiveExportStateStore,
+            healthArchiveDescriptorOptions: healthArchiveDescriptorOptions(),
             onSyncNow: { @MainActor in
                 await rerunBootstrapFromReady()
             },
@@ -309,6 +310,9 @@ struct RootView: View {
             },
             onChangeServer: { @MainActor in
                 await changeServer()
+            },
+            onHealthArchiveExportNow: { @MainActor in
+                await exportHealthArchiveFromSettings()
             }
         )
     }
@@ -449,7 +453,8 @@ struct RootView: View {
                     return true
                 },
                 historyViewModel: historyVM,
-                executionHolder: executionHolder
+                executionHolder: executionHolder,
+                watchBridge: watchBridge
             )
             switch result {
             case .ready(let todayVM, let holder, let appSync):
@@ -485,6 +490,7 @@ struct RootView: View {
     private func routeBackToFirstRunForTokenRejected() async {
         lifecycleGeneration += 1
         scenePhaseTask?.cancel()
+        healthArchiveRuntime = nil
         await currentAppSync()?.retire(trigger: .manualTodayRefresh)
         await AppSyncLocalStateReset.pauseForTokenRejected(persistence: persistence)
         didStartBootstrap = false
@@ -494,6 +500,7 @@ struct RootView: View {
     private func rerunBootstrapFromReady() async {
         lifecycleGeneration += 1
         scenePhaseTask?.cancel()
+        healthArchiveRuntime = nil
         await currentAppSync()?.retire()
         didStartBootstrap = false
         phase = .bootstrapping
@@ -503,6 +510,7 @@ struct RootView: View {
     private func resetLocalDataFromSettings() async {
         lifecycleGeneration += 1
         scenePhaseTask?.cancel()
+        healthArchiveRuntime = nil
         await currentAppSync()?.retire()
         let result = await AppSyncLocalStateReset.clearLocalServerData(persistence: persistence)
         guard result.succeeded else {
@@ -530,6 +538,36 @@ struct RootView: View {
         }
     }
 
+    private func currentHealthArchiveExport() -> (any HealthArchiveExportControlling)? {
+        guard let appSync = currentAppSync() else {
+            return nil
+        }
+        if let healthArchiveRuntime {
+            return healthArchiveRuntime
+        }
+        let runtime = HealthArchiveExportFactory.live(
+            archiveStore: persistence.healthArchiveStore,
+            stateStore: persistence.healthArchiveExportStateStore,
+            syncAPI: appSync.syncAPI,
+            telemetry: persistence.telemetryEmitter()
+        )
+        healthArchiveRuntime = runtime
+        return runtime
+    }
+
+    private func exportHealthArchiveFromSettings() async {
+        _ = await HealthArchiveAppHooks.manualExportFromSettings(
+            controllerProvider: currentHealthArchiveExport,
+            tokenStore: persistence.tokenStore
+        )
+    }
+
+    private func healthArchiveDescriptorOptions() -> [HealthArchiveDescriptorOption] {
+        HealthArchiveDescriptorCatalog.supportedBatchDescriptors.map {
+            HealthArchiveDescriptorOption(id: $0.type.id, label: $0.label)
+        }
+    }
+
     private func handleScenePhase(_ newPhase: ScenePhase, generation: Int) async {
         guard let appSync = currentAppSync() else { return }
         guard generation == lifecycleGeneration else { return }
@@ -547,6 +585,7 @@ struct RootView: View {
                 await routeBackToFirstRunForTokenRejected()
                 return
             }
+            await runHealthArchiveForegroundCatchUp()
             if startedFromEmpty,
                case .foreground(refresh: .pulled) = result {
                 await promoteEmptyAfterForegroundPull(generation: generation)
@@ -567,6 +606,13 @@ struct RootView: View {
         didStartBootstrap = false
         phase = .bootstrapping
         await runBootstrap()
+    }
+
+    private func runHealthArchiveForegroundCatchUp() async {
+        _ = await HealthArchiveAppHooks.foregroundCatchUp(
+            controllerProvider: currentHealthArchiveExport,
+            tokenStore: persistence.tokenStore
+        )
     }
 
     #if DEBUG
@@ -626,6 +672,7 @@ extension RootView {
         }
         lifecycleGeneration += 1
         scenePhaseTask?.cancel()
+        healthArchiveRuntime = nil
         await currentAppSync()?.retire()
         let result = await AppSyncLocalStateReset.clearConnectionAndLocalServerData(
             persistence: persistence

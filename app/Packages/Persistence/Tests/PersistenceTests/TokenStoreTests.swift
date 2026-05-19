@@ -1,26 +1,28 @@
 // TokenStoreTests.swift
 //
-// Keychain round-trip + UserDefaults isolation. Each test uses a unique
-// service name so Keychain rows from one test don't bleed into another —
-// even across concurrent parallel test runs.
+// TokenStore payload, migration, and UserDefaults mirror behavior. These tests
+// use an in-memory Keychain client so pre-QA proves TokenStore logic without
+// depending on a macOS SwiftPM Keychain environment.
 
 import XCTest
-import Security
 @testable import Persistence
 
 final class TokenStoreTests: XCTestCase {
 
-    private func makeStore() -> (TokenStoreImpl, String, String) {
+    private func makeStore() -> (TokenStoreImpl, InMemoryTokenStoreKeychainClient, String, String) {
         let service = "com.ericfeunekes.WorkoutDB.token.test.\(UUID().uuidString)"
         let defaultsSuite = "WorkoutDBPersistenceTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: defaultsSuite) ?? .standard
+        let keychain = InMemoryTokenStoreKeychainClient()
         return (
             TokenStoreImpl(
                 serviceName: service,
                 account: "bearer",
                 urlDefaultsKey: "workoutdb.server.url",
-                defaults: defaults
+                defaults: defaults,
+                keychainClient: keychain
             ),
+            keychain,
             service,
             defaultsSuite
         )
@@ -28,13 +30,15 @@ final class TokenStoreTests: XCTestCase {
 
     private func makeStore(
         service: String,
-        defaultsSuite: String
+        defaultsSuite: String,
+        keychain: InMemoryTokenStoreKeychainClient
     ) -> TokenStoreImpl {
         TokenStoreImpl(
             serviceName: service,
             account: "bearer",
             urlDefaultsKey: "workoutdb.server.url",
-            defaults: UserDefaults(suiteName: defaultsSuite) ?? .standard
+            defaults: UserDefaults(suiteName: defaultsSuite) ?? .standard,
+            keychainClient: keychain
         )
     }
 
@@ -46,13 +50,13 @@ final class TokenStoreTests: XCTestCase {
     }
 
     func testLoadWithoutSaveReturnsNil() throws {
-        let (store, _, _) = makeStore()
+        let (store, _, _, _) = makeStore()
         let result = try store.loadConnection()
         XCTAssertNil(result)
     }
 
     func testSaveAndLoad() throws {
-        let (store, _, _) = makeStore()
+        let (store, _, _, _) = makeStore()
         defer { try? store.clear() }
         let url = URL(string: "https://tailscale.example.ts.net")!
         try store.saveConnection(url: url, token: "bearer-tok-xyz")
@@ -64,7 +68,7 @@ final class TokenStoreTests: XCTestCase {
     }
 
     func testSaveOverwritesExisting() throws {
-        let (store, _, _) = makeStore()
+        let (store, _, _, _) = makeStore()
         defer { try? store.clear() }
         let url1 = URL(string: "https://one.example.com")!
         let url2 = URL(string: "https://two.example.com")!
@@ -78,14 +82,15 @@ final class TokenStoreTests: XCTestCase {
     }
 
     func testSaveAndLoadSurvivesDefaultsLoss() throws {
-        let (store, service, _) = makeStore()
+        let (store, keychain, service, _) = makeStore()
         defer { try? store.clear() }
         let url = URL(string: "http://100.106.10.41:8080")!
         try store.saveConnection(url: url, token: "durable-token")
 
         let reinstallStore = makeStore(
             service: service,
-            defaultsSuite: "WorkoutDBPersistenceTests.reinstall.\(UUID().uuidString)"
+            defaultsSuite: "WorkoutDBPersistenceTests.reinstall.\(UUID().uuidString)",
+            keychain: keychain
         )
         let loaded = try reinstallStore.loadConnection()
 
@@ -94,12 +99,12 @@ final class TokenStoreTests: XCTestCase {
     }
 
     func testLegacyTokenAndDefaultsMigratesToDurablePayload() throws {
-        let (store, service, defaultsSuite) = makeStore()
+        let (store, keychain, service, defaultsSuite) = makeStore()
         defer { try? store.clear() }
         let defaults = UserDefaults(suiteName: defaultsSuite) ?? .standard
         let url = URL(string: "https://legacy.example.com")!
         defaults.set(url.absoluteString, forKey: "workoutdb.server.url")
-        try writeLegacyToken(service: service, token: "legacy-token")
+        try keychain.write(data: Data("legacy-token".utf8), serviceName: service, account: "bearer")
 
         let loaded = try store.loadConnection()
         XCTAssertEqual(loaded?.url, url)
@@ -107,7 +112,8 @@ final class TokenStoreTests: XCTestCase {
 
         let reinstallStore = makeStore(
             service: service,
-            defaultsSuite: "WorkoutDBPersistenceTests.legacy-reinstall.\(UUID().uuidString)"
+            defaultsSuite: "WorkoutDBPersistenceTests.legacy-reinstall.\(UUID().uuidString)",
+            keychain: keychain
         )
         let migrated = try reinstallStore.loadConnection()
         XCTAssertEqual(migrated?.url, url)
@@ -115,7 +121,7 @@ final class TokenStoreTests: XCTestCase {
     }
 
     func testClearRemovesBoth() throws {
-        let (store, _, _) = makeStore()
+        let (store, _, _, _) = makeStore()
         let url = URL(string: "https://example.com")!
         try store.saveConnection(url: url, token: "tok")
 
@@ -125,24 +131,30 @@ final class TokenStoreTests: XCTestCase {
     }
 
     func testClearWhenEmptyIsIdempotent() throws {
-        let (store, _, _) = makeStore()
+        let (store, _, _, _) = makeStore()
         // Must not throw even if nothing's stored.
         try store.clear()
         try store.clear()
     }
+}
 
-    private func writeLegacyToken(service: String, token: String) throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: "bearer",
-        ]
-        SecItemDelete(query as CFDictionary)
-        var addQuery = query
-        addQuery[kSecValueData as String] = Data(token.utf8)
-        let status = SecItemAdd(addQuery as CFDictionary, nil)
-        if status != errSecSuccess {
-            throw NSError(domain: NSOSStatusErrorDomain, code: Int(status))
-        }
+final class InMemoryTokenStoreKeychainClient: TokenStoreKeychainClient, @unchecked Sendable {
+    private var storage: [Key: Data] = [:]
+
+    func write(data: Data, serviceName: String, account: String) throws {
+        storage[Key(serviceName: serviceName, account: account)] = data
+    }
+
+    func read(serviceName: String, account: String) throws -> Data? {
+        storage[Key(serviceName: serviceName, account: account)]
+    }
+
+    func delete(serviceName: String, account: String) throws {
+        storage.removeValue(forKey: Key(serviceName: serviceName, account: account))
+    }
+
+    private struct Key: Hashable {
+        var serviceName: String
+        var account: String
     }
 }

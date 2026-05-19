@@ -306,37 +306,42 @@ manual.
 
 TestFlight is the app release channel for Eric's phone. A release is ready only
 when it is traceable from a verified commit through an uploaded App Store
-Connect build and an assigned internal TestFlight group. The release process
-must be repeatable from the CLI by an agent or by Eric without opening Xcode
-for routine archive/export/upload work.
+Connect build and an assigned internal TestFlight group. The release process is
+agent-operated: it must be repeatable from the CLI without Eric being present
+at the machine, without opening Xcode, and without interactive password prompts.
 
 Release inputs:
 
-- a clean commit or explicitly named dirty-tree exception
-- current local gates for the change shape (`make pre-qa` before app-facing
-  QA, plus any entitlement/device proof the claim needs)
-- regenerated Xcode project from `app/project.yml`
+- a committed `RELEASE_REF` that resolves to the exact source SHA being shipped
+- release gates for the change shape, run inside the detached release worktree
+  (`make pre-qa` before app-facing QA, plus any entitlement/device proof the
+  claim needs)
+- generated Xcode project from `app/project.yml` inside the release worktree
 - monotonically increasing marketing/build version fields
 - App Store Connect app, bundle IDs, HealthKit capability, distribution
   certificate, App Store provisioning profiles, and upload credentials
 
 Release outputs:
 
+- run manifest under `scratch/qa-runs/` binding source SHA, gates, archive,
+  exported IPA hash, App Store Connect build ID, and readiness readback
 - signed archive and exported `.ipa`
 - successful App Store Connect upload result
 - processed build with export-compliance answered
 - build assigned to the `Internal Testing` group
-- final readback that the group has the expected tester count and build count
+- final readback that the build is in the expected group, with tester count
+  asserted when `SETMARK_RELEASE_EXPECTED_INTERNAL_TESTER_COUNT` is configured
 
 Signing material is a release secret, not source control. Agents must not store
 certificates, provisioning profiles, private keys, keychain passwords, or App
-Store Connect API private keys in the repo. The release path should use a
-dedicated release keychain or explicit temporary keychain rather than the login
-keychain. A temporary keychain is acceptable when it is created for one release,
-used non-interactively by `xcodebuild`, and deleted or left in `/tmp` only as a
-short-lived artifact. A durable local release keychain is acceptable if it has a
-narrow password policy, is not the login keychain, and its setup is documented
-outside the repo with secrets retrieved from 1Password.
+Store Connect API private keys in the repo. The normal release path must use a
+dedicated non-login release keychain that is already unlocked or unlockable by
+the release automation through a non-interactive secret source such as
+1Password. A temporary keychain is acceptable for a release run when it is
+created from non-interactively retrieved certificate material, passed explicitly
+to `xcodebuild`, and removed during cleanup. Interactive keychain prompts,
+`op signin` prompts, Apple ID prompts, and Xcode GUI prompts are release
+preflight failures.
 
 App Store Connect API keys should be scoped to the smallest role that can
 upload builds and manage TestFlight assignment. Admin-scoped keys are allowed
@@ -347,8 +352,13 @@ never the private key material.
 
 The release automation should fail closed:
 
+- build from a detached temporary worktree at the resolved source SHA, then
+  remove the worktree after the run
+- run release gates inside that worktree so the recorded proof belongs to the
+  shipped SHA
 - refuse duplicate build numbers before archive
 - refuse missing or stale provisioning profile names before export
+- refuse locked/missing signing material or upload credentials before archive
 - refuse upload if the `.ipa` was not produced by the current archive step
 - surface App Store Connect processing, compliance, and group-assignment state
   as explicit readbacks instead of assuming upload equals availability
@@ -356,15 +366,13 @@ The release automation should fail closed:
 
 Current gaps:
 
-- `RELEASE-GAP-001`: The CLI release flow is still manual command knowledge,
-  not a checked-in target/runbook with preflight, archive, export, upload, and
-  App Store Connect readback.
-- `RELEASE-GAP-002`: Release secret handling is not hardened. The bootstrap run
-  used a temporary keychain and an Admin-scoped App Store Connect API key; the
-  durable requirement is a documented dedicated release keychain posture plus
-  least-privilege upload credentials and rotation guidance.
-- `RELEASE-GAP-003`: Version/build-number management is manual, so duplicate
-  TestFlight build rejection is still easy.
+- `RELEASE-GAP-001`: Run `make release-testflight` against a committed ref and
+  keep the manifest as proof of the checked-in release path.
+- `RELEASE-GAP-002`: Finish proof that the dedicated release keychain and
+  least-privilege App Store Connect key can run end to end with no prompts.
+- `RELEASE-GAP-003`: Version bumping is now guarded by App Store Connect
+  duplicate checks; close the gap after the first manifest-backed upload proves
+  the guard on a real release.
 
 ## After context loss
 

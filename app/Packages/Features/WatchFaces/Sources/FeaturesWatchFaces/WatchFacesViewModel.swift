@@ -115,13 +115,10 @@ public final class WatchFacesViewModel {
     private var metricTask: Task<Void, Never>?
 
     /// Minimal per-item context the view model holds between messages.
-    /// `workoutItemID` is NOT transmitted in `ActiveBlockPayload` today —
-    /// WatchBridge only ships the rendered strings and counts. So until
-    /// the payload gains an ID field (see `docs/open-questions.md` when
-    /// that lands), tap → `setStarted` / `setEnded` uses a placeholder
-    /// UUID and relies on the phone side to resolve the active item from
-    /// its own session state. The field shape stays ID-first so the
-    /// wire-up is a one-line change when the payload grows.
+    /// Minimal per-item context sent by the phone with each active payload.
+    /// The phone remains authoritative, but the watch echoes this ID back so
+    /// tap messages can be matched to the active primitive slot without a
+    /// placeholder identity.
     private struct LastActiveContext: Equatable, Sendable {
         let workoutItemID: UUID
         let setIndex: Int
@@ -198,11 +195,8 @@ public final class WatchFacesViewModel {
             targetRir: payload.targetRir,
             heartRateBPM: latestHeartRateBPM
         )
-        // Track context for tap-resolution. Placeholder UUID is used
-        // until ActiveBlockPayload carries the workoutItemID — see the
-        // comment on `LastActiveContext`.
         lastActive = LastActiveContext(
-            workoutItemID: UUID(),
+            workoutItemID: payload.workoutItemID,
             setIndex: payload.setNumber,
             exerciseName: payload.exerciseName
         )

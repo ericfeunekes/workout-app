@@ -27,6 +27,47 @@ final class ExecutionViewModelLogCardioSetTests: XCTestCase {
 
     // MARK: - Fixtures
 
+    private static func primitiveContext(
+        workout: Workout,
+        blocks: [Block],
+        itemsByBlock: [[WorkoutItem]],
+        exercises: [UUID: Exercise]
+    ) -> WorkoutContext {
+        let primitiveBlocks = blocks.map { block in
+            let items = itemsByBlock[block.position]
+            return PrimitiveBlock(
+                id: block.id,
+                sets: [
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: PrimitiveTiming(mode: .setBounded),
+                        traversal: .sequential,
+                        repeatCount: 10,
+                        slots: items.map { item in
+                            PrimitiveSlot(
+                                id: item.id,
+                                exerciseID: item.exerciseID,
+                                workTargets: [],
+                                load: item.prescriptionJSON.contains(#""load_kg":100"#)
+                                    ? PrimitiveLoad(value: 100, unit: .lb, unitType: .absolute)
+                                    : nil
+                            )
+                        }
+                    ),
+                ]
+            )
+        }
+        let primitive = PrimitiveWorkout(id: workout.id, name: workout.name, blocks: primitiveBlocks)
+        return WorkoutContext(
+            workout: workout,
+            primitiveWorkout: primitive,
+            primitiveExecutionPlan: try! ExecutionPlan.validated(workout: primitive),
+            blocks: blocks,
+            itemsByBlock: itemsByBlock,
+            exercises: exercises
+        )
+    }
+
     /// Build a 10 × 400 m intervals workout context (the canonical
     /// cardio fixture from `docs/prescription.md` § "10 × 400m at 5K
     /// pace"). `intervalCount` is parametric so tests can construct
@@ -60,7 +101,7 @@ final class ExecutionViewModelLogCardioSetTests: XCTestCase {
             exerciseID: exerciseID,
             prescriptionJSON: "{}"
         )
-        let ctx = WorkoutContext(
+        let ctx = primitiveContext(
             workout: workout,
             blocks: [block],
             itemsByBlock: [[item]],
@@ -102,7 +143,7 @@ final class ExecutionViewModelLogCardioSetTests: XCTestCase {
             exerciseID: exerciseID,
             prescriptionJSON: "{}"
         )
-        let ctx = WorkoutContext(
+        let ctx = primitiveContext(
             workout: workout,
             blocks: [block],
             itemsByBlock: [[item]],
@@ -141,7 +182,7 @@ final class ExecutionViewModelLogCardioSetTests: XCTestCase {
             exerciseID: exerciseID,
             prescriptionJSON: "{}"
         )
-        let ctx = WorkoutContext(
+        let ctx = primitiveContext(
             workout: workout,
             blocks: [block],
             itemsByBlock: [[item]],
@@ -189,7 +230,7 @@ final class ExecutionViewModelLogCardioSetTests: XCTestCase {
             exerciseID: pressExerciseID,
             prescriptionJSON: #"{"sets":1,"reps":5,"load_kg":100}"#
         )
-        let ctx = WorkoutContext(
+        let ctx = primitiveContext(
             workout: workout,
             blocks: [runBlock, pressBlock],
             itemsByBlock: [[runItem], [pressItem]],

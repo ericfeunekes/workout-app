@@ -133,6 +133,7 @@ public struct PullService: Sendable {
             let primitiveDTO = WorkoutDBSchema.PrimitiveWorkout(
                 id: w.id,
                 name: w.name,
+                activityIntent: w.activityIntent,
                 primitiveBlocks: w.primitiveBlocks
             )
             primitiveWorkouts.append(try unwrap(DTOMapping.mapPrimitiveWorkout(primitiveDTO)))

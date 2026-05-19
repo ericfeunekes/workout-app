@@ -76,6 +76,11 @@ public enum HistoryPreviewSeed {
             blocks: built.flatMap(\.blocks),
             items: built.flatMap(\.items),
             setLogs: built.flatMap(\.setLogs),
+            primitiveSetLogs: Self.primitiveLogs(
+                setLogs: built.flatMap(\.setLogs),
+                items: built.flatMap(\.items),
+                blocks: built.flatMap(\.blocks)
+            ),
             userParameters: [bodyweight]
         )
     }
@@ -87,6 +92,7 @@ public enum HistoryPreviewSeed {
         public let blocks: [Block]
         public let items: [WorkoutItem]
         public let setLogs: [SetLog]
+        public let primitiveSetLogs: [PrimitiveSetLog]
         public let userParameters: [UserParameter]
 
         public init(
@@ -95,6 +101,7 @@ public enum HistoryPreviewSeed {
             blocks: [Block],
             items: [WorkoutItem],
             setLogs: [SetLog],
+            primitiveSetLogs: [PrimitiveSetLog] = [],
             userParameters: [UserParameter] = []
         ) {
             self.exercises = exercises
@@ -102,7 +109,47 @@ public enum HistoryPreviewSeed {
             self.blocks = blocks
             self.items = items
             self.setLogs = setLogs
+            self.primitiveSetLogs = primitiveSetLogs
             self.userParameters = userParameters
+        }
+    }
+
+    private static func primitiveLogs(
+        setLogs: [SetLog],
+        items: [WorkoutItem],
+        blocks: [Block]
+    ) -> [PrimitiveSetLog] {
+        let itemByID = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        let blockByID = Dictionary(uniqueKeysWithValues: blocks.map { ($0.id, $0) })
+        return setLogs.compactMap { log in
+            guard let item = itemByID[log.workoutItemID],
+                  let block = blockByID[item.blockID] else {
+                return nil
+            }
+            return PrimitiveSetLog(
+                id: log.id,
+                role: .slot,
+                slotID: item.id,
+                setID: item.id,
+                blockID: block.id,
+                workoutID: block.workoutID,
+                plannedExerciseID: item.exerciseID,
+                performedExerciseID: log.performedExerciseID,
+                setIndex: log.setIndex,
+                reps: log.reps,
+                weight: log.weight,
+                weightUnit: log.weightUnit,
+                durationSec: log.durationSec,
+                distanceM: log.distanceM,
+                rir: log.rir,
+                hrAvgBpm: log.hrAvgBpm,
+                hrMaxBpm: log.hrMaxBpm,
+                isWarmup: log.isWarmup,
+                skipped: log.skipped,
+                side: log.side,
+                notes: log.notes,
+                completedAt: log.completedAt
+            )
         }
     }
 
@@ -322,7 +369,20 @@ final class SeedCache: WorkoutCache, @unchecked Sendable {
             .sorted { $0.setIndex < $1.setIndex }
     }
 
-    func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [PrimitiveSetLog] { [] }
+    func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [PrimitiveSetLog] {
+        seed.primitiveSetLogs
+            .filter { $0.workoutID == workoutID }
+            .sorted { $0.setIndex < $1.setIndex }
+    }
+
+    func loadPrimitiveSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [PrimitiveSetLog] {
+        guard limit > 0 else { return [] }
+        let matching = seed.primitiveSetLogs.filter { log in
+            log.resultSemantics.isByExerciseEligible
+                && ((log.performedExerciseID ?? log.plannedExerciseID) == exerciseID)
+        }
+        return Array(matching.sorted { $0.completedAt > $1.completedAt }.prefix(limit))
+    }
 
     func loadSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [SetLog] {
         guard limit > 0 else { return [] }

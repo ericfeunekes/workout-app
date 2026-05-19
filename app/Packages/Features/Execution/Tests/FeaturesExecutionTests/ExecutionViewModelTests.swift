@@ -647,7 +647,7 @@ final class ExecutionViewModelTests: XCTestCase {
         XCTAssertEqual(logs.map(\.id), vm.primitiveSetLogs.sorted(by: { $0.setRepeatIndex < $1.setRepeatIndex }).map(\.id))
     }
 
-    func testSaveAndDonePrimitiveCompletionOmitsSkippedSlotRows() async throws {
+    func testSaveAndDonePrimitiveCompletionIncludesSkippedSlotRowsWithoutMetrics() async throws {
         let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_075))
         let (ctx, _) = makeContext(sets: 1, restSec: 0, includePrimitivePlan: true)
         let recorder = CompletionRecorder()
@@ -668,7 +668,12 @@ final class ExecutionViewModelTests: XCTestCase {
 
         let calls = await recorder.calls
         let call = try XCTUnwrap(calls.first)
-        XCTAssertTrue(call.record.primitiveSetLogs.isEmpty)
+        let log = try XCTUnwrap(call.record.primitiveSetLogs.first)
+        XCTAssertTrue(log.skipped)
+        XCTAssertNil(log.reps)
+        XCTAssertNil(log.weight)
+        XCTAssertNil(log.durationSec)
+        XCTAssertNil(log.distanceM)
     }
 
     func testCompletionWriteStampsPerSetTimestamps() async throws {

@@ -139,6 +139,41 @@ def test_primitive_stimulus_type_parity(primitive_swift_source: str) -> None:
     assert swift == {"rir", "hr_zone"}
 
 
+def test_activity_domain_parity(primitive_swift_source: str) -> None:
+    swift = _extract_enum_cases(primitive_swift_source, "ActivityDomain")
+    assert swift == {
+        "running",
+        "cycling",
+        "rowing",
+        "swimming",
+        "walking",
+        "hiking",
+        "functional_strength",
+        "traditional_strength",
+        "hiit",
+        "mobility",
+        "mixed_modal",
+        "carry",
+        "other",
+    }
+
+
+def test_activity_environment_parity(primitive_swift_source: str) -> None:
+    swift = _extract_enum_cases(primitive_swift_source, "ActivityEnvironment")
+    assert swift == {"indoor", "outdoor", "unspecified"}
+
+
+def test_activity_preservation_policy_parity(primitive_swift_source: str) -> None:
+    swift = _extract_enum_cases(primitive_swift_source, "ActivityPreservationPolicy")
+    assert swift == {
+        "preserve_primary_activity",
+        "preserve_structure",
+        "preserve_elapsed_time",
+        "preserve_distance",
+        "preserve_mixed_modality",
+    }
+
+
 def test_primitive_log_role_parity(primitive_swift_source: str) -> None:
     swift = _extract_enum_cases(primitive_swift_source, "PrimitiveLogRole")
     assert swift == {"slot", "set_result", "block_result"}

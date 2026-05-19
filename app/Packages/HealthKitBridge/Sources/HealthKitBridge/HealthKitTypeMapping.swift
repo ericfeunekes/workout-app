@@ -34,6 +34,7 @@ enum HealthKitTypeMapper {
         HealthDataTypeRegistry.bodyMass,
         HealthDataTypeRegistry.stepCount,
         HealthDataTypeRegistry.activeEnergyBurned,
+        HealthDataTypeRegistry.runningSpeed,
         HealthDataTypeRegistry.sleepAnalysis,
         HealthDataTypeRegistry.workout,
     ]
@@ -91,6 +92,12 @@ enum HealthKitTypeMapper {
                 descriptor: HealthDataTypeRegistry.activeEnergyBurned,
                 identifier: .activeEnergyBurned,
                 unit: .kilocalorie()
+            )
+        case HealthDataTypeRegistry.runningSpeed.id:
+            return try quantityMapping(
+                descriptor: HealthDataTypeRegistry.runningSpeed,
+                identifier: .runningSpeed,
+                unit: .meter().unitDivided(by: .second())
             )
         case HealthDataTypeRegistry.sleepAnalysis.id:
             guard let type = HKCategoryType.categoryType(forIdentifier: .sleepAnalysis) else {

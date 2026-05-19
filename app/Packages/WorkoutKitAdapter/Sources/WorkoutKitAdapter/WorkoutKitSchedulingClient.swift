@@ -1,4 +1,5 @@
 import Foundation
+import WorkoutKitExportProfile
 
 public struct WorkoutKitScheduleSupport: Sendable, Hashable, Codable {
     public var isSupported: Bool

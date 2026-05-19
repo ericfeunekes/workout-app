@@ -21,7 +21,7 @@
 //     overwrites on UUID); we do not want those overwrites to cascade into
 //     historical set_logs. Keep the link loose.
 //
-// These file-scope classes are the latest `WorkoutDBSchemaV8` shape
+// These file-scope classes are the latest `WorkoutDBSchemaV9` shape
 // (HealthKit archive projection plus earlier primitive/cache columns). The V1
 // (pre-006), V2 (post-006, pre-R1.4), and V3 (R1.4, pre-perf-002)
 // shapes are preserved as shadow @Model types inside their respective
@@ -122,7 +122,12 @@ public final class PrimitiveSetLogModel {
     public var distanceM: Double?
     public var rounds: Int?
     public var rir: Int?
+    public var hrAvgBpm: Int?
+    public var hrMaxBpm: Int?
     public var isWarmup: Bool
+    public var skipped: Bool = false
+    public var sideRaw: String = "bilateral"
+    public var notes: String?
     public var completedAt: Date
 
     public init(
@@ -144,7 +149,12 @@ public final class PrimitiveSetLogModel {
         distanceM: Double?,
         rounds: Int?,
         rir: Int?,
+        hrAvgBpm: Int?,
+        hrMaxBpm: Int?,
         isWarmup: Bool,
+        skipped: Bool = false,
+        sideRaw: String = "bilateral",
+        notes: String? = nil,
         completedAt: Date
     ) {
         self.id = id
@@ -165,7 +175,12 @@ public final class PrimitiveSetLogModel {
         self.distanceM = distanceM
         self.rounds = rounds
         self.rir = rir
+        self.hrAvgBpm = hrAvgBpm
+        self.hrMaxBpm = hrMaxBpm
         self.isWarmup = isWarmup
+        self.skipped = skipped
+        self.sideRaw = sideRaw
+        self.notes = notes
         self.completedAt = completedAt
     }
 }

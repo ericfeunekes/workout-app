@@ -58,11 +58,12 @@ Projected records must preserve:
 - sync cursor or batch cursor state per stable exported request-set key.
 - deleted external IDs or tombstones from anchored queries.
 
-Scheduling is outside the data module. App launch, debug export, post-workout
-completion, manual Settings export, and future background scheduling are all
-consumers that supply request-set keys, request sets, date windows, and cursors. The module
-returns records and delete information; it does not decide when archive jobs
-run.
+Scheduling and upload are outside the data module. App launch, debug export,
+post-workout completion, manual Settings export, daily background export, and
+foreground catch-up are all consumers that supply request-set keys, request
+sets, date windows, and cursors. The module returns records and delete
+information; it does not decide when archive jobs run or where exported
+records are uploaded.
 
 ## Consumer Contract
 
@@ -144,6 +145,75 @@ implementation supports every HealthKit type. The first implementation may ship
 a finite registry, but unsupported types must fail explicitly and the registry
 must be extension-friendly.
 
+## Personal Archive Export
+
+The full personal archive export is a first-class product lane. Its target is
+Eric's home server, not an arbitrary third-party destination. The app should
+let Eric choose either all currently supported HealthKit descriptors or an
+explicit subset, request the required permissions for that selection through
+`HealthKitBridge`, fetch the selected data through the batch/archive primitive,
+persist the local projection, and upload normalized records plus tombstones to
+the home server.
+
+"All" means all descriptors supported by the app registry at that build. It
+does not mean every Apple HealthKit type exists in the registry, is available
+on the current device, or has a generic serializer. Unsupported or unavailable
+types must be visible as unsupported/unavailable, not silently treated as a
+successful empty export.
+
+The export configuration is app-local state:
+
+- selected descriptor set: all supported, or explicit descriptor IDs.
+- current-server delivery namespace, derived from the saved server identity.
+- request-set key and fingerprint for cursor ownership, scoped to the selected
+  descriptor set and current-server delivery namespace.
+- permission request status and last observed failure class.
+- last successful local fetch time and upload time.
+- last server-acknowledged HealthKit cursor per request-set key.
+- last export summary: inserted/updated count, tombstone count, upload outcome,
+  and redacted error class if any.
+
+The server is the durable landing zone for exported health records. The server
+API/schema for those records is not selected yet, but it must preserve the same
+identity, descriptor, unit, source, start/end, value, metadata, cursor, and
+tombstone semantics as the local projection. Server storage must not become a
+writer back into HealthKit; HealthKit remains the source of truth.
+
+Local HealthKit projection data is connection-agnostic and survives server
+changes. Delivery state is not connection-agnostic. A new server identity must
+use a fresh delivery namespace and therefore a fresh cursor/backfill for that
+server. Returning to a previously used server may reuse that server's namespace
+if still present locally, but Settings must show status for the current server
+only.
+
+Cursor advancement is tied to server acknowledgement. The app may persist
+fetched records and tombstones locally before upload, but the cursor used for
+the next export run must advance only after the corresponding upload succeeds.
+If upload fails after fetch succeeds, the next run re-fetches from the last
+server-acknowledged cursor and relies on local/server idempotency to tolerate
+duplicate records. No implementation may advance the export cursor merely
+because local fetch/projection succeeded.
+
+## Archive Scheduling And Delivery
+
+Daily export is app-initiated. The intended behavior is opportunistic rather
+than exact-wall-clock: the app schedules a background-capable daily archive job
+where iOS allows it, runs the same export primitive when woken, and always
+runs a foreground catch-up on app open if the daily export is due or a prior
+run failed. A manual Settings export uses the same request set and cursor path.
+
+The schedule must be transparent to the user. Settings should show whether
+automatic export is enabled, what descriptor scope is selected, when the app
+expects to try next, when the last successful local fetch/upload completed, and
+the last failure class. The UI must not promise exact daily timing because iOS
+background execution is not exact or guaranteed.
+
+Silent push/APNs is not required for this archive lane. APNs server-nudged
+workout delivery is tracked separately in `docs/sync.md` as `SYNC-GAP-004`.
+HealthKit background delivery may later be used as an optimization for specific
+sample descriptors, but the daily archive contract must still work through
+scheduled/background opportunities and foreground catch-up.
+
 ## Live Workout Metrics
 
 Live reads use the same descriptors only for types that can stream credibly.
@@ -219,10 +289,13 @@ or Watch/iPhone sync reliability.
 
 - No real Watch live metric claim.
 - No custom Watch-primary execution behavior.
-- No cloud or remote personal-system sync target.
+- No arbitrary third-party health export target. The home server is the
+  accepted target for the personal archive lane once its endpoint/schema are
+  selected.
 - No app-side analysis of HealthKit samples beyond normalized export/readback.
 - No promise that every HealthKit type is supported on day one.
-- No scheduling engine; consumers trigger batch reads.
+- No exact-wall-clock background guarantee; scheduled exports are
+  opportunistic and foreground catch-up remains required.
 
 ## Acceptance Criteria
 
@@ -281,6 +354,30 @@ metric ingestion, and HealthKit result import must not be required to push a
 planned workout. Merge-gate proof: architecture tests keep WorkoutKit side
 effects in `WorkoutKitAdapter` and HealthKit data access in `HealthKitBridge`.
 
+`HKDATA-AC-011`: Settings can configure a personal archive export for all
+supported HealthKit descriptors or an explicit supported subset, and permission
+requests are derived from that selected descriptor set. Merge-gate proof:
+Settings feature tests for selection state and HealthKitBridge permission-set
+tests for the same request set.
+
+`HKDATA-AC-012`: A manual archive export fetches selected descriptors, persists
+the local projection, and uploads normalized records and tombstones to the home
+server without screens importing HealthKit. Merge-gate proof: package tests for
+the orchestration path against fake HealthKit providers and fake server
+transport, plus server tests for idempotent health-record/tombstone ingestion
+once the endpoint/schema are selected.
+
+`HKDATA-AC-013`: A daily archive schedule is opportunistic and catch-up based,
+not exact-wall-clock. If the scheduled background run is skipped, throttled, or
+offline, the next app-open foreground pass uses the same cursor and upload path.
+Merge-gate proof: scheduler/orchestrator tests with controlled clocks and fake
+background triggers, plus app-hosted lifecycle proof when the app wiring lands.
+
+`HKDATA-AC-014`: Export status is user-visible and diagnostic enough to answer
+what happened without inspecting the database: selected scope, last fetch,
+last upload, next intended attempt, counts, and redacted failure class.
+Merge-gate proof: Settings feature tests and telemetry/export-summary tests.
+
 ## Current Capability
 
 - `HealthKitBridge` maps the first supported batch registry into HealthKit
@@ -292,16 +389,31 @@ effects in `WorkoutKitAdapter` and HealthKit data access in `HealthKitBridge`.
   request-set key. It persists deletion tombstones and applies them to
   `loadRecords`; `loadDeletions` remains the evidence surface for
   reconciliation/export.
+- The personal archive export now supports all-supported and explicit-subset
+  request sets. The server exposes `POST /api/health/archive`, stores uploaded
+  normalized records, tombstones, and request-set summaries in SQLite, and
+  updates `schema/openapi.json` plus `WorkoutDBSchema` DTOs. `Sync` owns the
+  upload client; `HealthArchiveExport` owns the shared manual/foreground
+  coordinator, requests permissions through `HealthKitBridge`, fetches from the
+  last server-acknowledged cursor for the selected request set, persists the
+  local projection, uploads through `Sync`, and advances the local delivery
+  cursor only after server acknowledgement. Settings now has descriptor scope,
+  manual export, automatic-export toggle, next-attempt status, and
+  current-server status controls. BGTask registration and richer status
+  presentation are still later loops.
 - The DEBUG simulator probe route requests HealthKit authorization, runs the
   archive fetch, persists the projection, and exposes structured proof fields
   for authorization request completion, request-set fingerprints, fetch
   success, this-run sample correlation, first/second cursor presence, second
-  fetch cursor input, deleted-sample correlation, projection persistence, and
-  tombstone readback. The proof route is gated by the signed-app entitlement
-  preflight in `make test-healthkit-ui`; on the current Xcode simulator path,
-  the HealthKit entitlement is embedded in `WorkoutDB.app-Simulated.xcent`.
-  On 2026-05-18, the target passed the entitlement preflight and archive UI
-  proof on an iPhone 16 Pro simulator.
+  fetch cursor input, deleted-sample correlation, projection persistence,
+  tombstone readback, default-store selection, and reopen-from-disk readback.
+  The proof route is gated by the signed-app entitlement preflight in
+  `make test-healthkit-ui`; on the current Xcode simulator path, the HealthKit
+  entitlement is embedded in `WorkoutDB.app-Simulated.xcent`. On 2026-05-18,
+  the target passed the entitlement preflight and archive UI proof on an
+  iPhone 16 Pro simulator; the proof now fails unless the probe uses the
+  default on-disk store and a newly opened store can read back the records,
+  tombstones, and cursor.
 - Fake live providers and scripted heart-rate observers exist for package-level
   live-consumer proof. They are deterministic app harnesses, not evidence of
   Apple Watch sensor delivery.
@@ -314,6 +426,12 @@ effects in `WorkoutKitAdapter` and HealthKit data access in `HealthKitBridge`.
   latest heart rate in the outbound `.setEnded` message. Package tests prove
   the consumer behavior with deterministic fixture streams; physical sensor
   delivery remains a real-device gap.
+- The phone app wires `WatchBridge` into the active execution view model during
+  shell bootstrap. Watch `.setStarted`, `.setEnded`, and `.quickLog` messages
+  now apply to the current execution session, preserve the real
+  `workoutItemID`, update primitive set logs with watch heart-rate fields, and
+  enqueue the resulting push payloads. This is local app-consumption proof, not
+  proof of inactive/background WatchConnectivity delivery.
 - A DEBUG watch launch path, `--healthkit-live-workout-probe`, runs a
   `HealthKitBridge` diagnostic that requests HealthKit permission, starts
   `HKWorkoutSession`/`HKLiveWorkoutBuilder`, collects simulated live metric
@@ -328,8 +446,11 @@ effects in `WorkoutKitAdapter` and HealthKit data access in `HealthKitBridge`.
   re-signing was rejected by the watch simulator launcher.
 - `make assert-healthkit-watch-sim-log PROBE_LOG=...` parses a captured
   XcodeBuildMCP watch runtime log and asserts the live-workout probe JSON.
-  The parser is repeatable, but the current post-wiring watch launch path still
-  needs a reliable trigger that emits the sentinels on demand.
+  `make test-healthkit-watch-sim` finds the latest XcodeBuildMCP watch app log
+  and applies the same assertions. XcodeBuildMCP still owns the watch
+  build/install/launch path; `simctl privacy` does not expose Health as a
+  grantable service, so first-run permission UI remains an Apple-runtime
+  boundary rather than a pure CLI reset.
 
 ## Current Gaps
 
@@ -337,7 +458,16 @@ effects in `WorkoutKitAdapter` and HealthKit data access in `HealthKitBridge`.
   authorization, `HKWorkoutSession`/`HKLiveWorkoutBuilder` lifecycle, simulated
   metric delivery, and builder save through XcodeBuildMCP. The watch face now
   consumes the typed metric-source contract for HR display and outbound set-end
-  payloads. Remaining live-work scope is reliable merge-gated watch probe
-  triggering plus phone-side execution handling of watch HR payloads.
+  payloads, and the phone-side execution session consumes those watch messages
+  into local logs/push payloads. Remaining live-work scope is real-device
+  sensor/sync behavior and richer metric coverage beyond HR fields.
 - `HKDATA-GAP-003`: Real Watch-backed live metric delivery is unproven until a
   physical iPhone + Apple Watch diagnostic run succeeds.
+- `HKDATA-GAP-006`: Personal archive export to the home server has
+  all-supported and explicit-subset source-to-server paths, including server
+  ingestion/schema, upload transport, local export state, Settings
+  trigger/status controls, foreground catch-up through the shared runtime, and
+  split proof for local projection and server-side SQLite ingestion. Remaining
+  work is BGTask registration, richer user-visible schedule/status copy, a real
+  HTTP app-client to server readback harness, and proof that BGTask-triggered
+  exports share the same typed descriptor, cursor, tombstone, and upload path.

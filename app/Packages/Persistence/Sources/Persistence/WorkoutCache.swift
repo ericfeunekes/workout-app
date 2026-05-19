@@ -135,6 +135,11 @@ public protocol WorkoutCache: Sendable {
     /// to `loadSetLogs(workoutID:)`.
     func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [PrimitiveSetLog]
 
+    /// Recent primitive rows that reference `exerciseID`, using
+    /// performed-first identity. This is a storage-shaped query; consumers
+    /// apply primitive result semantics before treating rows as progress.
+    func loadPrimitiveSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [PrimitiveSetLog]
+
     /// Recent set_logs that reference `exerciseID` — either as the planned
     /// `exerciseID` on the underlying `WorkoutItem`, or as a mid-workout
     /// swap captured in `performedExerciseID`. Sorted newest first by
@@ -445,6 +450,24 @@ public actor WorkoutCacheImpl: WorkoutCache {
             }
             return $0.completedAt < $1.completedAt
         }
+    }
+
+    public func loadPrimitiveSetLogs(
+        exerciseID: ExerciseID,
+        limit: Int
+    ) async throws -> [PrimitiveSetLog] {
+        guard limit > 0 else { return [] }
+        let descriptor = FetchDescriptor<PrimitiveSetLogModel>(
+            predicate: #Predicate<PrimitiveSetLogModel> { log in
+                log.performedExerciseID == exerciseID
+                    || (log.performedExerciseID == nil && log.plannedExerciseID == exerciseID)
+            }
+        )
+        let rows = try modelContext.fetch(descriptor)
+        let ordered = rows
+            .map { $0.toDomain() }
+            .sorted { $0.completedAt > $1.completedAt }
+        return Array(ordered.prefix(limit))
     }
 
     public func clear() async throws {

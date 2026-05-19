@@ -195,6 +195,7 @@ public struct Workout: Codable, Sendable, Equatable {
     public let source: WorkoutSource
     public let notes: String?
     public let tagsJson: String?
+    public let activityIntent: ActivityIntent?
     public let createdAt: Date
     public let updatedAt: Date
     public let completedAt: Date?
@@ -209,6 +210,7 @@ public struct Workout: Codable, Sendable, Equatable {
         case source
         case notes
         case tagsJson = "tags_json"
+        case activityIntent = "activity_intent"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case completedAt = "completed_at"
@@ -224,6 +226,7 @@ public struct Workout: Codable, Sendable, Equatable {
         source: WorkoutSource,
         notes: String? = nil,
         tagsJson: String? = nil,
+        activityIntent: ActivityIntent? = nil,
         createdAt: Date,
         updatedAt: Date,
         completedAt: Date? = nil,
@@ -237,6 +240,7 @@ public struct Workout: Codable, Sendable, Equatable {
         self.source = source
         self.notes = notes
         self.tagsJson = tagsJson
+        self.activityIntent = activityIntent
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.completedAt = completedAt
@@ -253,6 +257,7 @@ public struct Workout: Codable, Sendable, Equatable {
         source = try container.decode(WorkoutSource.self, forKey: .source)
         notes = try container.decodeIfPresent(String.self, forKey: .notes)
         tagsJson = try container.decodeIfPresent(String.self, forKey: .tagsJson)
+        activityIntent = try container.decodeIfPresent(ActivityIntent.self, forKey: .activityIntent)
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
         completedAt = try container.decodeIfPresent(Date.self, forKey: .completedAt)

@@ -146,7 +146,7 @@ final class TabataAutoLogPushTests: XCTestCase {
     func testCardioTabataAutoLogEnqueuesDurationSetLog() async throws {
         let start = Date(timeIntervalSince1970: 1_700_000_000)
         let clock = TabataAutoLogClock(now: start)
-        let (ctx, itemID) = makeCardioTabataContext()
+        let (ctx, itemID) = makePrimitiveCardioTabataContext()
         let recorder = AutoLogEnqueueRecorder()
         let hooks = ExecutionPushHooks(
             onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitive(log) }

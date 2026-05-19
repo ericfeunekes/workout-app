@@ -2,7 +2,7 @@
 //
 // Exercises the viewModel's contract:
 //   - sections are built in the documented order (SERVER → DEVICE →
-//     AUTOREG DEFAULTS → DATA) with the right row types
+//     AUTOREG DEFAULTS → HEALTH ARCHIVE → DATA) with the right row types
 //   - tapping a destructive action populates `showDestructiveConfirm`
 //   - confirming invokes the provided closure; cancelling does not
 //   - the units picker mutates the store and the derived section
@@ -10,6 +10,7 @@
 
 import XCTest
 import Foundation
+import Persistence
 @testable import FeaturesSettings
 
 @MainActor
@@ -20,13 +21,13 @@ final class SettingsViewModelTests: XCTestCase {
     func testSectionsHaveExpectedOrder() {
         let vm = makeViewModel()
         let ids = vm.sections.map { $0.id }
-        XCTAssertEqual(ids, ["server", "device", "autoreg-defaults", "data"])
+        XCTAssertEqual(ids, ["server", "device", "autoreg-defaults", "health-archive", "data"])
     }
 
     func testSectionsHaveExpectedTitles() {
         let vm = makeViewModel()
         let titles = vm.sections.map { $0.title }
-        XCTAssertEqual(titles, ["SERVER", "DEVICE", "AUTOREG DEFAULTS", "DATA"])
+        XCTAssertEqual(titles, ["SERVER", "DEVICE", "AUTOREG DEFAULTS", "HEALTH ARCHIVE", "DATA"])
     }
 
     func testServerSectionHasExpectedRows() {
@@ -81,6 +82,179 @@ final class SettingsViewModelTests: XCTestCase {
         XCTAssertTrue(isAction(data.rows[0]))
         XCTAssertTrue(actionDestructive(data.rows[0]))
         XCTAssertTrue(isInfo(data.rows[1]))
+    }
+
+    func testHealthArchiveSectionShowsAllSupportedManualExportRows() {
+        let vm = makeViewModel()
+        let section = vm.sections.first { $0.id == "health-archive" }!
+
+        XCTAssertEqual(section.rows.map(\.id), [
+            "health-archive.scope-mode",
+            "health-archive.automatic",
+            "health-archive.next-attempt",
+            "health-archive.status",
+            "health-archive.export-now",
+        ])
+        XCTAssertTrue(isPicker(section.rows[0]))
+        XCTAssertTrue(isToggle(section.rows[1]))
+        XCTAssertTrue(isInfo(section.rows[2]))
+        XCTAssertTrue(isInfo(section.rows[3]))
+        XCTAssertTrue(isAction(section.rows[4]))
+        XCTAssertFalse(actionDestructive(section.rows[4]))
+    }
+
+    func testHealthArchiveCustomScopeRendersInjectedDescriptorToggles() async {
+        let store = FakeHealthArchiveExportStateStore()
+        let vm = makeViewModel(
+            healthArchiveStore: store,
+            healthArchiveDescriptorOptions: [
+                HealthArchiveDescriptorOption(id: "heart", label: "heart rate"),
+                HealthArchiveDescriptorOption(id: "steps", label: "steps"),
+            ]
+        )
+
+        await vm.pickHealthArchiveScopeMode("custom")
+
+        let section = vm.sections.first { $0.id == "health-archive" }!
+        XCTAssertEqual(section.rows.map(\.id), [
+            "health-archive.scope-mode",
+            "health-archive.descriptor.heart",
+            "health-archive.descriptor.steps",
+            "health-archive.automatic",
+            "health-archive.next-attempt",
+            "health-archive.status",
+            "health-archive.export-now",
+        ])
+        XCTAssertTrue(isToggle(section.rows[1]))
+        XCTAssertTrue(isToggle(section.rows[2]))
+    }
+
+    func testHealthArchiveDescriptorTogglePersistsSubsetWithoutAllowingEmptySelection() async {
+        let store = FakeHealthArchiveExportStateStore()
+        let vm = makeViewModel(
+            healthArchiveStore: store,
+            healthArchiveDescriptorOptions: [
+                HealthArchiveDescriptorOption(id: "heart", label: "heart rate"),
+                HealthArchiveDescriptorOption(id: "steps", label: "steps"),
+            ]
+        )
+
+        await vm.pickHealthArchiveScopeMode("custom")
+        await toggleRow(in: vm, rowID: "health-archive.descriptor.steps", enabled: false)
+        XCTAssertEqual(store.snapshot.scope, .explicitDescriptorIDs(["heart"]))
+
+        await toggleRow(in: vm, rowID: "health-archive.descriptor.heart", enabled: false)
+        XCTAssertEqual(store.snapshot.scope, .explicitDescriptorIDs(["heart"]))
+    }
+
+    func testHealthArchiveScopeCanReturnToAllSupported() async {
+        let store = FakeHealthArchiveExportStateStore(snapshot: HealthArchiveExportSnapshot(
+            scope: .explicitDescriptorIDs(["heart"])
+        ))
+        let vm = makeViewModel(
+            healthArchiveStore: store,
+            healthArchiveDescriptorOptions: [
+                HealthArchiveDescriptorOption(id: "heart", label: "heart rate"),
+                HealthArchiveDescriptorOption(id: "steps", label: "steps"),
+            ]
+        )
+
+        await vm.refreshAsync()
+        await vm.pickHealthArchiveScopeMode("all supported")
+
+        XCTAssertEqual(store.snapshot.scope, .allSupported)
+        let section = vm.sections.first { $0.id == "health-archive" }!
+        XCTAssertFalse(section.rows.contains { $0.id == "health-archive.descriptor.heart" })
+    }
+
+    func testHealthArchiveAutomaticTogglePersists() async {
+        let store = FakeHealthArchiveExportStateStore()
+        let vm = makeViewModel(healthArchiveStore: store)
+
+        await toggleRow(in: vm, rowID: "health-archive.automatic", enabled: true)
+
+        XCTAssertTrue(store.snapshot.automaticEnabled)
+    }
+
+    func testHealthArchiveExportNowInvokesClosureWithoutConfirm() async {
+        final class Box: @unchecked Sendable { var count = 0 }
+        let box = Box()
+        let vm = makeViewModel(onHealthArchiveExportNow: {
+            box.count += 1
+        })
+
+        await tapAction(in: vm, rowID: "health-archive.export-now")
+
+        XCTAssertNil(vm.showDestructiveConfirm)
+        await drainPendingTasks()
+        XCTAssertEqual(box.count, 1)
+    }
+
+    func testHealthArchiveStatusRendersSucceededAndFailedSnapshots() async {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let succeededStore = FakeHealthArchiveExportStateStore(snapshot: HealthArchiveExportSnapshot(
+            status: .succeeded,
+            lastUploadAt: now.addingTimeInterval(-120),
+            lastRecordCount: 4,
+            lastTombstoneCount: 1
+        ))
+        let succeeded = makeViewModel(healthArchiveStore: succeededStore, now: now)
+
+        await succeeded.refreshAsync()
+
+        XCTAssertEqual(firstInfoValue(in: succeeded, rowID: "health-archive.status"), "5 · 2 min ago")
+
+        let failedStore = FakeHealthArchiveExportStateStore(snapshot: HealthArchiveExportSnapshot(
+            status: .failed,
+            lastFailureClass: "SyncError"
+        ))
+        let failed = makeViewModel(healthArchiveStore: failedStore, now: now)
+
+        await failed.refreshAsync()
+
+        XCTAssertEqual(firstInfoValue(in: failed, rowID: "health-archive.status"), "failed · SyncError")
+    }
+
+    func testHealthArchiveStatusRendersRunningAndAlreadyRunningSnapshots() async {
+        let runningStore = FakeHealthArchiveExportStateStore(snapshot: HealthArchiveExportSnapshot(
+            status: .running
+        ))
+        let running = makeViewModel(healthArchiveStore: runningStore)
+        await running.refreshAsync()
+        XCTAssertEqual(firstInfoValue(in: running, rowID: "health-archive.status"), "exporting")
+
+        let alreadyRunningStore = FakeHealthArchiveExportStateStore(
+            snapshot: HealthArchiveExportSnapshot(status: .alreadyRunning)
+        )
+        let alreadyRunning = makeViewModel(healthArchiveStore: alreadyRunningStore)
+        await alreadyRunning.refreshAsync()
+        XCTAssertEqual(
+            firstInfoValue(in: alreadyRunning, rowID: "health-archive.status"),
+            "already running"
+        )
+    }
+
+    func testHealthArchiveNextAttemptUsesFutureTense() async {
+        let now = Date(timeIntervalSince1970: 10_000)
+        let store = FakeHealthArchiveExportStateStore(snapshot: HealthArchiveExportSnapshot(
+            automaticEnabled: true,
+            nextAttemptAt: now.addingTimeInterval(3_600)
+        ))
+        let vm = makeViewModel(healthArchiveStore: store, now: now)
+
+        await vm.refreshAsync()
+
+        XCTAssertEqual(firstInfoValue(in: vm, rowID: "health-archive.next-attempt"), "in 1 h")
+    }
+
+    func testHealthArchiveStatusUsesFullServerNamespace() async {
+        let token = FakeTokenStore(initial: (URL(string: "https://wdb.local:8443/api")!, "t"))
+        let store = FakeHealthArchiveExportStateStore()
+        let vm = makeViewModel(tokenStore: token, healthArchiveStore: store)
+
+        await vm.refreshAsync()
+
+        XCTAssertEqual(store.loadedNamespaces.last ?? nil, "https://wdb.local:8443/api")
     }
 
     // MARK: - Server URL rendering
@@ -345,12 +519,16 @@ final class SettingsViewModelTests: XCTestCase {
         autoregStore: FakeAutoregStore = FakeAutoregStore(),
         unitsStore: FakeUnitsStore = FakeUnitsStore(),
         syncStore: FakeSyncMetadataStore? = nil,
+        healthArchiveStore: FakeHealthArchiveExportStateStore =
+            FakeHealthArchiveExportStateStore(),
+        healthArchiveDescriptorOptions: [HealthArchiveDescriptorOption] = [],
         buildInfo: BuildInfo = BuildInfo(version: "0.0.1", build: "1", commit: "dev"),
         lastSync: Date? = nil,
         pairedWatch: String? = nil,
         onSyncNow: @escaping @Sendable () async -> Void = {},
         onResetCache: @escaping @Sendable () async -> Void = {},
         onChangeServer: @escaping @Sendable () async -> Void = {},
+        onHealthArchiveExportNow: @escaping @Sendable () async -> Void = {},
         now: Date = Date(timeIntervalSince1970: 10_000)
     ) -> SettingsViewModel {
         // Tests can either pass in a prepared `syncStore` or supply the
@@ -361,11 +539,14 @@ final class SettingsViewModelTests: XCTestCase {
             autoregStore: autoregStore,
             unitsStore: unitsStore,
             syncMetadata: store,
+            healthArchiveExportState: healthArchiveStore,
+            healthArchiveDescriptorOptions: healthArchiveDescriptorOptions,
             buildInfo: buildInfo,
             pairedWatchProvider: { pairedWatch },
             onSyncNow: onSyncNow,
             onResetCache: onResetCache,
             onChangeServer: onChangeServer,
+            onHealthArchiveExportNow: onHealthArchiveExportNow,
             now: { now }
         )
     }
@@ -417,6 +598,23 @@ final class SettingsViewModelTests: XCTestCase {
         XCTFail("no picker row with id \(rowID)")
     }
 
+    private func toggleRow(
+        in vm: SettingsViewModel,
+        rowID: String,
+        enabled: Bool
+    ) async {
+        for section in vm.sections {
+            for row in section.rows {
+                if row.id == rowID, case .toggle(_, _, _, let onToggle) = row {
+                    onToggle(enabled)
+                    await drainPendingTasks()
+                    return
+                }
+            }
+        }
+        XCTFail("no toggle row with id \(rowID)")
+    }
+
     /// Yields several times so any `Task { @MainActor in ... }` enqueued
     /// by a row callback runs to completion before assertions fire. Three
     /// yields is empirically sufficient: the row closure hops onto
@@ -451,6 +649,11 @@ final class SettingsViewModelTests: XCTestCase {
 
     private func isPicker(_ row: SettingsRow) -> Bool {
         if case .picker = row { return true }
+        return false
+    }
+
+    private func isToggle(_ row: SettingsRow) -> Bool {
+        if case .toggle = row { return true }
         return false
     }
 

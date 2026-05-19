@@ -92,7 +92,12 @@ enum PushQueuePayloadCoding {
         let distanceM: Double?
         let rounds: Int?
         let rir: Int?
+        let hrAvgBpm: Int?
+        let hrMaxBpm: Int?
         let isWarmup: Bool
+        let skipped: Bool?
+        let side: String?
+        let notes: String?
         let completedAt: Date
 
         init(_ log: PrimitiveSetLog) {
@@ -114,7 +119,12 @@ enum PushQueuePayloadCoding {
             distanceM = log.distanceM
             rounds = log.rounds
             rir = log.rir
+            hrAvgBpm = log.hrAvgBpm
+            hrMaxBpm = log.hrMaxBpm
             isWarmup = log.isWarmup
+            skipped = log.skipped
+            side = log.side.rawValue
+            notes = log.notes
             completedAt = log.completedAt
         }
 
@@ -141,7 +151,12 @@ enum PushQueuePayloadCoding {
                 distanceM: distanceM,
                 rounds: rounds,
                 rir: rir,
+                hrAvgBpm: hrAvgBpm,
+                hrMaxBpm: hrMaxBpm,
                 isWarmup: isWarmup,
+                skipped: skipped ?? false,
+                side: side.flatMap { SetLogSide(rawValue: $0) } ?? .bilateral,
+                notes: notes,
                 completedAt: completedAt
             )
         }

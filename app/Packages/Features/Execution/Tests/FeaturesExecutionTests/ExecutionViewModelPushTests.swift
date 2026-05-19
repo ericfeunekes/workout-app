@@ -85,6 +85,39 @@ final class ExecutionViewModelPushTests: XCTestCase {
         XCTAssertNil(log.performedExerciseID)
     }
 
+    func testWatchSetEndedLogsCurrentSetAndAnnotatesHeartRate() async throws {
+        let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_010))
+        let (ctx, itemID) = PushTestFixtures.context(
+            sets: 2, reps: 5, loadKg: 100, includePrimitivePlan: true
+        )
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onPrimitiveSetLogged: { [recorder] log in
+                await recorder.appendPrimitiveSet(log)
+            }
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
+        vm.start()
+        vm.startCurrentSet()
+
+        vm.applyWatchSetEnded(
+            workoutItemID: itemID,
+            setIndex: 1,
+            bpmAvg: 141,
+            bpmMax: 156
+        )
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let log = try XCTUnwrap(vm.primitiveSetLogs.first)
+        XCTAssertEqual(log.reps, 5)
+        XCTAssertEqual(log.hrAvgBpm, 141)
+        XCTAssertEqual(log.hrMaxBpm, 156)
+        XCTAssertEqual(vm.state.route, .rest)
+        let pushed = await recorder.primitiveSetLogs
+        XCTAssertEqual(pushed.last?.hrAvgBpm, 141)
+        XCTAssertEqual(pushed.last?.hrMaxBpm, 156)
+    }
+
     func testPrimitiveSlotLogEmitsRowShapedTelemetry() async throws {
         let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_001))
         let (ctx, itemID) = PushTestFixtures.context(
@@ -114,9 +147,14 @@ final class ExecutionViewModelPushTests: XCTestCase {
         XCTAssertTrue(payload.contains(#""weight_unit":"lb""#))
     }
 
-    func testSkipCurrentSetDoesNotEnqueuePrimitiveResultMetrics() async throws {
+    func testSkipCurrentSetEnqueuesSkippedPrimitiveRowWithoutMetrics() async throws {
         let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_100))
-        let (ctx, _) = PushTestFixtures.context(sets: 2, reps: 5, loadKg: 100)
+        let (ctx, itemID) = PushTestFixtures.context(
+            sets: 2,
+            reps: 5,
+            loadKg: 100,
+            includePrimitivePlan: true
+        )
         let recorder = EnqueueRecorder()
         let hooks = ExecutionPushHooks(
             onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
@@ -133,7 +171,37 @@ final class ExecutionViewModelPushTests: XCTestCase {
         XCTAssertTrue(set.done)
         XCTAssertEqual(vm.state.route, .rest)
         let logs = await recorder.primitiveSetLogs
-        XCTAssertTrue(logs.isEmpty, "skips are state transitions, not primitive result metrics")
+        let log = try XCTUnwrap(logs.first)
+        XCTAssertEqual(logs.count, 1)
+        XCTAssertEqual(log.slotID, itemID)
+        XCTAssertTrue(log.skipped)
+        XCTAssertNil(log.reps)
+        XCTAssertNil(log.weight)
+        XCTAssertEqual(log.weightUnit, .lb)
+        XCTAssertNil(log.rir)
+        XCTAssertNil(log.durationSec)
+        XCTAssertNil(log.distanceM)
+        XCTAssertEqual(log.side, .bilateral)
+        XCTAssertEqual(log.completedAt, fixed.now)
+    }
+
+    func testLegacyContextDoesNotSynthesizePrimitiveResultRow() async throws {
+        let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_101))
+        let (ctx, _) = PushTestFixtures.context(sets: 2, reps: 5, loadKg: 100)
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onPrimitiveSetLogged: { [recorder] log in await recorder.appendPrimitiveSet(log) }
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
+        vm.start()
+        vm.startCurrentSet()
+
+        vm.logSet(reps: 5, rir: 2)
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        XCTAssertTrue(vm.primitiveSetLogs.isEmpty)
+        let logs = await recorder.primitiveSetLogs
+        XCTAssertTrue(logs.isEmpty, "planless legacy contexts must not fabricate primitive rows")
     }
 
     func testCompleteAloneDoesNotPublishCompletion() async throws {
@@ -262,10 +330,126 @@ final class ExecutionViewModelPushTests: XCTestCase {
         XCTAssertEqual(
             completion.primitiveSetLogs.count,
             0,
-            "no primitive result was logged on explicit End path"
+            "explicit End must not fabricate primitive rows when nothing was logged"
         )
         let kicks = await kickRecorder.count
         XCTAssertEqual(kicks, 1, "one kick per terminal push, not two")
+    }
+
+    func testExplicitEndPreservesAlreadyLoggedPrimitiveRowsInCompletion() async throws {
+        let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_042))
+        let (ctx, itemID) = PushTestFixtures.context(
+            sets: 2,
+            reps: 5,
+            loadKg: 100,
+            includePrimitivePlan: true
+        )
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
+            }
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
+        vm.start()
+        vm.startCurrentSet()
+        vm.logSet(reps: 5, rir: 2)
+        vm.complete()
+        vm.saveAndDone()
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let completions = await recorder.completions
+        let completion = try XCTUnwrap(completions.first)
+        XCTAssertEqual(completion.primitiveSetLogs.count, 1)
+        let log = try XCTUnwrap(completion.primitiveSetLogs.first)
+        XCTAssertEqual(log.role, .slot)
+        XCTAssertEqual(log.slotID, itemID)
+        XCTAssertEqual(log.reps, 5)
+        XCTAssertEqual(log.rir, 2)
+    }
+
+    func testExplicitEndPreservesLiveLoggedPrimitiveRowsForEMOM() async throws {
+        let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_043))
+        let (ctx, itemID) = PushTestFixtures.emomContext()
+        let recorder = EnqueueRecorder()
+        let hooks = ExecutionPushHooks(
+            onWorkoutCompleted: { [recorder] record in
+                await recorder.appendCompletion(record)
+            }
+        )
+        let vm = ExecutionViewModel(context: ctx, clock: fixed, push: hooks)
+        vm.start()
+        vm.startCurrentSet()
+        vm.logSet(reps: 10, rir: 1)
+        vm.complete()
+        vm.saveAndDone()
+
+        try await Task.sleep(nanoseconds: 50_000_000)
+
+        let completions = await recorder.completions
+        let completion = try XCTUnwrap(completions.first)
+        let log = try XCTUnwrap(completion.primitiveSetLogs.first)
+        XCTAssertEqual(completion.primitiveSetLogs.count, 1)
+        XCTAssertEqual(log.role, .slot)
+        XCTAssertEqual(log.slotID, itemID)
+        XCTAssertEqual(log.reps, 10)
+        XCTAssertEqual(log.rir, 1)
+        XCTAssertEqual(log.workoutID, ctx.workout.id)
+    }
+
+    func testExplicitEndPreservesSeededPrimitiveResultsAcrossTimingFamilies() async throws {
+        let cases = PushTestFixtures.explicitEndTimingFamilyContexts()
+        for testCase in cases {
+            let fixed = FixedClock(now: Date(timeIntervalSince1970: 1_700_000_500))
+            let recorder = EnqueueRecorder()
+            let hooks = ExecutionPushHooks(
+                onWorkoutCompleted: { [recorder] record in
+                    await recorder.appendCompletion(record)
+                }
+            )
+            let vm = ExecutionViewModel(context: testCase.context, clock: fixed, push: hooks)
+
+            for result in testCase.results {
+                switch result {
+                case .set(let blockIndex, let reps, let rounds, let durationSec, let distanceM):
+                    vm.recordPrimitiveSetResult(
+                        blockIndex: blockIndex,
+                        setIndexInBlock: 0,
+                        reps: reps,
+                        rounds: rounds,
+                        durationSec: durationSec,
+                        distanceM: distanceM
+                    )
+                case .block(let blockIndex, let durationSec):
+                    vm.recordPrimitiveBlockResult(
+                        blockIndex: blockIndex,
+                        durationSec: durationSec
+                    )
+                }
+            }
+            vm.complete()
+            vm.saveAndDone()
+
+            try await Task.sleep(nanoseconds: 50_000_000)
+
+            let completions = await recorder.completions
+            let completion = try XCTUnwrap(completions.first, testCase.name)
+            XCTAssertEqual(
+                completion.primitiveSetLogs.map(\.role),
+                testCase.expectedRoles,
+                testCase.name
+            )
+            XCTAssertEqual(
+                completion.primitiveSetLogs.map(\.workoutID),
+                Array(repeating: testCase.context.workout.id, count: testCase.expectedRoles.count),
+                testCase.name
+            )
+            XCTAssertTrue(
+                completion.primitiveSetLogs.allSatisfy { $0.resultSemantics.isSentinel == false },
+                testCase.name
+            )
+        }
     }
 
     func testSaveAndDoneEmitsCompletionProofTelemetry() async throws {
@@ -469,6 +653,23 @@ final class ExecutionViewModelPushTests: XCTestCase {
 // MARK: - Test helpers
 
 private enum PushTestFixtures {
+    enum ResultToRecord {
+        case set(
+            blockIndex: Int,
+            reps: Int?,
+            rounds: Int?,
+            durationSec: Double?,
+            distanceM: Double?
+        )
+        case block(blockIndex: Int, durationSec: Double?)
+    }
+
+    struct ExplicitEndTimingFamilyCase {
+        let name: String
+        let context: WorkoutContext
+        let results: [ResultToRecord]
+        let expectedRoles: [PrimitiveLogRole]
+    }
 
     /// Builds a single-block, single-item straight-sets workout context.
     /// Matches the shape used by ExecutionViewModelTests' `makeContext`
@@ -562,6 +763,75 @@ private enum PushTestFixtures {
         return (ctx, itemID)
     }
 
+    static func emomContext() -> (WorkoutContext, UUID) {
+        let userID = UUID()
+        let workoutID = UUID()
+        let blockID = UUID()
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let now = Date()
+        let workout = Workout(
+            id: workoutID, userID: userID, name: "EMOM Push Test",
+            scheduledDate: now, status: .planned, source: .claude,
+            notes: nil, createdAt: now, updatedAt: now,
+            completedAt: nil, tagsJSON: nil
+        )
+        let block = Block(
+            id: blockID, workoutID: workoutID, parentBlockID: nil,
+            position: 0, name: nil, timingMode: .emom,
+            timingConfigJSON: #"{"interval_sec":60,"rounds":5}"#,
+            rounds: nil, roundsRepSchemeJSON: nil, notes: nil
+        )
+        let item = WorkoutItem(
+            id: itemID,
+            blockID: blockID,
+            position: 0,
+            exerciseID: exerciseID,
+            prescriptionJSON: #"{"sets":5,"reps":10,"load_kg":0}"#
+        )
+        let primitive = PrimitiveWorkout(
+            id: workoutID,
+            name: workout.name,
+            blocks: [
+                PrimitiveBlock(id: blockID, sets: [
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: PrimitiveTiming(mode: .timeBounded, intervalSec: 60, rounds: 5),
+                        traversal: .sequential,
+                        slots: [
+                            PrimitiveSlot(
+                                id: itemID,
+                                exerciseID: exerciseID,
+                                workTargets: [
+                                    PrimitiveWorkTarget(
+                                        metric: .reps,
+                                        valueForm: .single,
+                                        value: 10,
+                                        role: .completion
+                                    ),
+                                ],
+                                load: PrimitiveLoad(
+                                    unit: .bodyweight,
+                                    unitType: .implicitBodyweight
+                                )
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        let plan = try! ExecutionPlan.validated(workout: primitive)
+        let ctx = WorkoutContext(
+            workout: workout,
+            primitiveWorkout: primitive,
+            primitiveExecutionPlan: plan,
+            blocks: [block],
+            itemsByBlock: [[item]],
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Burpee")]
+        )
+        return (ctx, itemID)
+    }
+
     static func primitiveContext() -> WorkoutContext {
         let userID = UUID(uuidString: "01000000-0000-4000-8000-000000000001")!
         let workoutID = UUID(uuidString: "10000000-0000-4000-8000-000000000051")!
@@ -626,6 +896,233 @@ private enum PushTestFixtures {
             blocks: [block],
             itemsByBlock: [[]],
             exercises: [exerciseID: Exercise(id: exerciseID, name: "Push-up")]
+        )
+    }
+
+    static func explicitEndTimingFamilyContexts() -> [ExplicitEndTimingFamilyCase] {
+        [
+            .init(
+                name: "EMOM",
+                context: primitiveContext(
+                    name: "EMOM",
+                    timing: .init(mode: .timeBounded, intervalSec: 60, rounds: 5),
+                    traversal: .sequential
+                ),
+                results: [.set(blockIndex: 0, reps: 12, rounds: nil, durationSec: nil, distanceM: nil)],
+                expectedRoles: [.setResult]
+            ),
+            .init(
+                name: "intervals",
+                context: primitiveContext(
+                    name: "Intervals",
+                    timing: .init(mode: .timeBounded, intervalSec: 90, rounds: 4),
+                    traversal: .roundRobin
+                ),
+                results: [.set(blockIndex: 0, reps: nil, rounds: nil, durationSec: 360, distanceM: 800)],
+                expectedRoles: [.setResult]
+            ),
+            .init(
+                name: "Tabata",
+                context: primitiveContext(
+                    name: "Tabata",
+                    timing: .init(mode: .timeBounded, intervalSec: 20, rounds: 8),
+                    traversal: .roundRobin
+                ),
+                results: [.set(blockIndex: 0, reps: 48, rounds: nil, durationSec: 160, distanceM: nil)],
+                expectedRoles: [.setResult]
+            ),
+            .init(
+                name: "for-time",
+                context: primitiveContext(
+                    name: "For Time",
+                    timing: .init(mode: .capBounded, capSec: 900),
+                    traversal: .sequential,
+                    setTargets: [.init(metric: .duration, valueForm: .open, role: .observation)]
+                ),
+                results: [.set(blockIndex: 0, reps: 50, rounds: nil, durationSec: 612, distanceM: nil)],
+                expectedRoles: [.setResult]
+            ),
+            .init(
+                name: "continuous",
+                context: primitiveContext(
+                    name: "Continuous",
+                    timing: .init(mode: .targetBounded),
+                    traversal: .sequential,
+                    slotTargets: [
+                        .init(metric: .distance, valueForm: .single, value: 5_000, role: .completion),
+                    ]
+                ),
+                results: [.set(blockIndex: 0, reps: nil, rounds: nil, durationSec: 1_200, distanceM: 5_000)],
+                expectedRoles: [.setResult]
+            ),
+            .init(
+                name: "AMRAP",
+                context: primitiveContext(
+                    name: "AMRAP",
+                    timing: .init(mode: .capBounded, capSec: 1_200),
+                    traversal: .amrap,
+                    setTargets: [.init(metric: .rounds, valueForm: .open, role: .observation)]
+                ),
+                results: [.set(blockIndex: 0, reps: 9, rounds: 6, durationSec: 1_200, distanceM: nil)],
+                expectedRoles: [.setResult]
+            ),
+            .init(
+                name: "composed capstone",
+                context: composedPrimitiveContext(),
+                results: [
+                    .set(blockIndex: 0, reps: 18, rounds: 3, durationSec: 480, distanceM: nil),
+                    .set(blockIndex: 1, reps: nil, rounds: nil, durationSec: 360, distanceM: 1_000),
+                    .block(blockIndex: 1, durationSec: 360),
+                ],
+                expectedRoles: [.setResult, .setResult, .blockResult]
+            ),
+        ]
+    }
+
+    private static func primitiveContext(
+        name: String,
+        timing: PrimitiveTiming,
+        traversal: PrimitiveTraversal,
+        setTargets: [PrimitiveWorkTarget] = [],
+        slotTargets: [PrimitiveWorkTarget] = [
+            .init(metric: .reps, valueForm: .single, value: 10, role: .completion),
+        ]
+    ) -> WorkoutContext {
+        let userID = UUID()
+        let workoutID = UUID()
+        let legacyBlockID = UUID()
+        let primitiveBlockID = UUID()
+        let primitiveSetID = UUID()
+        let slotID = UUID()
+        let exerciseID = UUID()
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let workout = Workout(
+            id: workoutID,
+            userID: userID,
+            name: name,
+            scheduledDate: now,
+            status: .planned,
+            source: .claude,
+            createdAt: now,
+            updatedAt: now
+        )
+        let block = Block(
+            id: legacyBlockID,
+            workoutID: workoutID,
+            position: 0,
+            timingMode: .straightSets,
+            timingConfigJSON: "{}"
+        )
+        let primitive = PrimitiveWorkout(
+            id: workoutID,
+            name: name,
+            blocks: [
+                PrimitiveBlock(id: primitiveBlockID, sets: [
+                    PrimitiveSet(
+                        id: primitiveSetID,
+                        timing: timing,
+                        traversal: traversal,
+                        workTargets: setTargets,
+                        slots: [
+                            PrimitiveSlot(
+                                id: slotID,
+                                exerciseID: exerciseID,
+                                workTargets: slotTargets
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        let plan = try! ExecutionPlan.validated(workout: primitive)
+        return WorkoutContext(
+            workout: workout,
+            primitiveWorkout: primitive,
+            primitiveExecutionPlan: plan,
+            blocks: [block],
+            itemsByBlock: [[]],
+            exercises: [exerciseID: Exercise(id: exerciseID, name: name)]
+        )
+    }
+
+    private static func composedPrimitiveContext() -> WorkoutContext {
+        let userID = UUID()
+        let workoutID = UUID()
+        let legacyBlockID = UUID()
+        let firstBlockID = UUID()
+        let secondBlockID = UUID()
+        let firstSetID = UUID()
+        let secondSetID = UUID()
+        let burpeeSlotID = UUID()
+        let runSlotID = UUID()
+        let burpeeID = UUID()
+        let runID = UUID()
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        let workout = Workout(
+            id: workoutID,
+            userID: userID,
+            name: "Composed Capstone",
+            scheduledDate: now,
+            status: .planned,
+            source: .claude,
+            createdAt: now,
+            updatedAt: now
+        )
+        let block = Block(
+            id: legacyBlockID,
+            workoutID: workoutID,
+            position: 0,
+            timingMode: .straightSets,
+            timingConfigJSON: "{}"
+        )
+        let primitive = PrimitiveWorkout(
+            id: workoutID,
+            name: "Composed Capstone",
+            blocks: [
+                PrimitiveBlock(id: firstBlockID, sets: [
+                    PrimitiveSet(
+                        id: firstSetID,
+                        timing: .init(mode: .capBounded, capSec: 1_200),
+                        traversal: .amrap,
+                        workTargets: [.init(metric: .rounds, valueForm: .open, role: .observation)],
+                        slots: [
+                            PrimitiveSlot(
+                                id: burpeeSlotID,
+                                exerciseID: burpeeID,
+                                workTargets: [.init(metric: .reps, valueForm: .single, value: 6, role: .completion)]
+                            ),
+                        ]
+                    ),
+                ]),
+                PrimitiveBlock(id: secondBlockID, sets: [
+                    PrimitiveSet(
+                        id: secondSetID,
+                        timing: .init(mode: .targetBounded),
+                        traversal: .sequential,
+                        slots: [
+                            PrimitiveSlot(
+                                id: runSlotID,
+                                exerciseID: runID,
+                                workTargets: [
+                                    .init(metric: .distance, valueForm: .single, value: 1_000, role: .completion),
+                                ]
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        let plan = try! ExecutionPlan.validated(workout: primitive)
+        return WorkoutContext(
+            workout: workout,
+            primitiveWorkout: primitive,
+            primitiveExecutionPlan: plan,
+            blocks: [block],
+            itemsByBlock: [[]],
+            exercises: [
+                burpeeID: Exercise(id: burpeeID, name: "Burpee"),
+                runID: Exercise(id: runID, name: "Run"),
+            ]
         )
     }
 }

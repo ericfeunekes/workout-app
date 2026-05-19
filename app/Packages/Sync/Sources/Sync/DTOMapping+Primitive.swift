@@ -22,7 +22,31 @@ extension DTOMapping {
             case .failure(let error): return .failure(error)
             }
         }
-        return .success(CoreDomain.PrimitiveWorkout(id: id, name: dto.name, blocks: blocks))
+        return .success(CoreDomain.PrimitiveWorkout(
+            id: id,
+            name: dto.name,
+            activityIntent: mapActivityIntent(dto.activityIntent),
+            blocks: blocks
+        ))
+    }
+
+    public static func mapActivityIntent(
+        _ dto: WorkoutDBSchema.ActivityIntent?
+    ) -> CoreDomain.ActivityIntent? {
+        guard let dto else { return nil }
+        guard let domain = CoreDomain.ActivityDomain(rawValue: dto.activityDomain.rawValue),
+              let environment = CoreDomain.ActivityEnvironment(rawValue: dto.environment.rawValue)
+        else {
+            return nil
+        }
+        let policy = dto.preservationPolicy.flatMap {
+            CoreDomain.ActivityPreservationPolicy(rawValue: $0.rawValue)
+        }
+        return CoreDomain.ActivityIntent(
+            activityDomain: domain,
+            environment: environment,
+            preservationPolicy: policy
+        )
     }
 
     private static func mapPrimitiveBlock(
@@ -121,7 +145,12 @@ extension DTOMapping {
             distanceM: log.distanceM,
             rounds: log.rounds,
             rir: log.rir,
+            hrAvgBpm: log.hrAvgBpm,
+            hrMaxBpm: log.hrMaxBpm,
             isWarmup: log.isWarmup,
+            skipped: log.skipped,
+            side: log.side.rawValue,
+            notes: log.notes,
             completedAt: log.completedAt
         )
     }
@@ -172,6 +201,7 @@ extension DTOMapping {
         case .failure(let error): return .failure(error)
         }
         let unit = dto.weightUnit.flatMap { CoreDomain.WeightUnit(rawValue: $0.rawValue) }
+        let side = CoreDomain.SetLogSide(rawValue: dto.side) ?? .bilateral
         return .success(CoreDomain.PrimitiveSetLog(
             id: id,
             role: role,
@@ -191,7 +221,12 @@ extension DTOMapping {
             distanceM: dto.distanceM,
             rounds: dto.rounds,
             rir: dto.rir,
+            hrAvgBpm: dto.hrAvgBpm,
+            hrMaxBpm: dto.hrMaxBpm,
             isWarmup: dto.isWarmup,
+            skipped: dto.skipped,
+            side: side,
+            notes: dto.notes,
             completedAt: dto.completedAt
         ))
     }

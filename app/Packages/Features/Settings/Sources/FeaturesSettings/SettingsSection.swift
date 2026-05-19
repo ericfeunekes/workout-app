@@ -57,6 +57,13 @@ public enum SettingsRow: Identifiable, Sendable {
         selected: String,
         onPick: @Sendable (String) -> Void
     )
+    /// Binary setting row.
+    case toggle(
+        id: String,
+        label: String,
+        isOn: Bool,
+        onToggle: @Sendable (Bool) -> Void
+    )
     /// Tappable action row. `destructive` toggles the accent color per the
     /// design reference — e.g. "change server" and "reset local data".
     case action(
@@ -70,6 +77,7 @@ public enum SettingsRow: Identifiable, Sendable {
         switch self {
         case .info(let id, _, _),
              .picker(let id, _, _, _, _),
+             .toggle(let id, _, _, _),
              .action(let id, _, _, _):
             return id
         }
@@ -81,6 +89,7 @@ public enum SettingsRow: Identifiable, Sendable {
         switch self {
         case .info(_, let label, _),
              .picker(_, let label, _, _, _),
+             .toggle(_, let label, _, _),
              .action(_, let label, _, _):
             return label
         }
@@ -95,6 +104,9 @@ public enum SettingsRow: Identifiable, Sendable {
         case (.picker(let a, let la, let o1, let s1, _),
               .picker(let b, let lb, let o2, let s2, _)):
             return a == b && la == lb && o1 == o2 && s1 == s2
+        case (.toggle(let a, let la, let on1, _),
+              .toggle(let b, let lb, let on2, _)):
+            return a == b && la == lb && on1 == on2
         case (.action(let a, let la, let d1, _),
               .action(let b, let lb, let d2, _)):
             return a == b && la == lb && d1 == d2

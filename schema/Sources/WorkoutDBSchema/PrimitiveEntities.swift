@@ -94,6 +94,68 @@ public enum PrimitiveStimulusType: String, Codable, Sendable, CaseIterable {
     case hrZone = "hr_zone"
 }
 
+public enum ActivityDomain: String, Codable, Sendable, CaseIterable {
+    case running
+    case cycling
+    case rowing
+    case swimming
+    case walking
+    case hiking
+    case functionalStrength = "functional_strength"
+    case traditionalStrength = "traditional_strength"
+    case hiit
+    case mobility
+    case mixedModal = "mixed_modal"
+    case carry
+    case other
+}
+
+public enum ActivityEnvironment: String, Codable, Sendable, CaseIterable {
+    case indoor
+    case outdoor
+    case unspecified
+}
+
+public enum ActivityPreservationPolicy: String, Codable, Sendable, CaseIterable {
+    case preservePrimaryActivity = "preserve_primary_activity"
+    case preserveStructure = "preserve_structure"
+    case preserveElapsedTime = "preserve_elapsed_time"
+    case preserveDistance = "preserve_distance"
+    case preserveMixedModality = "preserve_mixed_modality"
+}
+
+public struct ActivityIntent: Codable, Sendable, Equatable {
+    public let activityDomain: ActivityDomain
+    public let environment: ActivityEnvironment
+    public let preservationPolicy: ActivityPreservationPolicy?
+
+    enum CodingKeys: String, CodingKey {
+        case activityDomain = "activity_domain"
+        case environment
+        case preservationPolicy = "preservation_policy"
+    }
+
+    public init(
+        activityDomain: ActivityDomain,
+        environment: ActivityEnvironment = .unspecified,
+        preservationPolicy: ActivityPreservationPolicy? = nil
+    ) {
+        self.activityDomain = activityDomain
+        self.environment = environment
+        self.preservationPolicy = preservationPolicy
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        activityDomain = try container.decode(ActivityDomain.self, forKey: .activityDomain)
+        environment = try container.decodeIfPresent(ActivityEnvironment.self, forKey: .environment) ?? .unspecified
+        preservationPolicy = try container.decodeIfPresent(
+            ActivityPreservationPolicy.self,
+            forKey: .preservationPolicy
+        )
+    }
+}
+
 public struct PrimitiveStimulus: Codable, Sendable, Equatable {
     public let type: PrimitiveStimulusType
     public let target: Double?
@@ -234,17 +296,25 @@ public struct PrimitiveBlock: Codable, Sendable, Equatable {
 public struct PrimitiveWorkout: Codable, Sendable, Equatable {
     public let id: String
     public let name: String
+    public let activityIntent: ActivityIntent?
     public let primitiveBlocks: [PrimitiveBlock]
 
     enum CodingKeys: String, CodingKey {
         case id
         case name
+        case activityIntent = "activity_intent"
         case primitiveBlocks = "primitive_blocks"
     }
 
-    public init(id: String, name: String, primitiveBlocks: [PrimitiveBlock]) {
+    public init(
+        id: String,
+        name: String,
+        activityIntent: ActivityIntent? = nil,
+        primitiveBlocks: [PrimitiveBlock]
+    ) {
         self.id = id
         self.name = name
+        self.activityIntent = activityIntent
         self.primitiveBlocks = primitiveBlocks
     }
 }
@@ -274,7 +344,12 @@ public struct PrimitiveSetLog: Codable, Sendable, Equatable {
     public let distanceM: Double?
     public let rounds: Int?
     public let rir: Int?
+    public let hrAvgBpm: Int?
+    public let hrMaxBpm: Int?
     public let isWarmup: Bool
+    public let skipped: Bool
+    public let side: String
+    public let notes: String?
     public let completedAt: Date
 
     enum CodingKeys: String, CodingKey {
@@ -296,7 +371,12 @@ public struct PrimitiveSetLog: Codable, Sendable, Equatable {
         case distanceM = "distance_m"
         case rounds
         case rir
+        case hrAvgBpm = "hr_avg_bpm"
+        case hrMaxBpm = "hr_max_bpm"
         case isWarmup = "is_warmup"
+        case skipped
+        case side
+        case notes
         case completedAt = "completed_at"
     }
 
@@ -319,7 +399,12 @@ public struct PrimitiveSetLog: Codable, Sendable, Equatable {
         distanceM: Double? = nil,
         rounds: Int? = nil,
         rir: Int? = nil,
+        hrAvgBpm: Int? = nil,
+        hrMaxBpm: Int? = nil,
         isWarmup: Bool = false,
+        skipped: Bool = false,
+        side: String = "bilateral",
+        notes: String? = nil,
         completedAt: Date
     ) {
         self.id = id
@@ -340,7 +425,41 @@ public struct PrimitiveSetLog: Codable, Sendable, Equatable {
         self.distanceM = distanceM
         self.rounds = rounds
         self.rir = rir
+        self.hrAvgBpm = hrAvgBpm
+        self.hrMaxBpm = hrMaxBpm
         self.isWarmup = isWarmup
+        self.skipped = skipped
+        self.side = side
+        self.notes = notes
         self.completedAt = completedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        role = try container.decode(PrimitiveLogRole.self, forKey: .role)
+        slotId = try container.decodeIfPresent(String.self, forKey: .slotId)
+        setId = try container.decodeIfPresent(String.self, forKey: .setId)
+        blockId = try container.decodeIfPresent(String.self, forKey: .blockId)
+        workoutId = try container.decode(String.self, forKey: .workoutId)
+        plannedExerciseId = try container.decodeIfPresent(String.self, forKey: .plannedExerciseId)
+        performedExerciseId = try container.decodeIfPresent(String.self, forKey: .performedExerciseId)
+        setIndex = try container.decode(Int.self, forKey: .setIndex)
+        setRepeatIndex = try container.decodeIfPresent(Int.self, forKey: .setRepeatIndex) ?? 0
+        blockRepeatIndex = try container.decodeIfPresent(Int.self, forKey: .blockRepeatIndex) ?? 0
+        reps = try container.decodeIfPresent(Int.self, forKey: .reps)
+        weight = try container.decodeIfPresent(Double.self, forKey: .weight)
+        weightUnit = try container.decodeIfPresent(WeightUnit.self, forKey: .weightUnit)
+        durationSec = try container.decodeIfPresent(Double.self, forKey: .durationSec)
+        distanceM = try container.decodeIfPresent(Double.self, forKey: .distanceM)
+        rounds = try container.decodeIfPresent(Int.self, forKey: .rounds)
+        rir = try container.decodeIfPresent(Int.self, forKey: .rir)
+        hrAvgBpm = try container.decodeIfPresent(Int.self, forKey: .hrAvgBpm)
+        hrMaxBpm = try container.decodeIfPresent(Int.self, forKey: .hrMaxBpm)
+        isWarmup = try container.decodeIfPresent(Bool.self, forKey: .isWarmup) ?? false
+        skipped = try container.decodeIfPresent(Bool.self, forKey: .skipped) ?? false
+        side = try container.decodeIfPresent(String.self, forKey: .side) ?? "bilateral"
+        notes = try container.decodeIfPresent(String.self, forKey: .notes)
+        completedAt = try container.decode(Date.self, forKey: .completedAt)
     }
 }

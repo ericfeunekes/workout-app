@@ -21,6 +21,60 @@
 import Foundation
 import Security
 
+protocol TokenStoreKeychainClient: Sendable {
+    func write(data: Data, serviceName: String, account: String) throws
+    func read(serviceName: String, account: String) throws -> Data?
+    func delete(serviceName: String, account: String) throws
+}
+
+struct SecurityTokenStoreKeychainClient: TokenStoreKeychainClient {
+    func write(data: Data, serviceName: String, account: String) throws {
+        // Prefer update; fall back to add. Avoids leaving multiple items in
+        // the login keychain with the same service/account pair.
+        let query = keychainQuery(serviceName: serviceName, account: account)
+        let updateStatus = SecItemUpdate(
+            query as CFDictionary,
+            [kSecValueData as String: data] as CFDictionary
+        )
+        if updateStatus == errSecSuccess { return }
+        if updateStatus != errSecItemNotFound {
+            throw PersistenceError.keychain(updateStatus)
+        }
+        var addQuery = query
+        addQuery[kSecValueData as String] = data
+        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
+        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
+        if addStatus != errSecSuccess {
+            throw PersistenceError.keychain(addStatus)
+        }
+    }
+
+    func read(serviceName: String, account: String) throws -> Data? {
+        var query = keychainQuery(serviceName: serviceName, account: account)
+        query[kSecReturnData as String] = true
+        query[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: AnyObject?
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecItemNotFound { return nil }
+        if status != errSecSuccess { throw PersistenceError.keychain(status) }
+        return result as? Data
+    }
+
+    func delete(serviceName: String, account: String) throws {
+        let status = SecItemDelete(keychainQuery(serviceName: serviceName, account: account) as CFDictionary)
+        if status == errSecSuccess || status == errSecItemNotFound { return }
+        throw PersistenceError.keychain(status)
+    }
+
+    private func keychainQuery(serviceName: String, account: String) -> [String: Any] {
+        [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: serviceName,
+            kSecAttrAccount as String: account,
+        ]
+    }
+}
+
 public protocol TokenStore: Sendable {
     func saveConnection(url: URL, token: String) throws
     func loadConnection() throws -> (url: URL, token: String)?
@@ -37,6 +91,7 @@ public struct TokenStoreImpl: TokenStore {
     private let serviceName: String
     private let account: String
     private let urlDefaultsKey: String
+    private let keychainClient: any TokenStoreKeychainClient
     // UserDefaults is documented as thread-safe by Apple but does not carry
     // a Sendable conformance. `nonisolated(unsafe)` reflects the runtime
     // reality — UserDefaults atomically reads/writes and tolerates calls
@@ -50,10 +105,27 @@ public struct TokenStoreImpl: TokenStore {
         urlDefaultsKey: String = "workoutdb.server.url",
         defaults: UserDefaults = .standard
     ) {
+        self.init(
+            serviceName: serviceName,
+            account: account,
+            urlDefaultsKey: urlDefaultsKey,
+            defaults: defaults,
+            keychainClient: SecurityTokenStoreKeychainClient()
+        )
+    }
+
+    init(
+        serviceName: String = "com.ericfeunekes.WorkoutDB.token",
+        account: String = "bearer",
+        urlDefaultsKey: String = "workoutdb.server.url",
+        defaults: UserDefaults = .standard,
+        keychainClient: any TokenStoreKeychainClient
+    ) {
         self.serviceName = serviceName
         self.account = account
         self.urlDefaultsKey = urlDefaultsKey
         self.defaults = defaults
+        self.keychainClient = keychainClient
     }
 
     public func saveConnection(url: URL, token: String) throws {
@@ -104,48 +176,14 @@ public struct TokenStoreImpl: TokenStore {
     }
 
     private func writeKeychain(data: Data) throws {
-        // Prefer update; fall back to add. Avoids leaving multiple items in
-        // the login keychain with the same service/account pair.
-        let query = keychainQuery()
-        let updateStatus = SecItemUpdate(
-            query as CFDictionary,
-            [kSecValueData as String: data] as CFDictionary
-        )
-        if updateStatus == errSecSuccess { return }
-        if updateStatus != errSecItemNotFound {
-            throw PersistenceError.keychain(updateStatus)
-        }
-        var addQuery = query
-        addQuery[kSecValueData as String] = data
-        addQuery[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlock
-        let addStatus = SecItemAdd(addQuery as CFDictionary, nil)
-        if addStatus != errSecSuccess {
-            throw PersistenceError.keychain(addStatus)
-        }
+        try keychainClient.write(data: data, serviceName: serviceName, account: account)
     }
 
     private func readKeychainData() throws -> Data? {
-        var query = keychainQuery()
-        query[kSecReturnData as String] = true
-        query[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-        if status == errSecItemNotFound { return nil }
-        if status != errSecSuccess { throw PersistenceError.keychain(status) }
-        return result as? Data
+        try keychainClient.read(serviceName: serviceName, account: account)
     }
 
     private func deleteKeychain() throws {
-        let status = SecItemDelete(keychainQuery() as CFDictionary)
-        if status == errSecSuccess || status == errSecItemNotFound { return }
-        throw PersistenceError.keychain(status)
-    }
-
-    private func keychainQuery() -> [String: Any] {
-        [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: serviceName,
-            kSecAttrAccount as String: account,
-        ]
+        try keychainClient.delete(serviceName: serviceName, account: account)
     }
 }

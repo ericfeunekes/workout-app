@@ -37,6 +37,17 @@ private func iso8601(_ string: String) -> Date {
     return g.date(from: string) ?? Date(timeIntervalSince1970: 0)
 }
 
+private func minimalHealthArchiveUploadRequest() -> HealthArchiveUploadRequest {
+    HealthArchiveUploadRequest(
+        requestSetKey: "server|all-supported|fp",
+        serverNamespace: "server",
+        descriptorFingerprint: "fp",
+        nextCursor: "cursor-1",
+        records: [],
+        tombstones: []
+    )
+}
+
 private func encodedFixture() -> Data {
     // A minimal SyncPullResponse with valid UUIDs in every slot. Used as the
     // success-path pull fixture.
@@ -57,6 +68,11 @@ private func encodedFixture() -> Data {
           "source": "claude",
           "notes": null,
           "tags_json": null,
+          "activity_intent": {
+            "activity_domain": "mixed_modal",
+            "environment": "unspecified",
+            "preservation_policy": "preserve_structure"
+          },
           "created_at": "2026-04-17T07:00:00Z",
           "updated_at": "2026-04-17T07:00:00Z",
           "completed_at": null,
@@ -306,6 +322,9 @@ runAsyncCase("PullService success — maps DTOs to Domain") {
     try expectEqual(result.workouts[0].blocks.count, 1)
     try expectEqual(result.workouts[0].items.count, 1)
     try expectEqual(result.primitiveWorkouts.count, 1)
+    try expectEqual(result.primitiveWorkouts[0].activityIntent?.activityDomain, .mixedModal)
+    try expectEqual(result.primitiveWorkouts[0].activityIntent?.environment, .unspecified)
+    try expectEqual(result.primitiveWorkouts[0].activityIntent?.preservationPolicy, .preserveStructure)
     try expectEqual(result.primitiveWorkouts[0].blocks[0].sets[0].traversal, .amrap)
     try expectEqual(result.lastPerformed.count, 1)
     try expectEqual(result.lastPerformed[0].lastSetLogs.count, 1)
@@ -1004,6 +1023,151 @@ runAsyncCase("SyncAPI pullLatest routes 401 to tokenRejected") {
     try expect(state == .tokenRejected)
 }
 
+runAsyncCase("HealthArchiveUploadService posts archive payload and decodes ack") {
+    let response = """
+    {
+      "request_set_key": "server|all-supported|fp",
+      "acknowledged_cursor": "cursor-1",
+      "records_received": 1,
+      "tombstones_received": 1,
+      "server_time": "2026-05-18T12:00:00Z"
+    }
+    """.data(using: .utf8)!
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 200, body: response))
+    ])
+    let service = HealthArchiveUploadService(transport: transport)
+
+    let result = try await service.upload(HealthArchiveUploadRequest(
+        requestSetKey: "server|all-supported|fp",
+        serverNamespace: "server",
+        descriptorFingerprint: "fp",
+        nextCursor: "cursor-1",
+        records: [
+            HealthArchiveUploadRecord(
+                id: "70000000-0000-4000-8000-000000000001",
+                externalID: "hk-1",
+                descriptorID: "HKQuantityTypeIdentifierHeartRate",
+                sampleKind: "quantity",
+                value: HealthArchiveUploadValue(
+                    kind: .quantity,
+                    quantityValue: 120,
+                    unit: "count/min"
+                )
+            )
+        ],
+        tombstones: [
+            HealthArchiveUploadTombstone(
+                id: "80000000-0000-4000-8000-000000000001",
+                descriptorID: "HKQuantityTypeIdentifierHeartRate",
+                externalID: "hk-deleted-1",
+                observedAt: iso8601("2026-05-18T11:59:00Z")
+            )
+        ]
+    ), bearerToken: "tok")
+    let calls = await transport.store.recordedCalls()
+    let body = String(data: calls[0].body ?? Data(), encoding: .utf8) ?? ""
+
+    try expectEqual(calls[0].path, "/api/health/archive")
+    try expectEqual(calls[0].bearerToken, "tok")
+    try expect(body.contains(#""quantity_value":120"#), "encoded quantity value")
+    try expectEqual(result.acknowledgedCursor, "cursor-1")
+    try expectEqual(result.recordsReceived, 1)
+    try expectEqual(result.tombstonesReceived, 1)
+}
+
+runAsyncCase("HealthArchiveUploadService routes archive 401 to tokenRejected") {
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 401, body: Data()))
+    ])
+    let service = HealthArchiveUploadService(transport: transport)
+
+    do {
+        _ = try await service.upload(minimalHealthArchiveUploadRequest(), bearerToken: "tok")
+        try expect(false, "expected tokenRejected")
+    } catch let err as SyncError {
+        try expectEqual(err, .tokenRejected)
+    }
+}
+
+runAsyncCase("HealthArchiveUploadService routes archive 503 to server error") {
+    let body = Data("temporarily unavailable".utf8)
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 503, body: body))
+    ])
+    let service = HealthArchiveUploadService(transport: transport)
+
+    do {
+        _ = try await service.upload(minimalHealthArchiveUploadRequest(), bearerToken: "tok")
+        try expect(false, "expected server error")
+    } catch let err as SyncError {
+        try expectEqual(err, .server(status: 503, message: "temporarily unavailable"))
+    }
+}
+
+runAsyncCase("HealthArchiveUploadService routes archive network and decode failures") {
+    let networkTransport = FakeTransport(outcomes: [.throwURLError])
+    let networkService = HealthArchiveUploadService(transport: networkTransport)
+    do {
+        _ = try await networkService.upload(minimalHealthArchiveUploadRequest(), bearerToken: "tok")
+        try expect(false, "expected network error")
+    } catch let err as SyncError {
+        if case .network = err {
+            // Expected.
+        } else {
+            try expect(false, "expected network, got \(err)")
+        }
+    }
+
+    let decodeTransport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 200, body: Data("not json".utf8)))
+    ])
+    let decodeService = HealthArchiveUploadService(transport: decodeTransport)
+    do {
+        _ = try await decodeService.upload(minimalHealthArchiveUploadRequest(), bearerToken: "tok")
+        try expect(false, "expected decode error")
+    } catch let err as SyncError {
+        if case .decode = err {
+            // Expected.
+        } else {
+            try expect(false, "expected decode, got \(err)")
+        }
+    }
+}
+
+runAsyncCase("SyncAPI uploadHealthArchive requires token and routes 401 state") {
+    let noTokenAPI = SyncAPI(
+        transport: FakeTransport(),
+        store: FakePushQueueStore(),
+        tokenProvider: { nil }
+    )
+    do {
+        _ = try await noTokenAPI.uploadHealthArchive(minimalHealthArchiveUploadRequest())
+        try expect(false, "expected tokenRejected without token")
+    } catch let err as SyncError {
+        try expectEqual(err, .tokenRejected)
+    }
+    let noTokenState = await noTokenAPI.connection.state
+    try expect(noTokenState == .tokenRejected)
+
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 401, body: Data()))
+    ])
+    let api = SyncAPI(
+        transport: transport,
+        store: FakePushQueueStore(),
+        tokenProvider: { "tok" }
+    )
+    do {
+        _ = try await api.uploadHealthArchive(minimalHealthArchiveUploadRequest())
+        try expect(false, "expected tokenRejected from server")
+    } catch let err as SyncError {
+        try expectEqual(err, .tokenRejected)
+    }
+    let rejectedState = await api.connection.state
+    try expect(rejectedState == .tokenRejected)
+}
+
 // MARK: - Telemetry push routing
 
 runAsyncCase("PushQueue — telemetry events route to /api/telemetry/events") {
@@ -1048,6 +1212,9 @@ runAsyncCase("PushQueue — primitive_set_logs route to sync results and encode 
         durationSec: 360,
         distanceM: 1000,
         rounds: 7,
+        skipped: true,
+        side: .left,
+        notes: "scaled after warmup",
         completedAt: iso8601("2026-04-20T07:30:00Z")
     )
 
@@ -1066,6 +1233,9 @@ runAsyncCase("PushQueue — primitive_set_logs route to sync results and encode 
     try expectEqual(payload.primitiveSetLogs[0].role, .setResult)
     try expectEqual(payload.primitiveSetLogs[0].rounds, 7)
     try expectEqual(payload.primitiveSetLogs[0].distanceM, 1000)
+    try expectEqual(payload.primitiveSetLogs[0].skipped, true)
+    try expectEqual(payload.primitiveSetLogs[0].side, "left")
+    try expectEqual(payload.primitiveSetLogs[0].notes, "scaled after warmup")
 }
 
 // MARK: - User parameter push routing
@@ -1199,6 +1369,10 @@ runAsyncCase("Primitive DTO mapping keeps schema at Sync and emits primitive log
     {
       "id": "10000000-0000-4000-8000-000000000002",
       "name": "Primitive AMRAP",
+      "activity_intent": {
+        "activity_domain": "running",
+        "preservation_policy": "preserve_primary_activity"
+      },
       "primitive_blocks": [
         {
           "id": "20000000-0000-4000-8000-000000000002",
@@ -1244,6 +1418,9 @@ runAsyncCase("Primitive DTO mapping keeps schema at Sync and emits primitive log
     }
     try expectEqual(mapped.blocks[0].sets[0].traversal, .amrap)
     try expectEqual(mapped.blocks[0].sets[0].workTargets[0].metric, .rounds)
+    try expectEqual(mapped.activityIntent?.activityDomain, .running)
+    try expectEqual(mapped.activityIntent?.environment, .unspecified)
+    try expectEqual(mapped.activityIntent?.preservationPolicy, .preservePrimaryActivity)
 
     let primitiveLog = CoreDomain.PrimitiveSetLog(
         id: uuid("99999999-9999-4999-8999-999999999999"),

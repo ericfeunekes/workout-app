@@ -95,6 +95,7 @@ class Workout(Base):
     source: Mapped[str] = mapped_column(String, nullable=False)
     notes: Mapped[str | None] = mapped_column(String)
     tags_json: Mapped[str | None] = mapped_column(String)
+    activity_intent_json: Mapped[str | None] = mapped_column(String)
     primitive_blocks_json: Mapped[str] = mapped_column(String, nullable=False, default="[]")
     created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(
@@ -122,6 +123,22 @@ class Workout(Base):
         if not blocks:
             raise ValueError("persisted primitive_blocks_json must contain at least one block")
         return blocks
+
+    @property
+    def activity_intent(self):
+        if self.activity_intent_json is None:
+            return None
+        try:
+            value = json.loads(self.activity_intent_json)
+        except (json.JSONDecodeError, TypeError):
+            raise ValueError("persisted activity_intent_json is not valid JSON") from None
+        if value is None:
+            return None
+        if not isinstance(value, dict):
+            raise ValueError("persisted activity_intent_json must be a JSON object or null")
+        if "environment" not in value:
+            value["environment"] = "unspecified"
+        return value
 
     __table_args__ = (
         CheckConstraint(
@@ -295,13 +312,19 @@ class PrimitiveSetLog(Base):
     distance_m: Mapped[float | None] = mapped_column(Float)
     rounds: Mapped[int | None] = mapped_column(Integer)
     rir: Mapped[int | None] = mapped_column(Integer)
+    hr_avg_bpm: Mapped[int | None] = mapped_column(Integer)
+    hr_max_bpm: Mapped[int | None] = mapped_column(Integer)
     is_warmup: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    skipped: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    side: Mapped[str] = mapped_column(String, nullable=False, default="bilateral")
+    notes: Mapped[str | None] = mapped_column(String)
     completed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
 
     __table_args__ = (
         CheckConstraint("role IN ('slot', 'set_result', 'block_result')"),
         CheckConstraint("weight_unit IN ('kg', 'lb') OR weight_unit IS NULL"),
         CheckConstraint("rir IS NULL OR (rir >= 0 AND rir <= 5)"),
+        CheckConstraint("side IN ('left', 'right', 'bilateral')"),
         Index("idx_primitive_set_log_workout", "workout_id"),
         Index("idx_primitive_set_log_set", "set_id"),
         Index("idx_primitive_set_log_slot", "slot_id"),
@@ -371,3 +394,72 @@ class EventLog(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
 
     __table_args__ = (Index("idx_event_log_user_ts", "user_id", "ts"),)
+
+
+# ---------- HealthKit personal archive ----------
+
+
+class HealthArchiveRecord(Base):
+    """Normalized HealthKit sample projection uploaded by the app.
+
+    HealthKit remains the source of truth. The server stores these rows as
+    Eric's personal landing zone for downstream systems and idempotently
+    upserts by the external HealthKit identity within a descriptor.
+    """
+
+    __tablename__ = "health_archive_record"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("app_user.id", ondelete="CASCADE"), nullable=False
+    )
+    external_id: Mapped[str] = mapped_column(String, nullable=False)
+    descriptor_id: Mapped[str] = mapped_column(String, nullable=False)
+    sample_kind: Mapped[str] = mapped_column(String, nullable=False)
+    source_bundle_identifier: Mapped[str | None] = mapped_column(String)
+    start_at: Mapped[datetime | None] = mapped_column(DateTime)
+    end_at: Mapped[datetime | None] = mapped_column(DateTime)
+    unit: Mapped[str | None] = mapped_column(String)
+    value_json: Mapped[str] = mapped_column(String, nullable=False)
+    metadata_json: Mapped[str] = mapped_column(String, nullable=False, default="{}")
+    first_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+    __table_args__ = (
+        Index("idx_health_archive_record_user_descriptor", "user_id", "descriptor_id"),
+        Index("idx_health_archive_record_user_start", "user_id", "start_at"),
+    )
+
+
+class HealthArchiveTombstone(Base):
+    __tablename__ = "health_archive_tombstone"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True)
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("app_user.id", ondelete="CASCADE"), nullable=False
+    )
+    descriptor_id: Mapped[str] = mapped_column(String, nullable=False)
+    external_id: Mapped[str] = mapped_column(String, nullable=False)
+    observed_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    __table_args__ = (
+        Index("idx_health_archive_tombstone_user_descriptor", "user_id", "descriptor_id"),
+    )
+
+
+class HealthArchiveRequestSet(Base):
+    __tablename__ = "health_archive_request_set"
+
+    id: Mapped[str] = mapped_column(String, primary_key=True, default=new_uuid)
+    user_id: Mapped[str] = mapped_column(
+        String, ForeignKey("app_user.id", ondelete="CASCADE"), nullable=False
+    )
+    request_set_key: Mapped[str] = mapped_column(String, nullable=False)
+    server_namespace: Mapped[str] = mapped_column(String, nullable=False)
+    descriptor_fingerprint: Mapped[str] = mapped_column(String, nullable=False)
+    acknowledged_cursor: Mapped[str | None] = mapped_column(String)
+    records_received: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    tombstones_received: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_uploaded_at: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=_utcnow)
+
+    __table_args__ = (Index("idx_health_archive_request_set_user", "user_id", "request_set_key"),)

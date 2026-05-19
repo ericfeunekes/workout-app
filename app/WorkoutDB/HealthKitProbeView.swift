@@ -75,6 +75,15 @@ struct HealthKitProbeView: View {
             let matchedDelete = !expectedDeletionKeys.isEmpty
                 && expectedDeletionKeys.isSubset(of: persistedDeletionKeys)
             let matchedCursor = persistedCursor == result.secondCursorValue
+            let storeKind = ProcessInfo.processInfo.environment[
+                "WORKOUTDB_HEALTHKIT_PROBE_DEFAULT_STORE"
+            ] == "1" ? "default_on_disk" : "in_memory"
+            let reopenMatched = try await verifyDefaultStoreReopenIfRequested(
+                expectedRecordIDs: expectedRecordIDs,
+                expectedDeletionKeys: expectedDeletionKeys,
+                expectedCursor: result.secondCursorValue,
+                requestSetKey: result.requestSetKey
+            )
             return result.withProjectionResult(
                 success: true,
                 projectionDeletedExternalIDs: persistedDeletedIDs,
@@ -82,11 +91,37 @@ struct HealthKitProbeView: View {
                 projectionRecordExternalIDs: persistedRecordIDs,
                 projectionMatchedRecords: matchedRecords,
                 projectionCursorValue: persistedCursor,
-                projectionMatchedCursor: matchedCursor
+                projectionMatchedCursor: matchedCursor,
+                projectionStoreKind: storeKind,
+                projectionReopenMatched: reopenMatched
             )
         } catch {
             return result.withProjectionResult(success: false, error: String(describing: error))
         }
+    }
+
+    private func verifyDefaultStoreReopenIfRequested(
+        expectedRecordIDs: [String],
+        expectedDeletionKeys: Set<String>,
+        expectedCursor: String?,
+        requestSetKey: String
+    ) async throws -> Bool {
+        guard ProcessInfo.processInfo.environment[
+            "WORKOUTDB_HEALTHKIT_PROBE_DEFAULT_STORE"
+        ] == "1" else {
+            return true
+        }
+        let reopened = try PersistenceFactory.makeDefault()
+        let records = try await reopened.healthArchiveStore.loadRecords(descriptorID: nil)
+        let deletions = try await reopened.healthArchiveStore.loadDeletions(descriptorID: nil)
+        let cursor = try await reopened.healthArchiveStore.loadCursor(
+            requestSetKey: requestSetKey
+        )?.cursor
+        return expectedRecordIDs.allSatisfy { expected in
+            records.contains { $0.externalID == expected }
+        }
+        && expectedDeletionKeys.isSubset(of: Set(deletions.map(deletionKey)))
+        && cursor == expectedCursor
     }
 
     private func archiveRecord(from record: HealthDataRecord) -> HealthArchiveRecord {

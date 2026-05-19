@@ -10,7 +10,7 @@ final class AppSyncLocalStateResetTests: XCTestCase {
 
     func testClearConnectionAndLocalServerDataClearsTokenWorkoutCacheAndCursorButPreservesArchive() async throws {
         let factory = try PersistenceFactory.makeInMemory(
-            tokenServiceName: "com.ericfeunekes.WorkoutDB.token.test.\(UUID().uuidString)"
+            tokenStore: FakeTokenStore()
         )
         let fixture = Fixtures.sampleWorkoutPayload()
         let archiveRecord = HealthArchiveRecord(
@@ -84,7 +84,7 @@ final class AppSyncLocalStateResetTests: XCTestCase {
 
     func testClearLocalServerDataPreservesTokenAndArchiveButClearsServerOwnedLocalState() async throws {
         let factory = try PersistenceFactory.makeInMemory(
-            tokenServiceName: "com.ericfeunekes.WorkoutDB.token.test.\(UUID().uuidString)"
+            tokenStore: FakeTokenStore()
         )
         let fixture = Fixtures.sampleWorkoutPayload()
         try factory.tokenStore.saveConnection(
@@ -109,7 +109,7 @@ final class AppSyncLocalStateResetTests: XCTestCase {
 
     func testPauseForTokenRejectedPreservesConnectionServerOwnedStateAndArchive() async throws {
         let factory = try PersistenceFactory.makeInMemory(
-            tokenServiceName: "com.ericfeunekes.WorkoutDB.token.test.\(UUID().uuidString)"
+            tokenStore: FakeTokenStore()
         )
         let fixture = Fixtures.sampleWorkoutPayload()
         try factory.tokenStore.saveConnection(
@@ -239,6 +239,22 @@ final class AppSyncLocalStateResetTests: XCTestCase {
 }
 
 private struct FailingResetError: Error {}
+
+private final class FakeTokenStore: TokenStore, @unchecked Sendable {
+    private var connection: (url: URL, token: String)?
+
+    func saveConnection(url: URL, token: String) throws {
+        connection = (url, token)
+    }
+
+    func loadConnection() throws -> (url: URL, token: String)? {
+        connection
+    }
+
+    func clear() throws {
+        connection = nil
+    }
+}
 
 private func seedServerOwnedLocalState(
     factory: PersistenceFactory,

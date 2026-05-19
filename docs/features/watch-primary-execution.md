@@ -23,11 +23,12 @@ covers:
 
 Eric needs the Watch to be able to run the workout when the phone is nearby,
 in a bag, or left behind. The current companion model is too weak for that:
-the Watch can display a face and emit start/end messages, but the phone has no
-watch inbox, the watch payload lacks stable cursor identity, and delayed
-WatchConnectivity delivery can make an old action look current. The feature is
-not "make the Watch independent of the system." It is: make one device the live
-workout authority, let the other mirror, and reconcile back through the phone.
+the Watch can display a face and emit start/end messages, and the phone-primary
+path can now consume those messages, but delayed WatchConnectivity delivery can
+still make an old action look current and the Watch cannot yet own authority
+while disconnected. The feature is not "make the Watch independent of the
+system." It is: make one device the live workout authority, let the other
+mirror, and reconcile back through the phone.
 
 The intended model is start-origin plus explicit handoff. Starting on the
 phone creates a phone-primary session. Starting on the Watch creates a
@@ -136,8 +137,11 @@ server sync path.
   programmable double tap.
 - `WATCHCUSTOM-GAP-001`: The current WatchBridge schema is rendered-string oriented and unversioned.
   Implementation must replace it before enabling watch-primary actions.
-- `WATCHCUSTOM-GAP-001`: The phone-side watch inbox does not exist today, so current Watch taps do not
-  mutate phone session state.
+- `WATCHCUSTOM-GAP-001`: Phone-side watch message handling exists for the
+  current phone-primary execution session, including set-start, set-end,
+  quick-log, real item identity, HR annotation, and push enqueue. Watch-primary
+  authority transfer, inactive delivery, disconnected event replay, and
+  real-device timing remain unproven.
 - `WATCHCUSTOM-GAP-002`: Watch durability during app termination must be proven before relying on
   disconnected execution for real workouts.
 

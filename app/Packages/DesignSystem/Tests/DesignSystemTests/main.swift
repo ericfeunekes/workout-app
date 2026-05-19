@@ -51,6 +51,13 @@ runCase("DSButton constructs in every style") {
     _ = DSButton(title: "disabled", style: .primary, disabled: true, action: {})
 }
 
+runCase("DSButton pins minimum action height") {
+    try expect(
+        DSButton.minimumHeight >= 44,
+        "button minimum height must satisfy platform hit-target expectation"
+    )
+}
+
 runCase("DSChip constructs with every tone") {
     _ = DSChip(label: "last session", value: "fri")
     _ = DSChip(label: "offline")

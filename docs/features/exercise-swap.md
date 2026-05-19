@@ -23,12 +23,12 @@ Long-press on the Active screen's card fires a medium haptic + opens `SwapSheet`
 ## State surface
 - **Inputs (UI):** long-press (~0.4s) on the Active-card scroll region opens `SwapSheet`. Tapping a row calls `ExecutionViewModel.swap(itemID:, alternativeID:)`.
 - **Inputs (code):** any caller can dispatch `.swap(itemID:, toExerciseID:, overrides:)` through `ExecutionViewModel.apply(_:)`; the `overrides:` associated value defaults to `nil`.
-- **Outputs / side effects:** `itemLog.performedExerciseID` is set; `itemLog.overrides` carries the parsed `AlternativeOverrides` when non-empty; remaining non-done `SetPlan` rows pick up the override's `reps` / `load_kg` (`.manual` rows preserved). Subsequent `logSet` calls produce `SetLog` rows with `performedExerciseID` populated. The workout template is **not** mutated — re-pulling the workout shows the original exercise. Telemetry emits `execution.exercise_swap`.
+- **Outputs / side effects:** `itemLog.performedExerciseID` is set; `itemLog.overrides` carries the parsed `AlternativeOverrides` when non-empty; remaining non-done `SetPlan` rows pick up the override's `reps` / `load_kg` (`.manual` rows preserved). Subsequent `logSet` calls produce primitive slot rows with `performedExerciseID` populated. The workout template is **not** mutated — re-pulling the workout shows the original exercise. Telemetry emits `execution.exercise_swap`.
 - **State transitions:** exactly one reducer branch — `applySwap` (`SessionReducer+Handlers.swift`).
 
 ## What it deliberately doesn't do
 - Does not reset `autoregHeld` (`SessionReducer+Handlers.swift` — cites `docs/prescription.md` § "Hold scope").
-- Does not mutate logged sets (comment: "preserves history", `SessionMutation.swift`). Pre-swap set_logs retain `performedExerciseID=nil` (meaning "planned exercise performed").
+- Does not mutate logged sets (comment: "preserves history", `SessionMutation.swift`). Pre-swap primitive slot rows retain `performedExerciseID=nil` (meaning "planned exercise performed").
 - Does not write to the workout row — next session still shows the original exercise.
 - Does not overwrite `.manual` edits. Any pending set the user edited before the swap keeps its user-chosen load/reps; only non-manual pending sets pick up the alternative's override values.
 - Does not validate that the alternative's shape matches the block's timing_mode — flagged in `docs/open-questions.md:41` ("no validation that the override produces a shape the block's timing_mode can execute").
@@ -71,7 +71,7 @@ Long-press on the Active screen's card fires a medium haptic + opens `SwapSheet`
 ### S3. Swap preserves logged sets
 - **setup:** 3 sets prescribed. Log set 1 of Bench as 5/RIR 2.
 - **steps:** dispatch `.swap(itemID, dbBenchID)`.
-- **expected:** `state.items[0].sets[0]` still has the logged reps/rir. Its `performedExerciseID` is **not** retroactively applied to logged sets — set_log rows created from that logged state carry `performedExerciseID=nil` (the set was logged before the swap). Only **subsequent** `logSet` calls receive the new id via `enqueueLoggedSet` (`ExecutionViewModel+Push.swift:58-62`).
+- **expected:** `state.items[0].sets[0]` still has the logged reps/rir. Its `performedExerciseID` is **not** retroactively applied to logged sets — primitive slot rows already created from that logged state carry `performedExerciseID=nil` (the set was logged before the swap). Only **subsequent** `logSet` calls receive the new id through primitive slot publication.
 
 ### S4. Swap preserves autoregHeld
 - **setup:** Bench item with `autoregHeld=true` after an earlier Undo.
@@ -81,7 +81,7 @@ Long-press on the Active screen's card fires a medium haptic + opens `SwapSheet`
 ### S5. Swap mid-set
 - **setup:** Active screen, set 2 of 3.
 - **steps:** long-press → SwapSheet → tap alternative → return to active.
-- **expected — code behavior:** pending set 2's `loadKg` and `reps` are unchanged (swap doesn't reseed — non-manual rows pick up the override's values, but set 2 is the current cursor). Only the display name flips. Logging set 2 produces a set_log with `performedExerciseID` set to the alternative.
+- **expected — code behavior:** pending set 2's `loadKg` and `reps` are unchanged (swap doesn't reseed — non-manual rows pick up the override's values, but set 2 is the current cursor). Only the display name flips. Logging set 2 produces a primitive slot row with `performedExerciseID` set to the alternative.
 
 ### S6. Empty alternatives list
 - **setup:** item with `alternatives[]=[]` in the pulled workout.
@@ -91,7 +91,7 @@ Long-press on the Active screen's card fires a medium haptic + opens `SwapSheet`
 ### S7. Swap to same exercise (no-op)
 - **setup:** alternative's `exerciseID == item.exerciseID`.
 - **steps:** dispatch `.swap(itemID, sameID)`.
-- **expected — code behavior:** `performedExerciseID` is set to `sameID`, which now masks the underlying `item.exerciseID`. `exerciseName` resolution short-circuits on the same id. Functional no-op, but the state now carries a redundant override — it'll show in `SetLog.performedExerciseID` for subsequent logs. Cosmetically fine; semantically an authoring oddity.
+- **expected — code behavior:** `performedExerciseID` is set to `sameID`, which now masks the underlying `item.exerciseID`. `exerciseName` resolution short-circuits on the same id. Functional no-op, but the state now carries a redundant override — it'll show in primitive slot `performedExerciseID` for subsequent logs. Cosmetically fine; semantically an authoring oddity.
 
 ### S8. Swap affects only this item
 - **setup:** three items A, B, C in the same block.
@@ -102,10 +102,10 @@ Long-press on the Active screen's card fires a medium haptic + opens `SwapSheet`
 - **setup:** swap A in block 0; advance to block 1 containing item D.
 - **expected:** D's display name, prescription, autoreg all come from D's own `workout_item`. No cross-item contamination.
 
-### S10. `performedExerciseID` lands on set_log
+### S10. `performedExerciseID` lands on primitive slot log
 - **setup:** swap Bench → DB Bench. Log set 2.
-- **steps:** inspect the `SetLog` handed to `onSetLogged`.
-- **expected:** `setLog.performedExerciseID == dbBenchID` (`ExecutionViewModel+Push.swift:55-70`). `setLog.workoutItemID` stays the original Bench item's id.
+- **steps:** inspect the `PrimitiveSetLog` handed to `onPrimitiveSetLogged`.
+- **expected:** `primitiveSetLog.performedExerciseID == dbBenchID`. The primitive slot ID stays the original authored slot/item coordinate.
 
 ### S11. History aggregation follows the swap
 - **setup:** swap logged, completion saved.

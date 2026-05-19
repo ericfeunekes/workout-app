@@ -38,6 +38,7 @@ final class WatchFacesViewModelTests: XCTestCase {
         try await awaitSubscription()
 
         let payload = ActiveBlockPayload(
+            workoutItemID: UUID(),
             exerciseName: "Bench",
             prescription: "5 × 102.5 kg",
             setNumber: 2,
@@ -72,7 +73,9 @@ final class WatchFacesViewModelTests: XCTestCase {
 
         // Prime with an active block so the rest payload carries the
         // exercise name — this is the realistic wire order.
+        let itemID = UUID()
         bridge.deliver(.pushActiveBlock(ActiveBlockPayload(
+            workoutItemID: itemID,
             exerciseName: "Row",
             prescription: "8 × 80 kg",
             setNumber: 1,
@@ -111,7 +114,9 @@ final class WatchFacesViewModelTests: XCTestCase {
         }
         try await awaitSubscription()
 
+        let itemID = UUID()
         bridge.deliver(.pushActiveBlock(ActiveBlockPayload(
+            workoutItemID: itemID,
             exerciseName: "Row",
             prescription: "8 × 80 kg",
             setNumber: 1,
@@ -141,7 +146,9 @@ final class WatchFacesViewModelTests: XCTestCase {
         }
         try await awaitSubscription()
 
+        let itemID = UUID()
         bridge.deliver(.pushActiveBlock(ActiveBlockPayload(
+            workoutItemID: itemID,
             exerciseName: "Bench",
             prescription: "5 × 102.5 kg",
             setNumber: 3,
@@ -168,7 +175,8 @@ final class WatchFacesViewModelTests: XCTestCase {
             return false
         }
         switch setStarted {
-        case .setStarted(_, let setIndex, _):
+        case .setStarted(let workoutItemID, let setIndex, _):
+            XCTAssertEqual(workoutItemID, itemID)
             XCTAssertEqual(setIndex, 3)
         default:
             XCTFail("expected .setStarted in sent log, got \(sent)")
@@ -187,6 +195,7 @@ final class WatchFacesViewModelTests: XCTestCase {
 
         // Prime with an active block, then flip to rest.
         bridge.deliver(.pushActiveBlock(ActiveBlockPayload(
+            workoutItemID: UUID(),
             exerciseName: "Bench",
             prescription: "5 × 102.5 kg",
             setNumber: 3,
@@ -262,6 +271,7 @@ final class WatchFacesViewModelTests: XCTestCase {
         try await awaitSubscription()
 
         bridge.deliver(.pushActiveBlock(ActiveBlockPayload(
+            workoutItemID: UUID(),
             exerciseName: "Run",
             prescription: "20 min easy",
             setNumber: 1,
@@ -300,6 +310,7 @@ final class WatchFacesViewModelTests: XCTestCase {
         try await awaitSubscription()
 
         bridge.deliver(.pushActiveBlock(ActiveBlockPayload(
+            workoutItemID: UUID(),
             exerciseName: "Bench",
             prescription: "5 × 100 kg",
             setNumber: 1,
@@ -336,6 +347,7 @@ final class WatchFacesViewModelTests: XCTestCase {
         try await awaitSubscription()
 
         bridge.deliver(.pushActiveBlock(ActiveBlockPayload(
+            workoutItemID: UUID(),
             exerciseName: "Bench",
             prescription: "5 × 102.5 kg",
             setNumber: 2,

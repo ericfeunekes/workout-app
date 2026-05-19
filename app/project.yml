@@ -61,6 +61,8 @@ packages:
     path: Packages/Sync
   HealthKitBridge:
     path: Packages/HealthKitBridge
+  HealthArchiveExport:
+    path: Packages/HealthArchiveExport
   WatchBridge:
     path: Packages/WatchBridge
   WorkoutKitAdapter:
@@ -114,6 +116,9 @@ targets:
       # HealthKitBridge — HR, cadence, body-weight queries. The only
       # package allowed to import HealthKit (FF-13 enforces).
       - package: HealthKitBridge
+      # HealthArchiveExport — manual personal HealthKit archive export
+      # coordinator. Settings triggers it through app-shell closures.
+      - package: HealthArchiveExport
       # WatchBridge — iPhone ↔ Watch IPC. The only package allowed to
       # import WatchConnectivity (FF-13 enforces).
       - package: WatchBridge
@@ -270,9 +275,28 @@ targets:
       - path: WorkoutDBTests
     dependencies:
       - target: WorkoutDB
+      - package: HealthArchiveExport
+      - package: Persistence
+      - package: Sync
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.ericfeunekes.WorkoutDBTests
+        GENERATE_INFOPLIST_FILE: YES
+
+  # -----------------------------------------------------------------------
+  # Setmark — signed iOS Keychain boundary tests
+  # -----------------------------------------------------------------------
+  WorkoutDBKeychainTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: WorkoutDBKeychainTests
+    dependencies:
+      - target: WorkoutDB
+      - package: Persistence
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ericfeunekes.WorkoutDBKeychainTests
         GENERATE_INFOPLIST_FILE: YES
 
 schemes:
@@ -287,6 +311,7 @@ schemes:
       config: Debug
       targets:
         - WorkoutDBTests
+        - WorkoutDBKeychainTests
         - WorkoutDBUITests
     archive:
       config: Release

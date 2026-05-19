@@ -904,6 +904,16 @@ final class AppBootstrapTests: XCTestCase {
         XCTAssertTrue(payloads.allSatisfy { $0["primitive_set_log_count"] as? Int == 7 })
         XCTAssertTrue(payloads.allSatisfy { $0["has_note"] as? Bool == false })
         XCTAssertEqual(payloads[1]["publisher_installed"] as? Bool, true)
+
+        let historyVM = HistoryViewModel(cache: factory.workoutCache)
+        await historyVM.load()
+        let detail = try XCTUnwrap(historyVM.detail(for: saved.id))
+        let renderedRows = detail.cards.flatMap(\.setRows)
+        XCTAssertEqual(renderedRows.count, 7)
+        XCTAssertFalse(
+            renderedRows.map(\.display).joined(separator: " ").contains("rows logged"),
+            "History must render the primitive completion artifact, not internal row-count copy"
+        )
     }
 
     // MARK: - Post-save VM rebuild (qa-002 / qa-003)
@@ -1913,6 +1923,7 @@ private final class EmptyWorkoutContextCache: WorkoutCache, @unchecked Sendable 
     func loadCompletedWorkouts(limit: Int, offset: Int) async throws -> [DomainWorkout] { [] }
     func loadSetLogs(workoutID: WorkoutID) async throws -> [DomainSetLog] { [] }
     func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [DomainPrimitiveSetLog] { [] }
+    func loadPrimitiveSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [DomainPrimitiveSetLog] { [] }
     func loadSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [DomainSetLog] { [] }
     func loadOrphanedSetLogs() async throws -> [DomainSetLog] { [] }
     func saveSetLogs(_ setLogs: [DomainSetLog], workoutID: WorkoutID) async throws {}
@@ -1964,6 +1975,9 @@ private final class ThrowingUserParameterCache: WorkoutCache, @unchecked Sendabl
     }
     func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [DomainPrimitiveSetLog] {
         try await base.loadPrimitiveSetLogs(workoutID: workoutID)
+    }
+    func loadPrimitiveSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [DomainPrimitiveSetLog] {
+        try await base.loadPrimitiveSetLogs(exerciseID: exerciseID, limit: limit)
     }
     func loadSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [DomainSetLog] {
         try await base.loadSetLogs(exerciseID: exerciseID, limit: limit)

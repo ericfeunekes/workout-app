@@ -18,6 +18,8 @@ final class FakeHistoryCache: WorkoutCache, @unchecked Sendable {
     var itemsByBlock: [UUID: [WorkoutItem]]
     var exercises: [Exercise]
     var setLogsByWorkout: [UUID: [SetLog]]
+    var primitiveWorkouts: [PrimitiveWorkout]
+    var primitiveSetLogsByWorkout: [UUID: [PrimitiveSetLog]]
     /// `user_parameters` rows indexed by `key`. Tests that exercise the
     /// History bodyweight-window lookup seed this directly; the rest
     /// ignore it.
@@ -29,6 +31,8 @@ final class FakeHistoryCache: WorkoutCache, @unchecked Sendable {
         itemsByBlock: [UUID: [WorkoutItem]] = [:],
         exercises: [Exercise] = [],
         setLogsByWorkout: [UUID: [SetLog]] = [:],
+        primitiveWorkouts: [PrimitiveWorkout] = [],
+        primitiveSetLogsByWorkout: [UUID: [PrimitiveSetLog]] = [:],
         userParametersByKey: [String: [UserParameter]] = [:]
     ) {
         self.workouts = workouts
@@ -36,6 +40,8 @@ final class FakeHistoryCache: WorkoutCache, @unchecked Sendable {
         self.itemsByBlock = itemsByBlock
         self.exercises = exercises
         self.setLogsByWorkout = setLogsByWorkout
+        self.primitiveWorkouts = primitiveWorkouts
+        self.primitiveSetLogsByWorkout = primitiveSetLogsByWorkout
         self.userParametersByKey = userParametersByKey
     }
 
@@ -46,7 +52,7 @@ final class FakeHistoryCache: WorkoutCache, @unchecked Sendable {
         return workouts.filter { $0.status == status }
     }
 
-    func loadPrimitiveWorkouts() async throws -> [PrimitiveWorkout] { [] }
+    func loadPrimitiveWorkouts() async throws -> [PrimitiveWorkout] { primitiveWorkouts }
 
     func loadBlocks(workoutID: WorkoutID) async throws -> [Block] {
         blocksByWorkout[workoutID] ?? []
@@ -127,7 +133,18 @@ final class FakeHistoryCache: WorkoutCache, @unchecked Sendable {
         setLogsByWorkout[workoutID] ?? []
     }
 
-    func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [PrimitiveSetLog] { [] }
+    func loadPrimitiveSetLogs(workoutID: WorkoutID) async throws -> [PrimitiveSetLog] {
+        primitiveSetLogsByWorkout[workoutID] ?? []
+    }
+
+    func loadPrimitiveSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [PrimitiveSetLog] {
+        guard limit > 0 else { return [] }
+        let matching = primitiveSetLogsByWorkout.values.flatMap { $0 }.filter { log in
+            log.resultSemantics.isByExerciseEligible
+                && ((log.performedExerciseID ?? log.plannedExerciseID) == exerciseID)
+        }
+        return Array(matching.sorted { $0.completedAt > $1.completedAt }.prefix(limit))
+    }
 
     func loadSetLogs(exerciseID: ExerciseID, limit: Int) async throws -> [SetLog] {
         guard limit > 0 else { return [] }
@@ -185,10 +202,22 @@ final class FakeHistoryCache: WorkoutCache, @unchecked Sendable {
         setLogsByWorkout[workoutID] = bucket
     }
 
-    func savePrimitiveSetLogs(_ setLogs: [PrimitiveSetLog], workoutID: WorkoutID) async throws {}
+    func savePrimitiveSetLogs(_ setLogs: [PrimitiveSetLog], workoutID: WorkoutID) async throws {
+        var bucket = primitiveSetLogsByWorkout[workoutID] ?? []
+        for var newLog in setLogs {
+            newLog.workoutID = newLog.workoutID ?? workoutID
+            if let idx = bucket.firstIndex(where: { $0.id == newLog.id }) {
+                bucket[idx] = newLog
+            } else {
+                bucket.append(newLog)
+            }
+        }
+        primitiveSetLogsByWorkout[workoutID] = bucket
+    }
 
     func resetWorkout(workoutID: WorkoutID) async throws {
         setLogsByWorkout[workoutID] = []
+        primitiveSetLogsByWorkout[workoutID] = []
         workouts = workouts.map { workout in
             guard workout.id == workoutID else { return workout }
             var reset = workout

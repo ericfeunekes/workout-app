@@ -212,6 +212,32 @@ final class CompleteViewLedgerSwapTests: XCTestCase {
         )
     }
 
+    func testForTimeFallbackDoesNotExposeRowsLoggedCopy() {
+        let exerciseID = UUID()
+        let itemID = UUID()
+        let context = makeContext(
+            itemID: itemID,
+            plannedExerciseID: exerciseID,
+            exercises: [exerciseID: Exercise(id: exerciseID, name: "Thruster")],
+            timingMode: .forTime,
+            timingConfigJSON: #"{"time_cap_sec":600}"#,
+            blockName: "For Time"
+        )
+        let itemLog = SessionState.ItemLog(
+            itemID: itemID,
+            sets: [makeSet(index: 1, load: 40, unit: .kg, reps: 10, rir: nil)]
+        )
+
+        let entries = CompleteView.blockResultEntries(
+            context: context,
+            items: [itemLog],
+            note: ""
+        )
+
+        XCTAssertEqual(entries.first?.summary, "1 result logged")
+        XCTAssertFalse(entries.first?.summary.contains("rows logged") ?? true)
+    }
+
     func testBlockResultsPreferPrimitiveAggregateSetResults() {
         let exerciseID = UUID()
         let itemID = UUID()

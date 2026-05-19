@@ -82,6 +82,75 @@ final class ExecutionWorkoutTypeMatrixUITests: XCTestCase {
         runExecutionSmoke(.matrixCase(named: "primitive_strength_density"))
     }
 
+    func testPrimitiveCapstoneSaveAndDoneRendersHistoryPrimitiveRows() {
+        let app = XCUIApplication()
+        app.terminate()
+        app.launchArguments = [
+            "--jump-complete",
+            "--debug-scenario",
+            "primitive_capstone_fast",
+        ]
+        app.launch()
+        defer { app.terminate() }
+
+        XCTAssertTrue(app.staticTexts["workout complete"].waitForExistence(timeout: 8))
+        XCTAssertEqual(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "rows logged")).count,
+            0
+        )
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "reps")).count > 0)
+
+        let saveAndDone = app.buttons["save & done"]
+        XCTAssertTrue(
+            saveAndDone.waitForExistence(timeout: 3),
+            "primitive_capstone_fast completion expected Save & Done button"
+        )
+        XCTAssertTrue(
+            saveAndDone.isHittable,
+            "primitive_capstone_fast completion expected Save & Done button to be hittable"
+        )
+        XCTAssertGreaterThanOrEqual(
+            saveAndDone.frame.height,
+            44,
+            "Save & Done must preserve at least the platform minimum hit target"
+        )
+
+        tapRequiredButton(
+            "save & done",
+            identifier: "save & done",
+            in: app,
+            name: "primitive_capstone_fast history readback",
+            file: #filePath,
+            line: #line
+        )
+        tapRequiredButton(
+            "history",
+            identifier: "history",
+            in: app,
+            name: "primitive_capstone_fast history readback",
+            file: #filePath,
+            line: #line
+        )
+        let completedSession = app.buttons
+            .matching(NSPredicate(format: "label CONTAINS[c] %@", "QA Primitive · Fast Mixed AMRAP"))
+            .firstMatch
+        XCTAssertTrue(
+            completedSession.waitForExistence(timeout: 3),
+            "primitive_capstone_fast history readback expected completed primitive session row"
+        )
+        completedSession.tap()
+
+        XCTAssertTrue(
+            app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH %@", "history.session.setrow.")).count > 0,
+            "History detail must render primitive result rows after Save & Done"
+        )
+        XCTAssertEqual(
+            app.staticTexts.matching(NSPredicate(format: "label CONTAINS[c] %@", "rows logged")).count,
+            0,
+            "History must not expose internal row-count copy"
+        )
+    }
+
     private func runExecutionSmoke(
         _ testCase: ExecutionSmokeCase,
         file: StaticString = #filePath,

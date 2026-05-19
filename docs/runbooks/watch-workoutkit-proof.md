@@ -207,9 +207,11 @@ the production proof-gated push coordinator and not the adapter's raw
 descriptor/client types. The current hook is schedule-probe evidence only. It
 does not prove open/startability, scheduled-workout visibility on Apple Watch,
 duplicate/update behavior, permissions, or a user-facing export path. The
-production coordinator blocks value-backed payloads until exact target-value
-mapping exists, so these synthetic diagnostic targets do not imply product
-export readiness.
+production coordinator consumes only `ExportProfile` resolved descriptors;
+descriptor-incomplete rows remain blocked until exact target and step mapping
+exists. The DEBUG hook uses a separate synthetic descriptor for evidence
+collection. These synthetic diagnostic targets do not imply product export
+readiness.
 
 ## Spike probes
 

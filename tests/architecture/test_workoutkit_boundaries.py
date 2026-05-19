@@ -21,6 +21,16 @@ FORBIDDEN_HEALTHKIT_DATA_ACCESS_SYMBOLS = (
     "requestAuthorization",
     "authorizationStatus",
 )
+FORBIDDEN_TARGET_SPECIFIC_SOURCE_FACT_SYMBOLS = (
+    "workoutkit_",
+    "WorkoutKit",
+    "healthkit_",
+    "HealthKit",
+    "strava_",
+    "Strava",
+    "apple_workout",
+    "appleWorkout",
+)
 
 
 def _swift_files(root: Path) -> list[Path]:
@@ -70,11 +80,14 @@ def test_workoutkit_imports_stay_inside_adapter_package() -> None:
 def test_shell_and_features_do_not_call_raw_workoutkit_adapter_bypasses() -> None:
     """Product callers use the coordinator/facade, not raw clients or descriptors."""
 
-    allowed_prefix = "app/Packages/WorkoutKitAdapter/"
+    allowed_prefixes = (
+        "app/Packages/WorkoutKitAdapter/",
+        "app/Packages/ExportProfile/",
+    )
     violations: list[str] = []
     for path in _swift_files(REPO_ROOT / "app"):
         rel = path.relative_to(REPO_ROOT).as_posix()
-        if rel.startswith(allowed_prefix):
+        if rel.startswith(allowed_prefixes):
             continue
         text = path.read_text()
         for symbol in FORBIDDEN_ADAPTER_BYPASS_SYMBOLS:
@@ -102,5 +115,44 @@ def test_workoutkit_adapter_healthkit_usage_is_enum_only() -> None:
     assert not violations, (
         "WorkoutKitAdapter's HealthKit exception is limited to enum types required "
         "for WorkoutKit plan construction; HealthKit data access belongs in HealthKitBridge:\n"
+        + "\n".join(violations)
+    )
+
+
+def test_activity_intent_source_facts_stay_vendor_neutral() -> None:
+    """Primitive source facts stay neutral; target policy belongs in export adapters."""
+
+    source_fact_files = [
+        REPO_ROOT
+        / "app"
+        / "Packages"
+        / "Core"
+        / "Domain"
+        / "Sources"
+        / "CoreDomain"
+        / "PrimitiveWorkout.swift",
+        REPO_ROOT / "schema" / "Sources" / "WorkoutDBSchema" / "PrimitiveEntities.swift",
+    ]
+    violations: list[str] = []
+    for path in source_fact_files:
+        text = path.read_text()
+        for symbol in FORBIDDEN_TARGET_SPECIFIC_SOURCE_FACT_SYMBOLS:
+            if symbol in text:
+                violations.append(f"{path.relative_to(REPO_ROOT).as_posix()}: {symbol}")
+
+    schemas_text = (REPO_ROOT / "server" / "workoutdb_server" / "api" / "schemas.py").read_text()
+    match = re.search(
+        r"class ActivityIntentIn\(BaseModel\):(?P<body>.*?)(?=\n\nclass )",
+        schemas_text,
+        re.S,
+    )
+    assert match is not None, "ActivityIntentIn schema must exist"
+    for symbol in FORBIDDEN_TARGET_SPECIFIC_SOURCE_FACT_SYMBOLS:
+        if symbol in match.group("body"):
+            violations.append(f"server/workoutdb_server/api/schemas.py: ActivityIntentIn {symbol}")
+
+    assert not violations, (
+        "activity_intent is a vendor-neutral primitive source fact. "
+        "Do not add WorkoutKit/HealthKit/Strava/Apple-specific fields there:\n"
         + "\n".join(violations)
     )

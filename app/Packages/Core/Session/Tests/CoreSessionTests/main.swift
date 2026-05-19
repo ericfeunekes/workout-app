@@ -129,6 +129,86 @@ runCase("primitive log coordinate creates stable role-scoped ids") {
     try expect(setResultA != blockResultA, "aggregate roles must remain role-scoped")
 }
 
+runCase("primitive result log semantics protect role authority") {
+    let completedAt = Date(timeIntervalSince1970: 1_700_000_100)
+    let exerciseID = UUID(uuidString: "50000000-0000-4000-8000-000000000101")!
+    let performedID = UUID(uuidString: "50000000-0000-4000-8000-000000000102")!
+    let slot = PrimitiveSetLog(
+        id: UUID(uuidString: "60000000-0000-4000-8000-000000000101")!,
+        role: .slot,
+        slotID: UUID(uuidString: "40000000-0000-4000-8000-000000000101")!,
+        plannedExerciseID: exerciseID,
+        performedExerciseID: performedID,
+        setIndex: 0,
+        reps: 5,
+        weight: 100,
+        weightUnit: .kg,
+        rir: 2,
+        completedAt: completedAt
+    )
+    try expectEqual(slot.resultSemantics.scope, .exercise)
+    try expectEqual(slot.resultSemantics.isByExerciseEligible, true)
+    try expectEqual(slot.resultSemantics.isAggregate, false)
+    try expectEqual(slot.resultSemantics.primaryMetric, .reps)
+    try expectEqual(slot.resultSemantics.secondaryMetrics, [.loadCarried])
+    try expectEqual(slot.resultSemantics.isSentinel, false)
+
+    let skippedSlot = PrimitiveSetLog(
+        id: UUID(uuidString: "60000000-0000-4000-8000-000000000102")!,
+        role: .slot,
+        slotID: UUID(uuidString: "40000000-0000-4000-8000-000000000102")!,
+        plannedExerciseID: exerciseID,
+        setIndex: 1,
+        skipped: true,
+        completedAt: completedAt
+    )
+    try expectEqual(skippedSlot.resultSemantics.scope, .exercise)
+    try expectEqual(skippedSlot.resultSemantics.isByExerciseEligible, false)
+    try expectEqual(skippedSlot.resultSemantics.isSentinel, false)
+    try expectEqual(skippedSlot.primitiveResultMetrics, [])
+
+    let setAggregate = PrimitiveSetLog(
+        id: UUID(uuidString: "60000000-0000-4000-8000-000000000103")!,
+        role: .setResult,
+        setID: UUID(uuidString: "30000000-0000-4000-8000-000000000103")!,
+        blockID: UUID(uuidString: "20000000-0000-4000-8000-000000000103")!,
+        setIndex: 0,
+        reps: 7,
+        rounds: 3,
+        completedAt: completedAt
+    )
+    try expectEqual(setAggregate.resultSemantics.scope, .setAggregate)
+    try expectEqual(setAggregate.resultSemantics.isByExerciseEligible, false)
+    try expectEqual(setAggregate.resultSemantics.isAggregate, true)
+    try expectEqual(setAggregate.resultSemantics.primaryMetric, .rounds)
+    try expectEqual(setAggregate.resultSemantics.secondaryMetrics, [.reps])
+    try expectEqual(setAggregate.primitiveResultMetrics, [.rounds, .reps])
+    try expectEqual(setAggregate.resultSemantics.isSentinel, false)
+
+    let blockSentinel = PrimitiveSetLog(
+        id: UUID(uuidString: "60000000-0000-4000-8000-000000000104")!,
+        role: .blockResult,
+        blockID: UUID(uuidString: "20000000-0000-4000-8000-000000000104")!,
+        setIndex: 0,
+        completedAt: completedAt
+    )
+    try expectEqual(blockSentinel.resultSemantics.scope, .blockAggregate)
+    try expectEqual(blockSentinel.resultSemantics.isByExerciseEligible, false)
+    try expectEqual(blockSentinel.resultSemantics.isAggregate, true)
+    try expectEqual(blockSentinel.resultSemantics.primaryMetric, nil)
+    try expectEqual(blockSentinel.resultSemantics.isSentinel, true)
+
+    let skippedAggregate = PrimitiveSetLog(
+        id: UUID(uuidString: "60000000-0000-4000-8000-000000000105")!,
+        role: .blockResult,
+        blockID: UUID(uuidString: "20000000-0000-4000-8000-000000000105")!,
+        setIndex: 0,
+        skipped: true,
+        completedAt: completedAt
+    )
+    try expectEqual(skippedAggregate.resultSemantics.isSentinel, true)
+}
+
 runCase("primitive semantics validates shared timing traversal matrix") {
     let exerciseID = UUID(uuidString: "50000000-0000-4000-8000-000000000010")!
     let legal = PrimitiveWorkout(

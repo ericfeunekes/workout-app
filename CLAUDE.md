@@ -157,10 +157,16 @@ make pre-qa              # current local pre-QA gate before docs/QA.md
 make qa-ready            # verify XcodeBuildMCP before simulator/device QA
 ```
 
-For TestFlight/App Store distribution from an agent session, avoid login-keychain
-password prompts by importing the distribution certificate into a dedicated
-temporary keychain and passing it to Xcode with
-`OTHER_CODE_SIGN_FLAGS = --keychain <path>`.
+TestFlight/App Store distribution is agent-operated. Do not rely on Eric being
+present to type passwords. Preflight must prove signing material, provisioning
+profiles, and App Store Connect upload credentials are available
+non-interactively. Use `make release-preflight`, `make release-bump-build`, and
+`make release-testflight RELEASE_REF=<committed-ref>`; the release runner builds
+from a detached temporary worktree at the resolved SHA and records a manifest
+under `scratch/qa-runs/`. Use a dedicated non-login release keychain, or create
+a temporary keychain from non-interactively retrieved certificate material, and
+pass it to Xcode with `OTHER_CODE_SIGN_FLAGS = --keychain <path>`. Treat any
+login-keychain, Apple ID, `op signin`, or Xcode GUI prompt as a release blocker.
 
 **CI** (`.github/workflows/ci.yml`): Linux only, server tests + ruff on push and PR. iOS build/test deferred until the app exists and we revisit public-vs-private repo. See `docs/WORKFLOW.md` § "CI scope" for the budget math.
 

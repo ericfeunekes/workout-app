@@ -127,6 +127,10 @@ struct CodableRoundTripTests {
             status: .planned,
             source: .claude,
             tagsJson: #"["hypertrophy_block_2"]"#,
+            activityIntent: ActivityIntent(
+                activityDomain: .traditionalStrength,
+                preservationPolicy: .preserveStructure
+            ),
             createdAt: createdAt,
             updatedAt: createdAt,
             primitiveBlocks: [
@@ -156,6 +160,25 @@ struct CodableRoundTripTests {
         let data = try encoder.encode(workout)
         let decoded = try decoder.decode(Workout.self, from: data)
         #expect(decoded == workout)
+    }
+
+    @Test func workoutActivityIntentDecodesOmittedNullAndMissingEnvironment() throws {
+        let omitted = try decoder.decode(Workout.self, from: Data(workoutJSON(activityIntent: nil).utf8))
+        #expect(omitted.activityIntent == nil)
+
+        let explicitNull = try decoder.decode(
+            Workout.self,
+            from: Data(workoutJSON(activityIntent: "null").utf8)
+        )
+        #expect(explicitNull.activityIntent == nil)
+
+        let missingEnvironment = try decoder.decode(
+            Workout.self,
+            from: Data(workoutJSON(activityIntent: #"{"activity_domain":"running"}"#).utf8)
+        )
+        #expect(missingEnvironment.activityIntent?.activityDomain == .running)
+        #expect(missingEnvironment.activityIntent?.environment == .unspecified)
+        #expect(missingEnvironment.activityIntent?.preservationPolicy == nil)
     }
 
     @Test func setLogRoundTripWithHR() throws {
@@ -265,4 +288,43 @@ struct CodableRoundTripTests {
         #expect(decoded.exercises[0].id == kExerciseBackSquat)
         #expect(decoded.lastPerformed.isEmpty)
     }
+}
+
+private func workoutJSON(activityIntent: String?) -> String {
+    let activityIntentField = activityIntent.map { #","activity_intent":\#($0)"# } ?? ""
+    return #"""
+        {
+          "id":"\#(kWorkoutID)",
+          "user_id":"\#(kUserID)",
+          "name":"Tuesday Legs",
+          "scheduled_date":"2026-04-20",
+          "status":"planned",
+          "source":"claude",
+          "notes":null,
+          "tags_json":null\#(activityIntentField),
+          "created_at":"2026-04-17T08:00:00Z",
+          "updated_at":"2026-04-17T08:00:00Z",
+          "completed_at":null,
+          "primitive_blocks":[{
+            "id":"\#(kBlockID)",
+            "repeat":1,
+            "work_target":[],
+            "sets":[{
+              "id":"\#(kWorkoutItemID)",
+              "repeat":1,
+              "traversal":"sequential",
+              "work_target":[],
+              "timing":{"mode":"set_bounded"},
+              "slots":[{
+                "id":"\#(kAlternativeID)",
+                "exercise_id":"\#(kExerciseBackSquat)",
+                "work_target":[],
+                "stimuli":[],
+                "post_rest_sec":0,
+                "is_warmup":false
+              }]
+            }]
+          }]
+        }
+        """#
 }

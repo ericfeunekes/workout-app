@@ -13,6 +13,7 @@
 
 import Foundation
 import CoreDomain
+import CoreSession
 import WorkoutCoreFoundation
 
 /// Canonical split tag used for filtering.
@@ -44,6 +45,7 @@ public enum SplitTag: String, Sendable, CaseIterable, Hashable {
 public struct SessionDetail: Sendable, Equatable {
     public let workout: Workout
     public let setLogs: [SetLog]
+    public let primitiveSetLogs: [PrimitiveSetLog]
     /// Map from `WorkoutItem.id` to the planned `exerciseID`. Used by the
     /// picker to count an exercise as "performed this session" even when
     /// the user didn't swap mid-workout (so `performedExerciseID` is
@@ -61,11 +63,13 @@ public struct SessionDetail: Sendable, Equatable {
     public init(
         workout: Workout,
         setLogs: [SetLog],
+        primitiveSetLogs: [PrimitiveSetLog] = [],
         plannedExerciseByItem: [WorkoutItemID: ExerciseID] = [:],
         bodyweightKg: Double? = nil
     ) {
         self.workout = workout
         self.setLogs = setLogs
+        self.primitiveSetLogs = primitiveSetLogs
         self.plannedExerciseByItem = plannedExerciseByItem
         self.bodyweightKg = bodyweightKg
     }
@@ -76,6 +80,14 @@ public struct SessionDetail: Sendable, Equatable {
     /// source has data.
     public var performedExerciseIDs: Set<ExerciseID> {
         var out: Set<ExerciseID> = []
+        for log in primitiveSetLogs where log.resultSemantics.isByExerciseEligible {
+            if let performed = log.performedExerciseID {
+                out.insert(performed)
+            } else if let planned = log.plannedExerciseID {
+                out.insert(planned)
+            }
+        }
+        if !out.isEmpty { return out }
         for log in setLogs where !log.skipped {
             if let swap = log.performedExerciseID {
                 out.insert(swap)
@@ -107,7 +119,12 @@ public struct SessionDetail: Sendable, Equatable {
     /// Average RIR across all set_logs that recorded one. Nil when no
     /// set recorded RIR.
     public var avgRIR: Double? {
-        let rirValues = setLogs.filter { !$0.skipped }.compactMap(\.rir)
+        let primitiveRIR = primitiveSetLogs
+            .filter { $0.resultSemantics.isByExerciseEligible }
+            .compactMap(\.rir)
+        let rirValues = primitiveRIR.isEmpty
+            ? setLogs.filter { !$0.skipped }.compactMap(\.rir)
+            : primitiveRIR
         guard !rirValues.isEmpty else { return nil }
         let sum = rirValues.reduce(0, +)
         return Double(sum) / Double(rirValues.count)
@@ -118,9 +135,11 @@ public struct SessionDetail: Sendable, Equatable {
     /// them, otherwise falls back to the window between earliest and
     /// latest `completedAt`. Nil when fewer than two data points exist.
     public var durationSeconds: TimeInterval? {
-        if setLogs.isEmpty { return nil }
+        let primitiveCompletions = primitiveSetLogs.map(\.completedAt)
+        let legacyCompletions = setLogs.map(\.completedAt)
+        let completions = primitiveCompletions.isEmpty ? legacyCompletions : primitiveCompletions
+        if completions.isEmpty { return nil }
         let starts = setLogs.compactMap(\.startedAt)
-        let completions = setLogs.map(\.completedAt)
         let first = starts.min() ?? completions.min()
         let last = completions.max()
         guard let first, let last else { return nil }
@@ -131,6 +150,7 @@ public struct SessionDetail: Sendable, Equatable {
     /// True when the workout has a note, or any set log has one.
     public var hasNote: Bool {
         if let note = workout.notes, !note.isEmpty { return true }
+        if primitiveSetLogs.contains(where: { !($0.notes ?? "").isEmpty }) { return true }
         return setLogs.contains { log in
             guard let n = log.notes else { return false }
             return !n.isEmpty

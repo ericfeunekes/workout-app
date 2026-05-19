@@ -14,7 +14,7 @@ covers:
 # push-queue
 
 ## What it does
-Durable SwiftData-backed FIFO queue for outbound writes. Result payloads are `setLogs([SetLog])`, `statusUpdate(workoutID, status, completedAt)`, `completionResults(workoutID, completedAt, notes, setLogs)`, `workoutReset(workoutID)`, and `userParameter(...)`; telemetry uses `events([TelemetryEvent])`. Result payloads POST to `/api/sync/results` except user parameters, which POST to `/api/user-parameters`; telemetry events POST to `/api/telemetry/events`. `PushFlusher` is an actor that owns a detached `Task.sleep`-based loop at 60s cadence; it calls `SyncAPI.flushPushQueue()` which pulls `bearerToken` from `tokenProvider`, peeks up to `batchSize=32` oldest items, posts each, and on 2xx removes. On 401 it stops the loop (`PushFlusher.swift:66-71`). Normal set logging enqueues via fire-and-forget hooks. Save & Done is stricter: the VM builds a local `WorkoutCompletionRecord`, awaits REST's durable grouped enqueue, then writes that same record to local history before clearing the live session. See `docs/sync.md` § "Push protocol" and "Cadence".
+Durable SwiftData-backed FIFO queue for outbound writes. Result payloads are `primitiveSetLogs([PrimitiveSetLog])`, `statusUpdate(workoutID, status, completedAt)`, `completionResults(workoutID, completedAt, notes, primitiveSetLogs)`, `workoutReset(workoutID)`, and `userParameter(...)`; telemetry uses `events([TelemetryEvent])`. Result payloads POST to `/api/sync/results` except user parameters, which POST to `/api/user-parameters`; telemetry events POST to `/api/telemetry/events`. `PushFlusher` is an actor that owns a detached `Task.sleep`-based loop at 60s cadence; it calls `SyncAPI.flushPushQueue()` which pulls `bearerToken` from `tokenProvider`, peeks up to `batchSize=32` oldest items, posts each, and on 2xx removes. On 401 it stops the loop (`PushFlusher.swift:66-71`). Normal set logging enqueues primitive slot rows via fire-and-forget hooks. Save & Done is stricter: the VM builds a local `WorkoutCompletionRecord`, awaits REST's durable grouped enqueue, then writes that same record to local history before clearing the live session. See `docs/sync.md` § "Push protocol" and "Cadence".
 
 ## State surface
 - **Inputs:** enqueue calls from `ExecutionViewModel+Push`, `TelemetryEmitterImpl`, `tokenProvider` closure
@@ -30,9 +30,9 @@ Durable SwiftData-backed FIFO queue for outbound writes. Result payloads are `se
 ## What it does have now (bug-060)
 - **Exponential backoff** via `PushBackoff.schedule = [10, 30, 60, 120, 300]`s. `PushFlusher` consults the schedule against the consecutive-failure counter.
 - **Dead-letter after 5 consecutive non-401 4xx.** Drops the item and emits `execution.push_item_dead_lettered` with `setLogID` / `workoutID` / `userParameterID` correlation id so the event can be joined to the dropped payload.
-- **Priority-weighted FIFO** (bug-056): `peek` sorts by `(priority, enqueuedAt)`. `results` (SetLog / status / UserParameter) are priority 0; `telemetry` is priority 1. Telemetry backlog can't starve set_log pushes. perf-002 persisted `priority` on `PushItemModel` (V4) so SwiftData resolves the sort against a SQLite index with `fetchLimit: batchSize` instead of decoding every row on every flush.
-- **Logical dedup** (bug-055): dedup on `SetLog.id` / `(workoutID, status)` / `UserParameter.id`. Idempotent enqueue also still replaces by `PushItemID`. perf-002 persisted `dedupKey: String?` on `PushItemModel` (V4) so dedup resolves via a scoped `FetchDescriptor` predicate — one scoped fetch per enqueue, not a full-table peek + decode.
-- **Atomic completion publication**: Save & Done queues `completionResults`, a single logical item that encodes final set logs and completed status together. The queue store removes older single-log rows for the same `SetLog.id`, older completed status rows for the workout, and older grouped completion rows for the same workout in the same durable mutation that inserts the grouped replacement. A 2xx removes the grouped item; a 5xx/transport failure keeps logs and status together for retry.
+- **Priority-weighted FIFO** (bug-056): `peek` sorts by `(priority, enqueuedAt)`. `results` (PrimitiveSetLog / status / UserParameter) are priority 0; `telemetry` is priority 1. Telemetry backlog can't starve primitive result pushes. perf-002 persisted `priority` on `PushItemModel` (V4) so SwiftData resolves the sort against a SQLite index with `fetchLimit: batchSize` instead of decoding every row on every flush.
+- **Logical dedup** (bug-055): dedup on `PrimitiveSetLog.id` / `(workoutID, status)` / `UserParameter.id`. Idempotent enqueue also still replaces by `PushItemID`. perf-002 persisted `dedupKey: String?` on `PushItemModel` (V4) so dedup resolves via a scoped `FetchDescriptor` predicate — one scoped fetch per enqueue, not a full-table peek + decode.
+- **Atomic completion publication**: Save & Done queues `completionResults`, a single logical item that encodes final primitive set logs and completed status together. The queue store removes older single-log rows for the same `PrimitiveSetLog.id`, older completed status rows for the workout, and older grouped completion rows for the same workout in the same durable mutation that inserts the grouped replacement. A 2xx removes the grouped item; a 5xx/transport failure keeps logs and status together for retry.
 - **Tolerant peek**: one unknown envelope kind (forward-versioned row) is skipped instead of throwing. Startup sweep via `pruneUndecodableRows()` removes anything the decoder consistently rejects.
 
 ## Edge cases handled in code
@@ -41,7 +41,7 @@ Durable SwiftData-backed FIFO queue for outbound writes. Result payloads are `se
 - 5xx and non-401 4xx → bump attempts, return `.networkFailed`, continue batch (`:190-197`)
 - Network throw (SyncError) → bump attempts, classify tokenRejected vs networkFailed (`:172-180`)
 - Idempotent enqueue: duplicate `PushItemID` replaces existing row (`PushQueueStoreImpl.swift:29-43`)
-- Idempotent server: same `SetLog.id` upserts — safe to re-push (per `docs/sync.md` § "Push protocol")
+- Idempotent server: same `PrimitiveSetLog.id` upserts — safe to re-push (per `docs/sync.md` § "Push protocol")
 - `PushFlusher.start()` is idempotent — second call no-ops if task exists (`PushFlusher.swift:46-47`)
 - `PushFlusher.stop()` is safe to call multiple times (`:97-100`)
 - `flushNow()` returns `tokenRejected` for 401s so Shell can route auth
@@ -56,6 +56,9 @@ Durable SwiftData-backed FIFO queue for outbound writes. Result payloads are `se
   Foreground flusher start/restart, background stop posture, and push-token
   recovery now belong to `AppSyncCoordinator`; this gap is only true background
   delivery.
+- Inbound server-nudged workout delivery is not part of this outbound queue.
+  That future APNs/silent-push sync lane is tracked separately as
+  `SYNC-GAP-004` in `docs/sync.md`.
 
 ## QA scenarios
 
@@ -67,7 +70,7 @@ Durable SwiftData-backed FIFO queue for outbound writes. Result payloads are `se
 ### S2. Happy path: complete + save & done pushes grouped completion
 - **setup:** `.ready`, workout near end
 - **steps:** log final set (auto-advances to `.complete`), tap "save & done"
-- **expected:** one `completionResults` queue item replaces pending single-log rows for that workout's final logs, `flushNow` kicks, and one `/api/sync/results` body carries both `set_logs` and `status_updates`. Server persists the final logs and transitions the workout to `completed` atomically.
+- **expected:** one `completionResults` queue item replaces pending single-log rows for that workout's final logs, `flushNow` kicks, and one `/api/sync/results` body carries both `primitive_set_logs` and `status_updates`. Server persists the final logs and transitions the workout to `completed` atomically.
 - **notes:** regression guard for completion atomicity; covered by Sync, Shell, and server atomicity tests.
 
 ### S3. Explicit End button does not publish until Save & Done
@@ -105,18 +108,18 @@ Durable SwiftData-backed FIFO queue for outbound writes. Result payloads are `se
 ### S9. Telemetry event routing
 - **setup:** `.ready`, telemetry emitter wired
 - **steps:** trigger any emit point (e.g. start a workout → `execution.session_mutation`)
-- **expected:** event lands in local store, eventually enqueued via `PushQueue.enqueueEvents`, POSTed to `/api/telemetry/events` (separate path from set_logs — `PushQueue.swift:208-211`)
+- **expected:** event lands in local store, eventually enqueued via `PushQueue.enqueueEvents`, POSTed to `/api/telemetry/events` (separate path from primitive result payloads)
 
-### S10. Telemetry failure doesn't block set_logs
+### S10. Telemetry failure doesn't block primitive results
 - **setup:** `/api/telemetry/events` returns 500, `/api/sync/results` returns 200
 - **steps:** log a set, trigger a telemetry event
-- **expected:** set_log drains (2xx, removed). Telemetry item stays, `attempts` bumps. Flusher continues batch — `.networkFailed` is per-item, doesn't short-circuit.
+- **expected:** primitive result drains (2xx, removed). Telemetry item stays, `attempts` bumps. Flusher continues batch — `.networkFailed` is per-item, doesn't short-circuit.
 - **notes:** 401 DOES short-circuit; 5xx does not (`PushQueue.swift:124`)
 
 ### S11. Rapid log taps during flush
 - **setup:** `.ready`, flusher mid-flight
 - **steps:** log 3 sets in <1s
-- **expected:** all three enqueue via `Task { @MainActor in await onSetLogged(log) }`. Enqueue order matches tap order because MainActor serializes the tasks.
+- **expected:** all three primitive slot rows enqueue via `Task { @MainActor in await onPrimitiveSetLogged(log) }`. Enqueue order matches tap order because MainActor serializes the tasks.
 - **notes:** `PushQueue` itself is an actor so internal operations are serialized regardless
 
 ### S12. App kill mid-push
@@ -131,7 +134,7 @@ Durable SwiftData-backed FIFO queue for outbound writes. Result payloads are `se
 - **notes:** package tests pin the coordinator behavior; `TEST-GAP-004` remains for simulator/app-root proof that the running `scenePhase` path invokes it.
 
 ### S14. Priority FIFO ordering with mixed payloads
-- **setup:** queue empty, enqueue: telemetry event (t=0), set_logA (t=1), completionResults (t=2), event (t=3)
+- **setup:** queue empty, enqueue: telemetry event (t=0), primitiveSetLogA (t=1), completionResults (t=2), event (t=3)
 - **steps:** flush
 - **expected:** result payloads drain before telemetry because priority 0 sorts ahead of priority 1; FIFO holds within each priority class. Each `pushOne` routes to the correct endpoint.
 

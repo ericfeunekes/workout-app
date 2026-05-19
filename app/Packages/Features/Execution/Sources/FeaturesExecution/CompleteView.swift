@@ -34,6 +34,8 @@ import WorkoutCoreFoundation
 struct CompleteView: View {
     @Bindable var viewModel: ExecutionViewModel
 
+    private static let topScrollInsetHeight: CGFloat = DSSpacing.xl
+
     /// Workout-level note text. Bound to a multi-line TextField so the
     /// user can jot a sentence ("felt strong"). Empty is the default and
     /// collapses to `nil` on save.
@@ -86,6 +88,9 @@ struct CompleteView: View {
             DSColors.background.ignoresSafeArea()
 
             VStack(spacing: 0) {
+                Color.clear
+                    .frame(height: Self.topScrollInsetHeight)
+
                 ScrollView {
                     VStack(alignment: .leading, spacing: DSSpacing.xl) {
                         header
@@ -97,7 +102,8 @@ struct CompleteView: View {
                     .padding(.top, DSSpacing.xxl)
                     .padding(.bottom, DSSpacing.xxl)
                 }
-
+            }
+            .safeAreaInset(edge: .bottom, spacing: 0) {
                 DSButton(
                     title: "save & done",
                     style: .primary,
@@ -114,6 +120,7 @@ struct CompleteView: View {
                 .padding(.horizontal, DSSpacing.xl)
                 .padding(.top, DSSpacing.lg)
                 .padding(.bottom, DSSpacing.xxl)
+                .background(DSColors.background)
             }
         }
     }

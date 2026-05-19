@@ -1,4 +1,5 @@
 import Foundation
+import WorkoutKitExportProfile
 
 #if (os(iOS) || os(watchOS)) && canImport(WorkoutKit) && canImport(HealthKit)
 import HealthKit
@@ -50,7 +51,7 @@ struct LiveWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
                     goal: workoutGoal(from: step.goal)
                 )
             }
-            let block = IntervalBlock(steps: steps, iterations: 1)
+            let block = IntervalBlock(steps: steps, iterations: descriptor.intervalIterations)
             return WorkoutPlan(.custom(CustomWorkout(
                 activity: hkActivity(from: descriptor.activity),
                 location: hkLocation(from: descriptor.location),
@@ -62,7 +63,7 @@ struct LiveWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
         }
     }
 
-    private func workoutGoal(from goal: WorkoutKitAdapterGoal) -> WorkoutGoal {
+    private func workoutGoal(from goal: WorkoutKitResolvedGoal) -> WorkoutGoal {
         switch goal {
         case .open:
             .open
@@ -73,12 +74,24 @@ struct LiveWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
         }
     }
 
-    private func hkActivity(from activity: WorkoutKitAdapterActivity) -> HKWorkoutActivityType {
+    private func hkActivity(from activity: WorkoutKitResolvedActivity) -> HKWorkoutActivityType {
         switch activity {
+        case .running:
+            .running
         case .cycling:
             .cycling
+        case .rowing:
+            .rowing
+        case .swimming:
+            .swimming
+        case .hiking:
+            .hiking
         case .functionalStrength:
             .functionalStrengthTraining
+        case .traditionalStrength:
+            .traditionalStrengthTraining
+        case .hiit:
+            .highIntensityIntervalTraining
         case .mixedCardio:
             .mixedCardio
         case .walking:
@@ -90,10 +103,12 @@ struct LiveWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
         }
     }
 
-    private func hkLocation(from location: WorkoutKitAdapterLocation) -> HKWorkoutSessionLocationType {
+    private func hkLocation(from location: WorkoutKitResolvedLocation) -> HKWorkoutSessionLocationType {
         switch location {
         case .unknown:
             .unknown
+        case .indoor:
+            .indoor
         case .outdoor:
             .outdoor
         }

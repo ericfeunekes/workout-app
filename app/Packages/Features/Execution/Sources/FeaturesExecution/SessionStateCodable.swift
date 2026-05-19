@@ -308,6 +308,9 @@ private struct PrimitiveSetLogCodable: Codable {
     let rounds: Int?
     let rir: Int?
     let isWarmup: Bool
+    let skipped: Bool?
+    let side: String?
+    let notes: String?
     let completedAt: Date
 
     init(value: PrimitiveSetLog) {
@@ -330,6 +333,9 @@ private struct PrimitiveSetLogCodable: Codable {
         rounds = value.rounds
         rir = value.rir
         isWarmup = value.isWarmup
+        skipped = value.skipped
+        side = value.side.rawValue
+        notes = value.notes
         completedAt = value.completedAt
     }
 
@@ -359,6 +365,9 @@ private struct PrimitiveSetLogCodable: Codable {
             rounds: rounds,
             rir: rir,
             isWarmup: isWarmup,
+            skipped: skipped ?? false,
+            side: side.flatMap { SetLogSide(rawValue: $0) } ?? .bilateral,
+            notes: notes,
             completedAt: completedAt
         )
     }

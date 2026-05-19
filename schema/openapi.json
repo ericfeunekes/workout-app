@@ -706,6 +706,52 @@
         ]
       }
     },
+    "/api/health/archive": {
+      "post": {
+        "tags": [
+          "health-archive"
+        ],
+        "summary": "Upload Health Archive",
+        "operationId": "upload_health_archive_api_health_archive_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HealthArchiveUploadIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthArchiveUploadOut"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
     "/api/telemetry/events": {
       "post": {
         "tags": [
@@ -758,6 +804,63 @@
   },
   "components": {
     "schemas": {
+      "ActivityIntentIn": {
+        "properties": {
+          "activity_domain": {
+            "type": "string",
+            "enum": [
+              "running",
+              "cycling",
+              "rowing",
+              "swimming",
+              "walking",
+              "hiking",
+              "functional_strength",
+              "traditional_strength",
+              "hiit",
+              "mobility",
+              "mixed_modal",
+              "carry",
+              "other"
+            ],
+            "title": "Activity Domain"
+          },
+          "environment": {
+            "type": "string",
+            "enum": [
+              "indoor",
+              "outdoor",
+              "unspecified"
+            ],
+            "title": "Environment",
+            "default": "unspecified"
+          },
+          "preservation_policy": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "preserve_primary_activity",
+                  "preserve_structure",
+                  "preserve_elapsed_time",
+                  "preserve_distance",
+                  "preserve_mixed_modality"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preservation Policy"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "activity_domain"
+        ],
+        "title": "ActivityIntentIn"
+      },
       "ExerciseLastPerformed": {
         "properties": {
           "exercise_id": {
@@ -919,6 +1022,320 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "HealthArchiveRecordIn": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "external_id": {
+            "type": "string",
+            "title": "External Id"
+          },
+          "descriptor_id": {
+            "type": "string",
+            "title": "Descriptor Id"
+          },
+          "sample_kind": {
+            "type": "string",
+            "enum": [
+              "quantity",
+              "category",
+              "workout",
+              "characteristic",
+              "correlation",
+              "clinical"
+            ],
+            "title": "Sample Kind"
+          },
+          "source_bundle_identifier": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Bundle Identifier"
+          },
+          "start_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start At"
+          },
+          "end_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End At"
+          },
+          "value": {
+            "$ref": "#/components/schemas/HealthArchiveValueIn"
+          },
+          "metadata": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object",
+            "title": "Metadata"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "external_id",
+          "descriptor_id",
+          "sample_kind",
+          "value"
+        ],
+        "title": "HealthArchiveRecordIn"
+      },
+      "HealthArchiveTombstoneIn": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "descriptor_id": {
+            "type": "string",
+            "title": "Descriptor Id"
+          },
+          "external_id": {
+            "type": "string",
+            "title": "External Id"
+          },
+          "observed_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Observed At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "descriptor_id",
+          "external_id",
+          "observed_at"
+        ],
+        "title": "HealthArchiveTombstoneIn"
+      },
+      "HealthArchiveUploadIn": {
+        "properties": {
+          "request_set_key": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Request Set Key"
+          },
+          "server_namespace": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Server Namespace"
+          },
+          "descriptor_fingerprint": {
+            "type": "string",
+            "minLength": 1,
+            "title": "Descriptor Fingerprint"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "records": {
+            "items": {
+              "$ref": "#/components/schemas/HealthArchiveRecordIn"
+            },
+            "type": "array",
+            "title": "Records"
+          },
+          "tombstones": {
+            "items": {
+              "$ref": "#/components/schemas/HealthArchiveTombstoneIn"
+            },
+            "type": "array",
+            "title": "Tombstones"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "request_set_key",
+          "server_namespace",
+          "descriptor_fingerprint"
+        ],
+        "title": "HealthArchiveUploadIn"
+      },
+      "HealthArchiveUploadOut": {
+        "properties": {
+          "request_set_key": {
+            "type": "string",
+            "title": "Request Set Key"
+          },
+          "acknowledged_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acknowledged Cursor"
+          },
+          "records_received": {
+            "type": "integer",
+            "title": "Records Received"
+          },
+          "tombstones_received": {
+            "type": "integer",
+            "title": "Tombstones Received"
+          },
+          "server_time": {
+            "type": "string",
+            "title": "Server Time"
+          }
+        },
+        "type": "object",
+        "required": [
+          "request_set_key",
+          "acknowledged_cursor",
+          "records_received",
+          "tombstones_received",
+          "server_time"
+        ],
+        "title": "HealthArchiveUploadOut"
+      },
+      "HealthArchiveValueIn": {
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "quantity",
+              "category",
+              "workout",
+              "text",
+              "unsupported"
+            ],
+            "title": "Kind"
+          },
+          "quantity_value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity Value"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "category_value": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Value"
+          },
+          "workout_activity_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workout Activity Type"
+          },
+          "duration_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Seconds"
+          },
+          "total_energy_kcal": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Energy Kcal"
+          },
+          "text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Text"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "kind"
+        ],
+        "title": "HealthArchiveValueIn"
       },
       "PrimitiveBlockIn": {
         "properties": {
@@ -1332,10 +1749,58 @@
             ],
             "title": "Rir"
           },
+          "hr_avg_bpm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hr Avg Bpm"
+          },
+          "hr_max_bpm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hr Max Bpm"
+          },
           "is_warmup": {
             "type": "boolean",
             "title": "Is Warmup",
             "default": false
+          },
+          "skipped": {
+            "type": "boolean",
+            "title": "Skipped",
+            "default": false
+          },
+          "side": {
+            "type": "string",
+            "enum": [
+              "left",
+              "right",
+              "bilateral"
+            ],
+            "title": "Side",
+            "default": "bilateral"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
           },
           "completed_at": {
             "type": "string",
@@ -1351,7 +1816,7 @@
           "completed_at"
         ],
         "title": "PrimitiveSetLogIn",
-        "description": "Primitive result row. The role selects the coordinate grammar: slot rows identify block/set/slot and must include set_index as the slot ordinal within the authored set; set_result rows identify block/set, use set_index 0 as their aggregate sentinel, and cannot carry slot or exercise ids; block_result rows identify block, use set_index and set_repeat_index 0 as aggregate sentinels, and cannot carry set, slot, or exercise ids. Runtime validation also verifies the coordinates against the persisted primitive workout tree."
+        "description": "Primitive result row. The role selects the coordinate grammar: slot rows identify block/set/slot and must include set_index as the commit sequence within the block/set repeat instance; set_result rows identify block/set, use set_index 0 as their aggregate sentinel, and cannot carry slot or exercise ids; block_result rows identify block, use set_index and set_repeat_index 0 as aggregate sentinels, and cannot carry set, slot, or exercise ids. Runtime validation also verifies the coordinates against the persisted primitive workout tree."
       },
       "PrimitiveSetLogRead": {
         "properties": {
@@ -1511,9 +1976,50 @@
             ],
             "title": "Rir"
           },
+          "hr_avg_bpm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hr Avg Bpm"
+          },
+          "hr_max_bpm": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hr Max Bpm"
+          },
           "is_warmup": {
             "type": "boolean",
             "title": "Is Warmup"
+          },
+          "skipped": {
+            "type": "boolean",
+            "title": "Skipped"
+          },
+          "side": {
+            "type": "string",
+            "title": "Side"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
           },
           "completed_at": {
             "type": "string",
@@ -1540,7 +2046,12 @@
           "distance_m",
           "rounds",
           "rir",
+          "hr_avg_bpm",
+          "hr_max_bpm",
           "is_warmup",
+          "skipped",
+          "side",
+          "notes",
           "completed_at"
         ],
         "title": "PrimitiveSetLogRead"
@@ -2145,6 +2656,16 @@
             ],
             "title": "Tags Json"
           },
+          "activity_intent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityIntentIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "primitive_blocks": {
             "items": {
               "$ref": "#/components/schemas/PrimitiveBlockIn"
@@ -2217,6 +2738,16 @@
               }
             ],
             "title": "Tags Json"
+          },
+          "activity_intent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityIntentIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "created_at": {
             "type": "string",
@@ -2386,6 +2917,16 @@
               }
             ],
             "title": "Tags Json"
+          },
+          "activity_intent": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivityIntentIn"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "completed_at": {
             "anyOf": [

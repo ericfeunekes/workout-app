@@ -94,11 +94,7 @@ public final class LiveHealthDataProvider:
     }
 
     public static func supportedBatchTypes() -> [HealthDataTypeDescriptor] {
-        #if canImport(HealthKit)
-        return HealthKitTypeMapper.supportedBatchDescriptors
-        #else
-        return []
-        #endif
+        HealthArchiveDescriptorCatalog.supportedBatchTypes()
     }
 
     public static func debugPermissionSet(for requests: [HealthDataRequest]) throws

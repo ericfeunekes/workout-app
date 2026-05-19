@@ -11,19 +11,11 @@
 // `ExecutionViewModel+Telemetry.swift` so both files stay under
 // SwiftLint's `file_length` cap.
 //
-// Deterministic set-log UUIDs:
-//   `enqueueLoggedSet` and `enqueueEditedSet` BOTH derive the pushed
-//   `SetLog.id` from `(itemID, setIndex)` via `setLogID(item:setIndex:)`.
-//   Given the same `(itemID, setIndex)` pair, the function returns the
-//   same UUID every time — so an original log push and any subsequent
-//   past-set-edit push carry the SAME id. The server's set_log upsert
-//   keys on UUID (see `docs/sync.md` § "Push protocol · idempotent
-//   UUIDs"), so the edit lands as an update in place, not a second row.
-//   Why deterministic instead of storing the UUID on SetPlan: avoids a
-//   CoreSession schema change that would collide with parallel work on
-//   `SessionState.ItemLog`. The (itemID, setIndex) tuple is unique per
-//   session and stable across re-launches, which is all idempotency
-//   needs.
+// Deterministic cache SetLog UUIDs:
+//   `setLogID(item:setIndex:)` derives stable IDs for derived History
+//   cache rows. Live execution publication uses primitive log coordinates
+//   from `ExecutionPlan`; the cache IDs remain stable so local History
+//   can reconcile one logical set row across completion rewrites.
 
 import CryptoKit
 import Foundation
@@ -178,8 +170,8 @@ extension ExecutionViewModel {
         // optional-chain on loggedSet would double-wrap to `Double??`;
         // use `flatMap(\.self)` to flatten so `nil` uniformly means
         // "no load" whether the row is missing or the row is loadless.
-        // SetLog.weight is `Double?` by design; a loadless row writes
-        // nil so History renders "BW" instead of fabricating "0 lb".
+        // Result weight is `Double?` by design; a loadless row writes nil
+        // so History renders "BW" instead of fabricating "0 lb".
         let loggedLoad: Double? = loggedSet?.loadKg.flatMap { $0 }
         let loggedUnit = loggedSet?.unit
         let performedExerciseID = itemLog?.performedExerciseID
@@ -193,10 +185,12 @@ extension ExecutionViewModel {
             setIndex: setIndex,
             reps: skipped ? nil : reps,
             weight: skipped ? nil : loggedLoad,
-            weightUnit: skipped || loggedLoad == nil ? nil : loggedUnit,
+            weightUnit: loggedLoad == nil && !skipped ? nil : loggedUnit,
             durationSec: skipped ? nil : loggedSet?.durationSec,
             distanceM: skipped ? nil : loggedSet?.distanceM,
             rir: skipped ? nil : rir,
+            hrAvgBpm: loggedSet?.hrAvgBpm,
+            hrMaxBpm: nil,
             completedAt: completedAt,
             performedExerciseID: performedExerciseID,
             skipped: skipped
@@ -205,12 +199,12 @@ extension ExecutionViewModel {
         enqueuePrimitiveSetObserver(primitiveLog)
     }
 
-    /// Cardio sibling of `enqueueLoggedSet`. Builds a cardio result log
+    /// Cardio sibling of `enqueueLoggedSet`. Builds a cardio primitive result
     /// (no `reps` / `rir`, populated `durationSec` / `distanceM` /
     /// `hrAvgBpm` / `cadenceAvgSpm` / `startedAt`, and authored load
     /// when the target is loaded) and pushes it through the primitive hook
-    /// if the hook is wired. Same deterministic UUID scheme as the
-    /// strength path so retries upsert in place.
+    /// if the hook is wired. It uses the same primitive coordinate UUID scheme
+    /// as the strength path so retries upsert in place.
     func enqueueLoggedCardioSet(
         item: WorkoutItem,
         setIndex: Int,
@@ -227,10 +221,12 @@ extension ExecutionViewModel {
             setIndex: setIndex,
             reps: nil,
             weight: skipped ? nil : weight,
-            weightUnit: skipped || weight == nil ? nil : loggedSet?.unit,
+            weightUnit: weight == nil && !skipped ? nil : loggedSet?.unit,
             durationSec: skipped ? nil : input.durationSec,
             distanceM: skipped ? nil : input.distanceM,
             rir: nil,
+            hrAvgBpm: skipped ? nil : input.hrAvgBpm,
+            hrMaxBpm: nil,
             completedAt: completedAt,
             performedExerciseID: performedExerciseID,
             skipped: skipped
@@ -244,13 +240,13 @@ extension ExecutionViewModel {
     /// Reads the post-edit state for the target `(itemID, setIndex)` —
     /// the reducer has already been applied by the time this runs, so
     /// `loadKg` / `reps` / `rir` reflect the user's new values. Uses the
-    /// same deterministic UUID as the original `enqueueLoggedSet` push
-    /// so the server upserts in place (same id → update, not insert).
+    /// same primitive coordinate UUID as the original log so the server
+    /// upserts in place (same id → update, not insert).
     ///
     /// `completedAt` is sourced from the ORIGINAL SetPlan's stamp (set
     /// by the reducer at `.logSet` time and preserved through
-    /// `.editPastSet`). The server's `_upsert_set_log` overwrites the
-    /// timestamp on every push, so if we sent `clock.now` here the edit
+    /// `.editPastSet`). The server's primitive result upsert overwrites
+    /// the timestamp on every push, so if we sent `clock.now` here the edit
     /// would retroactively move the workout's timeline onto the edit
     /// moment. A corrective edit fixes reps/rir/load — not the clock.
     /// Matches History's `editPastSet` in `HistoryViewModel+Edit`, which
@@ -283,10 +279,12 @@ extension ExecutionViewModel {
             setIndex: setIndex,
             reps: skipped ? nil : set.reps,
             weight: skipped ? nil : set.loadKg,
-            weightUnit: skipped || set.loadKg == nil ? nil : set.unit,
+            weightUnit: set.loadKg == nil && !skipped ? nil : set.unit,
             durationSec: skipped ? nil : set.durationSec,
             distanceM: skipped ? nil : set.distanceM,
             rir: skipped ? nil : set.rir,
+            hrAvgBpm: skipped ? nil : set.hrAvgBpm,
+            hrMaxBpm: nil,
             completedAt: completedAt,
             performedExerciseID: itemLog.performedExerciseID,
             skipped: skipped
@@ -304,55 +302,42 @@ extension ExecutionViewModel {
         durationSec: Double?,
         distanceM: Double?,
         rir: Int?,
+        hrAvgBpm: Int?,
+        hrMaxBpm: Int?,
         completedAt: Date,
         performedExerciseID: ExerciseID?,
         skipped: Bool
     ) -> PrimitiveSetLog? {
-        guard !skipped else { return nil }
-        guard let plan = context.primitiveExecutionPlan else {
-            var log = PrimitiveSetLog(
-                id: Self.setLogID(itemID: item.id, setIndex: setIndex),
-                role: .slot,
-                slotID: item.id,
-                blockID: item.blockID,
-                workoutID: context.workout.id,
-                plannedExerciseID: item.exerciseID,
-                performedExerciseID: performedExerciseID,
-                setIndex: 0,
-                setRepeatIndex: max(0, setIndex - 1),
-                blockRepeatIndex: 0,
-                reps: reps,
-                weight: weight,
-                weightUnit: weightUnit,
-                durationSec: durationSec,
-                distanceM: distanceM,
-                rir: rir,
-                completedAt: completedAt
-            )
-            log.performedExerciseID = performedExerciseID
-            primitiveSetLogs.removeAll { existing in
-                existing.id == log.id && existing.role == .slot
-            }
-            primitiveSetLogs.append(log)
-            emitPrimitiveResultRecorded(log)
-            persist()
-            return log
-        }
-        guard let slotPosition = primitiveSlotPosition(for: item, in: plan) else { return nil }
-        var log = slotPosition.slot.slotLog(
+        guard let plan = context.primitiveExecutionPlan else { return nil }
+        guard let position = primitiveSlotPosition(for: item, in: plan) else { return nil }
+        let coordinate = primitiveSlotCommitCoordinate(
+            position: position,
+            legacySetIndex: setIndex
+        )
+        var log = position.slot.slotLog(
             workoutID: plan.workoutID,
-            blockRepeatIndex: 0,
-            setRepeatIndex: max(0, setIndex - 1),
-            setIndex: slotPosition.slotIndex,
+            blockRepeatIndex: coordinate.blockRepeatIndex,
+            setRepeatIndex: coordinate.setRepeatIndex,
+            setIndex: coordinate.setIndex,
             reps: reps,
             weight: weight,
             weightUnit: weightUnit,
             durationSec: durationSec,
             distanceM: distanceM,
             rir: rir,
+            hrAvgBpm: hrAvgBpm,
+            hrMaxBpm: hrMaxBpm,
             completedAt: completedAt
         )
         log.performedExerciseID = performedExerciseID
+        if skipped {
+            log.reps = nil
+            log.weight = nil
+            log.durationSec = nil
+            log.distanceM = nil
+            log.rir = nil
+        }
+        log.skipped = skipped
         primitiveSetLogs.removeAll { existing in
             existing.id == log.id && existing.role == .slot
         }
@@ -362,14 +347,141 @@ extension ExecutionViewModel {
         return log
     }
 
+    public func applyWatchSetStarted(workoutItemID: WorkoutItemID, setIndex: Int) {
+        guard activeItemMatches(workoutItemID: workoutItemID, setIndex: setIndex) else {
+            return
+        }
+        startCurrentSet()
+    }
+
+    public func applyWatchSetEnded(
+        workoutItemID: WorkoutItemID,
+        setIndex: Int,
+        bpmAvg: Int?,
+        bpmMax: Int?
+    ) {
+        guard let item = context.itemsByBlock.flatMap({ $0 }).first(where: { $0.id == workoutItemID })
+        else { return }
+        if !primitiveSlotLogExists(item: item, setIndex: setIndex),
+           activeItemMatches(workoutItemID: workoutItemID, setIndex: setIndex) {
+            logCurrentSet(reps: activeSetPlan?.reps ?? 0, rir: activeSetPlan?.rir)
+        }
+        updatePrimitiveSlotTelemetry(
+            item: item,
+            setIndex: setIndex,
+            hrAvgBpm: bpmAvg,
+            hrMaxBpm: bpmMax
+        )
+    }
+
+    public func applyWatchQuickLog(
+        workoutItemID: WorkoutItemID,
+        setIndex: Int,
+        reps: Int,
+        rir: Int?
+    ) {
+        guard let item = context.itemsByBlock.flatMap({ $0 }).first(where: { $0.id == workoutItemID })
+        else { return }
+        if activeItemMatches(workoutItemID: workoutItemID, setIndex: setIndex) {
+            logCurrentSet(reps: reps, rir: rir)
+        }
+        updatePrimitiveSlotTelemetry(
+            item: item,
+            setIndex: setIndex,
+            hrAvgBpm: nil,
+            hrMaxBpm: nil
+        )
+    }
+
+    private func activeItemMatches(workoutItemID: WorkoutItemID, setIndex: Int) -> Bool {
+        guard state.route == .active || state.route == .rest else { return false }
+        let cursor = state.cursor
+        guard cursor.setIndex == setIndex else { return false }
+        return context.item(at: cursor.blockIndex, itemIndex: cursor.itemIndex)?.id == workoutItemID
+    }
+
+    private func primitiveSlotLogExists(item: WorkoutItem, setIndex: Int) -> Bool {
+        primitiveSlotLogIndex(item: item, setIndex: setIndex) != nil
+    }
+
+    private func updatePrimitiveSlotTelemetry(
+        item: WorkoutItem,
+        setIndex: Int,
+        hrAvgBpm: Int?,
+        hrMaxBpm: Int?
+    ) {
+        guard let index = primitiveSlotLogIndex(item: item, setIndex: setIndex) else { return }
+        var log = primitiveSetLogs[index]
+        log.hrAvgBpm = hrAvgBpm ?? log.hrAvgBpm
+        log.hrMaxBpm = hrMaxBpm ?? log.hrMaxBpm
+        primitiveSetLogs[index] = log
+        emitPrimitiveResultRecorded(log)
+        persist()
+        enqueuePrimitiveSetObserver(log)
+    }
+
+    private func primitiveSlotLogIndex(item: WorkoutItem, setIndex: Int) -> Int? {
+        guard let plan = context.primitiveExecutionPlan,
+              let position = primitiveSlotPosition(for: item, in: plan) else {
+            return nil
+        }
+        let coordinate = primitiveSlotCommitCoordinate(
+            position: position,
+            legacySetIndex: setIndex
+        )
+        let expected = position.slot.slotLog(
+            workoutID: plan.workoutID,
+            blockRepeatIndex: coordinate.blockRepeatIndex,
+            setRepeatIndex: coordinate.setRepeatIndex,
+            setIndex: coordinate.setIndex,
+            reps: nil,
+            rir: nil,
+            completedAt: clock.now
+        )
+        return primitiveSetLogs.firstIndex { $0.id == expected.id && $0.role == .slot }
+    }
+
+    private struct PrimitiveSlotPosition {
+        var slot: ExecutionSlot
+        var set: ExecutionSet
+        var slotIndex: Int
+    }
+
+    private struct PrimitiveSlotCommitCoordinate {
+        var blockRepeatIndex: Int
+        var setRepeatIndex: Int
+        var setIndex: Int
+    }
+
+    private func primitiveSlotCommitCoordinate(
+        position: PrimitiveSlotPosition,
+        legacySetIndex: Int
+    ) -> PrimitiveSlotCommitCoordinate {
+        let zeroBasedLegacySetIndex = max(0, legacySetIndex - 1)
+        if position.set.timing.mode == .timeBounded,
+           position.set.timing.rounds != nil,
+           position.set.setRepeat == 1 {
+            return PrimitiveSlotCommitCoordinate(
+                blockRepeatIndex: 0,
+                setRepeatIndex: 0,
+                setIndex: zeroBasedLegacySetIndex
+            )
+        }
+        return PrimitiveSlotCommitCoordinate(
+            blockRepeatIndex: 0,
+            setRepeatIndex: zeroBasedLegacySetIndex,
+            setIndex: position.slotIndex
+        )
+    }
+
     private func primitiveSlotPosition(
         for item: WorkoutItem,
         in plan: ExecutionPlan
-    ) -> (slot: ExecutionSlot, slotIndex: Int)? {
+    ) -> PrimitiveSlotPosition? {
         for block in plan.blocks {
             for set in block.sets {
                 for (slotIndex, slot) in set.slots.enumerated() where slot.slotID == item.id {
-                    return (slot, slotIndex)
+                    return PrimitiveSlotPosition(slot: slot, set: set, slotIndex: slotIndex)
                 }
             }
         }
@@ -385,8 +497,9 @@ extension ExecutionViewModel {
     }
 
     /// Run the post-apply side effects for a `.editPastSet` mutation:
-    /// enqueue the corrected `SetLog` through the push hook (same
-    /// deterministic UUID as the original log → server upserts in place)
+    /// enqueue the corrected primitive slot row through the push hook
+    /// (same primitive coordinate UUID as the original log → server
+    /// upserts in place)
     /// and emit the `execution.past_set_edited` telemetry event. Called
     /// from `editPastSet` on the view model; factored out so the public
     /// entry point stays a 1-line dispatch.
@@ -412,7 +525,7 @@ extension ExecutionViewModel {
         return true
     }
 
-    /// Build the completed `Workout` + `[SetLog]` from the current session.
+    /// Build the completed workout record from the current session.
     /// Called from `saveAndDone` BEFORE the reducer's `.save` wipes the
     /// in-memory log. The returned value is the single app-owned completion
     /// record consumed by local History and outbound publishers.
@@ -421,20 +534,15 @@ extension ExecutionViewModel {
     /// stamping `status = .completed` + `completedAt = now`. `notes` is
     /// populated from the Complete screen's note field when the user
     /// typed something; an empty / whitespace-only note collapses to
-    /// `nil` (see `ExecutionViewModel.normalizeNote`). The set_logs are
-    /// one-per-done-SetPlan across every item in the session; this
-    /// mirrors the semantics of `enqueueLoggedSet` (which enqueues one
-    /// set_log per `logSet` call) but batches the whole session.
+    /// `nil` (see `ExecutionViewModel.normalizeNote`). Derived History
+    /// cache rows are one-per-done-SetPlan across every item in the
+    /// session; primitive result rows come from the `ExecutionPlan`
+    /// coordinates captured during live execution.
     ///
     /// Each local SetLog.id is derived from `setLogID(itemID:setIndex:)`
-    /// — the SAME deterministic UUID that `enqueueLoggedSet` /
-    /// `enqueueEditedSet` send to the server. Before bug-040, the local
-    /// cache stamped a fresh `UUID()` here, so the History-cache row and
-    /// the server row had different ids for the same set. A past-set
-    /// edit from History then pushed the local (random) id to the
-    /// server, which inserted a NEW row instead of updating in place.
-    /// Using the deterministic id keeps local cache and server in lock-
-    /// step — one logical set = one UUID everywhere.
+    /// — the same deterministic UUID family used for local History
+    /// corrections. Primitive result pushes use the primitive coordinate
+    /// UUID instead.
     ///
     /// Per-set timestamps:
     ///   - `completedAt` is sourced from `SetPlan.completedAt`, which the

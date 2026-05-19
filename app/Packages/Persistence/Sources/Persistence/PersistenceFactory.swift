@@ -20,6 +20,7 @@ public struct PersistenceFactory {
     public let sessionStore: SessionStore
     public let pushQueueStore: PushQueueStore
     public let healthArchiveStore: HealthArchiveStore
+    public let healthArchiveExportStateStore: HealthArchiveExportStateStore
     public let tokenStore: TokenStore
     public let authRecoveryStore: AuthRecoveryStore
     public let syncMetadataStore: SyncMetadataStore
@@ -70,7 +71,7 @@ public struct PersistenceFactory {
         storeURL: URL,
         tokenServiceName: String = "com.ericfeunekes.WorkoutDB.token"
     ) throws -> PersistenceFactory {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV8.self)
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV9.self)
         let configuration = ModelConfiguration(schema: schema, url: storeURL)
         let container: ModelContainer
         do {
@@ -109,9 +110,10 @@ public struct PersistenceFactory {
 
     /// In-memory container, used for tests and previews.
     public static func makeInMemory(
-        tokenServiceName: String = "com.ericfeunekes.WorkoutDB.token.test"
+        tokenServiceName: String = "com.ericfeunekes.WorkoutDB.token.test",
+        tokenStore: TokenStore? = nil
     ) throws -> PersistenceFactory {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV8.self)
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV9.self)
         let configuration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try ModelContainer(
             for: schema,
@@ -125,10 +127,13 @@ public struct PersistenceFactory {
         let defaults = UserDefaults(suiteName: suiteName) ?? .standard
         return PersistenceFactory(
             container: container,
-            tokenStore: TokenStoreImpl(serviceName: tokenServiceName),
+            tokenStore: tokenStore ?? TokenStoreImpl(serviceName: tokenServiceName),
             authRecoveryStore: AuthRecoveryStoreImpl(defaults: defaults),
             syncMetadataStore: SyncMetadataStoreImpl(defaults: defaults),
-            lastPerformedStore: LastPerformedStoreImpl(defaults: defaults)
+            lastPerformedStore: LastPerformedStoreImpl(defaults: defaults),
+            healthArchiveExportStateStore: UserDefaultsHealthArchiveExportStateStore(
+                defaults: defaults
+            )
         )
     }
 
@@ -154,12 +159,15 @@ public struct PersistenceFactory {
         tokenStore: TokenStore,
         authRecoveryStore: AuthRecoveryStore = AuthRecoveryStoreImpl(),
         syncMetadataStore: SyncMetadataStore = SyncMetadataStoreImpl(),
-        lastPerformedStore: LastPerformedStore = LastPerformedStoreImpl()
+        lastPerformedStore: LastPerformedStore = LastPerformedStoreImpl(),
+        healthArchiveExportStateStore: HealthArchiveExportStateStore =
+            UserDefaultsHealthArchiveExportStateStore()
     ) {
         self.container = container
         self.workoutCache = WorkoutCacheImpl(modelContainer: container)
         self.sessionStore = SessionStoreImpl(modelContainer: container)
         self.healthArchiveStore = HealthArchiveStoreImpl(modelContainer: container)
+        self.healthArchiveExportStateStore = healthArchiveExportStateStore
         let pushQueueStore = PushQueueStoreImpl(modelContainer: container)
         self.pushQueueStore = pushQueueStore
         self.pushQueueStoreImpl = pushQueueStore

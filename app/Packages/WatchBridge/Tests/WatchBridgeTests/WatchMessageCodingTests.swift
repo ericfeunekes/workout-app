@@ -24,6 +24,7 @@ final class WatchMessageCodingTests: XCTestCase {
 
     func testPushActiveBlockRoundTrip() throws {
         let payload = ActiveBlockPayload(
+            workoutItemID: UUID(),
             exerciseName: "Back Squat",
             prescription: "5 reps @ 102.5 kg",
             setNumber: 2,
@@ -37,6 +38,7 @@ final class WatchMessageCodingTests: XCTestCase {
         // targetRir can be nil (e.g. warmup set) — make sure the optional
         // survives the round trip without turning into `.some(0)`.
         let payload = ActiveBlockPayload(
+            workoutItemID: UUID(),
             exerciseName: "Front Squat",
             prescription: "Warmup",
             setNumber: 1,
@@ -108,6 +110,7 @@ final class WatchMessageCodingTests: XCTestCase {
         // locks in the on-wire key names — useful if a future iteration
         // grows a second consumer.
         let original = ActiveBlockPayload(
+            workoutItemID: UUID(),
             exerciseName: "Romanian Deadlift",
             prescription: "8 reps @ 80 kg",
             setNumber: 3,

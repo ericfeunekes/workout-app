@@ -17,6 +17,8 @@ extension SettingsView {
             infoRow(label: label, value: value)
         case .picker(_, let label, let options, let selected, let onPick):
             pickerRow(label: label, options: options, selected: selected, onPick: onPick)
+        case .toggle(_, let label, let isOn, let onToggle):
+            toggleRow(label: label, isOn: isOn, onToggle: onToggle)
         case .action(_, let label, let destructive, let onTap):
             actionRow(label: label, destructive: destructive, onTap: onTap)
         }
@@ -85,5 +87,26 @@ extension SettingsView {
             .contentShape(Rectangle())
         })
         .buttonStyle(.plain)
+    }
+
+    func toggleRow(
+        label: String,
+        isOn: Bool,
+        onToggle: @escaping @Sendable (Bool) -> Void
+    ) -> some View {
+        Toggle(
+            isOn: Binding(
+                get: { isOn },
+                set: { newValue in onToggle(newValue) }
+            ),
+            label: {
+                Text(label)
+                    .font(DSTypography.body)
+                    .foregroundStyle(DSColors.foreground)
+            }
+        )
+        .toggleStyle(.switch)
+        .padding(.vertical, DSSpacing.md)
+        .padding(.horizontal, DSSpacing.xl)
     }
 }

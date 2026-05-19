@@ -21,6 +21,7 @@
 
 import XCTest
 import CoreDomain
+import CoreSession
 import CoreTelemetry
 import WorkoutCoreFoundation
 @testable import FeaturesExecution
@@ -261,8 +262,32 @@ private enum Fixtures {
             exerciseID: exerciseID,
             prescriptionJSON: #"{"sets":2,"reps":5,"load_kg":100}"#
         )
+        let primitive = PrimitiveWorkout(
+            id: workoutID,
+            name: workout.name,
+            blocks: [
+                PrimitiveBlock(id: blockID, sets: [
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: PrimitiveTiming(mode: .setBounded),
+                        traversal: .sequential,
+                        repeatCount: 2,
+                        slots: [
+                            PrimitiveSlot(
+                                id: itemID,
+                                exerciseID: exerciseID,
+                                workTargets: [],
+                                load: PrimitiveLoad(value: 100, unit: .lb, unitType: .absolute)
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
         let ctx = WorkoutContext(
             workout: workout,
+            primitiveWorkout: primitive,
+            primitiveExecutionPlan: try! ExecutionPlan.validated(workout: primitive),
             blocks: [block],
             itemsByBlock: [[item]],
             exercises: [exerciseID: Exercise(id: exerciseID, name: "Bench")]

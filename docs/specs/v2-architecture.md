@@ -367,6 +367,15 @@ POST   /api/sync/results       — Push completed workout data or same-day reset
                                  workout.updated_at so a subsequent /api/sync/pull sees them.
                                  Workout resets delete the workout's primitive_set_logs and return it
                                  to planned so accidental same-day logs can be started over.
+
+POST   /api/health/archive     — Upload selected normalized HealthKit archive records
+                                 and tombstones for the personal archive lane.
+                                 Body carries request_set_key, server_namespace,
+                                 descriptor_fingerprint, next_cursor, records, and
+                                 tombstones. The server idempotently upserts records
+                                 by (user, descriptor_id, external_id), stores
+                                 tombstones, and acknowledges the cursor only after
+                                 the upload is committed.
 ```
 
 **Sync (App pull):**

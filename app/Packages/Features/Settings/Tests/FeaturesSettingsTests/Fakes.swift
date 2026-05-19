@@ -96,3 +96,56 @@ final class FakeSyncMetadataStore: @unchecked Sendable, SyncMetadataStore {
         lastSyncAt = nil
     }
 }
+
+final class FakeHealthArchiveExportStateStore: @unchecked Sendable, HealthArchiveExportStateStore {
+    var snapshot: HealthArchiveExportSnapshot
+    private(set) var loadedNamespaces: [String?] = []
+
+    init(snapshot: HealthArchiveExportSnapshot = HealthArchiveExportSnapshot()) {
+        self.snapshot = snapshot
+    }
+
+    func loadSnapshot(serverNamespace: String?) async -> HealthArchiveExportSnapshot {
+        loadedNamespaces.append(serverNamespace)
+        return HealthArchiveExportSnapshot(
+            scope: snapshot.scope,
+            serverNamespace: serverNamespace ?? snapshot.serverNamespace,
+            requestSetKey: snapshot.requestSetKey,
+            descriptorFingerprint: snapshot.descriptorFingerprint,
+            acknowledgedCursor: snapshot.acknowledgedCursor,
+            status: snapshot.status,
+            lastFetchAt: snapshot.lastFetchAt,
+            lastUploadAt: snapshot.lastUploadAt,
+            lastRecordCount: snapshot.lastRecordCount,
+            lastTombstoneCount: snapshot.lastTombstoneCount,
+            lastFailureClass: snapshot.lastFailureClass,
+            automaticEnabled: snapshot.automaticEnabled,
+            nextAttemptAt: snapshot.nextAttemptAt,
+            lastAttemptAt: snapshot.lastAttemptAt
+        )
+    }
+
+    func saveSnapshot(_ snapshot: HealthArchiveExportSnapshot) async {
+        self.snapshot = snapshot
+    }
+
+    func setScope(_ scope: HealthArchiveExportScope) async {
+        snapshot = HealthArchiveExportSnapshot(
+            scope: scope,
+            automaticEnabled: snapshot.automaticEnabled,
+            nextAttemptAt: snapshot.nextAttemptAt
+        )
+    }
+
+    func setAutomaticEnabled(_ enabled: Bool) async {
+        snapshot = HealthArchiveExportSnapshot(
+            scope: snapshot.scope,
+            automaticEnabled: enabled,
+            nextAttemptAt: snapshot.nextAttemptAt
+        )
+    }
+
+    func clear() async {
+        snapshot = HealthArchiveExportSnapshot()
+    }
+}

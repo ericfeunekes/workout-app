@@ -31,6 +31,7 @@ public enum PrimitiveExportFact: String, Sendable, Hashable, Codable, CaseIterab
 public struct PrimitiveExportFacts: Sendable, Hashable, Codable {
     public var workoutID: WorkoutID
     public var workoutName: String
+    public var activityIntent: ActivityIntent?
     public var blocks: [PrimitiveExportBlock]
     public var axes: PrimitiveAxisSummary
     public var ambiguities: Set<PrimitiveExportAmbiguity>
@@ -38,12 +39,14 @@ public struct PrimitiveExportFacts: Sendable, Hashable, Codable {
     public init(
         workoutID: WorkoutID,
         workoutName: String,
+        activityIntent: ActivityIntent? = nil,
         blocks: [PrimitiveExportBlock],
         axes: PrimitiveAxisSummary,
         ambiguities: Set<PrimitiveExportAmbiguity> = []
     ) {
         self.workoutID = workoutID
         self.workoutName = workoutName
+        self.activityIntent = activityIntent
         self.blocks = blocks
         self.axes = axes
         self.ambiguities = ambiguities
@@ -239,13 +242,17 @@ public enum PrimitiveExportProfileBuilder {
         return PrimitiveExportFacts(
             workoutID: workout.id,
             workoutName: workout.name,
+            activityIntent: workout.activityIntent,
             blocks: blocks,
             axes: axes,
-            ambiguities: ambiguities(for: axes)
+            ambiguities: ambiguities(for: axes, activityIntent: workout.activityIntent)
         )
     }
 
-    private static func ambiguities(for axes: PrimitiveAxisSummary) -> Set<PrimitiveExportAmbiguity> {
+    private static func ambiguities(
+        for axes: PrimitiveAxisSummary,
+        activityIntent: ActivityIntent?
+    ) -> Set<PrimitiveExportAmbiguity> {
         var ambiguities: Set<PrimitiveExportAmbiguity> = []
         if axes.traversals.contains(.amrap), axes.metrics.contains(.rounds) {
             ambiguities.insert(.resultOverlayNotRepresentedInPrimitives)
@@ -256,23 +263,27 @@ public enum PrimitiveExportProfileBuilder {
         {
             ambiguities.insert(.multipleCompatibleIntervalInterpretations)
         }
-        if axes.metrics.contains(.distance),
-           !axes.hasLoad,
-           !axes.metrics.contains(.loadCarried)
-        {
+        if activityIntent == nil && sourceDependent(axes: axes) {
             ambiguities.insert(.missingSourceFact)
+        }
+        return ambiguities
+    }
+
+    private static func sourceDependent(axes: PrimitiveAxisSummary) -> Bool {
+        if axes.metrics.contains(.distance), !axes.metrics.contains(.loadCarried) {
+            return true
         }
         if axes.metrics.contains(.duration),
            !axes.hasLoad,
            !axes.hasRest,
            !axes.setTimings.contains(.timeBounded)
         {
-            ambiguities.insert(.missingSourceFact)
+            return true
         }
         if axes.setTimings.contains(.timeBounded), axes.hasRest, !axes.hasLoad {
-            ambiguities.insert(.missingSourceFact)
+            return true
         }
-        return ambiguities
+        return false
     }
 }
 

@@ -42,6 +42,11 @@
           "rounds": null,
           "rir": 2,
           "is_warmup": false,
+          "skipped": false,
+          "side": "bilateral",
+          "notes": null,
+          "hr_avg_bpm": null,
+          "hr_max_bpm": null,
           "completed_at": "2026-04-10T07:15:00Z"
         }
       ]

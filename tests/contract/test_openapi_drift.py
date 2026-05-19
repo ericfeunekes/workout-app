@@ -56,6 +56,7 @@ def test_openapi_has_all_expected_paths(live_openapi: dict) -> None:
         "/api/workouts/{workout_id}",
         "/api/sync/pull",
         "/api/sync/results",
+        "/api/health/archive",
     }
     missing = expected - paths
     assert not missing, f"Missing endpoints in OpenAPI: {missing}"
@@ -87,6 +88,8 @@ def test_primitive_set_log_openapi_matches_role_grammar(live_openapi: dict) -> N
 
     assert schema["additionalProperties"] is False
     assert "set_index" not in schema["required"]
+    assert "commit sequence" in schema["description"]
+    assert "slot ordinal" not in schema["description"]
 
     slot_branch, set_result_branch, block_result_branch = schema["oneOf"]
     assert set(slot_branch["required"]) == {"slot_id", "set_id", "block_id", "set_index"}

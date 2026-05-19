@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from workoutdb_server import __version__
 from workoutdb_server.api import (
     exercises,
+    health_archive,
     sync,
     telemetry,
     user_parameters,
@@ -152,4 +153,5 @@ app.include_router(exercises.router)
 app.include_router(user_parameters.router)
 app.include_router(workouts.router)
 app.include_router(sync.router)
+app.include_router(health_archive.router)
 app.include_router(telemetry.router)

@@ -300,6 +300,47 @@ runCase("Block round-trips JSON fields unchanged") {
     try expectEqual(block.intent, "Move steady")
 }
 
+// ---- PrimitiveSetLog overlays -------------------------------------------
+
+runCase("PrimitiveSetLog defaults overlay fields") {
+    let log = PrimitiveSetLog(
+        id: UUID(),
+        role: .slot,
+        slotID: UUID(),
+        setID: UUID(),
+        blockID: UUID(),
+        workoutID: UUID(),
+        setIndex: 0,
+        completedAt: Date(timeIntervalSince1970: 1)
+    )
+    try expectEqual(log.skipped, false)
+    try expectEqual(log.side, .bilateral)
+    try expectEqual(log.notes, nil)
+}
+
+runCase("PrimitiveSetLog preserves explicit overlay fields") {
+    let log = PrimitiveSetLog(
+        id: UUID(),
+        role: .slot,
+        slotID: UUID(),
+        setID: UUID(),
+        blockID: UUID(),
+        workoutID: UUID(),
+        setIndex: 0,
+        weightUnit: .lb,
+        isWarmup: true,
+        skipped: true,
+        side: .left,
+        notes: "skipped left side",
+        completedAt: Date(timeIntervalSince1970: 1)
+    )
+    try expectEqual(log.weightUnit, .lb)
+    try expectEqual(log.isWarmup, true)
+    try expectEqual(log.skipped, true)
+    try expectEqual(log.side, .left)
+    try expectEqual(log.notes, "skipped left side")
+}
+
 // ---- UserParameter append-only shape -------------------------------------
 
 runCase("UserParameter carries a single key/value pair") {

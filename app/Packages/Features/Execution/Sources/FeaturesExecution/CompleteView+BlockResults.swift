@@ -126,7 +126,7 @@ extension CompleteView {
     ) -> String {
         let done = doneRows(blockItems: blockItems, itemLogs: itemLogs)
         guard done.contains(where: CompleteView.isCardioLike) else {
-            return "\(done.count) rows logged"
+            return loggedCount(done.count, noun: "result")
         }
         return cardioLedgerSummary(done: done)
     }
@@ -191,6 +191,7 @@ extension CompleteView {
         let logs = primitiveSetLogs.filter { $0.blockID == block.blockID }
         guard !logs.isEmpty else { return nil }
         let summary = logs
+            .filter { !$0.resultSemantics.isSentinel }
             .filter { $0.role == .blockResult || $0.role == .setResult }
             .map(primitiveResultText(for:))
             .filter { !$0.isEmpty }
@@ -200,6 +201,7 @@ extension CompleteView {
             return summary
         }
         return logs
+            .filter { !$0.resultSemantics.isSentinel }
             .filter { $0.role == .slot }
             .map(primitiveResultText(for:))
             .filter { !$0.isEmpty }
@@ -210,10 +212,10 @@ extension CompleteView {
     private static func primitiveResultText(for log: PrimitiveSetLog) -> String {
         var parts: [String] = []
         if let rounds = log.rounds {
-            parts.append("\(rounds) rounds")
+            parts.append("\(rounds) round\(rounds == 1 ? "" : "s")")
         }
         if let reps = log.reps {
-            parts.append("\(reps) reps")
+            parts.append("\(reps) rep\(reps == 1 ? "" : "s")")
         }
         if let duration = log.durationSec {
             parts.append(formatDuration(seconds: duration))
@@ -225,7 +227,17 @@ extension CompleteView {
             let unit = log.weightUnit?.rawValue ?? "load"
             parts.append("\(formatNumber(weight)) \(unit)")
         }
+        if log.skipped {
+            parts.append("skipped")
+        }
+        if parts.isEmpty {
+            parts.append("completed")
+        }
         return parts.joined(separator: " + ")
+    }
+
+    private static func loggedCount(_ count: Int, noun: String) -> String {
+        "\(count) \(noun)\(count == 1 ? "" : "s") logged"
     }
 
     private static func doneRows(

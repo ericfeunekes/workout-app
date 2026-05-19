@@ -7,6 +7,7 @@ covers:
   - app/Packages/Features/Settings/
   - app/WorkoutDB/WorkoutDBApp.swift
   - docs/sync.md
+  - docs/healthkit-data-access.md
   - docs/features/firstrun.md
   - docs/features/telemetry.md
 ---
@@ -39,8 +40,21 @@ row contract rather than extending a single mega-view.
 
 Settings is already a feature package and is mounted through `Shell.RootTabView`.
 It should present rows as explicit sections: server, local data, units, autoreg
-defaults, and diagnostics. Destructive actions require confirmation and should
-leave the app in a recoverable route.
+defaults, HealthKit export, and diagnostics. Destructive actions require
+confirmation and should leave the app in a recoverable route.
+
+The HealthKit export section is the local-control surface for the personal
+archive lane in `docs/healthkit-data-access.md`. The target surface lets Eric
+select all currently supported HealthKit descriptors or a supported subset,
+request the permissions implied by that selection, run a manual export,
+enable/disable the daily opportunistic export schedule, and inspect the last
+fetch/upload status. It must be clear that automatic export timing is
+best-effort and that app-open foreground catch-up remains authoritative.
+
+The current shipped slice exposes the HealthKit archive descriptor scope,
+manual export action, automatic-export toggle, next-attempt status, and
+current-server delivery status. Exact BGTask registration and richer last-run
+status remain in `SETTINGS-GAP-005`.
 
 Settings does not choose workouts, modify programming, or analyze history.
 If a control would change the workout plan itself, it belongs in Claude or a
@@ -56,6 +70,11 @@ future accepted app-side proposal workflow, not Settings.
   proven for each section.
 - `SETTINGS-GAP-004`: Diagnostics/export rows are target behavior only where
   telemetry gaps call for them; no broad debug dashboard is accepted.
+- `SETTINGS-GAP-005`: HealthKit personal archive export controls now include
+  descriptor subset selection, the manual export action, automatic-export
+  toggle, next-attempt status, and current-server status display. Remaining
+  Settings work is BGTask-backed scheduling proof, richer last-run summary, and
+  clearer failure display wired to the HealthKit data access requirements.
 
 ## QA scenarios
 
@@ -100,3 +119,24 @@ future accepted app-side proposal workflow, not Settings.
 - **steps:** open each Settings section.
 - **expected:** rows remain reachable, labels describe side effects, destructive
   rows are distinguishable, and no section requires hidden gestures.
+
+### S6. HealthKit archive export setup
+
+- **setup:** HealthKit available, saved server connection, no archive export
+  configured.
+- **steps:** open Settings, run the all-supported manual export.
+- **expected:** Settings derives the permission request from the selected
+  descriptors, starts the export without exposing HealthKit identifiers to the
+  view, reports successful uploads with counts, and reports failures with a
+  redacted failure class.
+
+### S7. HealthKit daily export status
+
+- **status:** future scenario for `SETTINGS-GAP-005`; not part of Loop A.
+- **setup:** HealthKit archive export configured with automatic daily export
+  enabled.
+- **steps:** open Settings after a successful run, then after a simulated
+  missed/failed run.
+- **expected:** Settings shows selected scope, automatic export state, next
+  intended attempt, last successful fetch/upload times, last counts, and the
+  failure class. The copy does not promise exact background timing.

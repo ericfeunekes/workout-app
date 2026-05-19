@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from workoutdb_server.api.deps import CurrentUserId, DbSession
 from workoutdb_server.api.schemas import (
+    ActivityIntentIn,
     PrimitiveBlockIn,
     WorkoutCreate,
     WorkoutRead,
@@ -55,6 +56,7 @@ def _build_workout_tree(payload: WorkoutCreate, user_id: str, db: Session) -> Wo
         source=payload.source,
         notes=payload.notes,
         tags_json=payload.tags_json,
+        activity_intent_json=_activity_intent_to_json(payload.activity_intent),
         primitive_blocks_json=_primitive_blocks_to_json(payload.primitive_blocks),
     )
     return workout
@@ -86,6 +88,7 @@ def create_workout(payload: WorkoutCreate, db: DbSession, user_id: CurrentUserId
                 status_=payload.status,
                 notes=payload.notes,
                 tags_json=payload.tags_json,
+                activity_intent=payload.activity_intent,
                 completed_at=None,
                 db=db,
                 primitive_blocks_payload=payload.primitive_blocks,
@@ -116,6 +119,11 @@ def update_workout(
         status_=payload.status,
         notes=payload.notes,
         tags_json=payload.tags_json,
+        activity_intent=(
+            payload.activity_intent
+            if "activity_intent" in payload.model_fields_set
+            else _UNCHANGED_ACTIVITY_INTENT
+        ),
         completed_at=payload.completed_at,
         db=db,
         primitive_blocks_payload=payload.primitive_blocks,
@@ -134,6 +142,7 @@ def _apply_workout_update(
     status_: str | None,
     notes: str | None,
     tags_json: str | None,
+    activity_intent: ActivityIntentIn | None | object,
     completed_at: datetime | None,
     db: Session,
     primitive_blocks_payload: list[PrimitiveBlockIn] | None = None,
@@ -165,6 +174,8 @@ def _apply_workout_update(
         workout.notes = notes
     if tags_json is not None:
         workout.tags_json = tags_json
+    if activity_intent is not _UNCHANGED_ACTIVITY_INTENT:
+        workout.activity_intent_json = _activity_intent_to_json(activity_intent)
     if completed_at is not None:
         workout.completed_at = completed_at
 
@@ -182,6 +193,22 @@ def _apply_workout_update(
 def _primitive_blocks_to_json(blocks: list[PrimitiveBlockIn]) -> str:
     return json.dumps(
         [_primitive_dump(block.model_dump(mode="json", exclude_none=True)) for block in blocks],
+        separators=(",", ":"),
+    )
+
+
+_UNCHANGED_ACTIVITY_INTENT = object()
+
+
+def _activity_intent_to_json(intent: ActivityIntentIn | None | object) -> str | None:
+    if intent is None:
+        return None
+    if intent is _UNCHANGED_ACTIVITY_INTENT:
+        raise AssertionError("unchanged activity intent cannot be serialized")
+    if not isinstance(intent, ActivityIntentIn):
+        raise TypeError("activity_intent must be an ActivityIntentIn or None")
+    return json.dumps(
+        _primitive_dump(intent.model_dump(mode="json", exclude_none=True)),
         separators=(",", ":"),
     )
 

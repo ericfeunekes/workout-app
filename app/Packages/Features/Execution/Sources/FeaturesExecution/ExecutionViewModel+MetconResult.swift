@@ -97,27 +97,9 @@ extension ExecutionViewModel {
     public func logForTimeResult() {
         guard currentTimingMode == .forTime else { return }
         let cursor = state.cursor
-        guard let item = context.item(at: cursor.blockIndex, itemIndex: 0) else {
-            return
-        }
         let elapsed = state.workStartedAt.map { max(0, clock.now.timeIntervalSince($0)) } ?? 0
-        let input = CardioLogInput(durationSec: elapsed, startedAt: state.workStartedAt)
         let now = clock.now
-        apply([
-            .logCardioSet(
-                itemID: item.id,
-                setIndex: 1,
-                durationSec: input.durationSec,
-                distanceM: input.distanceM,
-                hrAvgBpm: input.hrAvgBpm,
-                cadenceAvgSpm: input.cadenceAvgSpm,
-                startedAt: input.startedAt,
-                now: now
-            ),
-            .appendNote("For Time result: \(formatDuration(seconds: elapsed))"),
-        ])
-        emitSessionMutation("logCardioSet")
-        enqueueLoggedCardioSet(item: item, setIndex: 1, input: input)
+        apply([.appendNote("For Time result: \(formatDuration(seconds: elapsed))")])
         recordPrimitiveForTimeResult(
             blockIndex: cursor.blockIndex,
             durationSec: elapsed,
@@ -149,17 +131,21 @@ extension ExecutionViewModel {
             metric: partialMetric,
             partialValue: partialValue
         ) ?? partialValue
-        recordPrimitivePartialSlotResult(
-            cursor: cursor,
-            value: partialValue,
-            metric: partialMetric,
-            completedAt: completedAt
-        )
+        if partialMetric != .rounds {
+            recordPrimitivePartialSlotResult(
+                cursor: cursor,
+                value: partialValue,
+                metric: partialMetric,
+                completedAt: completedAt
+            )
+        }
         recordPrimitiveSetResult(
             blockIndex: cursor.blockIndex,
             setIndexInBlock: setIndex,
-            reps: partialMetric == .reps ? Int(partialValue.rounded()) : nil,
-            rounds: max(0, cursor.setIndex - 1),
+            reps: partialMetric == .reps ? Int(totalMetricValue.rounded()) : nil,
+            rounds: partialMetric == .rounds
+                ? Int(totalMetricValue.rounded())
+                : max(0, cursor.setIndex - 1),
             durationSec: duration,
             distanceM: partialMetric == .distance ? totalMetricValue : nil,
             weight: partialMetric == .loadCarried ? totalMetricValue : nil,
@@ -294,8 +280,11 @@ extension ExecutionViewModel {
         metric: PrimitiveResultMetric,
         partialValue: Double
     ) -> Double? {
-        guard metric != .reps,
-              cursor.blockIndex >= 0,
+        if metric == .reps {
+            return Double(amrapPrescribedRepsBeforeCurrentStation(cursor: cursor))
+                + partialValue
+        }
+        guard cursor.blockIndex >= 0,
               let block = context.primitiveExecutionPlan?.blocks[safe: cursor.blockIndex],
               let setIndex = currentPrimitiveAMRAPSetIndex(block: block, cursor: cursor)
         else {
@@ -323,6 +312,8 @@ extension ExecutionViewModel {
         now: Date
     ) {
         switch metric {
+        case .rounds:
+            apply([.appendNote(note)])
         case .reps:
             let reps = Int(value.rounded())
             apply([
@@ -384,17 +375,18 @@ extension ExecutionViewModel {
     ) {
         guard value > 0,
               let plan = context.primitiveExecutionPlan,
-              let slot = currentPrimitiveSlot() else {
+              let position = currentPrimitiveSlotPosition() else {
             return
         }
-        let log = slot.slotLog(
+        let coordinate = primitivePartialSlotCoordinate(position: position, cursor: cursor)
+        let log = position.slot.slotLog(
             workoutID: plan.workoutID,
-            blockRepeatIndex: 0,
-            setRepeatIndex: max(0, cursor.setIndex - 1),
-            setIndex: cursor.itemIndex,
+            blockRepeatIndex: coordinate.blockRepeatIndex,
+            setRepeatIndex: coordinate.setRepeatIndex,
+            setIndex: coordinate.setIndex,
             reps: metric == .reps ? Int(value.rounded()) : nil,
             weight: metric == .loadCarried ? value : nil,
-            weightUnit: metric == .loadCarried ? slot.loadUnit : nil,
+            weightUnit: metric == .loadCarried ? position.slot.loadUnit : nil,
             durationSec: metric == .duration ? value : nil,
             distanceM: metric == .distance ? value : nil,
             rir: nil,
@@ -405,17 +397,69 @@ extension ExecutionViewModel {
     }
 
     private func currentPrimitiveSlot() -> ExecutionSlot? {
+        currentPrimitiveSlotPosition()?.slot
+    }
+
+    private struct PrimitiveSlotPosition {
+        var slot: ExecutionSlot
+        var set: ExecutionSet
+        var slotIndex: Int
+    }
+
+    private struct PrimitiveSlotCommitCoordinate {
+        var blockRepeatIndex: Int
+        var setRepeatIndex: Int
+        var setIndex: Int
+    }
+
+    private func primitivePartialSlotCoordinate(
+        position: PrimitiveSlotPosition,
+        cursor: SessionState.Cursor
+    ) -> PrimitiveSlotCommitCoordinate {
+        let zeroBasedLegacySetIndex = max(0, cursor.setIndex - 1)
+        if position.set.traversal == .amrap {
+            return PrimitiveSlotCommitCoordinate(
+                blockRepeatIndex: 0,
+                setRepeatIndex: 0,
+                setIndex: zeroBasedLegacySetIndex * max(1, position.set.slots.count) + position.slotIndex
+            )
+        }
+        if position.set.timing.mode == .timeBounded,
+           position.set.timing.rounds != nil,
+           position.set.setRepeat == 1 {
+            return PrimitiveSlotCommitCoordinate(
+                blockRepeatIndex: 0,
+                setRepeatIndex: 0,
+                setIndex: zeroBasedLegacySetIndex
+            )
+        }
+        return PrimitiveSlotCommitCoordinate(
+            blockRepeatIndex: 0,
+            setRepeatIndex: zeroBasedLegacySetIndex,
+            setIndex: position.slotIndex
+        )
+    }
+
+    private func currentPrimitiveSlotPosition() -> PrimitiveSlotPosition? {
         let cursor = state.cursor
         guard let block = context.primitiveExecutionPlan?.blocks[safe: cursor.blockIndex],
               let currentItem = context.item(at: cursor.blockIndex, itemIndex: cursor.itemIndex) else {
             return nil
         }
         let itemCount = context.itemsByBlock[safe: cursor.blockIndex]?.count ?? 0
-        return block.slotForLegacyCursor(
+        guard let slot = block.slotForLegacyCursor(
             itemIndex: cursor.itemIndex,
             exerciseID: currentItem.exerciseID,
             itemCount: itemCount
-        )
+        ) else {
+            return nil
+        }
+        for set in block.sets {
+            if let slotIndex = set.slots.firstIndex(where: { $0.slotID == slot.slotID }) {
+                return PrimitiveSlotPosition(slot: slot, set: set, slotIndex: slotIndex)
+            }
+        }
+        return nil
     }
 
     private func currentPrimitiveAMRAPSetIndex(
@@ -439,6 +483,8 @@ extension ExecutionViewModel {
     private func formatPrimitiveResultValue(_ value: Double, metric: PrimitiveResultMetric) -> String {
         let formatted = value.rounded() == value ? String(Int(value)) : String(format: "%.2f", value)
         switch metric {
+        case .rounds:
+            return "\(formatted) rounds"
         case .reps:
             return "\(formatted) reps"
         case .distance:
@@ -454,6 +500,7 @@ extension ExecutionViewModel {
 
     private func primitiveResultNoun(_ metric: PrimitiveResultMetric) -> String {
         switch metric {
+        case .rounds: "rounds"
         case .reps: "reps"
         case .distance: "distance"
         case .duration: "time"

@@ -30,6 +30,64 @@ import WorkoutCoreFoundation
 @MainActor
 final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
 
+    private static func primitiveContext(
+        workout: Workout,
+        block: Block,
+        item: WorkoutItem,
+        exerciseID: UUID,
+        exerciseName: String,
+        repeatCount: Int = 10,
+        load: PrimitiveLoad? = nil
+    ) -> WorkoutContext {
+        let primitive = PrimitiveWorkout(
+            id: workout.id,
+            name: workout.name,
+            blocks: [
+                PrimitiveBlock(id: block.id, sets: [
+                    PrimitiveSet(
+                        id: UUID(),
+                        timing: PrimitiveTiming(mode: .setBounded),
+                        traversal: .sequential,
+                        repeatCount: repeatCount,
+                        slots: [
+                            PrimitiveSlot(
+                                id: item.id,
+                                exerciseID: exerciseID,
+                                workTargets: [],
+                                load: load
+                            ),
+                        ]
+                    ),
+                ]),
+            ]
+        )
+        return WorkoutContext(
+            workout: workout,
+            primitiveWorkout: primitive,
+            primitiveExecutionPlan: try! ExecutionPlan.validated(workout: primitive),
+            blocks: [block],
+            itemsByBlock: [[item]],
+            exercises: [exerciseID: Exercise(id: exerciseID, name: exerciseName)]
+        )
+    }
+
+    private static func primitiveLoad(from prescriptionJSON: String) -> PrimitiveLoad? {
+        let unit: PrimitiveLoadUnit = prescriptionJSON.contains(#""weight_unit":"lb""#) ? .lb : .kg
+        if prescriptionJSON.contains(#""load_kg":53"#) {
+            return PrimitiveLoad(value: 53, unit: unit, unitType: .absolute)
+        }
+        if prescriptionJSON.contains(#""load_kg":40"#) {
+            return PrimitiveLoad(value: 40, unit: unit, unitType: .absolute)
+        }
+        if prescriptionJSON.contains(#""load_kg":20"#) {
+            return PrimitiveLoad(value: 20, unit: unit, unitType: .absolute)
+        }
+        if prescriptionJSON.contains(#""load_kg":100"#) {
+            return PrimitiveLoad(value: 100, unit: unit, unitType: .absolute)
+        }
+        return nil
+    }
+
     // MARK: - Fixtures (single-block workouts per timing mode)
 
     /// Strength straight-sets — 3 × 5 @ 100 kg bench press. Used to
@@ -58,11 +116,14 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
             exerciseID: exerciseID,
             prescriptionJSON: #"{"sets":3,"reps":5,"load_kg":100,"weight_unit":"kg"}"#
         )
-        let ctx = WorkoutContext(
+        let ctx = primitiveContext(
             workout: workout,
-            blocks: [block],
-            itemsByBlock: [[item]],
-            exercises: [exerciseID: Exercise(id: exerciseID, name: "Bench")]
+            block: block,
+            item: item,
+            exerciseID: exerciseID,
+            exerciseName: "Bench",
+            repeatCount: 3,
+            load: PrimitiveLoad(value: 100, unit: .kg, unitType: .absolute)
         )
         return (ctx, itemID)
     }
@@ -95,15 +156,16 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
             exerciseID: exerciseID,
             prescriptionJSON: "{}"
         )
-        let ctx = WorkoutContext(
+        let ctx = primitiveContext(
             workout: workout,
-            blocks: [block],
-            itemsByBlock: [[item]],
-            exercises: [exerciseID: Exercise(id: exerciseID, name: "Run")]
+            block: block,
+            item: item,
+            exerciseID: exerciseID,
+            exerciseName: "Run",
+            repeatCount: 10
         )
         return (ctx, itemID)
     }
-
     /// Continuous — a 30 min Z2 run.
     private static func continuousContext() -> (WorkoutContext, UUID) {
         let userID = UUID()
@@ -131,11 +193,13 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
             exerciseID: exerciseID,
             prescriptionJSON: "{}"
         )
-        let ctx = WorkoutContext(
+        let ctx = primitiveContext(
             workout: workout,
-            blocks: [block],
-            itemsByBlock: [[item]],
-            exercises: [exerciseID: Exercise(id: exerciseID, name: "Run")]
+            block: block,
+            item: item,
+            exerciseID: exerciseID,
+            exerciseName: "Run",
+            repeatCount: 1
         )
         return (ctx, itemID)
     }
@@ -170,11 +234,14 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
             exerciseID: exerciseID,
             prescriptionJSON: prescriptionJSON
         )
-        let ctx = WorkoutContext(
+        let ctx = primitiveContext(
             workout: workout,
-            blocks: [block],
-            itemsByBlock: [[item]],
-            exercises: [exerciseID: Exercise(id: exerciseID, name: exerciseName)]
+            block: block,
+            item: item,
+            exerciseID: exerciseID,
+            exerciseName: exerciseName,
+            repeatCount: 1,
+            load: primitiveLoad(from: prescriptionJSON)
         )
         return (ctx, itemID)
     }
@@ -206,11 +273,14 @@ final class ExecutionViewModelLogCurrentSetTests: XCTestCase {
             exerciseID: exerciseID,
             prescriptionJSON: prescriptionJSON
         )
-        let ctx = WorkoutContext(
+        let ctx = primitiveContext(
             workout: workout,
-            blocks: [block],
-            itemsByBlock: [[item]],
-            exercises: [exerciseID: Exercise(id: exerciseID, name: exerciseName)]
+            block: block,
+            item: item,
+            exerciseID: exerciseID,
+            exerciseName: exerciseName,
+            repeatCount: 3,
+            load: primitiveLoad(from: prescriptionJSON)
         )
         return (ctx, itemID)
     }

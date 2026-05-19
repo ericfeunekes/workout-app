@@ -7,21 +7,21 @@
 // from the server.
 //
 // Covers:
-//   • V1 → V8 — pre-006 store opens under the current schema. The
-//     planner chains V1→V2→V3→V4→V5→V6→V7→V8 lightweight stages.
-//   • V2 → V8 — post-006, pre-R1.4 store opens under V8 AND the SetLog
+//   • V1 → V9 — pre-006 store opens under the current schema. The
+//     planner chains V1→V2→V3→V4→V5→V6→V7→V8→V9 lightweight stages.
+//   • V2 → V9 — post-006, pre-R1.4 store opens under V9 AND the SetLog
 //     denormalization backfill resolves `workoutID` + `plannedExerciseID`
 //     from the parent WorkoutItem → Block chain for rows that predate
 //     the column.
-//   • V3 → V8 — R1.4-era store opens under the current schema AND the
+//   • V3 → V9 — R1.4-era store opens under the current schema AND the
 //     PushItem priority + dedupKey backfill populates the new columns
 //     from each row's decoded envelope.
-//   • V4 → V8 — perf-002-era store opens with skipped/side/intent defaults.
-//   • V5 → V8 — the primitive-workout cache table is introduced without
+//   • V4 → V9 — perf-002-era store opens with skipped/side/intent defaults.
+//   • V5 → V9 — the primitive-workout cache table is introduced without
 //     stranding existing workout logs.
-//   • V6 → V8 — the first-class primitive result table is introduced;
+//   • V6 → V9 — the first-class primitive result table is introduced;
 //     V6 QA primitive result data is intentionally reset.
-//   • V7 → V8 — the HealthKit archive projection tables are introduced and
+//   • V7 → V9 — the HealthKit archive projection tables are introduced and
 //     writable without stranding existing primitive cache/log rows.
 //
 // Strategy per test: spin up an on-disk ModelContainer scoped to the old
@@ -100,10 +100,10 @@ final class SchemaMigrationTests: XCTestCase {
 
     /// Build a current ModelContainer pointing at the same on-disk URL, with
     /// the full migration plan so the appropriate stage(s) fire at open.
-    /// V8 is the current runtime schema (per `SchemaVersions.swift`);
+    /// V9 is the current runtime schema (per `SchemaVersions.swift`);
     /// older stores chain forward through the plan.
     private func makeCurrentContainer(at url: URL) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: WorkoutDBSchemaV8.self)
+        let schema = Schema(versionedSchema: WorkoutDBSchemaV9.self)
         let configuration = ModelConfiguration(schema: schema, url: url)
         return try ModelContainer(
             for: schema,
@@ -1137,7 +1137,7 @@ final class SchemaMigrationTests: XCTestCase {
             name: "Primitive workout",
             payloadJSON: "{}"
         ))
-        context.insert(PrimitiveSetLogModel(
+        context.insert(WorkoutDBSchemaV7.PrimitiveSetLogModel(
             id: ids.setLogID,
             roleRaw: PrimitiveLogRole.slot.rawValue,
             slotID: ids.itemID,

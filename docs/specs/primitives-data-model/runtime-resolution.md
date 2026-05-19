@@ -376,10 +376,10 @@ If a user corrects a slot row's weight retroactively, autoreg does not re-propos
 
 ## Current gaps
 
-- `PDM-GAP-004`: Runtime resolution must preserve offline execution and
-  seed-time parameter pinning. Relative loads resolve once from the local
-  `user_parameters` mirror at seed, execution reads an `ExecutionPlan` snapshot,
-  and mid-session server edits do not rebuild the active workout.
+No active runtime-resolution PDM gaps remain. Runtime resolution preserves
+offline execution and seed-time parameter pinning through `ExecutionPlan`
+snapshots. Unsupported primitive cells and no-work compositions fail closed at
+server ingest and app seed-time mapping.
 
 ## runtime-resolution.md open questions
 

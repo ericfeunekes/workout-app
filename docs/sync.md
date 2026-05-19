@@ -48,7 +48,12 @@ The app pulls and pushes on three triggers:
    backoff after failures; the lifecycle contract is still foreground-owned,
    not background-owned.
 
-**No aggressive polling.** No WebSocket. Push notifications are not in scope for v1 — the user will have opened the app by the time a new plan matters.
+**No aggressive polling.** No WebSocket. Push notifications are not required for
+the current foreground sync path or the HealthKit daily export slice. Future
+APNs/silent-push server-nudged sync is tracked by `SYNC-GAP-004`: it can wake
+the app opportunistically to pull newly-authored workouts before the user opens
+the app, but foreground/app-open catch-up remains required because background
+wakes can be throttled, skipped, or missed while the phone is offline.
 
 ---
 
@@ -223,8 +228,9 @@ Each `primitive_set_log` row carries the UUID the app assigned. Re-pushing the
 same UUID updates in place (idempotent). Rows are role-scoped:
 
 - `slot` rows identify `block_id`, `set_id`, and `slot_id`, and may carry
-  exercise-specific metrics. `set_index` is required and must match the slot's
-  ordinal inside the authored set.
+  exercise-specific metrics. `set_index` is required and is the commit
+  sequence within the current `(block_repeat_index, set_repeat_index)` set
+  instance.
 - `set_result` rows identify `block_id` and `set_id`, use `set_index = 0` as
   their aggregate sentinel, and cannot carry `slot_id` or exercise IDs.
 - `block_result` rows identify only `block_id`, use `set_index = 0` and
@@ -496,6 +502,17 @@ The watch face grammar (widget-based faces for set / rest / superset / EMOM / AM
   later after newer prescriptions may have arrived. Pick explicit expiry,
   refuse/resume, or never-expire behavior before changing execution/sync around
   long-lived active sessions.
+- `SYNC-GAP-004`: **APNs/silent-push server-nudged sync.** The app has no
+  background notification lane for "server has new workouts; wake and pull when
+  iOS permits." This is a future inbound sync capability, separate from
+  foreground pull, outbound push queue flushing, and HealthKit export
+  scheduling. This is a stub, not a completed requirements plan: future planning
+  should define the APNs entitlement/capability setup, app device-token
+  registration, server-side token storage and rotation, silent-push payload
+  contract, background pull handler, telemetry/diagnostics, and the fallback
+  rule that app-open foreground sync remains authoritative. No spike or external
+  research is currently required to know this capability is possible; the
+  unresolved work is requirements selection and implementation.
 - **Sync triggers on the watch.** Currently the phone is the only sync actor. If the watch ever writes primitive result rows independently (not in v1), we'll need a watch → phone → server reconciliation step.
 - **Result deletion scope.** v1 only deletes primitive result rows through `workout_resets` for same-day accidental workout logs. Arbitrary historical result deletion/edit provenance remains out of scope unless the user asks for audit-grade history later.
 - **Multiple active workouts.** The spec allows a user to mark multiple workouts `active`, but the app UX assumes one active workout at a time. Behavior if a second workout is started before the first is completed is undefined; we'd need to decide whether "start workout" auto-completes the prior one or refuses.

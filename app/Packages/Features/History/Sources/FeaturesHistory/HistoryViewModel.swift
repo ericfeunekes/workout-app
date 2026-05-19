@@ -18,14 +18,15 @@
 import Foundation
 import CoreDomain
 import CoreTelemetry
+import CoreSession
 import Persistence
 import WorkoutCoreFoundation
 
 /// Fire-and-forget hook invoked when the user corrects a past set from
-/// the History detail view. Shell wires this to `SyncAPI.pushLog([log])`
-/// so the edit propagates to the server via the standard set_log push
-/// path — same idempotent UUID as the original log, so the server
-/// upserts in place. Matches `ExecutionPushHooks.onSetLogged` semantics.
+/// the History detail view. Production does not wire this during the
+/// primitive cutover; package tests still use it to cover the legacy
+/// cache-edit surface until History correction gets a primitive-native
+/// edit/push contract.
 ///
 /// `nil` (the default) preserves the pure-offline test path — History
 /// still writes locally via `WorkoutCache.saveSetLogs` and reloads; the
@@ -294,6 +295,17 @@ public final class HistoryViewModel {
     private func workoutIDByItem(for exerciseID: ExerciseID) -> [WorkoutItemID: WorkoutID] {
         var out: [WorkoutItemID: WorkoutID] = [:]
         for session in rawSessions {
+            for log in session.primitiveSetLogs where log.resultSemantics.isByExerciseEligible {
+                let loggedExercise = log.performedExerciseID ?? log.plannedExerciseID
+                guard loggedExercise == exerciseID,
+                      let key = log.slotID else {
+                    continue
+                }
+                out[key] = session.workout.id
+            }
+            if !session.primitiveSetLogs.isEmpty {
+                continue
+            }
             for log in session.setLogs where !log.skipped {
                 let loggedExercise = log.performedExerciseID
                     ?? session.plannedExerciseByItem[log.workoutItemID]

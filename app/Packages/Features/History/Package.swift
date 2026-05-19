@@ -9,11 +9,11 @@ import PackageDescription
 //   • by-exercise pivot: picker + minimal trend indicator + recent sessions
 //
 // Dependencies per docs/architecture/swift-packages.md row "Features/History":
-//   CoreDomain, DesignSystem, Persistence, Sync.
+//   CoreDomain, CoreSession, DesignSystem, Persistence, Sync.
 //
-// Notably absent: CoreSession, CorePrescription, HealthKitBridge, WatchBridge.
-// History is a read-only surface over logged data; it does not drive the
-// session state machine, parse prescriptions, or touch sensors.
+// History imports CoreSession only for presentation-neutral primitive result
+// semantics. It does not drive the session state machine, parse prescriptions,
+// or touch sensors.
 //
 // Package.swift dependency-product quirk (same as siblings): `package:` in
 // `.product(...)` is the directory name of the path-based dependency, not
@@ -40,6 +40,7 @@ let package = Package(
     dependencies: [
         .package(path: "../../Core/Foundation"),
         .package(path: "../../Core/Domain"),
+        .package(path: "../../Core/Session"),
         .package(path: "../../Core/Telemetry"),
         .package(path: "../../DesignSystem"),
         .package(path: "../../Persistence"),
@@ -51,6 +52,7 @@ let package = Package(
             dependencies: [
                 .product(name: "WorkoutCoreFoundation", package: "Foundation"),
                 .product(name: "CoreDomain", package: "Domain"),
+                .product(name: "CoreSession", package: "Session"),
                 .product(name: "CoreTelemetry", package: "Telemetry"),
                 .product(name: "DesignSystem", package: "DesignSystem"),
                 .product(name: "Persistence", package: "Persistence"),
@@ -64,6 +66,7 @@ let package = Package(
                 "FeaturesHistory",
                 .product(name: "WorkoutCoreFoundation", package: "Foundation"),
                 .product(name: "CoreDomain", package: "Domain"),
+                .product(name: "CoreSession", package: "Session"),
                 .product(name: "CoreTelemetry", package: "Telemetry"),
                 .product(name: "Persistence", package: "Persistence"),
             ],

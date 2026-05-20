@@ -182,6 +182,7 @@ Run:
 ```bash
 make test-app-xcode
 make test-execution-ui
+make test-settings-ui
 make test-workout-type-ui
 make test-tokenstore-keychain-ui
 make test-healthkit-ui
@@ -195,6 +196,11 @@ entitlement-dependent test.
 It runs deterministic end-confirmation smoke coverage only. Route-change alert
 dismissal remains an opt-in XCUITest until it has a deterministic route driver
 instead of relying on wall-clock timer passage.
+
+`make test-settings-ui` is opt-in. Run it when a change claims Settings control
+action identity, Settings-owned persistence, or relaunch readback for Settings
+rows. It is code-signing-free and should not carry HealthKit authorization or
+archive-read claims.
 
 `make test-workout-type-ui` is opt-in. Run it when a change claims coverage
 across timing modes or composed primitive execution cases.
@@ -226,7 +232,11 @@ to prove persistence plus same-UUID upsert for the slot row. It also pushes one
 grouped completion artifact containing `slot`, `set_result`, and
 `block_result` rows, verifies `sync/pull` API readback for the eligible slot
 row, and verifies server persistence for aggregate rows, completed-workout
-status, and queue drain. It is wired into `make pre-qa`.
+status, and queue drain. The same probe now uploads quantity, category, and
+workout HealthKit archive records plus a tombstone through `SyncAPI` and reads
+the SQLite archive tables to prove request-set metadata, cursor
+acknowledgement, typed values, and tombstones landed through the real HTTP
+boundary. It is wired into `make pre-qa`.
 
 ## Pre-QA Gate
 
@@ -236,7 +246,7 @@ composes:
 - `make check` for Python lint/import contracts, Python tests, and schema
   package tests
 - `make test-sync-real-http` for FastAPI + SQLite + Swift URLSession primitive
-  sync and server-persistence proof
+  sync, HealthKit archive upload, and server-persistence proof
 - `make check-app` for every wired app package test plus the generated iOS app
   scheme compile/link smoke and code-signing-free execution UI proof
 

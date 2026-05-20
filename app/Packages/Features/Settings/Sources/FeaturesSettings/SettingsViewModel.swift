@@ -23,6 +23,13 @@
 import Foundation
 import Persistence
 
+public enum HealthArchiveManualExportOutcome: Sendable, Equatable {
+    case completed
+    case unavailable(String)
+    case failed(String)
+    case tokenRejected
+}
+
 /// View model for the Settings screen. `@Observable` so SwiftUI's
 /// observation tracking picks up `sections` and `showDestructiveConfirm`
 /// mutations without a manual `objectWillChange.send()`.
@@ -90,7 +97,7 @@ public final class SettingsViewModel {
     let onSyncNow: @Sendable () async -> Void
     let onResetCache: @Sendable () async -> Void
     let onChangeServer: @Sendable () async -> Void
-    let onHealthArchiveExportNow: @Sendable () async -> Void
+    let onHealthArchiveExportNow: @Sendable () async -> HealthArchiveManualExportOutcome
     let now: @MainActor () -> Date
 
     // MARK: - Cached derived state (rebuilt on mutation)
@@ -104,6 +111,8 @@ public final class SettingsViewModel {
     /// placeholder.
     var cachedLastSyncAt: Date?
     var cachedHealthArchiveExport: HealthArchiveExportSnapshot
+    var transientHealthArchiveStatus: String?
+    private var healthArchiveControlMutationTail: Task<Void, Never>?
 
     // MARK: - Init
 
@@ -130,7 +139,9 @@ public final class SettingsViewModel {
         onSyncNow: @escaping @Sendable () async -> Void = {},
         onResetCache: @escaping @Sendable () async -> Void = {},
         onChangeServer: @escaping @Sendable () async -> Void = {},
-        onHealthArchiveExportNow: @escaping @Sendable () async -> Void = {},
+        onHealthArchiveExportNow: @escaping @Sendable () async -> HealthArchiveManualExportOutcome = {
+            .completed
+        },
         now: @escaping @MainActor () -> Date = { Date() }
     ) {
         self.tokenStore = tokenStore
@@ -150,6 +161,7 @@ public final class SettingsViewModel {
         self.cachedUnits = unitsStore.load()
         self.cachedLastSyncAt = nil
         self.cachedHealthArchiveExport = HealthArchiveExportSnapshot()
+        self.transientHealthArchiveStatus = nil
         rebuild()
     }
 
@@ -174,6 +186,7 @@ public final class SettingsViewModel {
         cachedHealthArchiveExport = await healthArchiveExportState.loadSnapshot(
             serverNamespace: serverNamespace
         )
+        transientHealthArchiveStatus = nil
         cachedAutoregDefaults = autoregStore.load()
         cachedUnits = unitsStore.load()
         rebuild()
@@ -253,15 +266,43 @@ public final class SettingsViewModel {
         rebuild()
     }
 
-    func exportHealthArchiveNow() {
-        // swiftlint:disable:next no_direct_task_unstructured
-        Task { @MainActor [weak self, onHealthArchiveExportNow] in
-            await onHealthArchiveExportNow()
-            await self?.refreshAsync()
+    @discardableResult
+    func exportHealthArchiveNow() -> Task<Void, Never> {
+        enqueueHealthArchiveIntent { [self] in
+            let outcome = await self.onHealthArchiveExportNow()
+            await self.handleHealthArchiveManualExportOutcome(outcome)
         }
     }
 
-    func pickHealthArchiveScopeMode(_ mode: String) async {
+    private func handleHealthArchiveManualExportOutcome(
+        _ outcome: HealthArchiveManualExportOutcome
+    ) async {
+        switch outcome {
+        case .completed:
+            await refreshAsync()
+        case .unavailable(let reason):
+            applyHealthArchiveTransientUnavailable(reason)
+        case .failed(_):
+            await refreshAsync()
+        case .tokenRejected:
+            await refreshAsync()
+        }
+    }
+
+    private func applyHealthArchiveTransientUnavailable(_ failureClass: String) {
+        transientHealthArchiveStatus = "failed · \(failureClass)"
+        rebuild()
+    }
+
+    @discardableResult
+    func pickHealthArchiveScopeMode(_ mode: String) -> Task<Void, Never> {
+        enqueueHealthArchiveIntent { [self] in
+            await applyHealthArchiveScopeMode(mode)
+        }
+    }
+
+    private func applyHealthArchiveScopeMode(_ mode: String) async {
+        await reloadHealthArchiveExportSnapshot()
         if mode == "all supported" {
             await healthArchiveExportState.setScope(.allSupported)
         } else {
@@ -273,12 +314,28 @@ public final class SettingsViewModel {
         await refreshAsync()
     }
 
-    func setHealthArchiveAutomatic(_ enabled: Bool) async {
+    @discardableResult
+    func setHealthArchiveAutomatic(_ enabled: Bool) -> Task<Void, Never> {
+        enqueueHealthArchiveIntent { [self] in
+            await applyHealthArchiveAutomatic(enabled)
+        }
+    }
+
+    private func applyHealthArchiveAutomatic(_ enabled: Bool) async {
+        await reloadHealthArchiveExportSnapshot()
         await healthArchiveExportState.setAutomaticEnabled(enabled)
         await refreshAsync()
     }
 
-    func toggleHealthArchiveDescriptor(id: String, enabled: Bool) async {
+    @discardableResult
+    func toggleHealthArchiveDescriptor(id: String, enabled: Bool) -> Task<Void, Never> {
+        enqueueHealthArchiveIntent { [self] in
+            await applyHealthArchiveDescriptorToggle(id: id, enabled: enabled)
+        }
+    }
+
+    private func applyHealthArchiveDescriptorToggle(id: String, enabled: Bool) async {
+        await reloadHealthArchiveExportSnapshot()
         var ids = explicitDescriptorIDsForEditing()
         if enabled {
             ids.insert(id)
@@ -289,6 +346,26 @@ public final class SettingsViewModel {
             healthArchiveDescriptorOptions.map(\.id).filter { ids.contains($0) }
         ))
         await refreshAsync()
+    }
+
+    @discardableResult
+    private func enqueueHealthArchiveIntent(
+        _ operation: @escaping @MainActor () async -> Void
+    ) -> Task<Void, Never> {
+        let previous = healthArchiveControlMutationTail
+        let task = Task { @MainActor in
+            await previous?.value
+            await operation()
+        }
+        healthArchiveControlMutationTail = task
+        return task
+    }
+
+    private func reloadHealthArchiveExportSnapshot() async {
+        let serverNamespace = currentServerNamespace()
+        cachedHealthArchiveExport = await healthArchiveExportState.loadSnapshot(
+            serverNamespace: serverNamespace
+        )
     }
 
     private func explicitDescriptorIDsForEditing() -> Set<String> {

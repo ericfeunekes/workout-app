@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
 from workoutdb_server.api.deps import CurrentUserId, DbSession
@@ -119,9 +119,20 @@ def _upsert_request_set(
             tombstones_received=0,
         )
         db.add(row)
+    elif (
+        row.server_namespace != payload.server_namespace
+        or row.descriptor_fingerprint != payload.descriptor_fingerprint
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "request_set_key already exists with different "
+                "server_namespace or descriptor_fingerprint"
+            ),
+        )
     row.server_namespace = payload.server_namespace
     row.descriptor_fingerprint = payload.descriptor_fingerprint
     row.acknowledged_cursor = payload.next_cursor
-    row.records_received += len(payload.records)
-    row.tombstones_received += len(payload.tombstones)
+    row.records_received = len(payload.records)
+    row.tombstones_received = len(payload.tombstones)
     row.last_uploaded_at = now

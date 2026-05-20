@@ -78,7 +78,10 @@ prescription, autoregulation, session, telemetry, and utility logic.
 `Persistence`, `Sync`, `HealthKitBridge`, `WatchBridge`, and
 `WorkoutKitAdapter` own named side effects. `Features/*` owns Today,
 Execution, History, Settings, FirstRun, and WatchFaces. `Shell` owns bootstrap,
-root tab composition, cross-feature view model wiring, and push-flusher lifecycle. See
+root tab composition, cross-feature view model wiring, and push-flusher
+lifecycle. The app target owns thin scene-phase triggers for the HealthKit
+archive export because that wiring crosses app lifecycle and entitlement
+boundaries; the export mechanics still live in `HealthArchiveExport`. See
 `docs/architecture/swift-packages.md` for the authoritative package graph and
 allowed dependencies.
 

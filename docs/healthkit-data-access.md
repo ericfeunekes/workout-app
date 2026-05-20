@@ -364,8 +364,9 @@ tests for the same request set.
 the local projection, and uploads normalized records and tombstones to the home
 server without screens importing HealthKit. Merge-gate proof: package tests for
 the orchestration path against fake HealthKit providers and fake server
-transport, plus server tests for idempotent health-record/tombstone ingestion
-once the endpoint/schema are selected.
+transport, server tests for idempotent health-record/tombstone ingestion and
+request-set validation, and `make test-sync-real-http` proof that Swift
+`SyncAPI` can upload archive records through FastAPI into SQLite.
 
 `HKDATA-AC-013`: A daily archive schedule is opportunistic and catch-up based,
 not exact-wall-clock. If the scheduled background run is skipped, throttled, or
@@ -399,7 +400,9 @@ Merge-gate proof: Settings feature tests and telemetry/export-summary tests.
   local projection, uploads through `Sync`, and advances the local delivery
   cursor only after server acknowledgement. Settings now has descriptor scope,
   manual export, automatic-export toggle, next-attempt status, and
-  current-server status controls. BGTask registration and richer status
+  current-server status controls. The real HTTP probe uploads quantity,
+  category, and workout archive records plus a tombstone through `SyncAPI` and
+  verifies SQLite persistence. BGTask registration and richer status
   presentation are still later loops.
 - The DEBUG simulator probe route requests HealthKit authorization, runs the
   archive fetch, persists the projection, and exposes structured proof fields

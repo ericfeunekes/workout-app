@@ -59,6 +59,7 @@ private struct NoopPushQueueStore: PushQueueStore {
 private enum FakeOutcome {
     case response(HTTPResponse)
     case error(SyncError)
+    case archiveSuccess(cursor: String?)
 }
 
 private actor FakeTransportState {
@@ -79,6 +80,8 @@ private actor FakeTransportState {
             return response
         case .error(let error):
             throw error
+        case .archiveSuccess(let cursor):
+            return HTTPResponse(status: 200, body: uploadResponse(body: body, cursor: cursor))
         }
     }
 }
@@ -98,6 +101,32 @@ private struct FakeTransport: HTTPTransport {
     func post(path: String, body: Data, bearerToken: String) async throws -> HTTPResponse {
         try await state.nextPost(path: path, body: body, token: bearerToken)
     }
+}
+
+private final class DelayedUploadTransport: HTTPTransport, @unchecked Sendable {
+    private let delayNanoseconds: UInt64
+    private let storage = FakeDelayedUploadStorage()
+
+    init(delayNanoseconds: UInt64) {
+        self.delayNanoseconds = delayNanoseconds
+    }
+
+    var completedPosts: Int { storage.completedPosts }
+
+    func get(path: String, query: [(String, String)], bearerToken: String) async throws
+        -> HTTPResponse {
+        HTTPResponse(status: 200, body: Data())
+    }
+
+    func post(path: String, body: Data, bearerToken: String) async throws -> HTTPResponse {
+        try await Task.sleep(nanoseconds: delayNanoseconds)
+        storage.completedPosts += 1
+        return HTTPResponse(status: 200, body: uploadResponse(body: body, cursor: "cursor-delayed"))
+    }
+}
+
+private final class FakeDelayedUploadStorage: @unchecked Sendable {
+    nonisolated(unsafe) var completedPosts = 0
 }
 
 private final class DelayedHealthBatchDataProvider: HealthBatchDataProvider, @unchecked Sendable {
@@ -124,11 +153,14 @@ private final class FakeDelayedHealthBatchStorage: @unchecked Sendable {
     nonisolated(unsafe) var queries: [HealthBatchQuery] = []
 }
 
-private func uploadResponse(cursor: String?) -> Data {
+private func uploadResponse(body: Data, cursor: String?) -> Data {
+    let requestSetKey = ((try? JSONSerialization.jsonObject(with: body)) as? [String: Any])?[
+        "request_set_key"
+    ] as? String ?? ""
     let cursorJSON = cursor.map { "\"\($0)\"" } ?? "null"
     return """
     {
-      "request_set_key": "localhost|all-supported|fp",
+      "request_set_key": "\(requestSetKey)",
       "acknowledged_cursor": \(cursorJSON),
       "records_received": 1,
       "tombstones_received": 1,
@@ -139,7 +171,7 @@ private func uploadResponse(cursor: String?) -> Data {
 
 private func makeCoordinator(
     permissions: FakeHealthPermissionBroker = FakeHealthPermissionBroker(),
-    transport: FakeTransport,
+    transport: any HTTPTransport,
     batch: any HealthBatchDataProvider,
     store: PersistenceFactory
 ) -> HealthArchiveExportCoordinator {
@@ -163,7 +195,7 @@ private func makeCoordinator(
 runAsyncCase("manual export advances cursor only after upload success") {
     let store = try PersistenceFactory.makeInMemory()
     let transport = FakeTransport(outcomes: [
-        .response(HTTPResponse(status: 200, body: uploadResponse(cursor: "cursor-1")))
+        .archiveSuccess(cursor: "cursor-1")
     ])
     let batch = FakeHealthBatchDataProvider(result: HealthBatchResult(
         records: [
@@ -211,7 +243,7 @@ runAsyncCase("manual export advances cursor only after upload success") {
 runAsyncCase("upload failure keeps previous acknowledged cursor") {
     let store = try PersistenceFactory.makeInMemory()
     let successTransport = FakeTransport(outcomes: [
-        .response(HTTPResponse(status: 200, body: uploadResponse(cursor: "cursor-old")))
+        .archiveSuccess(cursor: "cursor-old")
     ])
     let successBatch = FakeHealthBatchDataProvider(result: HealthBatchResult(
         records: [],
@@ -255,11 +287,51 @@ runAsyncCase("upload failure keeps previous acknowledged cursor") {
     try expect(snapshot.status == .failed, "failed status")
 }
 
+runAsyncCase("request set acknowledgement mismatch does not advance cursor") {
+    let store = try PersistenceFactory.makeInMemory()
+    let transport = FakeTransport(outcomes: [
+        .response(HTTPResponse(status: 200, body: """
+        {
+          "request_set_key": "wrong-request-set",
+          "acknowledged_cursor": "cursor-new",
+          "records_received": 0,
+          "tombstones_received": 0,
+          "server_time": "2026-05-18T12:10:00Z"
+        }
+        """.data(using: .utf8)!))
+    ])
+    let batch = FakeHealthBatchDataProvider(result: HealthBatchResult(
+        records: [],
+        nextCursor: HealthBatchCursor("cursor-new")
+    ))
+    let coordinator = makeCoordinator(transport: transport, batch: batch, store: store)
+
+    do {
+        _ = try await coordinator.exportNow(serverURL: URL(string: "http://localhost:8000")!)
+        try expect(false, "expected request set mismatch")
+    } catch HealthArchiveExportError.requestSetAcknowledgementMismatch(
+        let expected,
+        let actual
+    ) {
+        try expect(expected.hasPrefix("http://localhost:8000|all-supported|"), "expected key")
+        try expectEqual(actual, "wrong-request-set")
+    }
+
+    let snapshot = await store.healthArchiveExportStateStore.loadSnapshot(
+        serverNamespace: "http://localhost:8000"
+    )
+    let storedCursor = try await store.healthArchiveStore.loadCursor(
+        requestSetKey: snapshot.requestSetKey ?? ""
+    )
+    try expect(storedCursor == nil, "mismatched acknowledgement must not advance cursor")
+    try expect(snapshot.status == .failed, "mismatch should mark failed")
+}
+
 runAsyncCase("manual export requests and fetches all supported batch descriptors") {
     let store = try PersistenceFactory.makeInMemory()
     let permissions = FakeHealthPermissionBroker()
     let transport = FakeTransport(outcomes: [
-        .response(HTTPResponse(status: 200, body: uploadResponse(cursor: "cursor-1")))
+        .archiveSuccess(cursor: "cursor-1")
     ])
     let batch = FakeHealthBatchDataProvider(result: HealthBatchResult(
         records: [],
@@ -293,6 +365,45 @@ runAsyncCase("manual export requests and fetches all supported batch descriptors
     )
 }
 
+runAsyncCase("manual export persists and uploads category and workout records") {
+    let store = try PersistenceFactory.makeInMemory()
+    let transport = FakeTransport(outcomes: [
+        .archiveSuccess(cursor: "cursor-1")
+    ])
+    let batch = FakeHealthBatchDataProvider(result: HealthBatchResult(
+        records: [
+            HealthDataRecord(
+                id: "sleep-1",
+                type: HealthDataTypeRegistry.sleepAnalysis,
+                value: .category(1)
+            ),
+            HealthDataRecord(
+                id: "workout-1",
+                type: HealthDataTypeRegistry.workout,
+                value: .workout(
+                    activityType: "37",
+                    durationSeconds: 1800,
+                    totalEnergyKcal: 220
+                )
+            ),
+        ],
+        nextCursor: HealthBatchCursor("cursor-1")
+    ))
+    let coordinator = makeCoordinator(transport: transport, batch: batch, store: store)
+
+    _ = try await coordinator.exportNow(serverURL: URL(string: "http://localhost:8000")!)
+
+    let stored = try await store.healthArchiveStore.loadRecords(descriptorID: nil)
+    let posts = await transport.state.posts
+    let body = String(data: posts[0].body, encoding: .utf8) ?? ""
+
+    try expectEqual(Set(stored.map(\.sampleKindRaw)), Set(["category", "workout"]))
+    try expect(body.contains(#""sample_kind":"category""#), "category sample kind uploaded")
+    try expect(body.contains(#""category_value":1"#), "category value uploaded")
+    try expect(body.contains(#""sample_kind":"workout""#), "workout sample kind uploaded")
+    try expect(body.contains(#""workout_activity_type":"37""#), "workout value uploaded")
+}
+
 runAsyncCase("explicit subset drives permission fetch fingerprint and cursor key") {
     let store = try PersistenceFactory.makeInMemory()
     await store.healthArchiveExportStateStore.setScope(.explicitDescriptorIDs([
@@ -301,7 +412,7 @@ runAsyncCase("explicit subset drives permission fetch fingerprint and cursor key
     ]))
     let permissions = FakeHealthPermissionBroker()
     let transport = FakeTransport(outcomes: [
-        .response(HTTPResponse(status: 200, body: uploadResponse(cursor: "cursor-subset")))
+        .archiveSuccess(cursor: "cursor-subset")
     ])
     let batch = FakeHealthBatchDataProvider(result: HealthBatchResult(
         records: [],
@@ -361,7 +472,7 @@ runAsyncCase("unsupported explicit descriptor fails before permission request") 
 runAsyncCase("runtime reports already running for overlapping triggers") {
     let store = try PersistenceFactory.makeInMemory()
     let transport = FakeTransport(outcomes: [
-        .response(HTTPResponse(status: 200, body: uploadResponse(cursor: "cursor-1")))
+        .archiveSuccess(cursor: "cursor-1")
     ])
     let batch = DelayedHealthBatchDataProvider(
         result: HealthBatchResult(records: [], nextCursor: HealthBatchCursor("cursor-1")),
@@ -384,10 +495,120 @@ runAsyncCase("runtime reports already running for overlapping triggers") {
     try expect(!firstSummary.alreadyRunning, "first trigger still performs export")
 }
 
+runAsyncCase("retired runtime suppresses stale export completion writes") {
+    let store = try PersistenceFactory.makeInMemory()
+    let transport = FakeTransport(outcomes: [
+        .archiveSuccess(cursor: "cursor-1")
+    ])
+    let batch = DelayedHealthBatchDataProvider(
+        result: HealthBatchResult(
+            records: [
+                HealthDataRecord(
+                    id: "sample-1",
+                    type: HealthDataTypeRegistry.heartRate,
+                    value: .quantity(122, unit: "count/min")
+                ),
+            ],
+            nextCursor: HealthBatchCursor("cursor-1")
+        ),
+        delayNanoseconds: 200_000_000
+    )
+    let coordinator = makeCoordinator(transport: transport, batch: batch, store: store)
+    let runtime = HealthArchiveExportRuntime(coordinator: coordinator)
+    let serverURL = URL(string: "http://localhost:8000")!
+
+    let export = Task {
+        try await runtime.exportNow(serverURL: serverURL, trigger: .manual)
+    }
+    try await Task.sleep(nanoseconds: 20_000_000)
+    await runtime.retire()
+
+    do {
+        _ = try await export.value
+        try expect(false, "expected retired export to cancel")
+    } catch is CancellationError {}
+
+    let snapshot = await store.healthArchiveExportStateStore.loadSnapshot(
+        serverNamespace: "http://localhost:8000"
+    )
+    let posts = await transport.state.posts
+    let records = try await store.healthArchiveStore.loadRecords(descriptorID: nil)
+
+    try expectEqual(snapshot.status, .failed)
+    try expectEqual(snapshot.lastFailureClass, "InterruptedExport")
+    try expectEqual(posts.count, 0)
+    try expectEqual(records.count, 0)
+}
+
+runAsyncCase("retired runtime cancels suspended upload before old-server post completes") {
+    let store = try PersistenceFactory.makeInMemory()
+    let transport = DelayedUploadTransport(delayNanoseconds: 500_000_000)
+    let batch = FakeHealthBatchDataProvider(result: HealthBatchResult(
+        records: [
+            HealthDataRecord(
+                id: "sample-1",
+                type: HealthDataTypeRegistry.heartRate,
+                value: .quantity(122, unit: "count/min")
+            ),
+        ],
+        nextCursor: HealthBatchCursor("cursor-delayed")
+    ))
+    let coordinator = makeCoordinator(transport: transport, batch: batch, store: store)
+    let runtime = HealthArchiveExportRuntime(coordinator: coordinator)
+    let serverURL = URL(string: "http://localhost:8000")!
+
+    let export = Task {
+        try await runtime.exportNow(serverURL: serverURL, trigger: .manual)
+    }
+    try await Task.sleep(nanoseconds: 50_000_000)
+    await runtime.retire()
+
+    do {
+        _ = try await export.value
+        try expect(false, "expected retired upload to cancel")
+    } catch is CancellationError {}
+
+    let snapshot = await store.healthArchiveExportStateStore.loadSnapshot(
+        serverNamespace: "http://localhost:8000"
+    )
+    let storedCursor = try await store.healthArchiveStore.loadCursor(
+        requestSetKey: snapshot.requestSetKey ?? ""
+    )
+    let storedRecords = try await store.healthArchiveStore.loadRecords(descriptorID: nil)
+
+    try expectEqual(transport.completedPosts, 0)
+    try expect(storedCursor == nil, "retired upload must not advance cursor")
+    try expectEqual(storedRecords.count, 0)
+    try expectEqual(snapshot.status, .failed)
+    try expectEqual(snapshot.lastFailureClass, "InterruptedExport")
+}
+
+runAsyncCase("token rejected export persists token failure class") {
+    let store = try PersistenceFactory.makeInMemory()
+    let transport = FakeTransport(outcomes: [.error(.tokenRejected)])
+    let batch = FakeHealthBatchDataProvider(result: HealthBatchResult(
+        records: [],
+        nextCursor: HealthBatchCursor("cursor-new")
+    ))
+    let coordinator = makeCoordinator(transport: transport, batch: batch, store: store)
+
+    do {
+        _ = try await coordinator.exportNow(serverURL: URL(string: "http://localhost:8000")!)
+        try expect(false, "expected token rejection")
+    } catch SyncError.tokenRejected {}
+
+    let snapshot = await store.healthArchiveExportStateStore.loadSnapshot(
+        serverNamespace: "http://localhost:8000"
+    )
+
+    try expectEqual(snapshot.status, .failed)
+    try expectEqual(snapshot.lastFailureClass, "TokenRejected")
+}
+
 runAsyncCase("exportIfDue respects automatic control and uses foreground trigger") {
     let store = try PersistenceFactory.makeInMemory()
     let transport = FakeTransport(outcomes: [
-        .response(HTTPResponse(status: 200, body: uploadResponse(cursor: "cursor-1")))
+        .archiveSuccess(cursor: "cursor-1")
     ])
     let batch = FakeHealthBatchDataProvider(result: HealthBatchResult(
         records: [],
@@ -411,7 +632,7 @@ runAsyncCase("exportIfDue respects automatic control and uses foreground trigger
 runAsyncCase("next attempt is scoped by server namespace") {
     let store = try PersistenceFactory.makeInMemory()
     let serverATransport = FakeTransport(outcomes: [
-        .response(HTTPResponse(status: 200, body: uploadResponse(cursor: "cursor-a")))
+        .archiveSuccess(cursor: "cursor-a")
     ])
     let serverABatch = FakeHealthBatchDataProvider(result: HealthBatchResult(
         records: [],
@@ -428,7 +649,7 @@ runAsyncCase("next attempt is scoped by server namespace") {
     _ = try await serverARuntime.exportIfDue(serverURL: URL(string: "http://server-a")!)
 
     let serverBTransport = FakeTransport(outcomes: [
-        .response(HTTPResponse(status: 200, body: uploadResponse(cursor: "cursor-b")))
+        .archiveSuccess(cursor: "cursor-b")
     ])
     let serverBBatch = FakeHealthBatchDataProvider(result: HealthBatchResult(
         records: [],
@@ -454,8 +675,8 @@ runAsyncCase("next attempt is scoped by server namespace") {
 runAsyncCase("next attempt is scoped by request set on the same server") {
     let store = try PersistenceFactory.makeInMemory()
     let transport = FakeTransport(outcomes: [
-        .response(HTTPResponse(status: 200, body: uploadResponse(cursor: "cursor-all"))),
-        .response(HTTPResponse(status: 200, body: uploadResponse(cursor: "cursor-subset"))),
+        .archiveSuccess(cursor: "cursor-all"),
+        .archiveSuccess(cursor: "cursor-subset"),
     ])
     let batch = FakeHealthBatchDataProvider(result: HealthBatchResult(
         records: [],

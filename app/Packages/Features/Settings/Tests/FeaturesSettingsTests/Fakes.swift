@@ -99,7 +99,9 @@ final class FakeSyncMetadataStore: @unchecked Sendable, SyncMetadataStore {
 
 final class FakeHealthArchiveExportStateStore: @unchecked Sendable, HealthArchiveExportStateStore {
     var snapshot: HealthArchiveExportSnapshot
+    var setScopeDelayNanoseconds: UInt64 = 0
     private(set) var loadedNamespaces: [String?] = []
+    private(set) var setScopeCallCount = 0
 
     init(snapshot: HealthArchiveExportSnapshot = HealthArchiveExportSnapshot()) {
         self.snapshot = snapshot
@@ -130,6 +132,10 @@ final class FakeHealthArchiveExportStateStore: @unchecked Sendable, HealthArchiv
     }
 
     func setScope(_ scope: HealthArchiveExportScope) async {
+        setScopeCallCount += 1
+        if setScopeDelayNanoseconds > 0 {
+            try? await Task.sleep(nanoseconds: setScopeDelayNanoseconds)
+        }
         snapshot = HealthArchiveExportSnapshot(
             scope: scope,
             automaticEnabled: snapshot.automaticEnabled,

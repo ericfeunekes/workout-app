@@ -113,6 +113,7 @@ struct PrimitiveSyncProbe {
             api: api,
             persistence: persistence
         )
+        try await uploadHealthArchive(api: api, baseURL: baseURL)
         try await expectInvalidPerformedExerciseRejected(baseURL: baseURL, token: token)
     }
 
@@ -285,6 +286,85 @@ struct PrimitiveSyncProbe {
             throw ProbeError.failedExpectation("expected HTTP response for invalid primitive log")
         }
         try expect(http.statusCode == 422, "expected invalid primitive log to return 422")
+    }
+
+    private static func uploadHealthArchive(api: SyncAPI, baseURL: URL) async throws {
+        let result = try await api.uploadHealthArchive(HealthArchiveUploadRequest(
+            requestSetKey: "sync-probe-health-archive",
+            serverNamespace: normalizedServerNamespace(baseURL),
+            descriptorFingerprint: "sync-probe-fingerprint",
+            nextCursor: "sync-probe-cursor-1",
+            records: [
+                HealthArchiveUploadRecord(
+                    id: "aaaa1111-1111-4111-8111-111111111111",
+                    externalID: "hk-quantity-heart-rate-1",
+                    descriptorID: "HKQuantityTypeIdentifierHeartRate",
+                    sampleKind: .quantity,
+                    sourceBundleIdentifier: "com.apple.Health",
+                    start: Date(timeIntervalSince1970: 1_768_516_800),
+                    end: Date(timeIntervalSince1970: 1_768_516_860),
+                    value: HealthArchiveUploadValue(
+                        kind: .quantity,
+                        quantityValue: 142,
+                        unit: "count/min"
+                    ),
+                    metadata: ["probe": "real-http"]
+                ),
+                HealthArchiveUploadRecord(
+                    id: "aaaa2222-2222-4222-8222-222222222222",
+                    externalID: "hk-category-sleep-1",
+                    descriptorID: "HKCategoryTypeIdentifierSleepAnalysis",
+                    sampleKind: .category,
+                    sourceBundleIdentifier: "com.apple.Health",
+                    start: Date(timeIntervalSince1970: 1_768_513_200),
+                    end: Date(timeIntervalSince1970: 1_768_538_400),
+                    value: HealthArchiveUploadValue(kind: .category, categoryValue: 1),
+                    metadata: ["probe": "real-http"]
+                ),
+                HealthArchiveUploadRecord(
+                    id: "aaaa3333-3333-4333-8333-333333333333",
+                    externalID: "hk-workout-run-1",
+                    descriptorID: "HKWorkoutTypeIdentifier",
+                    sampleKind: .workout,
+                    sourceBundleIdentifier: "com.workoutdb.probe",
+                    start: Date(timeIntervalSince1970: 1_768_516_800),
+                    end: Date(timeIntervalSince1970: 1_768_518_600),
+                    value: HealthArchiveUploadValue(
+                        kind: .workout,
+                        workoutActivityType: "running",
+                        durationSeconds: 1_800,
+                        totalEnergyKcal: 320
+                    ),
+                    metadata: ["probe": "real-http"]
+                ),
+            ],
+            tombstones: [
+                HealthArchiveUploadTombstone(
+                    id: "aaaa4444-4444-4444-8444-444444444444",
+                    descriptorID: "HKQuantityTypeIdentifierStepCount",
+                    externalID: "hk-step-deleted-1",
+                    observedAt: Date(timeIntervalSince1970: 1_768_518_900)
+                )
+            ]
+        ))
+        try expect(result.requestSetKey == "sync-probe-health-archive", "expected echoed request set")
+        try expect(result.acknowledgedCursor == "sync-probe-cursor-1", "expected acknowledged cursor")
+        try expect(result.recordsReceived == 3, "expected three health archive records")
+        try expect(result.tombstonesReceived == 1, "expected one health archive tombstone")
+    }
+
+    private static func normalizedServerNamespace(_ url: URL) -> String {
+        guard let scheme = url.scheme, let host = url.host else {
+            return url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        }
+        var namespace = "\(scheme)://\(host)"
+        if let port = url.port {
+            namespace += ":\(port)"
+        }
+        if !url.path.isEmpty && url.path != "/" {
+            namespace += url.path
+        }
+        return namespace
     }
 
     private static func makeSetLog(

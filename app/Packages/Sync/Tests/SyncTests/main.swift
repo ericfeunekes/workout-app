@@ -1028,7 +1028,7 @@ runAsyncCase("HealthArchiveUploadService posts archive payload and decodes ack")
     {
       "request_set_key": "server|all-supported|fp",
       "acknowledged_cursor": "cursor-1",
-      "records_received": 1,
+      "records_received": 3,
       "tombstones_received": 1,
       "server_time": "2026-05-18T12:00:00Z"
     }
@@ -1048,11 +1048,30 @@ runAsyncCase("HealthArchiveUploadService posts archive payload and decodes ack")
                 id: "70000000-0000-4000-8000-000000000001",
                 externalID: "hk-1",
                 descriptorID: "HKQuantityTypeIdentifierHeartRate",
-                sampleKind: "quantity",
+                sampleKind: .quantity,
                 value: HealthArchiveUploadValue(
                     kind: .quantity,
                     quantityValue: 120,
                     unit: "count/min"
+                )
+            ),
+            HealthArchiveUploadRecord(
+                id: "70000000-0000-4000-8000-000000000002",
+                externalID: "hk-sleep-1",
+                descriptorID: "HKCategoryTypeIdentifierSleepAnalysis",
+                sampleKind: .category,
+                value: HealthArchiveUploadValue(kind: .category, categoryValue: 1)
+            ),
+            HealthArchiveUploadRecord(
+                id: "70000000-0000-4000-8000-000000000003",
+                externalID: "hk-workout-1",
+                descriptorID: "HKWorkoutTypeIdentifier",
+                sampleKind: .workout,
+                value: HealthArchiveUploadValue(
+                    kind: .workout,
+                    workoutActivityType: "37",
+                    durationSeconds: 1800,
+                    totalEnergyKcal: 220
                 )
             )
         ],
@@ -1071,8 +1090,13 @@ runAsyncCase("HealthArchiveUploadService posts archive payload and decodes ack")
     try expectEqual(calls[0].path, "/api/health/archive")
     try expectEqual(calls[0].bearerToken, "tok")
     try expect(body.contains(#""quantity_value":120"#), "encoded quantity value")
+    try expect(body.contains(#""sample_kind":"category""#), "encoded category sample kind")
+    try expect(body.contains(#""category_value":1"#), "encoded category value")
+    try expect(body.contains(#""sample_kind":"workout""#), "encoded workout sample kind")
+    try expect(body.contains(#""workout_activity_type":"37""#), "encoded workout value")
+    try expectEqual(result.requestSetKey, "server|all-supported|fp")
     try expectEqual(result.acknowledgedCursor, "cursor-1")
-    try expectEqual(result.recordsReceived, 1)
+    try expectEqual(result.recordsReceived, 3)
     try expectEqual(result.tombstonesReceived, 1)
 }
 

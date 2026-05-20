@@ -1,6 +1,15 @@
 import Foundation
 import WorkoutDBSchema
 
+public enum HealthArchiveUploadSampleKind: String, Sendable, Equatable {
+    case quantity
+    case category
+    case workout
+    case characteristic
+    case correlation
+    case clinical
+}
+
 public struct HealthArchiveUploadValue: Sendable, Equatable {
     public let kind: Kind
     public let quantityValue: Double?
@@ -47,7 +56,7 @@ public struct HealthArchiveUploadRecord: Sendable, Equatable {
     public let id: String
     public let externalID: String
     public let descriptorID: String
-    public let sampleKind: String
+    public let sampleKind: HealthArchiveUploadSampleKind
     public let sourceBundleIdentifier: String?
     public let start: Date?
     public let end: Date?
@@ -58,7 +67,7 @@ public struct HealthArchiveUploadRecord: Sendable, Equatable {
         id: String,
         externalID: String,
         descriptorID: String,
-        sampleKind: String,
+        sampleKind: HealthArchiveUploadSampleKind,
         sourceBundleIdentifier: String? = nil,
         start: Date? = nil,
         end: Date? = nil,
@@ -117,17 +126,20 @@ public struct HealthArchiveUploadRequest: Sendable, Equatable {
 }
 
 public struct HealthArchiveUploadResult: Sendable, Equatable {
+    public let requestSetKey: String
     public let acknowledgedCursor: String?
     public let recordsReceived: Int
     public let tombstonesReceived: Int
     public let serverTime: Date
 
     public init(
+        requestSetKey: String,
         acknowledgedCursor: String?,
         recordsReceived: Int,
         tombstonesReceived: Int,
         serverTime: Date
     ) {
+        self.requestSetKey = requestSetKey
         self.acknowledgedCursor = acknowledgedCursor
         self.recordsReceived = recordsReceived
         self.tombstonesReceived = tombstonesReceived
@@ -171,6 +183,8 @@ public struct HealthArchiveUploadService: HealthArchiveUploading {
             )
         } catch let err as SyncError {
             throw err
+        } catch is CancellationError {
+            throw CancellationError()
         } catch {
             throw SyncError.network(error.localizedDescription)
         }
@@ -183,6 +197,7 @@ public struct HealthArchiveUploadService: HealthArchiveUploading {
                     from: response.body
                 )
                 return HealthArchiveUploadResult(
+                    requestSetKey: dto.requestSetKey,
                     acknowledgedCursor: dto.acknowledgedCursor,
                     recordsReceived: dto.recordsReceived,
                     tombstonesReceived: dto.tombstonesReceived,
@@ -221,7 +236,9 @@ public struct HealthArchiveUploadService: HealthArchiveUploading {
             id: record.id,
             externalId: record.externalID,
             descriptorId: record.descriptorID,
-            sampleKind: record.sampleKind,
+            sampleKind: WorkoutDBSchema.HealthArchiveSampleKind(
+                rawValue: record.sampleKind.rawValue
+            )!,
             sourceBundleIdentifier: record.sourceBundleIdentifier,
             startAt: record.start,
             endAt: record.end,

@@ -113,9 +113,6 @@ public struct UserDefaultsHealthArchiveExportStateStore: HealthArchiveExportStat
         if let data = try? encoder.encode(stored) {
             defaults.set(data, forKey: statusKey(serverNamespace))
         }
-        var control = loadControl()
-        control.automaticEnabled = snapshot.automaticEnabled
-        saveControl(control)
     }
 
     public func setScope(_ scope: HealthArchiveExportScope) async {
@@ -220,7 +217,7 @@ public struct UserDefaultsHealthArchiveExportStateStore: HealthArchiveExportStat
             automaticEnabled: Bool,
             serverNamespace: String
         ) -> HealthArchiveExportSnapshot {
-            HealthArchiveExportSnapshot(
+            let snapshot = HealthArchiveExportSnapshot(
                 scope: scope,
                 serverNamespace: serverNamespace,
                 requestSetKey: requestSetKey,
@@ -235,6 +232,34 @@ public struct UserDefaultsHealthArchiveExportStateStore: HealthArchiveExportStat
                 automaticEnabled: automaticEnabled,
                 nextAttemptAt: nextAttemptAt,
                 lastAttemptAt: lastAttemptAt
+            )
+            return Self.reconcileStaleRunning(snapshot)
+        }
+
+        private static func reconcileStaleRunning(
+            _ snapshot: HealthArchiveExportSnapshot
+        ) -> HealthArchiveExportSnapshot {
+            guard snapshot.status == .running,
+                  let lastAttemptAt = snapshot.lastAttemptAt,
+                  Date().timeIntervalSince(lastAttemptAt) > 30 * 60
+            else {
+                return snapshot
+            }
+            return HealthArchiveExportSnapshot(
+                scope: snapshot.scope,
+                serverNamespace: snapshot.serverNamespace,
+                requestSetKey: snapshot.requestSetKey,
+                descriptorFingerprint: snapshot.descriptorFingerprint,
+                acknowledgedCursor: snapshot.acknowledgedCursor,
+                status: .failed,
+                lastFetchAt: snapshot.lastFetchAt,
+                lastUploadAt: snapshot.lastUploadAt,
+                lastRecordCount: snapshot.lastRecordCount,
+                lastTombstoneCount: snapshot.lastTombstoneCount,
+                lastFailureClass: "InterruptedExport",
+                automaticEnabled: snapshot.automaticEnabled,
+                nextAttemptAt: snapshot.nextAttemptAt,
+                lastAttemptAt: snapshot.lastAttemptAt
             )
         }
     }

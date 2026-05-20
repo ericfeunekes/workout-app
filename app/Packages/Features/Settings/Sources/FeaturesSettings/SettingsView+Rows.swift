@@ -46,7 +46,7 @@ extension SettingsView {
         label: String,
         options: [String],
         selected: String,
-        onPick: @escaping @Sendable (String) -> Void
+        onPick: @escaping @MainActor @Sendable (String) -> Void
     ) -> some View {
         HStack(alignment: .center, spacing: DSSpacing.md) {
             Text(label)
@@ -79,7 +79,7 @@ extension SettingsView {
         id: String,
         label: String,
         destructive: Bool,
-        onTap: @escaping @Sendable () -> Void
+        onTap: @escaping @MainActor @Sendable () -> Void
     ) -> some View {
         Button(action: { onTap() }, label: {
             HStack(alignment: .firstTextBaseline, spacing: DSSpacing.md) {
@@ -100,12 +100,42 @@ extension SettingsView {
         id: String,
         label: String,
         isOn: Bool,
-        onToggle: @escaping @Sendable (Bool) -> Void
+        onToggle: @escaping @MainActor @Sendable (Bool) -> Void
     ) -> some View {
+        SettingsToggleRow(
+            id: id,
+            label: label,
+            isOn: isOn,
+            onToggle: onToggle
+        )
+    }
+}
+
+private struct SettingsToggleRow: View {
+    let id: String
+    let label: String
+    let isOn: Bool
+    let onToggle: @MainActor @Sendable (Bool) -> Void
+
+    init(
+        id: String,
+        label: String,
+        isOn: Bool,
+        onToggle: @escaping @MainActor @Sendable (Bool) -> Void
+    ) {
+        self.id = id
+        self.label = label
+        self.isOn = isOn
+        self.onToggle = onToggle
+    }
+
+    var body: some View {
         Toggle(
             isOn: Binding(
                 get: { isOn },
-                set: { newValue in onToggle(newValue) }
+                set: { newValue in
+                    onToggle(newValue)
+                }
             ),
             label: {
                 Text(label)

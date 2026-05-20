@@ -14,6 +14,16 @@ import pytest
 _SCHEMA_ROOT = Path(__file__).resolve().parents[2] / "schema"
 _ENUMS_FILE = _SCHEMA_ROOT / "Sources" / "WorkoutDBSchema" / "Enums.swift"
 _PRIMITIVE_FILE = _SCHEMA_ROOT / "Sources" / "WorkoutDBSchema" / "PrimitiveEntities.swift"
+_HEALTH_ARCHIVE_FILE = _SCHEMA_ROOT / "Sources" / "WorkoutDBSchema" / "HealthArchive.swift"
+_SYNC_HEALTH_ARCHIVE_FILE = (
+    Path(__file__).resolve().parents[2]
+    / "app"
+    / "Packages"
+    / "Sync"
+    / "Sources"
+    / "Sync"
+    / "HealthArchiveUploadService.swift"
+)
 
 
 def _extract_enum_cases(swift_source: str, enum_name: str) -> set[str]:
@@ -35,6 +45,8 @@ def _extract_enum_cases(swift_source: str, enum_name: str) -> set[str]:
         if not line.startswith("case "):
             continue
         name_and_value = line[5:].split("//")[0].strip().rstrip(",")
+        if name_and_value.endswith(":"):
+            continue
         if "=" in name_and_value:
             _, raw = name_and_value.split("=", 1)
             values.add(raw.strip().strip('"'))
@@ -53,6 +65,12 @@ def swift_source() -> str:
 def primitive_swift_source() -> str:
     assert _PRIMITIVE_FILE.exists(), f"{_PRIMITIVE_FILE} missing"
     return _PRIMITIVE_FILE.read_text()
+
+
+@pytest.fixture(scope="module")
+def health_archive_swift_source() -> str:
+    assert _HEALTH_ARCHIVE_FILE.exists(), f"{_HEALTH_ARCHIVE_FILE} missing"
+    return _HEALTH_ARCHIVE_FILE.read_text()
 
 
 def test_timing_mode_parity(swift_source: str) -> None:
@@ -177,6 +195,25 @@ def test_activity_preservation_policy_parity(primitive_swift_source: str) -> Non
 def test_primitive_log_role_parity(primitive_swift_source: str) -> None:
     swift = _extract_enum_cases(primitive_swift_source, "PrimitiveLogRole")
     assert swift == {"slot", "set_result", "block_result"}
+
+
+def test_health_archive_sample_kind_parity(health_archive_swift_source: str) -> None:
+    swift = _extract_enum_cases(health_archive_swift_source, "HealthArchiveSampleKind")
+    assert swift == {
+        "quantity",
+        "category",
+        "workout",
+        "characteristic",
+        "correlation",
+        "clinical",
+    }
+
+
+def test_sync_health_archive_public_api_does_not_reexport_schema_sample_kind() -> None:
+    """Sync owns schema mapping internally; archive upload callers should not see DTO types."""
+    source = _SYNC_HEALTH_ARCHIVE_FILE.read_text()
+    assert "public typealias HealthArchiveSampleKind" not in source
+    assert "public let sampleKind: WorkoutDBSchema.HealthArchiveSampleKind" not in source
 
 
 def _has_xcode() -> bool:

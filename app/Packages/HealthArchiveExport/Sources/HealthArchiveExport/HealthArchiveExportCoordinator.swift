@@ -13,6 +13,8 @@ public enum HealthArchiveExportTrigger: String, Sendable, Equatable {
 public enum HealthArchiveExportError: Error, Sendable, Equatable {
     case emptyExplicitScope
     case unsupportedDescriptorIDs([String])
+    case requestSetAcknowledgementMismatch(expected: String, actual: String)
+    case unsupportedSampleKind(String)
 }
 
 public struct HealthArchiveExportSummary: Sendable, Equatable {
@@ -48,7 +50,15 @@ public protocol HealthArchiveExportControlling: Sendable {
 
 public actor HealthArchiveExportRuntime: HealthArchiveExportControlling {
     private let coordinator: HealthArchiveExportCoordinator
-    private var isRunning = false
+    private var isRetired = false
+    private var generation = 0
+    private var currentRun: CurrentRun?
+
+    private struct CurrentRun: Sendable {
+        let generation: Int
+        let serverURL: URL
+        let task: Task<HealthArchiveExportSummary, Error>
+    }
 
     public init(coordinator: HealthArchiveExportCoordinator) {
         self.coordinator = coordinator
@@ -58,8 +68,12 @@ public actor HealthArchiveExportRuntime: HealthArchiveExportControlling {
         serverURL: URL,
         trigger: HealthArchiveExportTrigger
     ) async throws -> HealthArchiveExportSummary {
-        if isRunning {
-            await coordinator.markAlreadyRunning(serverURL: serverURL)
+        guard !isRetired else { throw CancellationError() }
+        if let currentRun {
+            await coordinator.markAlreadyRunning(
+                serverURL: serverURL,
+                isCurrent: { await self.isCurrent(currentRun.generation) }
+            )
             return HealthArchiveExportSummary(
                 trigger: trigger,
                 recordsFetched: 0,
@@ -68,9 +82,24 @@ public actor HealthArchiveExportRuntime: HealthArchiveExportControlling {
                 alreadyRunning: true
             )
         }
-        isRunning = true
-        defer { isRunning = false }
-        return try await coordinator.exportNow(serverURL: serverURL, trigger: trigger)
+        generation += 1
+        let runGeneration = generation
+        let task = Task {
+            try await coordinator.exportNow(
+                serverURL: serverURL,
+                trigger: trigger,
+                isCurrent: { await self.isCurrent(runGeneration) }
+            )
+        }
+        currentRun = CurrentRun(generation: runGeneration, serverURL: serverURL, task: task)
+        do {
+            let summary = try await task.value
+            clearCurrentRun(generation: runGeneration)
+            return summary
+        } catch {
+            clearCurrentRun(generation: runGeneration)
+            throw error
+        }
     }
 
     public func exportIfDue(serverURL: URL) async throws -> HealthArchiveExportSummary? {
@@ -78,6 +107,29 @@ public actor HealthArchiveExportRuntime: HealthArchiveExportControlling {
             return nil
         }
         return try await exportNow(serverURL: serverURL, trigger: .foregroundCatchUp)
+    }
+
+    public func retire() async {
+        isRetired = true
+        generation += 1
+        let retiredRun = currentRun
+        currentRun = nil
+        retiredRun?.task.cancel()
+        if let retiredRun {
+            do {
+                _ = try await retiredRun.task.value
+            } catch {}
+            await coordinator.markInterrupted(serverURL: retiredRun.serverURL)
+        }
+    }
+
+    private func isCurrent(_ runGeneration: Int) -> Bool {
+        !isRetired && generation == runGeneration
+    }
+
+    private func clearCurrentRun(generation runGeneration: Int) {
+        guard currentRun?.generation == runGeneration else { return }
+        currentRun = nil
     }
 }
 
@@ -114,12 +166,14 @@ public struct HealthArchiveExportCoordinator: Sendable {
 
     public func exportNow(
         serverURL: URL,
-        trigger: HealthArchiveExportTrigger = .manual
+        trigger: HealthArchiveExportTrigger = .manual,
+        isCurrent: @escaping @Sendable () async -> Bool = { true }
     ) async throws -> HealthArchiveExportSummary {
         let attemptedAt = now()
         let serverNamespace = normalizedServerNamespace(serverURL)
         let previousSnapshot = await stateStore.loadSnapshot(serverNamespace: serverNamespace)
         do {
+            try await ensureCurrent(isCurrent)
             let descriptors = try effectiveDescriptors(for: previousSnapshot.scope)
             let fingerprint = descriptorFingerprint(descriptors)
             let scopeSlug = scopeSlug(previousSnapshot.scope)
@@ -141,6 +195,7 @@ public struct HealthArchiveExportCoordinator: Sendable {
                 nextAttemptAt: previousSnapshot.nextAttemptAt,
                 lastAttemptAt: attemptedAt
             )
+            try await ensureCurrent(isCurrent)
             await stateStore.saveSnapshot(runningSnapshot)
             let requests = descriptors.map {
                 HealthDataRequest(type: $0, access: .read, delivery: .batch)
@@ -153,26 +208,34 @@ public struct HealthArchiveExportCoordinator: Sendable {
             let fetchedAt = now()
             let records = result.records.map(mapRecord)
             let deletions = result.deletedRecords.map { mapDeletion($0, observedAt: fetchedAt) }
-            try await archiveStore.save(records: records, deletions: deletions, cursors: [])
+            try await ensureCurrent(isCurrent)
             let uploadResult = try await syncAPI.uploadHealthArchive(HealthArchiveUploadRequest(
                 requestSetKey: requestSetKey,
                 serverNamespace: serverNamespace,
                 descriptorFingerprint: fingerprint,
                 nextCursor: result.nextCursor?.value,
-                records: records.map(mapUploadRecord),
+                records: try records.map(mapUploadRecord),
                 tombstones: deletions.map(mapUploadTombstone)
             ))
-            if let acknowledgedCursor = uploadResult.acknowledgedCursor {
-                try await archiveStore.save(
-                    records: [],
-                    deletions: [],
-                    cursors: [HealthArchiveCursor(
-                        requestSetKey: requestSetKey,
-                        cursor: acknowledgedCursor,
-                        updatedAt: uploadResult.serverTime
-                    )]
+            guard uploadResult.requestSetKey == requestSetKey else {
+                throw HealthArchiveExportError.requestSetAcknowledgementMismatch(
+                    expected: requestSetKey,
+                    actual: uploadResult.requestSetKey
                 )
             }
+            let cursors = uploadResult.acknowledgedCursor.map {
+                [HealthArchiveCursor(
+                    requestSetKey: requestSetKey,
+                    cursor: $0,
+                    updatedAt: uploadResult.serverTime
+                )]
+            } ?? []
+            try await ensureCurrent(isCurrent)
+            try await archiveStore.save(
+                records: records,
+                deletions: deletions,
+                cursors: cursors
+            )
             let nextAttempt = nextAttempt(after: uploadResult.serverTime)
             let success = HealthArchiveExportSnapshot(
                 scope: previousSnapshot.scope,
@@ -190,6 +253,7 @@ public struct HealthArchiveExportCoordinator: Sendable {
                 nextAttemptAt: nextAttempt,
                 lastAttemptAt: attemptedAt
             )
+            try await ensureCurrent(isCurrent)
             await stateStore.saveSnapshot(success)
             telemetry.emit(Event(
                 sessionID: TelemetrySession.id,
@@ -203,22 +267,24 @@ public struct HealthArchiveExportCoordinator: Sendable {
                 acknowledgedCursor: uploadResult.acknowledgedCursor
             )
         } catch {
-            await stateStore.saveSnapshot(HealthArchiveExportSnapshot(
-                scope: previousSnapshot.scope,
-                serverNamespace: serverNamespace,
-                requestSetKey: previousSnapshot.requestSetKey,
-                descriptorFingerprint: previousSnapshot.descriptorFingerprint,
-                acknowledgedCursor: previousSnapshot.acknowledgedCursor,
-                status: .failed,
-                lastFetchAt: previousSnapshot.lastFetchAt,
-                lastUploadAt: previousSnapshot.lastUploadAt,
-                lastRecordCount: previousSnapshot.lastRecordCount,
-                lastTombstoneCount: previousSnapshot.lastTombstoneCount,
-                lastFailureClass: String(describing: type(of: error)),
-                automaticEnabled: previousSnapshot.automaticEnabled,
-                nextAttemptAt: previousSnapshot.nextAttemptAt,
-                lastAttemptAt: attemptedAt
-            ))
+            if await isCurrent() {
+                await stateStore.saveSnapshot(HealthArchiveExportSnapshot(
+                    scope: previousSnapshot.scope,
+                    serverNamespace: serverNamespace,
+                    requestSetKey: previousSnapshot.requestSetKey,
+                    descriptorFingerprint: previousSnapshot.descriptorFingerprint,
+                    acknowledgedCursor: previousSnapshot.acknowledgedCursor,
+                    status: .failed,
+                    lastFetchAt: previousSnapshot.lastFetchAt,
+                    lastUploadAt: previousSnapshot.lastUploadAt,
+                    lastRecordCount: previousSnapshot.lastRecordCount,
+                    lastTombstoneCount: previousSnapshot.lastTombstoneCount,
+                    lastFailureClass: failureClass(for: error),
+                    automaticEnabled: previousSnapshot.automaticEnabled,
+                    nextAttemptAt: previousSnapshot.nextAttemptAt,
+                    lastAttemptAt: attemptedAt
+                ))
+            }
             throw error
         }
     }
@@ -241,9 +307,13 @@ public struct HealthArchiveExportCoordinator: Sendable {
         return nextAttemptAt <= now()
     }
 
-    public func markAlreadyRunning(serverURL: URL) async {
+    public func markAlreadyRunning(
+        serverURL: URL,
+        isCurrent: @escaping @Sendable () async -> Bool = { true }
+    ) async {
         let serverNamespace = normalizedServerNamespace(serverURL)
         let snapshot = await stateStore.loadSnapshot(serverNamespace: serverNamespace)
+        guard await isCurrent() else { return }
         await stateStore.saveSnapshot(HealthArchiveExportSnapshot(
             scope: snapshot.scope,
             serverNamespace: serverNamespace,
@@ -260,6 +330,39 @@ public struct HealthArchiveExportCoordinator: Sendable {
             nextAttemptAt: snapshot.nextAttemptAt,
             lastAttemptAt: snapshot.lastAttemptAt
         ))
+    }
+
+    public func markInterrupted(serverURL: URL) async {
+        let serverNamespace = normalizedServerNamespace(serverURL)
+        let snapshot = await stateStore.loadSnapshot(serverNamespace: serverNamespace)
+        guard snapshot.status == .running || snapshot.status == .alreadyRunning else { return }
+        await stateStore.saveSnapshot(HealthArchiveExportSnapshot(
+            scope: snapshot.scope,
+            serverNamespace: serverNamespace,
+            requestSetKey: snapshot.requestSetKey,
+            descriptorFingerprint: snapshot.descriptorFingerprint,
+            acknowledgedCursor: snapshot.acknowledgedCursor,
+            status: .failed,
+            lastFetchAt: snapshot.lastFetchAt,
+            lastUploadAt: snapshot.lastUploadAt,
+            lastRecordCount: snapshot.lastRecordCount,
+            lastTombstoneCount: snapshot.lastTombstoneCount,
+            lastFailureClass: "InterruptedExport",
+            automaticEnabled: snapshot.automaticEnabled,
+            nextAttemptAt: snapshot.nextAttemptAt,
+            lastAttemptAt: now()
+        ))
+    }
+
+    private func ensureCurrent(_ isCurrent: @escaping @Sendable () async -> Bool) async throws {
+        guard await isCurrent() else { throw CancellationError() }
+    }
+
+    private func failureClass(for error: Error) -> String {
+        if let syncError = error as? SyncError, syncError == .tokenRejected {
+            return "TokenRejected"
+        }
+        return String(describing: type(of: error))
     }
 
     private func effectiveDescriptors(
@@ -305,17 +408,7 @@ public struct HealthArchiveExportCoordinator: Sendable {
     }
 
     private func normalizedServerNamespace(_ url: URL) -> String {
-        guard let scheme = url.scheme, let host = url.host else {
-            return url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        }
-        var namespace = "\(scheme)://\(host)"
-        if let port = url.port {
-            namespace += ":\(port)"
-        }
-        if !url.path.isEmpty && url.path != "/" {
-            namespace += url.path
-        }
-        return namespace
+        HealthArchiveServerNamespace.normalized(from: url)
     }
 
     private func descriptorFingerprint(_ descriptors: [HealthDataTypeDescriptor]) -> String {
@@ -365,12 +458,15 @@ public struct HealthArchiveExportCoordinator: Sendable {
         }
     }
 
-    private func mapUploadRecord(_ record: HealthArchiveRecord) -> HealthArchiveUploadRecord {
-        HealthArchiveUploadRecord(
+    private func mapUploadRecord(_ record: HealthArchiveRecord) throws -> HealthArchiveUploadRecord {
+        guard let sampleKind = HealthArchiveUploadSampleKind(rawValue: record.sampleKindRaw) else {
+            throw HealthArchiveExportError.unsupportedSampleKind(record.sampleKindRaw)
+        }
+        return HealthArchiveUploadRecord(
             id: record.id.uuidString.lowercased(),
             externalID: record.externalID,
             descriptorID: record.descriptorID,
-            sampleKind: record.sampleKindRaw,
+            sampleKind: sampleKind,
             sourceBundleIdentifier: record.sourceBundleIdentifier,
             start: record.start,
             end: record.end,

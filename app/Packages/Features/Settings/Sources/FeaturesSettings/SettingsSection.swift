@@ -55,14 +55,14 @@ public enum SettingsRow: Identifiable, Sendable {
         label: String,
         options: [String],
         selected: String,
-        onPick: @Sendable (String) -> Void
+        onPick: @MainActor @Sendable (String) -> Void
     )
     /// Binary setting row.
     case toggle(
         id: String,
         label: String,
         isOn: Bool,
-        onToggle: @Sendable (Bool) -> Void
+        onToggle: @MainActor @Sendable (Bool) -> Void
     )
     /// Tappable action row. `destructive` toggles the accent color per the
     /// design reference — e.g. "change server" and "reset local data".
@@ -70,7 +70,7 @@ public enum SettingsRow: Identifiable, Sendable {
         id: String,
         label: String,
         destructive: Bool,
-        onTap: @Sendable () -> Void
+        onTap: @MainActor @Sendable () -> Void
     )
 
     public var id: String {

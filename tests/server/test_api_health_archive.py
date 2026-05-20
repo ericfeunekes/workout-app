@@ -103,8 +103,25 @@ def test_health_archive_upload_is_idempotent_by_external_identity(client, test_e
     assert record["id"] == "70000000-0000-4000-8000-000000000001"
     assert '"quantity_value":130' in record["value_json"]
     assert request_set["acknowledged_cursor"] == "cursor-2"
-    assert request_set["records_received"] == 2
-    assert request_set["tombstones_received"] == 2
+    assert request_set["records_received"] == 1
+    assert request_set["tombstones_received"] == 1
+
+
+def test_health_archive_upload_rejects_request_set_metadata_mismatch(client) -> None:
+    first = client.post("/api/health/archive", json=_upload_payload())
+    assert first.status_code == 200, first.text
+
+    changed_namespace = client.post(
+        "/api/health/archive",
+        json=_upload_payload(server_namespace="server-b"),
+    )
+    changed_fingerprint = client.post(
+        "/api/health/archive",
+        json=_upload_payload(descriptor_fingerprint="fp-2"),
+    )
+
+    assert changed_namespace.status_code == 409
+    assert changed_fingerprint.status_code == 409
 
 
 def test_health_archive_upload_is_user_scoped(client, test_engine, test_user_id) -> None:
@@ -159,3 +176,18 @@ def test_health_archive_rejects_invalid_value_shape(client) -> None:
 
     assert response.status_code == 422
     assert "quantity health archive values require quantity_value and unit" in response.text
+
+
+def test_health_archive_rejects_sample_kind_value_kind_mismatch(client) -> None:
+    payload = _upload_payload()
+    payload["records"][0]["sample_kind"] = "quantity"
+    payload["records"][0]["value"] = {
+        "kind": "workout",
+        "workout_activity_type": "37",
+        "duration_seconds": 1200,
+    }
+
+    response = client.post("/api/health/archive", json=payload)
+
+    assert response.status_code == 422
+    assert "sample_kind must match health archive value kind" in response.text

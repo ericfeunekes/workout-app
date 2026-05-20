@@ -64,6 +64,7 @@ def test_swift_sync_probe_round_trips_primitives_over_real_http(tmp_path: Path) 
             run_swift_probe(base_url)
             assert_sync_pull_reads_primitive_slot(base_url)
             assert_primitive_set_log_upserted(db_path)
+            assert_health_archive_uploaded(db_path, base_url)
         finally:
             process.terminate()
             try:
@@ -390,6 +391,61 @@ def assert_primitive_set_log_upserted(db_path: Path) -> None:
         "completed",
         "2026-01-15 22:42:00.000000",
         "mixed role completion probe",
+    )
+
+
+def assert_health_archive_uploaded(db_path: Path, base_url: str) -> None:
+    with sqlite3.connect(db_path) as connection:
+        record_rows = connection.execute(
+            """
+            SELECT external_id, descriptor_id, sample_kind, unit, value_json, metadata_json
+            FROM health_archive_record
+            ORDER BY external_id
+            """
+        ).fetchall()
+        tombstone_row = connection.execute(
+            """
+            SELECT descriptor_id, external_id
+            FROM health_archive_tombstone
+            WHERE external_id = 'hk-step-deleted-1'
+            """
+        ).fetchone()
+        request_set_row = connection.execute(
+            """
+            SELECT request_set_key, server_namespace, descriptor_fingerprint,
+                   acknowledged_cursor, records_received, tombstones_received
+            FROM health_archive_request_set
+            WHERE request_set_key = 'sync-probe-health-archive'
+            """
+        ).fetchone()
+
+    assert [row[2] for row in record_rows] == ["category", "quantity", "workout"]
+    rows_by_external_id = {row[0]: row for row in record_rows}
+    quantity = rows_by_external_id["hk-quantity-heart-rate-1"]
+    category = rows_by_external_id["hk-category-sleep-1"]
+    workout = rows_by_external_id["hk-workout-run-1"]
+    assert quantity[1:4] == ("HKQuantityTypeIdentifierHeartRate", "quantity", "count/min")
+    assert json.loads(quantity[4]) == {
+        "kind": "quantity",
+        "quantity_value": 142.0,
+        "unit": "count/min",
+    }
+    assert json.loads(category[4]) == {"kind": "category", "category_value": 1}
+    assert json.loads(workout[4]) == {
+        "kind": "workout",
+        "workout_activity_type": "running",
+        "duration_seconds": 1800.0,
+        "total_energy_kcal": 320.0,
+    }
+    assert json.loads(workout[5]) == {"probe": "real-http"}
+    assert tombstone_row == ("HKQuantityTypeIdentifierStepCount", "hk-step-deleted-1")
+    assert request_set_row == (
+        "sync-probe-health-archive",
+        base_url,
+        "sync-probe-fingerprint",
+        "sync-probe-cursor-1",
+        3,
+        1,
     )
 
 

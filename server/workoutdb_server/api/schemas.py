@@ -909,6 +909,19 @@ class HealthArchiveRecordIn(BaseModel):
     def _validate_id(cls, value: str) -> str:
         return _normalize_uuid_string(value)
 
+    @model_validator(mode="after")
+    def _sample_kind_matches_value(self) -> "HealthArchiveRecordIn":
+        if self.value.kind in {"quantity", "category", "workout"}:
+            if self.sample_kind != self.value.kind:
+                raise ValueError("sample_kind must match health archive value kind")
+        elif self.sample_kind in {"characteristic", "correlation", "clinical"}:
+            if self.value.kind not in {"text", "unsupported"}:
+                raise ValueError(
+                    "characteristic, correlation, and clinical archive records "
+                    "require text or unsupported values"
+                )
+        return self
+
 
 class HealthArchiveTombstoneIn(BaseModel):
     model_config = ConfigDict(extra="forbid")

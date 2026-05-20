@@ -113,7 +113,7 @@ final class SettingsViewModelTests: XCTestCase {
             ]
         )
 
-        await vm.pickHealthArchiveScopeMode("custom")
+        await vm.pickHealthArchiveScopeMode("custom").value
 
         let section = vm.sections.first { $0.id == "health-archive" }!
         XCTAssertEqual(section.rows.map(\.id), [
@@ -139,7 +139,7 @@ final class SettingsViewModelTests: XCTestCase {
             ]
         )
 
-        await vm.pickHealthArchiveScopeMode("custom")
+        await vm.pickHealthArchiveScopeMode("custom").value
         await toggleRow(in: vm, rowID: "health-archive.descriptor.steps", enabled: false)
         XCTAssertEqual(store.snapshot.scope, .explicitDescriptorIDs(["heart"]))
 
@@ -160,11 +160,28 @@ final class SettingsViewModelTests: XCTestCase {
         )
 
         await vm.refreshAsync()
-        await vm.pickHealthArchiveScopeMode("all supported")
+        await vm.pickHealthArchiveScopeMode("all supported").value
 
         XCTAssertEqual(store.snapshot.scope, .allSupported)
         let section = vm.sections.first { $0.id == "health-archive" }!
         XCTAssertFalse(section.rows.contains { $0.id == "health-archive.descriptor.heart" })
+    }
+
+    func testHealthArchiveCustomScopePreservesStoredSubsetBeforeInitialRefresh() async {
+        let store = FakeHealthArchiveExportStateStore(snapshot: HealthArchiveExportSnapshot(
+            scope: .explicitDescriptorIDs(["steps"])
+        ))
+        let vm = makeViewModel(
+            healthArchiveStore: store,
+            healthArchiveDescriptorOptions: [
+                HealthArchiveDescriptorOption(id: "heart", label: "heart rate"),
+                HealthArchiveDescriptorOption(id: "steps", label: "steps"),
+            ]
+        )
+
+        await vm.pickHealthArchiveScopeMode("custom").value
+
+        XCTAssertEqual(store.snapshot.scope, .explicitDescriptorIDs(["steps"]))
     }
 
     func testHealthArchiveAutomaticTogglePersists() async {
@@ -181,6 +198,7 @@ final class SettingsViewModelTests: XCTestCase {
         let box = Box()
         let vm = makeViewModel(onHealthArchiveExportNow: {
             box.count += 1
+            return .completed
         })
 
         await tapAction(in: vm, rowID: "health-archive.export-now")
@@ -188,6 +206,93 @@ final class SettingsViewModelTests: XCTestCase {
         XCTAssertNil(vm.showDestructiveConfirm)
         await drainPendingTasks()
         XCTAssertEqual(box.count, 1)
+    }
+
+    func testHealthArchiveExportNowSurfacesUnavailableStatus() async {
+        let vm = makeViewModel(onHealthArchiveExportNow: {
+            .unavailable("ExportUnavailable")
+        })
+
+        await tapAction(in: vm, rowID: "health-archive.export-now")
+
+        await drainPendingTasks()
+        XCTAssertEqual(
+            firstInfoValue(in: vm, rowID: "health-archive.status"),
+            "failed · ExportUnavailable"
+        )
+    }
+
+    func testHealthArchiveExportNowSurfacesThrownFailureClass() async {
+        let store = FakeHealthArchiveExportStateStore()
+        let vm = makeViewModel(healthArchiveStore: store, onHealthArchiveExportNow: {
+            await store.saveSnapshot(HealthArchiveExportSnapshot(
+                serverNamespace: "https://wdb.local:8080",
+                status: .failed,
+                lastFailureClass: "SyncError"
+            ))
+            return .failed("SyncError")
+        })
+
+        await tapAction(in: vm, rowID: "health-archive.export-now")
+
+        await drainPendingTasks()
+        XCTAssertEqual(
+            firstInfoValue(in: vm, rowID: "health-archive.status"),
+            "failed · SyncError"
+        )
+    }
+
+    func testHealthArchiveExportUnavailableStatusIsTransient() async {
+        let store = FakeHealthArchiveExportStateStore(snapshot: HealthArchiveExportSnapshot(
+            status: .succeeded,
+            lastUploadAt: Date(timeIntervalSince1970: 9_940),
+            lastRecordCount: 2,
+            lastTombstoneCount: 0
+        ))
+        let vm = makeViewModel(healthArchiveStore: store, onHealthArchiveExportNow: {
+            .unavailable("NoServerConnection")
+        })
+
+        await vm.refreshAsync()
+        await tapAction(in: vm, rowID: "health-archive.export-now")
+
+        await drainPendingTasks()
+        XCTAssertEqual(
+            firstInfoValue(in: vm, rowID: "health-archive.status"),
+            "failed · NoServerConnection"
+        )
+
+        await vm.refreshAsync()
+
+        XCTAssertEqual(firstInfoValue(in: vm, rowID: "health-archive.status"), "2 · 1 min ago")
+    }
+
+    func testHealthArchiveExportNowWaitsForPendingScopeMutation() async {
+        final class Box: @unchecked Sendable {
+            var scopeCompletedAtExport = false
+        }
+        let box = Box()
+        let store = FakeHealthArchiveExportStateStore()
+        store.setScopeDelayNanoseconds = 50_000_000
+        let vm = makeViewModel(
+            healthArchiveStore: store,
+            healthArchiveDescriptorOptions: [
+                HealthArchiveDescriptorOption(id: "heart", label: "heart rate"),
+                HealthArchiveDescriptorOption(id: "steps", label: "steps"),
+            ],
+            onHealthArchiveExportNow: {
+                box.scopeCompletedAtExport = store.setScopeCallCount == 1
+                    && store.snapshot.scope == .explicitDescriptorIDs(["heart", "steps"])
+                return .completed
+            }
+        )
+
+        let scopeTask = vm.pickHealthArchiveScopeMode("custom")
+        let exportTask = vm.exportHealthArchiveNow()
+        await scopeTask.value
+        await exportTask.value
+
+        XCTAssertTrue(box.scopeCompletedAtExport)
     }
 
     func testHealthArchiveStatusRendersSucceededAndFailedSnapshots() async {
@@ -528,7 +633,9 @@ final class SettingsViewModelTests: XCTestCase {
         onSyncNow: @escaping @Sendable () async -> Void = {},
         onResetCache: @escaping @Sendable () async -> Void = {},
         onChangeServer: @escaping @Sendable () async -> Void = {},
-        onHealthArchiveExportNow: @escaping @Sendable () async -> Void = {},
+        onHealthArchiveExportNow: @escaping @Sendable () async -> HealthArchiveManualExportOutcome = {
+            .completed
+        },
         now: Date = Date(timeIntervalSince1970: 10_000)
     ) -> SettingsViewModel {
         // Tests can either pass in a prepared `syncStore` or supply the

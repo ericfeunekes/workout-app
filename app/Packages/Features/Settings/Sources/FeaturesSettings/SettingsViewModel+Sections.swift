@@ -6,6 +6,7 @@
 // viewModel invokes them from `rebuild()`.
 
 import Foundation
+import Persistence
 
 extension SettingsViewModel {
 
@@ -137,8 +138,7 @@ extension SettingsViewModel {
                 options: ["all supported", "custom"],
                 selected: healthArchiveScopeMode(),
                 onPick: { [weak self] picked in
-                    // swiftlint:disable:next no_direct_task_unstructured
-                    Task { @MainActor in await self?.pickHealthArchiveScopeMode(picked) }
+                    self?.pickHealthArchiveScopeMode(picked)
                 }
             ),
         ]
@@ -150,13 +150,7 @@ extension SettingsViewModel {
                     label: option.label,
                     isOn: selected.contains(option.id),
                     onToggle: { [weak self] enabled in
-                        // swiftlint:disable:next no_direct_task_unstructured
-                        Task { @MainActor in
-                            await self?.toggleHealthArchiveDescriptor(
-                                id: option.id,
-                                enabled: enabled
-                            )
-                        }
+                        self?.toggleHealthArchiveDescriptor(id: option.id, enabled: enabled)
                     }
                 )
             })
@@ -167,8 +161,7 @@ extension SettingsViewModel {
                 label: "automatic",
                 isOn: cachedHealthArchiveExport.automaticEnabled,
                 onToggle: { [weak self] enabled in
-                    // swiftlint:disable:next no_direct_task_unstructured
-                    Task { @MainActor in await self?.setHealthArchiveAutomatic(enabled) }
+                    self?.setHealthArchiveAutomatic(enabled)
                 }
             ),
             .info(
@@ -186,8 +179,7 @@ extension SettingsViewModel {
                 label: "export now",
                 destructive: false,
                 onTap: { [weak self] in
-                    // swiftlint:disable:next no_direct_task_unstructured
-                    Task { @MainActor in self?.exportHealthArchiveNow() }
+                    self?.exportHealthArchiveNow()
                 }
             ),
         ])
@@ -225,18 +217,7 @@ extension SettingsViewModel {
             guard let connection = try tokenStore.loadConnection() else {
                 return nil
             }
-            let url = connection.url
-            guard let scheme = url.scheme, let host = url.host else {
-                return url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-            }
-            var namespace = "\(scheme)://\(host)"
-            if let port = url.port {
-                namespace += ":\(port)"
-            }
-            if !url.path.isEmpty && url.path != "/" {
-                namespace += url.path
-            }
-            return namespace
+            return HealthArchiveServerNamespace.normalized(from: connection.url)
         } catch {
             return nil
         }
@@ -283,6 +264,9 @@ extension SettingsViewModel {
     }
 
     func healthArchiveStatusValue() -> String {
+        if let transientHealthArchiveStatus {
+            return transientHealthArchiveStatus
+        }
         let snapshot = cachedHealthArchiveExport
         switch snapshot.status {
         case .neverRun:

@@ -1,5 +1,33 @@
 import Foundation
 
+public enum HealthArchiveSampleKind: String, Codable, Sendable, Equatable {
+    case quantity
+    case category
+    case workout
+    case characteristic
+    case correlation
+    case clinical
+
+    public init?(rawValue: String) {
+        switch rawValue {
+        case "quantity":
+            self = .quantity
+        case "category":
+            self = .category
+        case "workout":
+            self = .workout
+        case "characteristic":
+            self = .characteristic
+        case "correlation":
+            self = .correlation
+        case "clinical":
+            self = .clinical
+        default:
+            return nil
+        }
+    }
+}
+
 public struct HealthArchiveValue: Codable, Sendable, Equatable {
     public let kind: Kind
     public let quantityValue: Double?
@@ -17,6 +45,23 @@ public struct HealthArchiveValue: Codable, Sendable, Equatable {
         case workout
         case text
         case unsupported
+
+        public init?(rawValue: String) {
+            switch rawValue {
+            case "quantity":
+                self = .quantity
+            case "category":
+                self = .category
+            case "workout":
+                self = .workout
+            case "text":
+                self = .text
+            case "unsupported":
+                self = .unsupported
+            default:
+                return nil
+            }
+        }
     }
 
     enum CodingKeys: String, CodingKey {
@@ -58,7 +103,7 @@ public struct HealthArchiveRecord: Codable, Sendable, Equatable {
     public let id: String
     public let externalId: String
     public let descriptorId: String
-    public let sampleKind: String
+    public let sampleKind: HealthArchiveSampleKind
     public let sourceBundleIdentifier: String?
     public let startAt: Date?
     public let endAt: Date?
@@ -81,7 +126,7 @@ public struct HealthArchiveRecord: Codable, Sendable, Equatable {
         id: String,
         externalId: String,
         descriptorId: String,
-        sampleKind: String,
+        sampleKind: HealthArchiveSampleKind,
         sourceBundleIdentifier: String? = nil,
         startAt: Date? = nil,
         endAt: Date? = nil,

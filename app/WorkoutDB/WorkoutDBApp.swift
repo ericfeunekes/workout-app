@@ -142,6 +142,7 @@ struct RootView: View {
     @State private var lifecycleGeneration: Int = 0
     @State private var scenePhaseTask: Task<Void, Never>?
     @State private var healthArchiveRuntime: HealthArchiveExportRuntime?
+    @State private var isAppSyncTeardownInProgress: Bool = false
     @Environment(\.scenePhase) private var scenePhase
 
     /// HistoryViewModel is hoisted to RootView so it survives body
@@ -247,7 +248,7 @@ struct RootView: View {
                         phase = .bootstrapping
                         lifecycleGeneration += 1
                         scenePhaseTask?.cancel()
-                        await appSync?.retire(trigger: .emptyRetry)
+                        await retireHealthArchiveAndAppSync(appSync, trigger: .emptyRetry)
                         await runBootstrap()
                     },
                     onChangeServer: {
@@ -288,7 +289,15 @@ struct RootView: View {
         todayVM: TodayViewModel,
         executionHolder: ExecutionVMHolder
     ) -> some View {
+        #if DEBUG
+        let initialTab: RootTab = ProcessInfo.processInfo.arguments.contains(
+            "--debug-settings-tab"
+        ) ? .settings : .today
+        #else
+        let initialTab: RootTab = .today
+        #endif
         RootTabView(
+            initial: initialTab,
             todayVM: todayVM,
             executionHolder: executionHolder,
             historyVM: historyVM,
@@ -464,6 +473,7 @@ struct RootView: View {
                 // without re-pulling; later scene-phase foreground entries
                 // go through the full app-sync lifecycle.
                 await appSync.startForegroundFlushing(trigger: .bootstrap)
+                isAppSyncTeardownInProgress = false
                 phase = .ready(
                     todayVM: todayVM,
                     executionHolder: holder,
@@ -471,10 +481,12 @@ struct RootView: View {
                 )
             case .empty(let appSync):
                 await appSync.startForegroundFlushing(trigger: .bootstrap)
+                isAppSyncTeardownInProgress = false
                 phase = .empty(appSync: appSync)
             }
         } catch AppBootstrapError.tokenRejected {
             await AppSyncLocalStateReset.pauseForTokenRejected(persistence: persistence)
+            isAppSyncTeardownInProgress = false
             didStartBootstrap = false
             phase = .firstRun(prefill: prefillForCurrentConnection())
         } catch {
@@ -483,6 +495,7 @@ struct RootView: View {
             // empty so the user at least sees *something* and can try
             // relaunching. Leave `didStartBootstrap` set; the retry
             // button on EmptyStateView clears it before re-entering.
+            isAppSyncTeardownInProgress = false
             phase = .empty(appSync: nil)
         }
     }
@@ -490,8 +503,10 @@ struct RootView: View {
     private func routeBackToFirstRunForTokenRejected() async {
         lifecycleGeneration += 1
         scenePhaseTask?.cancel()
-        healthArchiveRuntime = nil
-        await currentAppSync()?.retire(trigger: .manualTodayRefresh)
+        await retireHealthArchiveAndAppSync(
+            currentAppSync(),
+            trigger: .manualTodayRefresh
+        )
         await AppSyncLocalStateReset.pauseForTokenRejected(persistence: persistence)
         didStartBootstrap = false
         phase = .firstRun(prefill: prefillForCurrentConnection())
@@ -500,8 +515,7 @@ struct RootView: View {
     private func rerunBootstrapFromReady() async {
         lifecycleGeneration += 1
         scenePhaseTask?.cancel()
-        healthArchiveRuntime = nil
-        await currentAppSync()?.retire()
+        await retireHealthArchiveAndAppSync(currentAppSync())
         didStartBootstrap = false
         phase = .bootstrapping
         await runBootstrap()
@@ -510,8 +524,7 @@ struct RootView: View {
     private func resetLocalDataFromSettings() async {
         lifecycleGeneration += 1
         scenePhaseTask?.cancel()
-        healthArchiveRuntime = nil
-        await currentAppSync()?.retire()
+        await retireHealthArchiveAndAppSync(currentAppSync())
         let result = await AppSyncLocalStateReset.clearLocalServerData(persistence: persistence)
         guard result.succeeded else {
             await recoverAfterFailedLocalStateReset()
@@ -538,7 +551,27 @@ struct RootView: View {
         }
     }
 
+    private func retireHealthArchiveRuntime() async {
+        let runtime = healthArchiveRuntime
+        await runtime?.retire()
+        if let runtime, healthArchiveRuntime === runtime {
+            healthArchiveRuntime = nil
+        }
+    }
+
+    private func retireHealthArchiveAndAppSync(
+        _ appSync: AppSyncCoordinator?,
+        trigger: AppSyncTrigger = .foreground
+    ) async {
+        isAppSyncTeardownInProgress = true
+        await retireHealthArchiveRuntime()
+        await appSync?.retire(trigger: trigger)
+    }
+
     private func currentHealthArchiveExport() -> (any HealthArchiveExportControlling)? {
+        guard !isAppSyncTeardownInProgress else {
+            return nil
+        }
         guard let appSync = currentAppSync() else {
             return nil
         }
@@ -555,11 +588,35 @@ struct RootView: View {
         return runtime
     }
 
-    private func exportHealthArchiveFromSettings() async {
-        _ = await HealthArchiveAppHooks.manualExportFromSettings(
+    private func exportHealthArchiveFromSettings() async -> HealthArchiveManualExportOutcome {
+        let result = await HealthArchiveAppHooks.manualExportFromSettings(
             controllerProvider: currentHealthArchiveExport,
             tokenStore: persistence.tokenStore
         )
+        let outcome = healthArchiveManualExportOutcome(from: result)
+        if case .tokenRejected = result {
+            await routeBackToFirstRunForTokenRejected()
+        }
+        return outcome
+    }
+
+    private func healthArchiveManualExportOutcome(
+        from result: HealthArchiveAppHooks.Result
+    ) -> HealthArchiveManualExportOutcome {
+        switch result {
+        case .succeeded:
+            return .completed
+        case .skipped(.missingConnection):
+            return .unavailable("NoServerConnection")
+        case .skipped(.missingController):
+            return .unavailable("ExportUnavailable")
+        case .skipped(.connectionUnavailable):
+            return .unavailable("ConnectionUnavailable")
+        case .failed(let failureClass):
+            return .failed(failureClass)
+        case .tokenRejected:
+            return .tokenRejected
+        }
     }
 
     private func healthArchiveDescriptorOptions() -> [HealthArchiveDescriptorOption] {
@@ -602,17 +659,23 @@ struct RootView: View {
     private func promoteEmptyAfterForegroundPull(generation: Int) async {
         guard generation == lifecycleGeneration else { return }
         lifecycleGeneration += 1
-        await currentAppSync()?.retire(trigger: .foreground)
+        await retireHealthArchiveAndAppSync(
+            currentAppSync(),
+            trigger: .foreground
+        )
         didStartBootstrap = false
         phase = .bootstrapping
         await runBootstrap()
     }
 
     private func runHealthArchiveForegroundCatchUp() async {
-        _ = await HealthArchiveAppHooks.foregroundCatchUp(
+        let result = await HealthArchiveAppHooks.foregroundCatchUp(
             controllerProvider: currentHealthArchiveExport,
             tokenStore: persistence.tokenStore
         )
+        if case .tokenRejected = result {
+            await routeBackToFirstRunForTokenRejected()
+        }
     }
 
     #if DEBUG
@@ -672,8 +735,7 @@ extension RootView {
         }
         lifecycleGeneration += 1
         scenePhaseTask?.cancel()
-        healthArchiveRuntime = nil
-        await currentAppSync()?.retire()
+        await retireHealthArchiveAndAppSync(currentAppSync())
         let result = await AppSyncLocalStateReset.clearConnectionAndLocalServerData(
             persistence: persistence
         )
@@ -698,6 +760,7 @@ extension RootView {
 
     private func recoverAfterFailedLocalStateReset() async {
         await historyVM.load()
+        isAppSyncTeardownInProgress = false
         didStartBootstrap = false
         phase = .firstRun(prefill: prefillForCurrentConnection())
     }

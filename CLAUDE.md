@@ -168,6 +168,13 @@ a temporary keychain from non-interactively retrieved certificate material, and
 pass it to Xcode with `OTHER_CODE_SIGN_FLAGS = --keychain <path>`. Treat any
 login-keychain, Apple ID, `op signin`, or Xcode GUI prompt as a release blocker.
 
+When the session is already running on Robie (`hostname` reports Eric's iMac),
+do not use `make deploy HOST=robie-imac`; that target is the laptop-to-server
+SSH path. Deploy locally by following `deploy/deploy.sh`'s same steps against
+`/opt/workoutdb`: back up `shared/db/workout.db`, sync the release dir, run
+`uv sync --no-dev`, flip `current`, restart launchd or kill the user-owned
+uvicorn process so launchd respawns it, then verify `/health/ready`.
+
 **CI** (`.github/workflows/ci.yml`): Linux only, server tests + ruff on push and PR. iOS build/test deferred until the app exists and we revisit public-vs-private repo. See `docs/WORKFLOW.md` § "CI scope" for the budget math.
 
 **Secrets**: `.env` (gitignored) holds the bearer token and DB path. Server loads via `pydantic-settings` with `env_prefix="WORKOUTDB_"`. The same bearer token is pasted into the iOS app's first-run setup — server and app share one secret, Tailscale handles network-layer trust.

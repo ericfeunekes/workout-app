@@ -412,9 +412,20 @@ def write_signing_xcconfig(config: ReleaseConfig, run_state: ReleaseRun) -> Path
 
 
 def decode_mobileprovision(path: Path) -> dict[str, Any] | None:
+    for command in (
+        ["security", "cms", "-D", "-i", str(path)],
+        ["openssl", "smime", "-verify", "-inform", "DER", "-noverify", "-in", str(path)],
+    ):
+        plist = decode_mobileprovision_with(command)
+        if plist is not None:
+            return plist
+    return None
+
+
+def decode_mobileprovision_with(command: list[str]) -> dict[str, Any] | None:
     try:
         result = subprocess.run(
-            ["security", "cms", "-D", "-i", str(path)],
+            command,
             check=False,
             capture_output=True,
             text=False,

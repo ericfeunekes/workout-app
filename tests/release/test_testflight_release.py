@@ -405,3 +405,50 @@ def test_profile_validation_rejects_wrong_bundle(monkeypatch: pytest.MonkeyPatch
     )
 
     assert any("bundle mismatch" in failure for failure in failures)
+
+
+def test_mobileprovision_decode_falls_back_to_openssl(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    profile = tmp_path / "profile.mobileprovision"
+    profile.write_bytes(b"signed profile")
+    payload = {
+        "Name": "Setmark iOS App Store",
+        "TeamIdentifier": ["TEAMID1234"],
+        "ExpirationDate": testflight.dt.datetime.now(testflight.dt.UTC)
+        + testflight.dt.timedelta(days=30),
+        "Entitlements": {
+            "application-identifier": "TEAMID1234.com.example.App",
+            "com.apple.developer.healthkit": True,
+        },
+    }
+    calls: list[list[str]] = []
+
+    class Completed:
+        def __init__(self, returncode: int, stdout: bytes = b"", stderr: bytes = b"") -> None:
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(
+        args: list[str],
+        *,
+        check: bool,
+        capture_output: bool,
+        text: bool,
+        timeout: int,
+    ) -> Completed:
+        del check, capture_output, text, timeout
+        calls.append(args)
+        if args[0] == "security":
+            return Completed(1, stderr=b"security cms failed")
+        return Completed(0, stdout=testflight.plistlib.dumps(payload))
+
+    monkeypatch.setattr(testflight.subprocess, "run", fake_run)
+
+    decoded = testflight.decode_mobileprovision(profile)
+
+    assert decoded is not None
+    assert decoded["Name"] == "Setmark iOS App Store"
+    assert calls[0][:3] == ["security", "cms", "-D"]
+    assert calls[1][:5] == ["openssl", "smime", "-verify", "-inform", "DER"]

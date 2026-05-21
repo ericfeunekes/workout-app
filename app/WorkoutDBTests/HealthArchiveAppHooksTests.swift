@@ -111,6 +111,19 @@ final class HealthArchiveAppHooksTests: XCTestCase {
         XCTAssertEqual(result, .tokenRejected)
     }
 
+    func testForegroundCatchUpSurfacesTokenRejected() async {
+        let controller = FakeHealthArchiveController()
+        controller.error = SyncError.tokenRejected
+        let tokenStore = FakeTokenStore(url: URL(string: "http://localhost:8000")!)
+
+        let result = await HealthArchiveAppHooks.foregroundCatchUp(
+            controllerProvider: { controller },
+            tokenStore: tokenStore
+        )
+
+        XCTAssertEqual(result, .tokenRejected)
+    }
+
     func testManualSettingsExportSurfacesThrownFailureClass() async {
         struct SyntheticExportError: Error {}
         let controller = FakeHealthArchiveController()

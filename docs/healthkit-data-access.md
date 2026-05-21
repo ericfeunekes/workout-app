@@ -173,11 +173,12 @@ The export configuration is app-local state:
 - last export summary: inserted/updated count, tombstone count, upload outcome,
   and redacted error class if any.
 
-The server is the durable landing zone for exported health records. The server
-API/schema for those records is not selected yet, but it must preserve the same
-identity, descriptor, unit, source, start/end, value, metadata, cursor, and
-tombstone semantics as the local projection. Server storage must not become a
-writer back into HealthKit; HealthKit remains the source of truth.
+The server is the durable landing zone for exported health records.
+`POST /api/health/archive` stores normalized records, tombstones, and
+request-set summaries in SQLite. Its API/schema preserves the same identity,
+descriptor, unit, source, start/end, value, metadata, cursor, and tombstone
+semantics as the local projection. Server storage must not become a writer back
+into HealthKit; HealthKit remains the source of truth.
 
 Local HealthKit projection data is connection-agnostic and survives server
 changes. Delivery state is not connection-agnostic. A new server identity must
@@ -394,12 +395,14 @@ Merge-gate proof: Settings feature tests and telemetry/export-summary tests.
   request sets. The server exposes `POST /api/health/archive`, stores uploaded
   normalized records, tombstones, and request-set summaries in SQLite, and
   updates `schema/openapi.json` plus `WorkoutDBSchema` DTOs. `Sync` owns the
-  upload client; `HealthArchiveExport` owns the shared manual/foreground
-  coordinator, requests permissions through `HealthKitBridge`, fetches from the
-  last server-acknowledged cursor for the selected request set, persists the
-  local projection, uploads through `Sync`, and advances the local delivery
-  cursor only after server acknowledgement. Settings now has descriptor scope,
-  manual export, automatic-export toggle, next-attempt status, and
+  upload client and maps its public archive-upload types to wire DTOs internally;
+  `Persistence` owns the canonical current-server namespace normalization used
+  by archive export state and Settings; `HealthArchiveExport` owns the shared
+  manual/foreground coordinator, requests permissions through `HealthKitBridge`,
+  fetches from the last server-acknowledged cursor for the selected request set,
+  persists the local projection, uploads through `Sync`, and advances the local
+  delivery cursor only after server acknowledgement. Settings now has descriptor
+  scope, manual export, automatic-export toggle, next-attempt status, and
   current-server status controls. The real HTTP probe uploads quantity,
   category, and workout archive records plus a tombstone through `SyncAPI` and
   verifies SQLite persistence. BGTask registration and richer status

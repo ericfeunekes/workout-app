@@ -11,9 +11,11 @@ import PackageDescription
 //   precisely so Persistence could implement it without creating a reverse
 //   dependency through the graph).
 //
-// Exposes three protocols — `WorkoutCache`, `SessionStore`, `TokenStore` —
-// plus a concrete `PushQueueStore` implementation. Features and Sync take
-// protocols via init; they never import SwiftData.
+// Exposes protocols and helpers for durable local state: `WorkoutCache`,
+// `SessionStore`, `TokenStore`, Health Archive export state/cursors, canonical
+// Health Archive server namespace normalization, plus a concrete
+// `PushQueueStore` implementation. Features and Sync take protocols via init;
+// they never import SwiftData.
 //
 // Test target note:
 //   Persistence uses SwiftData + Security framework, both of which require

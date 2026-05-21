@@ -629,6 +629,46 @@ runAsyncCase("exportIfDue respects automatic control and uses foreground trigger
     try expectEqual(batch.queries.count, 1)
 }
 
+runAsyncCase("exportIfDue reruns after stale running snapshot") {
+    let store = try PersistenceFactory.makeInMemory()
+    let transport = FakeTransport(outcomes: [
+        .archiveSuccess(cursor: "cursor-after-stale")
+    ])
+    let batch = FakeHealthBatchDataProvider(result: HealthBatchResult(
+        records: [],
+        nextCursor: HealthBatchCursor("cursor-after-stale")
+    ))
+    let coordinator = makeCoordinator(transport: transport, batch: batch, store: store)
+    let runtime = HealthArchiveExportRuntime(coordinator: coordinator)
+    let serverURL = URL(string: "http://localhost:8000")!
+
+    await store.healthArchiveExportStateStore.setAutomaticEnabled(true)
+    await store.healthArchiveExportStateStore.saveSnapshot(HealthArchiveExportSnapshot(
+        serverNamespace: "http://localhost:8000",
+        requestSetKey: "http://localhost:8000|all-supported|stale",
+        descriptorFingerprint: "stale",
+        acknowledgedCursor: "cursor-before-stale",
+        status: .running,
+        automaticEnabled: true,
+        lastAttemptAt: Date().addingTimeInterval(-31 * 60)
+    ))
+
+    let summary = try await expect(
+        runtime.exportIfDue(serverURL: serverURL),
+        "stale running automatic export should rerun"
+    )
+    let snapshot = await store.healthArchiveExportStateStore.loadSnapshot(
+        serverNamespace: "http://localhost:8000"
+    )
+    let posts = await transport.state.posts
+
+    try expectEqual(summary.trigger, .foregroundCatchUp)
+    try expectEqual(batch.queries.count, 1)
+    try expectEqual(posts.count, 1)
+    try expectEqual(snapshot.status, .succeeded)
+    try expectEqual(snapshot.acknowledgedCursor, "cursor-after-stale")
+}
+
 runAsyncCase("next attempt is scoped by server namespace") {
     let store = try PersistenceFactory.makeInMemory()
     let serverATransport = FakeTransport(outcomes: [

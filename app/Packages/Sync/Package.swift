@@ -9,8 +9,10 @@ import PackageDescription
 //   • `PullService` — GET /api/sync/pull
 //   • `PushQueue` — POST /api/sync/results, persistent and idempotent
 //   • `ConnectionManager` — offline / syncing / online / tokenRejected signal
-//   • `DTOMapping` — schema DTOs ↔ CoreDomain types. The one place WorkoutDBSchema
-//     is imported; Features only see Domain types (FF-11 boundary).
+//   • `DTOMapping` — schema DTOs ↔ CoreDomain types
+//   • `HealthArchiveUploadService` — public archive-upload types mapped to
+//     schema DTOs internally. `Sync` is the only app package that imports
+//     WorkoutDBSchema; Features only see Domain/Persistence/Sync-owned types.
 //
 // Split from day one — see `docs/architecture/hotspots.md` HS-1 for the
 // SyncManager-as-god-object intervention.

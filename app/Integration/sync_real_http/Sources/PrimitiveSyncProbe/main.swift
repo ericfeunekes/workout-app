@@ -291,7 +291,7 @@ struct PrimitiveSyncProbe {
     private static func uploadHealthArchive(api: SyncAPI, baseURL: URL) async throws {
         let result = try await api.uploadHealthArchive(HealthArchiveUploadRequest(
             requestSetKey: "sync-probe-health-archive",
-            serverNamespace: normalizedServerNamespace(baseURL),
+            serverNamespace: HealthArchiveServerNamespace.normalized(from: baseURL),
             descriptorFingerprint: "sync-probe-fingerprint",
             nextCursor: "sync-probe-cursor-1",
             records: [
@@ -351,20 +351,6 @@ struct PrimitiveSyncProbe {
         try expect(result.acknowledgedCursor == "sync-probe-cursor-1", "expected acknowledged cursor")
         try expect(result.recordsReceived == 3, "expected three health archive records")
         try expect(result.tombstonesReceived == 1, "expected one health archive tombstone")
-    }
-
-    private static func normalizedServerNamespace(_ url: URL) -> String {
-        guard let scheme = url.scheme, let host = url.host else {
-            return url.absoluteString.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        }
-        var namespace = "\(scheme)://\(host)"
-        if let port = url.port {
-            namespace += ":\(port)"
-        }
-        if !url.path.isEmpty && url.path != "/" {
-            namespace += url.path
-        }
-        return namespace
     }
 
     private static func makeSetLog(

@@ -164,6 +164,63 @@ def test_upload_refuses_ipa_that_does_not_match_manifest_hash(tmp_path: Path) ->
         testflight.upload_manifest_ipa(config, run_state)
 
 
+def test_upload_uses_system_xcrun_with_selected_developer_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = testflight.ReleaseConfig.from_env(valid_env(tmp_path))
+    ipa = tmp_path / "WorkoutDB.ipa"
+    ipa.write_text("ipa bytes")
+    run_state = testflight.ReleaseRun(
+        run_id="release-test",
+        root=tmp_path,
+        archive_path=tmp_path / "Setmark.xcarchive",
+        export_path=tmp_path,
+        manifest_path=tmp_path / "manifest.json",
+        worktree_path=None,
+        source_sha="abc123",
+        source_ref="HEAD",
+        version=testflight.BuildVersion(marketing="0.0.1", build="2"),
+        created_at="2026-05-19T00:00:00+00:00",
+        ipa_path=ipa,
+        ipa_sha256=testflight.sha256_file(ipa),
+    )
+    calls: list[tuple[list[str], dict[str, str] | None]] = []
+
+    def capture_run(
+        command: list[str],
+        *,
+        cwd: Path | None = None,
+        env: dict[str, str] | None = None,
+        dry_run: bool = False,
+        input_bytes: bytes | None = None,
+    ) -> None:
+        calls.append((command, env))
+
+    monkeypatch.setattr(testflight, "run", capture_run)
+
+    testflight.upload_manifest_ipa(config, run_state)
+
+    assert calls == [
+        (
+            [
+                "/usr/bin/xcrun",
+                "altool",
+                "--upload-app",
+                "--type",
+                "ios",
+                "-f",
+                str(ipa),
+                "--apiKey",
+                config.asc_key_id,
+                "--apiIssuer",
+                config.asc_issuer_id,
+            ],
+            testflight.xcode_env(config),
+        )
+    ]
+
+
 def test_release_requires_clean_tree_or_dirty_reason(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

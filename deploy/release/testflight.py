@@ -33,6 +33,7 @@ DEFAULT_CONFIG_PATHS = (REPO_ROOT / ".release.env", REPO_ROOT / ".env.release")
 ASC_API_ROOT = "https://api.appstoreconnect.apple.com/v1"
 DEFAULT_RELEASE_ROOT = REPO_ROOT / "scratch" / "qa-runs"
 LOGIN_KEYCHAIN_HINTS = ("login.keychain", "login.keychain-db")
+XCRUN_PATH = Path("/usr/bin/xcrun")
 
 
 class ReleaseError(RuntimeError):
@@ -522,6 +523,7 @@ def preflight_local(
     checks = [
         ((repo_root / "app/project.yml").exists(), f"missing project.yml under {repo_root}/app"),
         (xcodebuild.exists(), f"missing xcodebuild under {config.developer_dir}"),
+        (XCRUN_PATH.exists(), f"missing xcrun at {XCRUN_PATH}"),
         (config.keychain_path.exists(), f"missing release keychain: {config.keychain_path}"),
         (config.asc_key_path.exists(), f"missing App Store Connect key: {config.asc_key_path}"),
     ]
@@ -924,7 +926,7 @@ def upload_manifest_ipa(
             raise ReleaseError("refusing to upload IPA whose SHA-256 differs from manifest")
     run(
         [
-            str(config.developer_dir / "usr/bin/xcrun"),
+            str(XCRUN_PATH),
             "altool",
             "--upload-app",
             "--type",

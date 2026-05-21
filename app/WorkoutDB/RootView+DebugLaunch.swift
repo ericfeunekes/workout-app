@@ -15,7 +15,9 @@ import FeaturesToday
 import Persistence
 import Shell
 import WatchBridge
+import WorkoutCoreFoundation
 import WorkoutKitAdapter
+import WorkoutKitHandoff
 
 extension RootView {
 
@@ -25,7 +27,7 @@ extension RootView {
     /// RootTabView's observation path matches production.
     func buildDebugSeedViewModels(args: [String] = []) -> (TodayViewModel, ExecutionVMHolder) {
         if args.contains("--debug-today-plan") {
-            return buildDebugTodayPlanViewModels()
+            return buildDebugTodayPlanViewModels(args: args)
         }
 
         let cache = persistence.workoutCache
@@ -88,15 +90,19 @@ extension RootView {
     /// bypasses FirstRun without starting execution, so simulator QA can
     /// validate missed / today / upcoming cards, detail sheets, and the
     /// start-any-visible-card handoff.
-    private func buildDebugTodayPlanViewModels() -> (TodayViewModel, ExecutionVMHolder) {
+    private func buildDebugTodayPlanViewModels(
+        args: [String] = []
+    ) -> (TodayViewModel, ExecutionVMHolder) {
         let cache = persistence.workoutCache
         let telemetry = persistence.telemetryEmitter()
         let historyVM = self.historyVM
         let executionHolder = ExecutionVMHolder()
         let now = Date()
-        let contexts = debugTodayPlanContexts(now: now)
+        let contexts = args.contains("--debug-workoutkit-pacer-plan")
+            ? [debugWorkoutKitPacerContext(now: now)]
+            : debugTodayPlanContexts(now: now)
         let selected = contexts.first ?? ExecutionPreviewSeed.pushA()
-        let contextsByWorkoutID = Dictionary(uniqueKeysWithValues: contexts.map {
+        let contextsByWorkoutID: [WorkoutID: WorkoutContext] = Dictionary(uniqueKeysWithValues: contexts.map {
             ($0.workout.id, $0)
         })
 
@@ -111,6 +117,15 @@ extension RootView {
             workouts: todayContexts
         )
         let todayVM = TodayViewModel(planContext: planContext, telemetry: telemetry)
+        if args.contains("--workoutkit-proof-only-exposure") {
+            Task { @MainActor in
+                await wireDebugWorkoutKitHandoff(
+                    todayVM: todayVM,
+                    planContext: planContext,
+                    now: now
+                )
+            }
+        }
         let todayLoader = TodayLoader(cache: cache)
         let makeCompletionWriter: @MainActor () -> LocalCompletionWriter = {
             { [cache, historyVM, todayVM, todayLoader, telemetry] record in
@@ -272,6 +287,150 @@ extension RootView {
                 notes: "Loaded carry conditioning with clear bounded current-block progress."
             ),
         ]
+    }
+
+    private func debugWorkoutKitPacerContext(now: Date) -> WorkoutContext {
+        let base = ExecutionPreviewSeed.timingMode(.continuous)
+        let scheduled = Calendar(identifier: .gregorian).date(
+            byAdding: .day,
+            value: 1,
+            to: now
+        ) ?? now
+        let workout = Workout(
+            id: base.workout.id,
+            userID: base.workout.userID,
+            name: "Tomorrow 5K Pace Run",
+            scheduledDate: scheduled,
+            status: .planned,
+            source: base.workout.source,
+            notes: "Proof fixture for a single scheduled distance and target-time run.",
+            createdAt: base.workout.createdAt,
+            updatedAt: base.workout.updatedAt,
+            completedAt: nil,
+            tagsJSON: #"["running","pacer","workoutkit"]"#
+        )
+        let exerciseID = base.itemsByBlock.first?.first?.exerciseID ?? UUID()
+        let primitiveWorkout = PrimitiveWorkout(
+            id: workout.id,
+            name: workout.name,
+            activityIntent: ActivityIntent(activityDomain: .running),
+            blocks: [
+                PrimitiveBlock(
+                    id: base.blocks.first?.id ?? UUID(),
+                    title: "5K run",
+                    sets: [
+                        PrimitiveSet(
+                            id: UUID(),
+                            title: "Pacer",
+                            timing: PrimitiveTiming(mode: .targetBounded),
+                            slots: [
+                                PrimitiveSlot(
+                                    id: UUID(),
+                                    exerciseID: exerciseID,
+                                    workTargets: [
+                                        PrimitiveWorkTarget(
+                                            metric: .distance,
+                                            valueForm: .single,
+                                            value: 5_000,
+                                            role: .completion
+                                        ),
+                                        PrimitiveWorkTarget(
+                                            metric: .duration,
+                                            valueForm: .single,
+                                            value: 1_500,
+                                            role: .observation
+                                        ),
+                                    ]
+                                ),
+                            ]
+                        ),
+                    ]
+                ),
+            ]
+        )
+        return WorkoutContext(
+            workout: workout,
+            primitiveWorkout: primitiveWorkout,
+            primitiveExecutionPlan: try? ExecutionPlan.validated(workout: primitiveWorkout),
+            blocks: base.blocks,
+            itemsByBlock: base.itemsByBlock,
+            exercises: base.exercises,
+            lastPerformed: base.lastPerformed
+        )
+    }
+
+    private func wireDebugWorkoutKitHandoff(
+        todayVM: TodayViewModel,
+        planContext: TodayPlanContext,
+        now: Date
+    ) async {
+        let coordinator = WorkoutKitHandoffCoordinator(
+            attemptStore: persistence.workoutKitHandoffAttemptStore,
+            telemetry: persistence.telemetryEmitter(),
+            proofSource: .proofOnly,
+            now: { now },
+            push: { request in
+                let descriptor = try! request.plan.resolvedPlanDescriptor()
+                let fingerprint = try! WorkoutKitPayloadFingerprint.make(
+                    plan: request.plan,
+                    descriptor: descriptor,
+                    occurrence: request.occurrence
+                )
+                return .scheduled(WorkoutKitScheduledRecord(
+                    workoutID: request.plan.workoutID,
+                    workoutPlanID: descriptor.id,
+                    occurrence: request.occurrence!,
+                    payloadFingerprint: fingerprint,
+                    rowID: request.plan.rowID,
+                    supportState: request.plan.supportState,
+                    degradation: request.plan.degradation
+                ))
+            }
+        )
+        let contextsByWorkoutID: [WorkoutID: TodayContext] = Dictionary(uniqueKeysWithValues: planContext.workouts.map {
+            ($0.workout.id, $0)
+        })
+        var presentations: [WorkoutID: TodayViewModel.WorkoutKitHandoffSummary] = [:]
+        for context in planContext.workouts {
+            guard let primitive = context.primitiveWorkout,
+                  let presentation = await coordinator.presentation(
+                    workout: primitive,
+                    scheduledDate: context.workout.scheduledDate
+                  )
+            else {
+                continue
+            }
+            presentations[context.workout.id] = TodayViewModel.WorkoutKitHandoffSummary(
+                state: TodayViewModel.WorkoutKitHandoffSummary.State(
+                    rawValue: presentation.state.rawValue
+                ) ?? .failed,
+                title: presentation.title,
+                message: presentation.message,
+                actionTitle: presentation.actionTitle,
+                isActionable: presentation.isActionable
+            )
+        }
+        todayVM.setWorkoutKitHandoffs(presentations)
+        todayVM.setWorkoutKitHandoffAction { workoutID in
+            guard let context = contextsByWorkoutID[workoutID],
+                  let primitive = context.primitiveWorkout
+            else {
+                return nil
+            }
+            let result = await coordinator.schedule(
+                workout: primitive,
+                scheduledDate: context.workout.scheduledDate
+            )
+            return TodayViewModel.WorkoutKitHandoffSummary(
+                state: TodayViewModel.WorkoutKitHandoffSummary.State(
+                    rawValue: result.presentation.state.rawValue
+                ) ?? .failed,
+                title: result.presentation.title,
+                message: result.presentation.message,
+                actionTitle: result.presentation.actionTitle,
+                isActionable: result.presentation.isActionable
+            )
+        }
     }
 
     private func retitle(

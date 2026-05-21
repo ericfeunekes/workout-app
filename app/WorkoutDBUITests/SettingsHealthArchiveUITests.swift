@@ -20,11 +20,77 @@ final class SettingsHealthArchiveUITests: XCTestCase {
         assertSwitch(id: heartRate, value: "0", in: app)
     }
 
-    private func launchSettings() -> XCUIApplication {
+    func testHealthArchiveAutomaticAndManualExportUpdateVisibleStatus() {
+        let app = launchSettings(exportOutcome: "success")
+        defer { app.terminate() }
+
+        setSwitch(id: "health-archive.automatic", value: "1", in: app)
+        assertSwitch(id: "health-archive.automatic", value: "1", in: app)
+        XCTAssertTrue(
+            app.staticTexts["health-archive.next-attempt"].waitForExistence(timeout: 4)
+        )
+        XCTAssertNotEqual(app.staticTexts["health-archive.next-attempt"].label, "off")
+
+        let export = app.buttons["health-archive.export-now"]
+        scrollToElement(export, in: app)
+        export.tap()
+
+        let status = app.staticTexts["health-archive.status"]
+        let deadline = Date().addingTimeInterval(6)
+        while Date() < deadline, !status.label.contains("4 ·") {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTAssertTrue(status.label.contains("4 ·"), "status label: \(status.label)")
+    }
+
+    func testHealthArchiveManualExportFailureUpdatesVisibleStatus() {
+        let app = launchSettings(exportOutcome: "failed")
+        defer { app.terminate() }
+
+        let export = app.buttons["health-archive.export-now"]
+        scrollToElement(export, in: app)
+        export.tap()
+
+        let status = app.staticTexts["health-archive.status"]
+        let deadline = Date().addingTimeInterval(6)
+        while Date() < deadline, !status.label.contains("failed · DebugExportFailure") {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTAssertEqual(status.label, "failed · DebugExportFailure")
+    }
+
+    func testHealthArchiveManualExportShowsInFlightStatusBeforeCompletion() {
+        let app = launchSettings(exportOutcome: "delayedSuccess")
+        defer { app.terminate() }
+
+        let export = app.buttons["health-archive.export-now"]
+        scrollToElement(export, in: app)
+        export.tap()
+
+        let status = app.staticTexts["health-archive.status"]
+        let exportingDeadline = Date().addingTimeInterval(3)
+        while Date() < exportingDeadline, status.label != "exporting" {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTAssertEqual(status.label, "exporting")
+
+        let successDeadline = Date().addingTimeInterval(6)
+        while Date() < successDeadline, !status.label.contains("4 ·") {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+        }
+        XCTAssertTrue(status.label.contains("4 ·"), "status label: \(status.label)")
+    }
+
+    private func launchSettings(exportOutcome: String = "success") -> XCUIApplication {
         let app = XCUIApplication()
         app.terminate()
-        app.launchArguments = ["--debug-today-plan", "--debug-settings-tab"]
+        app.launchArguments = [
+            "--debug-today-plan",
+            "--debug-settings-tab",
+            "--debug-health-archive-settings",
+        ]
         app.launchEnvironment["WORKOUTDB_HEALTHKIT_PROBE_DEFAULT_STORE"] = "1"
+        app.launchEnvironment["WORKOUTDB_DEBUG_HEALTH_ARCHIVE_EXPORT_OUTCOME"] = exportOutcome
         app.launch()
         openSettings(in: app)
         return app

@@ -76,7 +76,7 @@ and `docs/sync.md` for sync + first-run behavior.
 The app is split into local SwiftPM packages. `Core/*` owns pure domain,
 prescription, autoregulation, session, telemetry, and utility logic.
 `Persistence`, `Sync`, `HealthKitBridge`, `WatchBridge`, and
-`WorkoutKitAdapter` own named side effects. `Features/*` owns Today,
+`WorkoutKitAdapter` and `WorkoutKitHandoff` own named side effects. `Features/*` owns Today,
 Execution, History, Settings, FirstRun, and WatchFaces. `Shell` owns bootstrap,
 root tab composition, cross-feature view model wiring, and push-flusher
 lifecycle. The app target owns thin scene-phase triggers for the HealthKit

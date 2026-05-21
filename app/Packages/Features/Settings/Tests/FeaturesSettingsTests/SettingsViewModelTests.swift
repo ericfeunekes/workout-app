@@ -185,12 +185,20 @@ final class SettingsViewModelTests: XCTestCase {
     }
 
     func testHealthArchiveAutomaticTogglePersists() async {
+        final class Box: @unchecked Sendable { var values: [Bool] = [] }
+        let box = Box()
         let store = FakeHealthArchiveExportStateStore()
-        let vm = makeViewModel(healthArchiveStore: store)
+        let vm = makeViewModel(
+            healthArchiveStore: store,
+            onHealthArchiveAutomaticChanged: { enabled in
+                box.values.append(enabled)
+            }
+        )
 
         await toggleRow(in: vm, rowID: "health-archive.automatic", enabled: true)
 
         XCTAssertTrue(store.snapshot.automaticEnabled)
+        XCTAssertEqual(box.values, [true])
     }
 
     func testHealthArchiveExportNowInvokesClosureWithoutConfirm() async {
@@ -206,6 +214,55 @@ final class SettingsViewModelTests: XCTestCase {
         XCTAssertNil(vm.showDestructiveConfirm)
         await drainPendingTasks()
         XCTAssertEqual(box.count, 1)
+    }
+
+    func testHealthArchiveExportNowShowsExportingWhileInFlight() async {
+        final class Box: @unchecked Sendable {
+            var exportContinuation: CheckedContinuation<Void, Never>?
+            var startedContinuations: [CheckedContinuation<Void, Never>] = []
+
+            func markStarted() {
+                let continuations = startedContinuations
+                startedContinuations.removeAll()
+                for continuation in continuations {
+                    continuation.resume()
+                }
+            }
+
+            func waitForStart() async {
+                if exportContinuation != nil { return }
+                await withCheckedContinuation { continuation in
+                    startedContinuations.append(continuation)
+                }
+            }
+        }
+        let box = Box()
+        let store = FakeHealthArchiveExportStateStore()
+        let now = Date(timeIntervalSince1970: 10_000)
+        let vm = makeViewModel(healthArchiveStore: store, onHealthArchiveExportNow: {
+            await withCheckedContinuation { continuation in
+                box.exportContinuation = continuation
+                box.markStarted()
+            }
+            await store.saveSnapshot(HealthArchiveExportSnapshot(
+                serverNamespace: "https://wdb.local:8080",
+                status: .succeeded,
+                lastUploadAt: now,
+                lastRecordCount: 1,
+                lastTombstoneCount: 0
+            ))
+            return .completed
+        }, now: now)
+
+        let exportTask = vm.exportHealthArchiveNow()
+        await box.waitForStart()
+
+        XCTAssertEqual(firstInfoValue(in: vm, rowID: "health-archive.status"), "exporting")
+
+        box.exportContinuation?.resume()
+        await exportTask.value
+
+        XCTAssertEqual(firstInfoValue(in: vm, rowID: "health-archive.status"), "1 · just now")
     }
 
     func testHealthArchiveExportNowSurfacesUnavailableStatus() async {
@@ -636,6 +693,7 @@ final class SettingsViewModelTests: XCTestCase {
         onHealthArchiveExportNow: @escaping @Sendable () async -> HealthArchiveManualExportOutcome = {
             .completed
         },
+        onHealthArchiveAutomaticChanged: @escaping @Sendable (Bool) async -> Void = { _ in },
         now: Date = Date(timeIntervalSince1970: 10_000)
     ) -> SettingsViewModel {
         // Tests can either pass in a prepared `syncStore` or supply the
@@ -654,6 +712,7 @@ final class SettingsViewModelTests: XCTestCase {
             onResetCache: onResetCache,
             onChangeServer: onChangeServer,
             onHealthArchiveExportNow: onHealthArchiveExportNow,
+            onHealthArchiveAutomaticChanged: onHealthArchiveAutomaticChanged,
             now: { now }
         )
     }

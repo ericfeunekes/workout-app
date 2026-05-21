@@ -555,6 +555,46 @@ final class TodayViewModelTests: XCTestCase {
         XCTAssertEqual(vm.exercises[0].prescriptionLine, "3 \u{00D7} 5 @ 60 lb")
     }
 
+    func testWorkoutKitHandoffActionIsPendingBeforeAwaitingScheduler() async {
+        let workoutID = UUID()
+        let context = makeContext(
+            userID: UUID(),
+            name: "Run",
+            scheduledDate: Date(),
+            tagsJSON: nil,
+            workoutID: workoutID
+        )
+        let vm = TodayViewModel(context: context)
+        vm.setWorkoutKitHandoffs([
+            workoutID: TodayViewModel.WorkoutKitHandoffSummary(
+                state: .ready,
+                title: "Apple Workout",
+                message: "Ready",
+                actionTitle: "Watch",
+                isActionable: true
+            ),
+        ])
+
+        var scheduleCalls = 0
+        vm.setWorkoutKitHandoffAction { _ in
+            scheduleCalls += 1
+            try? await Task.sleep(nanoseconds: 25_000_000)
+            return TodayViewModel.WorkoutKitHandoffSummary(
+                state: .scheduled,
+                title: "Apple Workout",
+                message: "Scheduled",
+                isActionable: false
+            )
+        }
+
+        async let first: Void = vm.scheduleWorkoutKitHandoff(workoutID: workoutID)
+        async let second: Void = vm.scheduleWorkoutKitHandoff(workoutID: workoutID)
+        _ = await (first, second)
+
+        XCTAssertEqual(scheduleCalls, 1)
+        XCTAssertEqual(vm.detail(for: workoutID)?.workoutKitHandoff?.state, .scheduled)
+    }
+
     private func makeContext(
         userID: UUID,
         name: String,

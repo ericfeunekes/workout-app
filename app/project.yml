@@ -67,6 +67,8 @@ packages:
     path: Packages/WatchBridge
   WorkoutKitAdapter:
     path: Packages/WorkoutKitAdapter
+  WorkoutKitHandoff:
+    path: Packages/WorkoutKitHandoff
   FeaturesToday:
     path: Packages/Features/Today
   FeaturesExecution:
@@ -126,6 +128,9 @@ targets:
       # scheduling/opening, and DEBUG proof probes. No visible export UI
       # calls this until real-device proof is recorded.
       - package: WorkoutKitAdapter
+      # WorkoutKitHandoff — thin product-route coordinator that projects
+      # eligible previews into Apple Workout scheduling state.
+      - package: WorkoutKitHandoff
       # Companion watch app — embed so WatchConnectivity recognizes the
       # paired Watch app as this iOS app's counterpart in simulator/device
       # installs, not just as a separately-built target.
@@ -159,7 +164,7 @@ targets:
       properties:
         CFBundleDisplayName: Setmark
         CFBundleShortVersionString: "0.0.1"
-        CFBundleVersion: "2"
+        CFBundleVersion: "3"
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
           NSExceptionDomains:
@@ -177,6 +182,10 @@ targets:
           - armv7
         NSHealthShareUsageDescription: "Reads heart rate and cadence during workouts for set logging."
         NSHealthUpdateUsageDescription: "Writes workout data to Apple Health so sessions appear in Fitness."
+        BGTaskSchedulerPermittedIdentifiers:
+          - com.ericfeunekes.WorkoutDB.health-archive.refresh
+        UIBackgroundModes:
+          - fetch
     entitlements:
       path: WorkoutDB/WorkoutDB.entitlements
       properties:
@@ -186,7 +195,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.ericfeunekes.WorkoutDB
         TARGETED_DEVICE_FAMILY: "1,2"     # iPhone + iPad
         SUPPORTS_MACCATALYST: NO
-        CURRENT_PROJECT_VERSION: "2"
+        CURRENT_PROJECT_VERSION: "3"
         MARKETING_VERSION: "0.0.1"
         GENERATE_INFOPLIST_FILE: NO
 
@@ -230,7 +239,7 @@ targets:
       properties:
         CFBundleDisplayName: Setmark
         CFBundleShortVersionString: "0.0.1"
-        CFBundleVersion: "2"
+        CFBundleVersion: "3"
         CFBundleIconName: AppIcon
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.ericfeunekes.WorkoutDB
@@ -246,7 +255,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.ericfeunekes.WorkoutDB.watchkitapp
         TARGETED_DEVICE_FAMILY: "4"     # watch
         WATCHOS_DEPLOYMENT_TARGET: "10.0"
-        CURRENT_PROJECT_VERSION: "2"
+        CURRENT_PROJECT_VERSION: "3"
 
   # -----------------------------------------------------------------------
   # DEBUG-only UI probe target for system HealthKit authorization sheets.
@@ -275,6 +284,8 @@ targets:
       - path: WorkoutDBTests
     dependencies:
       - target: WorkoutDB
+      - package: CoreDomain
+      - package: CoreTelemetry
       - package: HealthArchiveExport
       - package: Persistence
       - package: Sync

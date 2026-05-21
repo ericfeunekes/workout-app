@@ -53,8 +53,10 @@ best-effort and that app-open foreground catch-up remains authoritative.
 
 The current shipped slice exposes the HealthKit archive descriptor scope,
 manual export action, automatic-export toggle, next-attempt status, and
-current-server delivery status. Exact BGTask registration and richer last-run
-status remain in `SETTINGS-GAP-005`.
+current-server delivery status. BGTask registration/scheduling is now wired
+through the app shell and Settings toggles reschedule it. Richer last-run copy
+and real OS/device evidence for actual scheduled wake timing remain in
+`SETTINGS-GAP-005`.
 
 Settings does not choose workouts, modify programming, or analyze history.
 If a control would change the workout plan itself, it belongs in Claude or a
@@ -72,9 +74,11 @@ future accepted app-side proposal workflow, not Settings.
   telemetry gaps call for them; no broad debug dashboard is accepted.
 - `SETTINGS-GAP-005`: HealthKit personal archive export controls now include
   descriptor subset selection, the manual export action, automatic-export
-  toggle, next-attempt status, and current-server status display. Remaining
-  Settings work is BGTask-backed scheduling proof, richer last-run summary, and
-  clearer failure display wired to the HealthKit data access requirements.
+  toggle, next-attempt status, and current-server status display. The Settings
+  UI now has simulator proof for automatic enablement and visible manual export
+  status. Remaining Settings work is richer last-run summary, clearer failure
+  display, and real OS/device evidence for actual scheduled background wake
+  behavior.
 
 ## QA scenarios
 
@@ -132,7 +136,9 @@ future accepted app-side proposal workflow, not Settings.
 
 ### S7. HealthKit daily export status
 
-- **status:** future scenario for `SETTINGS-GAP-005`; not part of Loop A.
+- **status:** simulator Settings proof covers automatic enablement plus manual
+  success and failure visibility. Real scheduled-wake evidence remains in
+  `SETTINGS-GAP-005`.
 - **setup:** HealthKit archive export configured with automatic daily export
   enabled.
 - **steps:** open Settings after a successful run, then after a simulated

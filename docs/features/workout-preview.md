@@ -37,14 +37,19 @@ gym context where taps are imprecise.
   prescription/timing config parsing, last-performed summaries, current session
   state if one exists.
 - **Outputs:** preview read model, explicit start action, scoped edit intents
-  routed through `docs/set-edit-sheet.md`.
+  routed through `docs/set-edit-sheet.md`, and an optional Apple Workout
+  scheduling affordance when the selected workout is an eligible proof-gated
+  WorkoutKit handoff row.
 - **Projection ownership:** preview consumes the shared `Core/Session`
   `SessionPreviewProjection` seam for first-task, current-block remaining-work,
   upcoming-work, and primitive target facts. Features own presentation strings
   and layout. Today must not import `FeaturesExecution`, and preview must not
   re-derive primitive cursor/progress rules in a separate preview-only model.
 - **State transitions:** preview has no live timers. `Start` is the only route
-  from preview into execution.
+  from preview into Setmark execution. `Schedule in Apple Workout` is a separate
+  handoff route: it schedules the authored workout occurrence in Apple's
+  Workout app, records local attempt/receipt state, emits telemetry, and does
+  not imply Setmark result reconciliation.
 
 ## Edit contract
 
@@ -70,6 +75,7 @@ handoff instead of inventing a local plan mutation.
   inherited sync guarantee.
 - No automatic start from card body tap.
 - No Watch-specific layout here.
+- No HealthKit or WorkoutKit completion readback from preview handoff.
 
 ## Current gaps
 

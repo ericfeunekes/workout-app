@@ -200,7 +200,9 @@ instead of relying on wall-clock timer passage.
 `make test-settings-ui` is opt-in. Run it when a change claims Settings control
 action identity, Settings-owned persistence, or relaunch readback for Settings
 rows. It is code-signing-free and should not carry HealthKit authorization or
-archive-read claims.
+archive-read claims. Health archive rows use debug fixtures here only to prove
+Settings interaction, persisted selection, automatic-toggle scheduling hooks,
+and visible status updates.
 
 `make test-workout-type-ui` is opt-in. Run it when a change claims coverage
 across timing modes or composed primitive execution cases.

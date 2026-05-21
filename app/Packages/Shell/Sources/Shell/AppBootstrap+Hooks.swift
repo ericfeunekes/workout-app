@@ -16,6 +16,7 @@ import Persistence
 import Sync
 import WatchBridge
 import WorkoutCoreFoundation
+import WorkoutKitHandoff
 
 extension AppBootstrap {
 
@@ -80,6 +81,10 @@ extension AppBootstrap {
             sessionStore: persistence.sessionStore,
             telemetry: telemetry
         )
+        let handoffWiring = makeWorkoutKitHandoffWiring(
+            persistence: persistence,
+            telemetry: telemetry
+        )
         rebuildVM.writerBox.value = makeCompletionWriter(
             inputs: CompletionWriterInputs(
                 workoutCache: persistence.workoutCache,
@@ -89,7 +94,8 @@ extension AppBootstrap {
                 afterLocalCompletion: nil,
                 executionHolder: holder,
                 rebuild: rebuildVM.factory,
-                telemetry: telemetry
+                telemetry: telemetry,
+                handoffWiring: handoffWiring
             )
         )
         wireForegroundVisibleRefresh(
@@ -99,7 +105,8 @@ extension AppBootstrap {
             workoutCache: persistence.workoutCache,
             lastPerformedStore: persistence.lastPerformedStore,
             executionHolder: holder,
-            rebuild: rebuildVM.factory
+            rebuild: rebuildVM.factory,
+            handoffWiring: handoffWiring
         )
         if let onEmptyTodayRefresh {
             todayVM.setRefreshAction {
@@ -138,6 +145,7 @@ extension AppBootstrap {
         /// `WorkoutContext.lastPerformed` carries the same pulled
         /// snapshot Today is already rendering.
         let lastPerformedStore: LastPerformedStore?
+        let persistence: PersistenceFactory
         let syncAPI: SyncAPI
         let telemetry: TelemetryEmitter
         let afterLocalCompletion: (@Sendable () async -> Void)?
@@ -196,6 +204,14 @@ extension AppBootstrap {
             planContext: inputs.todayPlanContext,
             telemetry: inputs.telemetry
         )
+        let handoffWiring = makeWorkoutKitHandoffWiring(
+            persistence: inputs.persistence,
+            telemetry: inputs.telemetry
+        )
+        await handoffWiring.apply(
+            todayVM: todayVM,
+            planContext: inputs.todayPlanContext
+        )
         let hooks = makePushHooks(
             syncAPI: inputs.syncAPI,
             workoutCache: inputs.workoutCache,
@@ -215,7 +231,8 @@ extension AppBootstrap {
                 afterLocalCompletion: inputs.afterLocalCompletion,
                 executionHolder: inputs.executionHolder,
                 rebuild: rebuildVM.factory,
-                telemetry: inputs.telemetry
+                telemetry: inputs.telemetry,
+                handoffWiring: handoffWiring
             )
         )
         let refreshDeps = TodayRefreshDependencies(
@@ -226,7 +243,8 @@ extension AppBootstrap {
             rebuild: rebuildVM.factory,
             telemetry: inputs.telemetry,
             onTokenRejected: inputs.onManualRefreshTokenRejected,
-            appSync: inputs.appSync
+            appSync: inputs.appSync,
+            handoffWiring: handoffWiring
         )
         todayVM.setRefreshAction { [weak todayVM, refreshDeps] in
             guard let todayVM else { return false }
@@ -239,7 +257,8 @@ extension AppBootstrap {
                 rebuild: refreshDeps.rebuild,
                 telemetry: refreshDeps.telemetry,
                 onTokenRejected: refreshDeps.onTokenRejected,
-                appSync: refreshDeps.appSync
+                appSync: refreshDeps.appSync,
+                handoffWiring: refreshDeps.handoffWiring
             ))
         }
         wireForegroundVisibleRefresh(
@@ -249,7 +268,8 @@ extension AppBootstrap {
             workoutCache: inputs.workoutCache,
             lastPerformedStore: inputs.lastPerformedStore,
             executionHolder: inputs.executionHolder,
-            rebuild: rebuildVM.factory
+            rebuild: rebuildVM.factory,
+            handoffWiring: handoffWiring
         )
         todayVM.setStartWorkoutAction { [startDeps = refreshDeps] workoutID in
             await startWorkoutFromPlan(
@@ -288,6 +308,83 @@ extension AppBootstrap {
         let telemetry: TelemetryEmitter
         let onTokenRejected: (@Sendable @MainActor () async -> Void)?
         let appSync: AppSyncCoordinator
+        let handoffWiring: TodayWorkoutKitHandoffWiring
+    }
+
+    @MainActor
+    final class TodayWorkoutKitHandoffWiring: @unchecked Sendable {
+        private let coordinator: WorkoutKitHandoffCoordinator
+        private var contextsByID: [WorkoutID: TodayContext] = [:]
+
+        init(coordinator: WorkoutKitHandoffCoordinator) {
+            self.coordinator = coordinator
+        }
+
+        func apply(
+            todayVM: TodayViewModel,
+            planContext: TodayPlanContext
+        ) async {
+            contextsByID = Dictionary(uniqueKeysWithValues: planContext.workouts.map {
+                ($0.workout.id, $0)
+            })
+            var presentations: [WorkoutID: TodayViewModel.WorkoutKitHandoffSummary] = [:]
+            for context in planContext.workouts {
+                guard let primitive = context.primitiveWorkout,
+                      let presentation = await coordinator.presentation(
+                        workout: primitive,
+                        scheduledDate: context.workout.scheduledDate
+                      )
+                else {
+                    continue
+                }
+                presentations[context.workout.id] = todaySummary(from: presentation)
+            }
+            todayVM.setWorkoutKitHandoffs(presentations)
+            todayVM.setWorkoutKitHandoffAction { [weak self] workoutID in
+                await self?.schedule(workoutID: workoutID)
+            }
+        }
+
+        private func schedule(
+            workoutID: WorkoutID
+        ) async -> TodayViewModel.WorkoutKitHandoffSummary? {
+            guard let context = contextsByID[workoutID],
+                  let primitive = context.primitiveWorkout
+            else {
+                return nil
+            }
+            let result = await coordinator.schedule(
+                workout: primitive,
+                scheduledDate: context.workout.scheduledDate
+            )
+            return todaySummary(from: result.presentation)
+        }
+    }
+
+    static func makeWorkoutKitHandoffWiring(
+        persistence: PersistenceFactory,
+        telemetry: TelemetryEmitter
+    ) -> TodayWorkoutKitHandoffWiring {
+        let coordinator = WorkoutKitHandoffCoordinator(
+            attemptStore: persistence.workoutKitHandoffAttemptStore,
+            telemetry: telemetry,
+            proofSource: .proofOnly
+        )
+        return TodayWorkoutKitHandoffWiring(coordinator: coordinator)
+    }
+
+    static func todaySummary(
+        from presentation: WorkoutKitHandoffPresentation
+    ) -> TodayViewModel.WorkoutKitHandoffSummary {
+        TodayViewModel.WorkoutKitHandoffSummary(
+            state: TodayViewModel.WorkoutKitHandoffSummary.State(
+                rawValue: presentation.state.rawValue
+            ) ?? .unavailable,
+            title: presentation.title,
+            message: presentation.message,
+            actionTitle: presentation.actionTitle,
+            isActionable: presentation.isActionable
+        )
     }
 
     struct TodayRefreshInputs: Sendable {
@@ -300,13 +397,19 @@ extension AppBootstrap {
         let telemetry: TelemetryEmitter
         let onTokenRejected: (@Sendable @MainActor () async -> Void)?
         let appSync: AppSyncCoordinator
+        let handoffWiring: TodayWorkoutKitHandoffWiring
     }
 
     static func refreshTodayPlan(inputs: TodayRefreshInputs) async -> Bool {
         let result = await inputs.appSync.refresh(trigger: .manualTodayRefresh)
         switch result {
         case .pulled:
-            await inputs.todayViewModel.reload(using: inputs.todayLoader)
+            if let planContext = await inputs.todayViewModel.reload(using: inputs.todayLoader) {
+                await inputs.handoffWiring.apply(
+                    todayVM: inputs.todayViewModel,
+                    planContext: planContext
+                )
+            }
             await rebuildExecutionVMForNextWorkout(
                 workoutCache: inputs.workoutCache,
                 lastPerformedStore: inputs.lastPerformedStore,
@@ -335,17 +438,31 @@ extension AppBootstrap {
         workoutCache: WorkoutCache,
         lastPerformedStore: LastPerformedStore?,
         executionHolder: ExecutionVMHolder,
-        rebuild: @escaping @Sendable @MainActor (WorkoutContext) -> ExecutionViewModel
+        rebuild: @escaping @Sendable @MainActor (WorkoutContext) -> ExecutionViewModel,
+        handoffWiring: TodayWorkoutKitHandoffWiring
     ) {
         appSync.setForegroundRefreshHandler {
-            [todayViewModel, todayLoader, workoutCache, lastPerformedStore, executionHolder, rebuild]
+            [
+                todayViewModel,
+                todayLoader,
+                workoutCache,
+                lastPerformedStore,
+                executionHolder,
+                rebuild,
+                handoffWiring,
+            ]
             trigger,
             result in
             guard trigger == .foreground else { return }
             guard case .pulled = result else { return }
             let shouldRebuildExecution = executionHolder.vm?.state.route == .today
                 || executionHolder.vm == nil
-            await todayViewModel.reload(using: todayLoader)
+            if let planContext = await todayViewModel.reload(using: todayLoader) {
+                await handoffWiring.apply(
+                    todayVM: todayViewModel,
+                    planContext: planContext
+                )
+            }
             guard shouldRebuildExecution else { return }
             await rebuildExecutionVMForNextWorkout(
                 workoutCache: workoutCache,
@@ -519,7 +636,12 @@ extension AppBootstrap {
                     errorDescription: String(describing: error)
                 )
             }
-            await inputs.todayViewModel.reload(using: inputs.todayLoader)
+            if let planContext = await inputs.todayViewModel.reload(using: inputs.todayLoader) {
+                await inputs.handoffWiring.apply(
+                    todayVM: inputs.todayViewModel,
+                    planContext: planContext
+                )
+            }
             await inputs.afterLocalCompletion?()
             await rebuildExecutionVMForNextWorkout(
                 workoutCache: inputs.workoutCache,
@@ -542,6 +664,7 @@ extension AppBootstrap {
         let executionHolder: ExecutionVMHolder
         let rebuild: @Sendable @MainActor (WorkoutContext) -> ExecutionViewModel
         let telemetry: TelemetryEmitter
+        let handoffWiring: TodayWorkoutKitHandoffWiring
     }
 
     private nonisolated static func emitCompletionLocalCacheWrite(

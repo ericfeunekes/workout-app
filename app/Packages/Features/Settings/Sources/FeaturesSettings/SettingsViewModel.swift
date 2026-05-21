@@ -98,6 +98,7 @@ public final class SettingsViewModel {
     let onResetCache: @Sendable () async -> Void
     let onChangeServer: @Sendable () async -> Void
     let onHealthArchiveExportNow: @Sendable () async -> HealthArchiveManualExportOutcome
+    let onHealthArchiveAutomaticChanged: @Sendable (Bool) async -> Void
     let now: @MainActor () -> Date
 
     // MARK: - Cached derived state (rebuilt on mutation)
@@ -142,6 +143,7 @@ public final class SettingsViewModel {
         onHealthArchiveExportNow: @escaping @Sendable () async -> HealthArchiveManualExportOutcome = {
             .completed
         },
+        onHealthArchiveAutomaticChanged: @escaping @Sendable (Bool) async -> Void = { _ in },
         now: @escaping @MainActor () -> Date = { Date() }
     ) {
         self.tokenStore = tokenStore
@@ -156,6 +158,7 @@ public final class SettingsViewModel {
         self.onResetCache = onResetCache
         self.onChangeServer = onChangeServer
         self.onHealthArchiveExportNow = onHealthArchiveExportNow
+        self.onHealthArchiveAutomaticChanged = onHealthArchiveAutomaticChanged
         self.now = now
         self.cachedAutoregDefaults = autoregStore.load()
         self.cachedUnits = unitsStore.load()
@@ -269,6 +272,7 @@ public final class SettingsViewModel {
     @discardableResult
     func exportHealthArchiveNow() -> Task<Void, Never> {
         enqueueHealthArchiveIntent { [self] in
+            applyHealthArchiveTransientExporting()
             let outcome = await self.onHealthArchiveExportNow()
             await self.handleHealthArchiveManualExportOutcome(outcome)
         }
@@ -291,6 +295,11 @@ public final class SettingsViewModel {
 
     private func applyHealthArchiveTransientUnavailable(_ failureClass: String) {
         transientHealthArchiveStatus = "failed · \(failureClass)"
+        rebuild()
+    }
+
+    private func applyHealthArchiveTransientExporting() {
+        transientHealthArchiveStatus = "exporting"
         rebuild()
     }
 
@@ -324,6 +333,7 @@ public final class SettingsViewModel {
     private func applyHealthArchiveAutomatic(_ enabled: Bool) async {
         await reloadHealthArchiveExportSnapshot()
         await healthArchiveExportState.setAutomaticEnabled(enabled)
+        await onHealthArchiveAutomaticChanged(enabled)
         await refreshAsync()
     }
 

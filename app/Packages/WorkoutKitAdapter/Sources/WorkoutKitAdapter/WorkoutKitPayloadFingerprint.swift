@@ -10,7 +10,7 @@ public struct WorkoutKitPayloadFingerprint: Sendable, Hashable, Codable, CustomS
 
     public var description: String { value }
 
-    static func make(
+    public static func make(
         plan: WorkoutKitExportPlan,
         descriptor: WorkoutKitPlanDescriptor,
         occurrence: DateComponents?

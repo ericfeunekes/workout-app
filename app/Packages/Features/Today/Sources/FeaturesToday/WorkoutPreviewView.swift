@@ -25,6 +25,7 @@ struct WorkoutPreviewView: View {
     let isStartable: Bool
     let onClose: () -> Void
     let onCopyAdjustment: (String) -> Void
+    let onScheduleWorkoutKit: () -> Void
     let onStart: () -> Void
 
     var body: some View {
@@ -46,6 +47,10 @@ struct WorkoutPreviewView: View {
 
                     if let preview = detail.preview {
                         previewCard(preview)
+                    }
+
+                    if let handoff = detail.workoutKitHandoff {
+                        workoutKitHandoffCard(handoff)
                     }
 
                     ForEach(detail.blocks) { block in
@@ -130,6 +135,49 @@ struct WorkoutPreviewView: View {
                 }
             }
         }
+    }
+
+    private func workoutKitHandoffCard(
+        _ handoff: TodayViewModel.WorkoutKitHandoffSummary
+    ) -> some View {
+        DSCard {
+            VStack(alignment: .leading, spacing: DSSpacing.md) {
+                Text(handoff.title)
+                    .font(DSTypography.subtitle)
+                    .foregroundStyle(DSColors.foreground)
+
+                Text(handoff.message)
+                    .font(DSTypography.caption)
+                    .foregroundStyle(DSColors.foregroundMuted)
+
+                if handoff.isActionable {
+                    workoutKitWatchButton
+                }
+            }
+        }
+    }
+
+    private var workoutKitWatchButton: some View {
+        Button {
+            onScheduleWorkoutKit()
+        } label: {
+            Label("Watch", systemImage: "applewatch")
+                .font(.system(size: 15, weight: .semibold))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .foregroundStyle(DSColors.accentInk)
+                .padding(.horizontal, DSSpacing.lg)
+                .frame(minHeight: 44)
+                .background(DSColors.surfaceElevated)
+                .overlay(
+                    RoundedRectangle(cornerRadius: DSRadius.button, style: .continuous)
+                        .strokeBorder(DSColors.border, lineWidth: 1)
+                )
+                .clipShape(RoundedRectangle(cornerRadius: DSRadius.button, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Schedule on Watch")
+        .accessibilityIdentifier("today.preview.workoutkit.schedule.\(detail.id.uuidString)")
     }
 
     private func previewCard(_ preview: TodayViewModel.PreviewSummary) -> some View {

@@ -289,15 +289,21 @@ public struct TodayView: View {
     private func sheetContent(for sheet: TodaySheet) -> some View {
         switch sheet {
         case .workoutPreview(let detail):
+            let currentDetail = viewModel.detail(for: detail.id) ?? detail
             WorkoutPreviewView(
-                detail: detail,
-                adjustmentDraft: viewModel.adjustmentDraft(for: detail),
+                detail: currentDetail,
+                adjustmentDraft: viewModel.adjustmentDraft(for: currentDetail),
                 isCopied: copiedAdjustmentID == detail.id,
                 isStartable: viewModel.canStart(workoutID: detail.id),
                 onClose: { activeSheet = nil },
                 onCopyAdjustment: { body in
                     copyToClipboard(body)
                     copiedAdjustmentID = detail.id
+                },
+                onScheduleWorkoutKit: {
+                    Task {
+                        await viewModel.scheduleWorkoutKitHandoff(workoutID: detail.id)
+                    }
                 },
                 onStart: {
                     activeSheet = nil

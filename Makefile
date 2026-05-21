@@ -1,7 +1,7 @@
 # Common commands for local development. Every target is a thin wrapper over
 # uv / swift so the source of truth stays in pyproject.toml and Package.swift.
 
-.PHONY: help setup dev test test-python test-swift test-core test-app-packages test-app-xcode test-execution-ui test-settings-ui test-workout-type-ui test-workout-type-ui-repeat test-tokenstore-keychain-ui test-healthkit-ui test-healthkit-watch-sim assert-healthkit-watch-sim-log \
+.PHONY: help setup dev test test-python test-swift test-core test-app-packages test-app-xcode test-execution-ui test-settings-ui test-workoutkit-ui test-workout-type-ui test-workout-type-ui-repeat test-tokenstore-keychain-ui test-healthkit-ui test-healthkit-watch-sim assert-healthkit-watch-sim-log \
         test-sync-real-http check-app pre-qa lint format check regen-schema xcodegen xcode-mcp-tools qa-ready qa-runtime-ready clean \
         release-bump-build release-preflight release-testflight release-status release-resume db-backup db-restore deploy deploy-rollback server-status server-logs
 
@@ -62,7 +62,13 @@ EXECUTION_UI_TESTS := \
 	testEndConfirmationOpensFromRest
 
 SETTINGS_UI_TESTS := \
+	testHealthArchiveAutomaticAndManualExportUpdateVisibleStatus \
+	testHealthArchiveManualExportFailureUpdatesVisibleStatus \
+	testHealthArchiveManualExportShowsInFlightStatusBeforeCompletion \
 	testHealthArchiveControlsPersistThroughRelaunch
+
+WORKOUTKIT_UI_TESTS := \
+	testProofOnlyPreviewActionCapturesProductionReceipt
 
 help:  ## Show this help
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*?##/ {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -99,6 +105,7 @@ test-app-packages: test-core  ## Run every Swift package test target under app/P
 	cd app/Packages/Persistence && swift test
 	cd app/Packages/WatchBridge && swift test
 	cd app/Packages/WorkoutKitAdapter && swift test
+	cd app/Packages/WorkoutKitHandoff && swift test
 	cd app/Packages/Features/Today && swift test
 	cd app/Packages/Features/Execution && swift test
 	cd app/Packages/Features/FirstRun && swift test
@@ -139,6 +146,20 @@ test-settings-ui: xcodegen  ## Run Settings-focused XCUITests on a simulator
 	    -configuration Debug CODE_SIGNING_ALLOWED=NO \
 	    -resultBundlePath "$(XCODE_RESULT_ROOT)/$${test_name}.xcresult" \
 	    -only-testing:WorkoutDBUITests/SettingsHealthArchiveUITests/$${test_name} || exit $$?; \
+	done
+
+test-workoutkit-ui: xcodegen  ## Run WorkoutKit preview handoff XCUITest proof
+	mkdir -p "$(XCODE_RESULT_ROOT)"
+	@for test_name in $(WORKOUTKIT_UI_TESTS); do \
+	  xcrun simctl shutdown "$(IOS_SIMULATOR)" >/dev/null 2>&1 || true; \
+	  xcrun simctl boot "$(IOS_SIMULATOR)" >/dev/null 2>&1 || true; \
+	  xcrun simctl bootstatus "$(IOS_SIMULATOR)" -b; \
+	  xcrun simctl terminate "$(IOS_SIMULATOR)" com.ericfeunekes.WorkoutDB >/dev/null 2>&1 || true; \
+	  xcodebuild test -project app/WorkoutDB.xcodeproj -scheme WorkoutDB \
+	    -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' \
+	    -configuration Debug CODE_SIGNING_ALLOWED=NO \
+	    -resultBundlePath "$(XCODE_RESULT_ROOT)/$${test_name}.xcresult" \
+	    -only-testing:WorkoutDBUITests/WorkoutKitHandoffUITests/$${test_name} || exit $$?; \
 	done
 
 test-workout-type-ui: xcodegen  ## Run every timing mode and composed primitive execution XCUITest

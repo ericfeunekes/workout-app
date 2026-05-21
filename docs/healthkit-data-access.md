@@ -373,12 +373,17 @@ request-set validation, and `make test-sync-real-http` proof that Swift
 not exact-wall-clock. If the scheduled background run is skipped, throttled, or
 offline, the next app-open foreground pass uses the same cursor and upload path.
 Merge-gate proof: scheduler/orchestrator tests with controlled clocks and fake
-background triggers, plus app-hosted lifecycle proof when the app wiring lands.
+background triggers, app-shell tests proving the scheduled trigger reaches the
+shared export runtime, and Settings UI proof for enabling automatic export.
 
 `HKDATA-AC-014`: Export status is user-visible and diagnostic enough to answer
 what happened without inspecting the database: selected scope, last fetch,
 last upload, next intended attempt, counts, and redacted failure class.
-Merge-gate proof: Settings feature tests and telemetry/export-summary tests.
+Merge-gate proof: Settings feature tests, Settings XCUITests for visible state
+changes, and telemetry/export-summary tests. Export attempts also emit
+Health Archive telemetry for manual/background requests, skipped runs,
+successes, token rejection, failures, BGTask schedule submission/failure, and
+BGTask expiration.
 
 ## Current Capability
 
@@ -403,10 +408,17 @@ Merge-gate proof: Settings feature tests and telemetry/export-summary tests.
   persists the local projection, uploads through `Sync`, and advances the local
   delivery cursor only after server acknowledgement. Settings now has descriptor
   scope, manual export, automatic-export toggle, next-attempt status, and
-  current-server status controls. The real HTTP probe uploads quantity,
+  current-server status controls. The app target registers
+  `com.ericfeunekes.WorkoutDB.health-archive.refresh` as a `BGAppRefreshTask`,
+  submits it only when automatic export is enabled for the current server, and
+  maps the handler into the same `exportIfDue(..., .backgroundScheduled)` path
+  used by foreground catch-up. Unit tests prove registration, cancellation,
+  submission timing, idempotent registration, handler completion, and trigger
+  routing; the Settings UI test proves automatic enablement and visible manual
+  export status. This is not a claim that iOS has performed a real scheduled
+  daily wake. The real HTTP probe uploads quantity,
   category, and workout archive records plus a tombstone through `SyncAPI` and
-  verifies SQLite persistence. BGTask registration and richer status
-  presentation are still later loops.
+  verifies SQLite persistence. Richer status presentation remains a later loop.
 - The DEBUG simulator probe route requests HealthKit authorization, runs the
   archive fetch, persists the projection, and exposes structured proof fields
   for authorization request completion, request-set fingerprints, fetch
@@ -473,7 +485,10 @@ Merge-gate proof: Settings feature tests and telemetry/export-summary tests.
   all-supported and explicit-subset source-to-server paths, including server
   ingestion/schema, upload transport, local export state, Settings
   trigger/status controls, foreground catch-up through the shared runtime, and
-  split proof for local projection and server-side SQLite ingestion. Remaining
-  work is BGTask registration, richer user-visible schedule/status copy, a real
-  HTTP app-client to server readback harness, and proof that BGTask-triggered
-  exports share the same typed descriptor, cursor, tombstone, and upload path.
+  split proof for local projection and server-side SQLite ingestion. BGTask
+  registration/scheduling and the app handler now have deterministic app-shell
+  proof, the Settings UI has simulator interaction proof for automatic
+  enablement plus manual success/failure status updates, and export attempts
+  emit structured telemetry. Remaining work is a real HTTP app-client to server
+  readback harness and real OS/device evidence that iOS wakes the app for the
+  scheduled daily task.

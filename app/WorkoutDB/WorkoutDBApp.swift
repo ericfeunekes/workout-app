@@ -163,17 +163,23 @@ struct RootView: View {
     /// `internal` (default access) so DEBUG extensions in sibling files
     /// can read the shared factory without duplicating it.
     let persistence: PersistenceFactory
+    let healthArchiveBackgroundScheduler: HealthArchiveBackgroundExportScheduler
 
+    @MainActor
     init() {
         let persistence = Self.makePersistence()
         self.persistence = persistence
         self.watchBridge = LiveWatchBridge()
+        self.healthArchiveBackgroundScheduler = Self.makeHealthArchiveBackgroundScheduler(
+            persistence: persistence
+        )
         self._historyVM = State(
             wrappedValue: HistoryViewModel(
                 cache: persistence.workoutCache,
                 telemetry: persistence.telemetryEmitter()
             )
         )
+        self.healthArchiveBackgroundScheduler.register()
     }
 
     private static func makePersistence() -> PersistenceFactory {
@@ -194,6 +200,34 @@ struct RootView: View {
         } catch {
             fatalError("PersistenceFactory.makeDefault() failed: \(error)")
         }
+    }
+
+    @MainActor
+    private static func makeHealthArchiveBackgroundScheduler(
+        persistence: PersistenceFactory
+    ) -> HealthArchiveBackgroundExportScheduler {
+        HealthArchiveBackgroundExportScheduler(
+            tokenStore: persistence.tokenStore,
+            stateStore: persistence.healthArchiveExportStateStore,
+            telemetry: persistence.telemetryEmitter(),
+            prepareTelemetry: {
+                await persistence.prepareTelemetry()
+            },
+            makeController: { url, token in
+                let syncAPI = SyncAPI(
+                    transport: URLSessionTransport(baseURL: url),
+                    store: persistence.pushQueueStore,
+                    tokenProvider: { token },
+                    telemetry: persistence.telemetryEmitter()
+                )
+                return HealthArchiveExportFactory.live(
+                    archiveStore: persistence.healthArchiveStore,
+                    stateStore: persistence.healthArchiveExportStateStore,
+                    syncAPI: syncAPI,
+                    telemetry: persistence.telemetryEmitter()
+                )
+            }
+        )
     }
 
     var body: some View {
@@ -322,6 +356,9 @@ struct RootView: View {
             },
             onHealthArchiveExportNow: { @MainActor in
                 await exportHealthArchiveFromSettings()
+            },
+            onHealthArchiveAutomaticChanged: { @MainActor _ in
+                await healthArchiveBackgroundScheduler.scheduleIfAutomaticEnabled()
             }
         )
     }
@@ -338,6 +375,12 @@ struct RootView: View {
         var shouldRecreateLocalServerData = false
         #if DEBUG
         let args = ProcessInfo.processInfo.arguments
+        if args.contains("--debug-health-archive-settings") {
+            try? persistence.tokenStore.saveConnection(
+                url: URL(string: "http://localhost:8000")!,
+                token: "debug-health-archive-token"
+            )
+        }
         let debugRoute = DebugLaunchRoute.classify(args: args)
         if debugRoute.bypassesFirstRun {
             if debugRoute.showsHealthKitProbe {
@@ -589,9 +632,18 @@ struct RootView: View {
     }
 
     private func exportHealthArchiveFromSettings() async -> HealthArchiveManualExportOutcome {
+        #if DEBUG
+        if let outcome = await debugHealthArchiveExportOutcome() {
+            return outcome
+        }
+        #endif
         let result = await HealthArchiveAppHooks.manualExportFromSettings(
             controllerProvider: currentHealthArchiveExport,
-            tokenStore: persistence.tokenStore
+            tokenStore: persistence.tokenStore,
+            telemetry: persistence.telemetryEmitter(),
+            prepareTelemetry: {
+                await persistence.prepareTelemetry()
+            }
         )
         let outcome = healthArchiveManualExportOutcome(from: result)
         if case .tokenRejected = result {
@@ -599,6 +651,158 @@ struct RootView: View {
         }
         return outcome
     }
+
+    #if DEBUG
+    private func debugHealthArchiveExportOutcome() async -> HealthArchiveManualExportOutcome? {
+        guard let outcome = ProcessInfo.processInfo.environment[
+            "WORKOUTDB_DEBUG_HEALTH_ARCHIVE_EXPORT_OUTCOME"
+        ] else {
+            return nil
+        }
+        let connection: (url: URL, token: String)?
+        do {
+            connection = try persistence.tokenStore.loadConnection()
+        } catch {
+            if ProcessInfo.processInfo.arguments.contains("--debug-health-archive-settings") {
+                return await saveDebugHealthArchiveExportOutcome(
+                    outcome: outcome,
+                    connectionURL: URL(string: "http://localhost:8000")!
+                )
+            }
+            return .unavailable("NoServerConnection")
+        }
+        if connection == nil,
+           ProcessInfo.processInfo.arguments.contains("--debug-health-archive-settings") {
+            return await saveDebugHealthArchiveExportOutcome(
+                outcome: outcome,
+                connectionURL: URL(string: "http://localhost:8000")!
+            )
+        }
+        guard let connection else {
+            return .unavailable("NoServerConnection")
+        }
+        return await saveDebugHealthArchiveExportOutcome(
+            outcome: outcome,
+            connectionURL: connection.url
+        )
+    }
+
+    private func saveDebugHealthArchiveExportOutcome(
+        outcome: String,
+        connectionURL: URL
+    ) async -> HealthArchiveManualExportOutcome? {
+        let telemetry = persistence.telemetryEmitter()
+        await persistence.prepareTelemetry()
+        HealthArchiveAppHooks.emitExportEvent(
+            telemetry,
+            name: "health_archive.manual_export_requested",
+            trigger: .manual,
+            serverURL: connectionURL
+        )
+        let namespace = HealthArchiveServerNamespace.normalized(from: connectionURL)
+        let snapshot = await persistence.healthArchiveExportStateStore.loadSnapshot(
+            serverNamespace: namespace
+        )
+        let now = Date()
+        switch outcome {
+        case "success":
+            return await saveDebugHealthArchiveExportSuccess(
+                connectionURL: connectionURL,
+                namespace: namespace,
+                snapshot: snapshot,
+                now: now,
+                telemetry: telemetry
+            )
+        case "delayedSuccess":
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            return await saveDebugHealthArchiveExportSuccess(
+                connectionURL: connectionURL,
+                namespace: namespace,
+                snapshot: snapshot,
+                now: Date(),
+                telemetry: telemetry
+            )
+        case "tokenRejected":
+            HealthArchiveAppHooks.emitExportEvent(
+                telemetry,
+                name: "health_archive.export_token_rejected",
+                trigger: .manual,
+                serverURL: connectionURL
+            )
+            return .tokenRejected
+        case "failed":
+            await persistence.healthArchiveExportStateStore.saveSnapshot(
+                HealthArchiveExportSnapshot(
+                    scope: snapshot.scope,
+                    serverNamespace: namespace,
+                    status: .failed,
+                    lastFailureClass: "DebugExportFailure",
+                    automaticEnabled: snapshot.automaticEnabled,
+                    nextAttemptAt: snapshot.nextAttemptAt,
+                    lastAttemptAt: now
+                )
+            )
+            HealthArchiveAppHooks.emitExportEvent(
+                telemetry,
+                name: "health_archive.export_failed",
+                trigger: .manual,
+                serverURL: connectionURL,
+                failureClass: "DebugExportFailure"
+            )
+            return .failed("DebugExportFailure")
+        default:
+            HealthArchiveAppHooks.emitExportEvent(
+                telemetry,
+                name: "health_archive.export_skipped",
+                trigger: .manual,
+                serverURL: connectionURL,
+                skipReason: "UnsupportedDebugExportOutcome"
+            )
+            return .unavailable("UnsupportedDebugExportOutcome")
+        }
+    }
+
+    private func saveDebugHealthArchiveExportSuccess(
+        connectionURL: URL,
+        namespace: String,
+        snapshot: HealthArchiveExportSnapshot,
+        now: Date,
+        telemetry: TelemetryEmitter
+    ) async -> HealthArchiveManualExportOutcome {
+            let summary = HealthArchiveExportSummary(
+                trigger: .manual,
+                recordsFetched: 3,
+                tombstonesFetched: 1,
+                acknowledgedCursor: "debug-cursor"
+            )
+            await persistence.healthArchiveExportStateStore.saveSnapshot(
+                HealthArchiveExportSnapshot(
+                    scope: snapshot.scope,
+                    serverNamespace: namespace,
+                    requestSetKey: snapshot.requestSetKey,
+                    descriptorFingerprint: snapshot.descriptorFingerprint,
+                    acknowledgedCursor: "debug-cursor",
+                    status: .succeeded,
+                    lastFetchAt: now,
+                    lastUploadAt: now,
+                    lastRecordCount: 3,
+                    lastTombstoneCount: 1,
+                    lastFailureClass: nil,
+                    automaticEnabled: snapshot.automaticEnabled,
+                    nextAttemptAt: now.addingTimeInterval(24 * 60 * 60),
+                    lastAttemptAt: now
+                )
+            )
+            HealthArchiveAppHooks.emitExportEvent(
+                telemetry,
+                name: "health_archive.export_succeeded",
+                trigger: .manual,
+                serverURL: connectionURL,
+                summary: summary
+            )
+            return .completed
+    }
+    #endif
 
     private func healthArchiveManualExportOutcome(
         from result: HealthArchiveAppHooks.Result
@@ -649,6 +853,7 @@ struct RootView: View {
             }
         case .background:
             _ = await appSync.enterBackground()
+            await healthArchiveBackgroundScheduler.scheduleIfAutomaticEnabled()
         case .inactive:
             break
         @unknown default:
@@ -671,7 +876,11 @@ struct RootView: View {
     private func runHealthArchiveForegroundCatchUp() async {
         let result = await HealthArchiveAppHooks.foregroundCatchUp(
             controllerProvider: currentHealthArchiveExport,
-            tokenStore: persistence.tokenStore
+            tokenStore: persistence.tokenStore,
+            telemetry: persistence.telemetryEmitter(),
+            prepareTelemetry: {
+                await persistence.prepareTelemetry()
+            }
         )
         if case .tokenRejected = result {
             await routeBackToFirstRunForTokenRejected()

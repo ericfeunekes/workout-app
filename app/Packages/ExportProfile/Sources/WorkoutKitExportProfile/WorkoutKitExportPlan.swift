@@ -4,6 +4,7 @@ import PrimitiveExportProfile
 import WorkoutCoreFoundation
 
 public enum WorkoutKitMatrixRowID: String, Sendable, Hashable, Codable, CaseIterable {
+    case paceTargetRun
     case continuousCardio
     case simpleIntervals
     case straightStrength
@@ -55,6 +56,7 @@ public enum WorkoutKitSelectionPolicy: Sendable, Hashable, Codable {
 }
 
 public enum WorkoutKitPayloadShape: String, Sendable, Hashable, Codable, CaseIterable {
+    case pacer
     case singleGoal
     case customIntervals
     case openFunctionalStrength
@@ -79,6 +81,7 @@ public enum WorkoutKitActivitySelection: String, Sendable, Hashable, Codable, Ca
 }
 
 public enum WorkoutKitGoalBlueprint: String, Sendable, Hashable, Codable, CaseIterable {
+    case pacer
     case open
     case time
     case distance
@@ -141,6 +144,7 @@ public enum WorkoutKitDescriptorGoal: Sendable, Hashable, Codable {
     case open
     case timeSeconds(Double)
     case distanceMeters(Double)
+    case pacer(distanceMeters: Double, timeSeconds: Double)
 }
 
 public enum WorkoutKitDescriptorStepPurpose: String, Sendable, Hashable, Codable, CaseIterable {
@@ -259,6 +263,7 @@ public enum WorkoutKitResolvedGoal: Sendable, Hashable, Codable {
     case open
     case timeSeconds(Double)
     case distanceMeters(Double)
+    case pacer(distanceMeters: Double, timeSeconds: Double)
 }
 
 public struct WorkoutKitResolvedIntervalStep: Sendable, Hashable, Codable {
@@ -517,6 +522,8 @@ public struct WorkoutKitExportPlan: Sendable, Hashable, Codable {
             .timeSeconds(seconds)
         case .distanceMeters(let meters):
             .distanceMeters(meters)
+        case .pacer(let distanceMeters, let timeSeconds):
+            .pacer(distanceMeters: distanceMeters, timeSeconds: timeSeconds)
         }
     }
 

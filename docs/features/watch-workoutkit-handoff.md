@@ -183,6 +183,7 @@ Implemented pure planner row IDs in `app/Packages/ExportProfile`:
 
 | Row ID | Source shape | WorkoutKit candidate family | Support state | Base proof requirements | Extra path proof |
 | --- | --- | --- | --- | --- | --- |
+| `paceTargetRun` | Exactly one block, one set, one slot; slot has distance completion target plus duration observation target; `activity_intent.activity_domain=running` | `pacer` | native | SDK compile, simulator construction | Schedule visibility + duplicate/update for scheduled pushes |
 | `continuousCardio` | Distance/time target with no load | `singleGoal` | native | SDK compile, simulator construction | Schedule visibility + duplicate/update for scheduled pushes; startability for open-on-Watch |
 | `simpleIntervals` | Time-bounded work/rest intervals | `customWorkout` | native | SDK compile, simulator construction | Schedule visibility + duplicate/update for scheduled pushes; startability for open-on-Watch |
 | `straightStrength` | Reps/load/RIR set-based strength | `singleGoal` | degraded | SDK compile, simulator construction, degradation acknowledgement | Schedule visibility + duplicate/update for scheduled pushes; startability for open-on-Watch |
@@ -199,7 +200,8 @@ Phase 1 mapping matrix:
 | Setmark archetype | Primitive axes / dominant metric | WorkoutKit candidate | Support state | Preserved for Apple | Omitted or collapsed | Apple-visible result | Setmark result claim | Planner state |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Continuous cardio | One concrete time or distance target; sequential traversal; source activity fact required | `SingleGoalWorkout` | Native when `activity_intent` is present and the resolved descriptor preserves the single target; otherwise `needsSourceChoice` or descriptor-incomplete | Authored activity family, concrete time/distance goal, and authored indoor/outdoor location when present | Setmark block/set hierarchy; unspecified location remains unknown | Workout completed with elapsed time, distance/energy when available | No Setmark result claim from push | Block until source activity fact, exact descriptor mapping, and real-device schedule/start proof |
-| Pace-target run or ride | Distance plus target time/pace; cardio domain | `PacerWorkout` where supported | Future candidate; not emitted by current classifier/adapter | None yet | Pacer payload construction and source activity | Workout completed against Apple pacing model | No Setmark result claim from push | Block until target mapper and real-device proof |
+| Pace-target run | One scheduled running slot with distance completion and duration observation | `PacerWorkout` | Native for `paceTargetRun` | Running activity, authored scheduled date, distance, target time, derived Apple pacing model | Setmark hierarchy, multi-slot or multi-pace structure | Workout completed against Apple pacing model | No Setmark result claim from push | Hidden unless delivery proof source permits exposure; public/TestFlight enablement still waits on real-device proof |
+| Pace-target ride | Distance plus target time/pace; cycling domain | `PacerWorkout` where supported | Future candidate; not emitted by current classifier/adapter | None yet | Pacer payload construction and source activity | Workout completed against Apple pacing model | No Setmark result claim from push | Block until target mapper and real-device proof |
 | Simple cardio intervals | Time-bounded work/rest steps; sequential traversal; source activity fact required | `CustomWorkout` with interval blocks/steps | Native or degraded when `activity_intent` is present and the resolved descriptor preserves the authored work/rest metric; otherwise `needsSourceChoice` or descriptor-incomplete | Authored activity family, step order, concrete work/rest cadence, and repeat count | Step names on lower OS floors; detailed Setmark hierarchy | Interval workout completion | No Setmark result claim from push | Block until source activity fact, exact descriptor mapping, and real-device proof |
 | Segmented continuous workout | Sequential blocks in one modality; time/distance segments | `CustomWorkout` | Degraded | Segment order and broad goals | Rich segment intent, result roles below Apple step level | Custom workout completion | No Setmark result claim from push | Block until adapter proof |
 | Straight strength / set based | Repeated sets/slots; strength domain; reps/load are Setmark-owned | `SingleGoalWorkout` or `CustomWorkout` with functional-strength activity and open/time goals | Degraded | Activity category, broad duration or open workout | Load, reps, RIR, alternatives, per-slot/set results | Strength workout duration/energy/HR only | No Setmark result claim from push | Requires degradation acknowledgement plus real-device path proof |
@@ -233,6 +235,25 @@ Push proof must answer these cases before user-facing implementation:
 | Open now in Workout app | Prove the platform path first. In the local Xcode 16.4 SDK, `WorkoutPlan.openInWorkoutApp()` is watchOS-only, so a phone-only implementation cannot assume direct open. | No Setmark result claim; this only starts or presents the Apple Workout flow. |
 | Scheduled WorkoutKit plan | Prove iPhone scheduling support, scheduled date behavior, duplicate/update behavior, and visibility/startability on the paired Watch. | No Setmark result claim; this only creates or updates the app-owned scheduled plan. |
 | Duplicate/update push | Prove whether repeated stable `WorkoutPlan.id` pushes replace, duplicate, reject, or require explicit remove-then-schedule. | No Setmark result claim; this determines idempotent push behavior only. |
+
+## Product route v1
+
+The current product route is deliberately narrower than the full matrix:
+
+- `WorkoutKitHandoff` coordinates the phone-side `.scheduleOnPhone` path for
+  `paceTargetRun` only.
+- `Features/Today` receives SDK-free presentation strings and one action
+  closure. It does not import `ExportProfile`, `WorkoutKitAdapter`, or
+  `WorkoutKit`.
+- The action is exposed in normal app composition for `paceTargetRun` so
+  TestFlight can collect real device delivery evidence from the same button
+  path users will exercise.
+- The coordinator writes a latest-attempt snapshot plus a structured receipt for
+  every attempted schedule and emits telemetry for presentation, exposure,
+  block, tap, scheduler check, success, failure, and repeat-block states.
+- Same-occurrence scheduling is one-shot after local success. Changed-payload
+  replacement remains blocked until real-device duplicate/update behavior is
+  proven.
 
 ## Non-goals
 

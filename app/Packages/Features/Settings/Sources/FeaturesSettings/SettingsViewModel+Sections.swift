@@ -215,10 +215,24 @@ extension SettingsViewModel {
     func currentServerNamespace() -> String? {
         do {
             guard let connection = try tokenStore.loadConnection() else {
+                #if DEBUG
+                if ProcessInfo.processInfo.arguments.contains("--debug-health-archive-settings") {
+                    return HealthArchiveServerNamespace.normalized(
+                        from: URL(string: "http://localhost:8000")!
+                    )
+                }
+                #endif
                 return nil
             }
             return HealthArchiveServerNamespace.normalized(from: connection.url)
         } catch {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("--debug-health-archive-settings") {
+                return HealthArchiveServerNamespace.normalized(
+                    from: URL(string: "http://localhost:8000")!
+                )
+            }
+            #endif
             return nil
         }
     }

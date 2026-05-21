@@ -194,6 +194,7 @@ public enum AppBootstrap {
             sessionStore: inputs.persistence.sessionStore,
             workoutCache: inputs.persistence.workoutCache,
             lastPerformedStore: inputs.persistence.lastPerformedStore,
+            persistence: inputs.persistence,
             syncAPI: inputs.syncAPI,
             telemetry: inputs.telemetry,
             afterLocalCompletion: inputs.afterLocalCompletion,

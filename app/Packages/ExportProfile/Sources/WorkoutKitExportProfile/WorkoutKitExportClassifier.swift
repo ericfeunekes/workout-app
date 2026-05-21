@@ -273,6 +273,9 @@ private struct WorkoutKitMatrixContract: Sendable, Hashable {
         if axes.setTimings.contains(.timeBounded), axes.hasRest, !axes.hasLoad {
             return .simpleIntervals(facts: facts)
         }
+        if let paceTargetRun = paceTargetRun(facts: facts) {
+            return paceTargetRun
+        }
         if axes.metrics.contains(.distance), !axes.hasLoad {
             return .continuousCardio(facts: facts, distanceBased: true)
         }
@@ -326,6 +329,69 @@ private struct WorkoutKitMatrixContract: Sendable, Hashable {
                 preservedFacts: distanceBased ? [.activityType, .distanceGoal] : [.activityType, .timeGoal],
                 omittedFacts: [.setmarkHierarchy],
                 visibleResult: .workoutCompletionVisibleInAppleWorkout
+            )
+        )
+    }
+
+    static func paceTargetRun(facts: PrimitiveExportFacts) -> WorkoutKitMatrixContract? {
+        guard facts.axes.blockCount == 1,
+              facts.axes.setCount == 1,
+              facts.axes.slotCount == 1,
+              let block = facts.blocks.first,
+              block.repeatCount == 1,
+              block.workTargets.isEmpty,
+              let set = block.sets.first,
+              set.repeatCount == 1,
+              set.workTargets.isEmpty,
+              let slot = set.slots.first,
+              !slot.isWarmup,
+              slot.load == nil,
+              slot.postRestSec == 0,
+              slot.stimuli.isEmpty
+        else {
+            return nil
+        }
+        guard let intent = facts.activityIntent else {
+            return needsSourceChoice(rowID: .paceTargetRun, choices: [.activityDomain])
+        }
+        guard intent.activityDomain == .running else {
+            return nil
+        }
+
+        let distanceTargets = slot.workTargets.filter {
+            $0.metric == .distance && $0.valueForm == .single && $0.role == .completion
+        }
+        let durationTargets = slot.workTargets.filter {
+            $0.metric == .duration && $0.valueForm == .single && $0.role == .observation
+        }
+        guard distanceTargets.count == 1,
+              durationTargets.count == 1,
+              slot.workTargets.count == 2,
+              let distanceMeters = distanceTargets[0].value,
+              let timeSeconds = durationTargets[0].value,
+              distanceMeters > 0,
+              timeSeconds > 0
+        else {
+            return nil
+        }
+
+        return native(
+            rowID: .paceTargetRun,
+            family: .pacer,
+            payload: WorkoutKitPayloadBlueprint(
+                shape: .pacer,
+                activitySelection: .running,
+                goal: .pacer
+            ),
+            descriptor: .resolved(WorkoutKitResolvedDescriptorBlueprint(
+                activitySelection: .running,
+                location: location(for: intent),
+                goal: .pacer(distanceMeters: distanceMeters, timeSeconds: timeSeconds)
+            )),
+            degradation: WorkoutKitDegradation(
+                preservedFacts: [.activityType, .distanceGoal, .timeGoal],
+                omittedFacts: [.setmarkHierarchy],
+                visibleResult: .distanceOrDurationVisibleInAppleWorkout
             )
         )
     }
@@ -772,6 +838,8 @@ private struct WorkoutKitMatrixContract: Sendable, Hashable {
         switch (payload.shape, payload.goal) {
         case (.noPayload, _), (_, .none):
             .incomplete([.targetCapabilityUnavailable])
+        case (_, .pacer):
+            .incomplete([.exactTargetValuesUnavailable])
         case (.customIntervals, _), (_, .time), (_, .distance), (_, .intervalSteps):
             .incomplete([.exactTargetValuesUnavailable])
         case (_, .open):

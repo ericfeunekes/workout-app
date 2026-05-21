@@ -217,6 +217,24 @@ final class WorkoutKitPushCoordinatorTests: XCTestCase {
         XCTAssertEqual(intervalDescriptor.goal, .open)
         XCTAssertEqual(intervalDescriptor.intervalSteps.map(\.goal), [.timeSeconds(45), .timeSeconds(15)])
         XCTAssertEqual(intervalDescriptor.intervalIterations, 3)
+
+        let pacer = plan(
+            rowID: .paceTargetRun,
+            candidateFamily: .pacer,
+            payload: WorkoutKitPayloadBlueprint(
+                shape: .pacer,
+                activitySelection: .running,
+                goal: .pacer
+            ),
+            descriptor: .resolved(WorkoutKitResolvedDescriptorBlueprint(
+                activitySelection: .running,
+                goal: .pacer(distanceMeters: 5_000, timeSeconds: 1_500)
+            ))
+        )
+        let pacerDescriptor = try WorkoutKitPlanFactory.descriptor(for: pacer)
+        XCTAssertEqual(pacerDescriptor.family, .pacer)
+        XCTAssertEqual(pacerDescriptor.activity, .running)
+        XCTAssertEqual(pacerDescriptor.goal, .pacer(distanceMeters: 5_000, timeSeconds: 1_500))
     }
 
     func testSetmarkOnlyNeverCallsScheduler() async {
@@ -442,6 +460,7 @@ private func completeScheduleProofs() -> WorkoutKitDeliveryProofs {
 private func plan(
     supportState: WorkoutKitSupportState = .native,
     rowID: WorkoutKitMatrixRowID = .continuousCardio,
+    candidateFamily: WorkoutKitCandidateFamily = .singleGoal,
     deliveryPaths: Set<WorkoutKitDeliveryPath> = [.scheduleOnPhone, .openOnWatch],
     payload: WorkoutKitPayloadBlueprint = WorkoutKitPayloadBlueprint(
         shape: .singleGoal,
@@ -460,7 +479,7 @@ private func plan(
         workoutName: "Bike",
         rowID: rowID,
         deliveryPaths: deliveryPaths,
-        selectionPolicy: supportState == .unsupported ? .none : .exact(.singleGoal),
+        selectionPolicy: supportState == .unsupported ? .none : .exact(candidateFamily),
         supportState: supportState,
         payload: payload,
         pushIdentity: WorkoutKitPushIdentity(requirements: [

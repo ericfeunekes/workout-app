@@ -475,6 +475,31 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
         XCTAssertEqual(plan.admissionState, .descriptorIncomplete)
     }
 
+    func testDistanceCompletionAndDurationObservationRunMapsToPaceTargetRun() throws {
+        let classifier = WorkoutKitExportClassifier()
+        let plan = try classifier.classify(workout: Self.paceTargetRunWorkout())
+
+        XCTAssertEqual(plan.rowID, .paceTargetRun)
+        XCTAssertEqual(plan.payload.shape, .pacer)
+        XCTAssertEqual(plan.payload.goal, .pacer)
+        XCTAssertEqual(plan.selectionPolicy, .exact(.pacer))
+        XCTAssertEqual(plan.supportState, .native)
+        guard case .resolved(let descriptor) = plan.descriptor else {
+            return XCTFail("Expected resolved pacer descriptor")
+        }
+        XCTAssertEqual(descriptor.activitySelection, .running)
+        XCTAssertEqual(descriptor.goal, .pacer(distanceMeters: 5_000, timeSeconds: 1_500))
+    }
+
+    func testPaceTargetRunRequiresDurationObservationOnSameSlot() throws {
+        let classifier = WorkoutKitExportClassifier()
+        let plan = try classifier.classify(workout: Self.paceTargetRunWithSetDuration())
+
+        XCTAssertEqual(plan.rowID, .continuousCardio)
+        XCTAssertEqual(plan.payload.shape, .singleGoal)
+        XCTAssertEqual(plan.payload.goal, .distance)
+    }
+
     func testDistanceIntervalWithSourceIntentDoesNotBecomeTimeInterval() throws {
         let classifier = WorkoutKitExportClassifier()
         let plan = try classifier.classify(workout: Self.distanceIntervalWorkout(
@@ -588,6 +613,30 @@ final class WorkoutKitExportClassifierTests: XCTestCase {
             activityIntent: ActivityIntent(activityDomain: .cycling),
             timing: PrimitiveTiming(mode: .targetBounded),
             slots: [slot(targets: [target(.duration, value: 1_800)])]
+        )
+    }
+
+    private static func paceTargetRunWorkout() -> PrimitiveWorkout {
+        workout(
+            name: "Pace target run",
+            activityIntent: ActivityIntent(activityDomain: .running),
+            timing: PrimitiveTiming(mode: .targetBounded),
+            slots: [
+                slot(targets: [
+                    target(.distance, value: 5_000, role: .completion),
+                    target(.duration, value: 1_500, role: .observation),
+                ]),
+            ]
+        )
+    }
+
+    private static func paceTargetRunWithSetDuration() -> PrimitiveWorkout {
+        workout(
+            name: "Pace target run with set duration",
+            activityIntent: ActivityIntent(activityDomain: .running),
+            timing: PrimitiveTiming(mode: .targetBounded),
+            setTargets: [target(.duration, value: 1_500, role: .observation)],
+            slots: [slot(targets: [target(.distance, value: 5_000, role: .completion)])]
         )
     }
 

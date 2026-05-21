@@ -38,6 +38,16 @@ struct LiveWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
 
     private func makeWorkoutPlan(from descriptor: WorkoutKitPlanDescriptor) throws -> WorkoutPlan {
         switch descriptor.family {
+        case .pacer:
+            guard case .pacer(let distanceMeters, let timeSeconds) = descriptor.goal else {
+                throw WorkoutKitAdapterError.incompleteWorkoutKitDescriptor
+            }
+            return WorkoutPlan(.pacer(PacerWorkout(
+                activity: hkActivity(from: descriptor.activity),
+                location: hkLocation(from: descriptor.location),
+                distance: Measurement(value: distanceMeters, unit: UnitLength.meters),
+                time: Measurement(value: timeSeconds, unit: UnitDuration.seconds)
+            )), id: descriptor.id)
         case .singleGoal:
             return WorkoutPlan(.goal(SingleGoalWorkout(
                 activity: hkActivity(from: descriptor.activity),
@@ -58,7 +68,7 @@ struct LiveWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
                 displayName: descriptor.displayName,
                 blocks: [block]
             )), id: descriptor.id)
-        case .pacer, .swimBikeRun, .none:
+        case .swimBikeRun, .none:
             throw WorkoutKitAdapterError.unsupportedSelectionPolicy
         }
     }
@@ -71,6 +81,8 @@ struct LiveWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
             .time(seconds, .seconds)
         case .distanceMeters(let meters):
             .distance(meters, .meters)
+        case .pacer:
+            .open
         }
     }
 

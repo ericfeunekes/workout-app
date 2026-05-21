@@ -94,7 +94,39 @@ public final class TodayViewModel {
         public let tagLine: String?
         public let notes: String?
         public let preview: PreviewSummary?
+        public let workoutKitHandoff: WorkoutKitHandoffSummary?
         public let blocks: [BlockDetail]
+    }
+
+    public struct WorkoutKitHandoffSummary: Equatable, Sendable {
+        public enum State: String, Equatable, Sendable {
+            case hidden
+            case unavailable
+            case ready
+            case pending
+            case scheduled
+            case failed
+        }
+
+        public let state: State
+        public let title: String
+        public let message: String
+        public let actionTitle: String?
+        public let isActionable: Bool
+
+        public init(
+            state: State,
+            title: String,
+            message: String,
+            actionTitle: String? = nil,
+            isActionable: Bool = false
+        ) {
+            self.state = state
+            self.title = title
+            self.message = message
+            self.actionTitle = actionTitle
+            self.isActionable = isActionable
+        }
     }
 
     public struct PreviewSummary: Equatable, Sendable {
@@ -185,7 +217,9 @@ public final class TodayViewModel {
     private let sessionStateBinding: (@Sendable (SessionMutation) -> Void)?
     private var refreshAction: (@Sendable () async -> Bool)?
     private var startWorkoutAction: (@Sendable @MainActor (WorkoutID) async -> Bool)?
+    private var workoutKitHandoffAction: (@Sendable @MainActor (WorkoutID) async -> WorkoutKitHandoffSummary?)?
     private var startableWorkoutIDs: Set<WorkoutID>
+    private var workoutKitHandoffs: [WorkoutID: WorkoutKitHandoffSummary]
 
     public init(
         context: TodayContext,
@@ -206,6 +240,7 @@ public final class TodayViewModel {
         self.startableWorkoutIDs = Self.startableWorkoutIDs(
             from: planContext
         )
+        self.workoutKitHandoffs = [:]
     }
 
     public init(
@@ -227,6 +262,7 @@ public final class TodayViewModel {
         self.startableWorkoutIDs = Self.startableWorkoutIDs(
             from: planContext
         )
+        self.workoutKitHandoffs = [:]
     }
 
     /// Build a VM that starts in the empty-glance state — no planned
@@ -270,6 +306,7 @@ public final class TodayViewModel {
         self.sessionStateBinding = sessionStateBinding
         self.telemetry = emptyTelemetry
         self.startableWorkoutIDs = []
+        self.workoutKitHandoffs = [:]
     }
 
     /// Flip session route to `.active`. No-op when the binding is absent
@@ -325,6 +362,69 @@ public final class TodayViewModel {
         startWorkoutAction = action
     }
 
+    public func setWorkoutKitHandoffs(_ handoffs: [WorkoutID: WorkoutKitHandoffSummary]) {
+        workoutKitHandoffs = handoffs
+        workoutDetails = workoutDetails.mapValues { detail in
+            WorkoutDetail(
+                id: detail.id,
+                name: detail.name,
+                sectionTitle: detail.sectionTitle,
+                tagLine: detail.tagLine,
+                notes: detail.notes,
+                preview: detail.preview,
+                workoutKitHandoff: handoffs[detail.id],
+                blocks: detail.blocks
+            )
+        }
+    }
+
+    public func setWorkoutKitHandoffAction(
+        _ action: (@Sendable @MainActor (WorkoutID) async -> WorkoutKitHandoffSummary?)?
+    ) {
+        workoutKitHandoffAction = action
+    }
+
+    public func scheduleWorkoutKitHandoff(workoutID targetWorkoutID: WorkoutID) async {
+        guard let current = workoutKitHandoffs[targetWorkoutID],
+              current.isActionable,
+              let action = workoutKitHandoffAction
+        else { return }
+        let pending = WorkoutKitHandoffSummary(
+            state: .pending,
+            title: current.title,
+            message: "Scheduling in Apple Workout...",
+            isActionable: false
+        )
+        updateWorkoutKitHandoff(pending, workoutID: targetWorkoutID)
+        guard
+              let summary = await action(targetWorkoutID)
+        else {
+            updateWorkoutKitHandoff(current, workoutID: targetWorkoutID)
+            return
+        }
+        updateWorkoutKitHandoff(summary, workoutID: targetWorkoutID)
+    }
+
+    private func updateWorkoutKitHandoff(
+        _ summary: WorkoutKitHandoffSummary,
+        workoutID targetWorkoutID: WorkoutID
+    ) {
+        workoutKitHandoffs[targetWorkoutID] = summary
+        guard let detail = workoutDetails[targetWorkoutID] else {
+            return
+        }
+        workoutDetails[targetWorkoutID] = WorkoutDetail(
+            id: detail.id,
+            name: detail.name,
+            sectionTitle: detail.sectionTitle,
+            tagLine: detail.tagLine,
+            notes: detail.notes,
+            preview: detail.preview,
+            workoutKitHandoff: summary,
+            blocks: detail.blocks
+        )
+    }
+
     public func refresh() async {
         guard refreshState != .refreshing, let refreshAction else { return }
         refreshState = .refreshing
@@ -345,7 +445,8 @@ public final class TodayViewModel {
     /// forget from the shell's perspective (matches the rest of the save-
     /// and-done side-effect chain). A failure leaves the previous state
     /// intact so the user at least sees something.
-    public func reload(using loader: TodayLoader) async {
+    @discardableResult
+    public func reload(using loader: TodayLoader) async -> TodayPlanContext? {
         let context: TodayPlanContext?
         do {
             context = try await loader.loadPlan(
@@ -354,9 +455,10 @@ public final class TodayViewModel {
         } catch {
             // Cache read failed — keep the current rendered state rather
             // than blanking the screen. See `docs/sync.md` § offline.
-            return
+            return nil
         }
         applyPlan(context)
+        return context
     }
 
     /// Apply a fresh context (or `nil` for empty) to the observable
@@ -383,6 +485,7 @@ public final class TodayViewModel {
             isEmpty = true
             workoutID = nil
             startableWorkoutIDs = []
+            workoutKitHandoffs = [:]
             return
         }
         programName = context.selected.workout.name
@@ -391,6 +494,18 @@ public final class TodayViewModel {
         exercises = Self.deriveExercises(from: context.selected)
         planSections = Self.derivePlanSections(from: context, now: Date())
         workoutDetails = Self.deriveWorkoutDetails(from: context, now: Date())
+        workoutDetails = workoutDetails.mapValues { detail in
+            WorkoutDetail(
+                id: detail.id,
+                name: detail.name,
+                sectionTitle: detail.sectionTitle,
+                tagLine: detail.tagLine,
+                notes: detail.notes,
+                preview: detail.preview,
+                workoutKitHandoff: workoutKitHandoffs[detail.id],
+                blocks: detail.blocks
+            )
+        }
         isEmpty = false
         workoutID = context.selected.workout.id
         startableWorkoutIDs = Self.startableWorkoutIDs(
@@ -491,6 +606,7 @@ public final class TodayViewModel {
                 tagLine: tagLine(from: workoutContext.workout.tagsJSON),
                 notes: workoutContext.workout.notes,
                 preview: derivePreviewSummary(from: workoutContext),
+                workoutKitHandoff: nil,
                 blocks: deriveBlockDetails(from: workoutContext)
             )
             return (detail.id, detail)

@@ -45,7 +45,20 @@ public protocol HealthArchiveExportControlling: Sendable {
         trigger: HealthArchiveExportTrigger
     ) async throws -> HealthArchiveExportSummary
 
-    func exportIfDue(serverURL: URL) async throws -> HealthArchiveExportSummary?
+    func exportIfDue(
+        serverURL: URL,
+        trigger: HealthArchiveExportTrigger
+    ) async throws -> HealthArchiveExportSummary?
+
+    func retire() async
+}
+
+public extension HealthArchiveExportControlling {
+    func exportIfDue(serverURL: URL) async throws -> HealthArchiveExportSummary? {
+        try await exportIfDue(serverURL: serverURL, trigger: .foregroundCatchUp)
+    }
+
+    func retire() async {}
 }
 
 public actor HealthArchiveExportRuntime: HealthArchiveExportControlling {
@@ -102,11 +115,14 @@ public actor HealthArchiveExportRuntime: HealthArchiveExportControlling {
         }
     }
 
-    public func exportIfDue(serverURL: URL) async throws -> HealthArchiveExportSummary? {
+    public func exportIfDue(
+        serverURL: URL,
+        trigger: HealthArchiveExportTrigger = .foregroundCatchUp
+    ) async throws -> HealthArchiveExportSummary? {
         guard await coordinator.shouldRunAutomaticExport(serverURL: serverURL) else {
             return nil
         }
-        return try await exportNow(serverURL: serverURL, trigger: .foregroundCatchUp)
+        return try await exportNow(serverURL: serverURL, trigger: trigger)
     }
 
     public func retire() async {
@@ -255,11 +271,6 @@ public struct HealthArchiveExportCoordinator: Sendable {
             )
             try await ensureCurrent(isCurrent)
             await stateStore.saveSnapshot(success)
-            telemetry.emit(Event(
-                sessionID: TelemetrySession.id,
-                kind: "health_archive",
-                name: "health_archive.export_succeeded"
-            ))
             return HealthArchiveExportSummary(
                 trigger: trigger,
                 recordsFetched: records.count,

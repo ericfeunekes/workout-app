@@ -236,3 +236,4 @@ Do not add durable plan directories under `docs/`. Requirements docs describe ho
 For MCP tooling, keep one canonical command path per server. Do not add repo-local wrappers, fallback command chains, or machine-specific MCP variants unless Eric explicitly asks for that split. XcodeBuildMCP is the global `xcodebuildmcp` command; keep machine-specific simulator IDs and home paths out of committed config.
 
 For WorkoutKit handoff work, keep the push lane separate from results reconciliation. Pushing, scheduling, or opening WorkoutKit content is one slice; HealthKit or WorkoutKit completion readback, matching, import, and Setmark reconciliation belong to a later lane unless Eric explicitly asks to combine them.
+WorkoutKit handoff actions in the app should stay compact: use the `Watch` label with an Apple Watch icon instead of long full-width scheduling copy.

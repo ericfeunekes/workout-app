@@ -21,6 +21,7 @@ public struct PersistenceFactory {
     public let pushQueueStore: PushQueueStore
     public let healthArchiveStore: HealthArchiveStore
     public let healthArchiveExportStateStore: HealthArchiveExportStateStore
+    public let workoutKitHandoffAttemptStore: WorkoutKitHandoffAttemptStore
     public let tokenStore: TokenStore
     public let authRecoveryStore: AuthRecoveryStore
     public let syncMetadataStore: SyncMetadataStore
@@ -133,6 +134,9 @@ public struct PersistenceFactory {
             lastPerformedStore: LastPerformedStoreImpl(defaults: defaults),
             healthArchiveExportStateStore: UserDefaultsHealthArchiveExportStateStore(
                 defaults: defaults
+            ),
+            workoutKitHandoffAttemptStore: UserDefaultsWorkoutKitHandoffAttemptStore(
+                defaults: defaults
             )
         )
     }
@@ -161,13 +165,16 @@ public struct PersistenceFactory {
         syncMetadataStore: SyncMetadataStore = SyncMetadataStoreImpl(),
         lastPerformedStore: LastPerformedStore = LastPerformedStoreImpl(),
         healthArchiveExportStateStore: HealthArchiveExportStateStore =
-            UserDefaultsHealthArchiveExportStateStore()
+            UserDefaultsHealthArchiveExportStateStore(),
+        workoutKitHandoffAttemptStore: WorkoutKitHandoffAttemptStore =
+            UserDefaultsWorkoutKitHandoffAttemptStore()
     ) {
         self.container = container
         self.workoutCache = WorkoutCacheImpl(modelContainer: container)
         self.sessionStore = SessionStoreImpl(modelContainer: container)
         self.healthArchiveStore = HealthArchiveStoreImpl(modelContainer: container)
         self.healthArchiveExportStateStore = healthArchiveExportStateStore
+        self.workoutKitHandoffAttemptStore = workoutKitHandoffAttemptStore
         let pushQueueStore = PushQueueStoreImpl(modelContainer: container)
         self.pushQueueStore = pushQueueStore
         self.pushQueueStoreImpl = pushQueueStore
@@ -228,6 +235,8 @@ public struct PersistenceFactory {
         _ = try? await pushQueueStoreImpl.pruneUndecodableRows()
     }
 }
+
+extension PersistenceFactory: @unchecked Sendable {}
 
 /// Reference box that owns the "has the emitter been attached?" state so
 /// `PersistenceFactory.prepareTelemetry()` can be both `async` and safe to

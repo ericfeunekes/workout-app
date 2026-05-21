@@ -107,13 +107,35 @@ def test_health_archive_upload_is_idempotent_by_external_identity(client, test_e
     assert request_set["tombstones_received"] == 1
 
 
-def test_health_archive_upload_rejects_request_set_metadata_mismatch(client) -> None:
+def test_health_archive_upload_rejects_request_set_metadata_mismatch(
+    client,
+    test_engine,
+) -> None:
     first = client.post("/api/health/archive", json=_upload_payload())
     assert first.status_code == 200, first.text
 
+    conflict_payload = _upload_payload(
+        server_namespace="server-b",
+        next_cursor="cursor-conflict",
+        records=[
+            {
+                **_record_payload("70000000-0000-4000-8000-000000000099"),
+                "external_id": "hk-conflict-sample",
+                "metadata": {"device": "conflict"},
+            }
+        ],
+        tombstones=[
+            {
+                "id": "80000000-0000-4000-8000-000000000099",
+                "descriptor_id": "HKQuantityTypeIdentifierHeartRate",
+                "external_id": "hk-conflict-deleted",
+                "observed_at": "2026-05-18T13:02:00Z",
+            }
+        ],
+    )
     changed_namespace = client.post(
         "/api/health/archive",
-        json=_upload_payload(server_namespace="server-b"),
+        json=conflict_payload,
     )
     changed_fingerprint = client.post(
         "/api/health/archive",
@@ -122,6 +144,31 @@ def test_health_archive_upload_rejects_request_set_metadata_mismatch(client) -> 
 
     assert changed_namespace.status_code == 409
     assert changed_fingerprint.status_code == 409
+
+    with Session(test_engine) as session:
+        request_set = (
+            session.execute(text("SELECT * FROM health_archive_request_set")).mappings().one()
+        )
+        conflict_record_count = session.execute(
+            text(
+                "SELECT COUNT(*) FROM health_archive_record "
+                "WHERE external_id = 'hk-conflict-sample'"
+            )
+        ).scalar_one()
+        conflict_tombstone_count = session.execute(
+            text(
+                "SELECT COUNT(*) FROM health_archive_tombstone "
+                "WHERE external_id = 'hk-conflict-deleted'"
+            )
+        ).scalar_one()
+
+    assert request_set["server_namespace"] == "server-a"
+    assert request_set["descriptor_fingerprint"] == "fp-1"
+    assert request_set["acknowledged_cursor"] == "cursor-1"
+    assert request_set["records_received"] == 1
+    assert request_set["tombstones_received"] == 1
+    assert conflict_record_count == 0
+    assert conflict_tombstone_count == 0
 
 
 def test_health_archive_upload_is_user_scoped(client, test_engine, test_user_id) -> None:
@@ -186,6 +233,28 @@ def test_health_archive_rejects_sample_kind_value_kind_mismatch(client) -> None:
         "workout_activity_type": "37",
         "duration_seconds": 1200,
     }
+
+    response = client.post("/api/health/archive", json=payload)
+
+    assert response.status_code == 422
+    assert "sample_kind must match health archive value kind" in response.text
+
+
+def test_health_archive_rejects_primitive_sample_kind_with_text_value(client) -> None:
+    payload = _upload_payload()
+    payload["records"][0]["sample_kind"] = "quantity"
+    payload["records"][0]["value"] = {"kind": "text", "text": "not a quantity"}
+
+    response = client.post("/api/health/archive", json=payload)
+
+    assert response.status_code == 422
+    assert "sample_kind must match health archive value kind" in response.text
+
+
+def test_health_archive_rejects_primitive_sample_kind_with_unsupported_value(client) -> None:
+    payload = _upload_payload()
+    payload["records"][0]["sample_kind"] = "workout"
+    payload["records"][0]["value"] = {"kind": "unsupported", "reason": "not mapped"}
 
     response = client.post("/api/health/archive", json=payload)
 

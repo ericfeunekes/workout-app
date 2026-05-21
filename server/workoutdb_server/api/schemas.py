@@ -911,10 +911,10 @@ class HealthArchiveRecordIn(BaseModel):
 
     @model_validator(mode="after")
     def _sample_kind_matches_value(self) -> "HealthArchiveRecordIn":
-        if self.value.kind in {"quantity", "category", "workout"}:
-            if self.sample_kind != self.value.kind:
+        if self.sample_kind in {"quantity", "category", "workout"}:
+            if self.value.kind != self.sample_kind:
                 raise ValueError("sample_kind must match health archive value kind")
-        elif self.sample_kind in {"characteristic", "correlation", "clinical"}:
+        else:
             if self.value.kind not in {"text", "unsupported"}:
                 raise ValueError(
                     "characteristic, correlation, and clinical archive records "

@@ -3,7 +3,7 @@
 
 .PHONY: help setup dev test test-python test-swift test-core test-app-packages test-app-xcode test-execution-ui test-settings-ui test-workoutkit-ui test-workout-type-ui test-workout-type-ui-repeat test-tokenstore-keychain-ui test-healthkit-ui test-healthkit-watch-sim assert-healthkit-watch-sim-log \
         test-sync-real-http check-app pre-qa lint format check regen-schema xcodegen xcode-mcp-tools qa-ready qa-runtime-ready clean \
-        release-bump-build release-preflight release-testflight release-status release-resume db-backup db-restore deploy deploy-rollback server-status server-logs
+        release-bump-build release-preflight release-repair-signing release-testflight release-status release-resume db-backup db-restore deploy deploy-rollback server-status server-logs
 
 # Deploy / ops targets. Override HOST on the command line (e.g. `make deploy HOST=workoutdb.tail-xyz.ts.net`).
 HOST ?= workoutdb-server
@@ -271,6 +271,9 @@ release-bump-build:  ## Increment app/project.yml CFBundleVersion. Override BUIL
 
 release-preflight:  ## Verify TestFlight release can run non-interactively for RELEASE_REF
 	uv run python deploy/release/testflight.py $(RELEASE_ARGS) preflight $(RELEASE_PREFLIGHT_ARGS) --release-ref "$(RELEASE_REF)"
+
+release-repair-signing:  ## Explicitly rebuild the dedicated release keychain from configured signing material
+	uv run python deploy/release/testflight.py $(RELEASE_ARGS) repair-signing
 
 release-testflight:  ## Archive, export, upload, and assign committed RELEASE_REF to TestFlight
 	uv run python deploy/release/testflight.py $(RELEASE_ARGS) release --release-ref "$(RELEASE_REF)" $(RELEASE_GATE_ARGS)

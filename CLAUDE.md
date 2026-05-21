@@ -167,6 +167,13 @@ under `scratch/qa-runs/`. Use a dedicated non-login release keychain, or create
 a temporary keychain from non-interactively retrieved certificate material, and
 pass it to Xcode with `OTHER_CODE_SIGN_FLAGS = --keychain <path>`. Treat any
 login-keychain, Apple ID, `op signin`, or Xcode GUI prompt as a release blocker.
+If the release keychain loses its valid Apple Distribution identity, do not
+repair it manually in Keychain Access. `make release-preflight` should only
+unlock and prove the configured keychain; `make release-repair-signing` is the
+explicit path for using the non-repo `.p12` and `.p12` password to rebuild it.
+A non-verbose `security find-identity` match is not enough; the release path
+requires `security find-identity -v -p codesigning` and a noninteractive
+`codesign --dryrun` to succeed.
 
 When the session is already running on Robie (`hostname` reports Eric's iMac),
 do not use `make deploy HOST=robie-imac`; that target is the laptop-to-server

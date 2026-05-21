@@ -19,14 +19,16 @@ import os
 import plistlib
 import re
 import shlex
+import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterator
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATHS = (REPO_ROOT / ".release.env", REPO_ROOT / ".env.release")
@@ -51,6 +53,10 @@ class ReleaseConfig:
     asc_issuer_id: str
     asc_key_path: Path
     keychain_path: Path
+    keychain_password_path: Path | None
+    signing_p12_path: Path | None
+    signing_p12_password_path: Path | None
+    signing_chain_paths: tuple[Path, ...]
     sign_identity: str
     ios_profile_name: str
     watch_profile_name: str
@@ -77,6 +83,12 @@ class ReleaseConfig:
             asc_issuer_id=required(env, "SETMARK_RELEASE_ASC_ISSUER_ID"),
             asc_key_path=Path(required(env, "SETMARK_RELEASE_ASC_KEY_PATH")).expanduser(),
             keychain_path=Path(required(env, "SETMARK_RELEASE_KEYCHAIN_PATH")).expanduser(),
+            keychain_password_path=optional_path(env.get("SETMARK_RELEASE_KEYCHAIN_PASSWORD_PATH")),
+            signing_p12_path=optional_path(env.get("SETMARK_RELEASE_SIGNING_P12_PATH")),
+            signing_p12_password_path=optional_path(
+                env.get("SETMARK_RELEASE_SIGNING_P12_PASSWORD_PATH")
+            ),
+            signing_chain_paths=optional_path_list(env.get("SETMARK_RELEASE_SIGNING_CHAIN_PATHS")),
             sign_identity=env.get("SETMARK_RELEASE_SIGN_IDENTITY", "Apple Distribution"),
             ios_profile_name=required(env, "SETMARK_RELEASE_IOS_PROFILE_NAME"),
             watch_profile_name=required(env, "SETMARK_RELEASE_WATCH_PROFILE_NAME"),
@@ -189,6 +201,12 @@ def optional_path(value: str | None) -> Path | None:
     if value is None or not value.strip():
         return None
     return Path(value).expanduser()
+
+
+def optional_path_list(value: str | None) -> tuple[Path, ...]:
+    if value is None or not value.strip():
+        return ()
+    return tuple(Path(part.strip()).expanduser() for part in value.split(":") if part.strip())
 
 
 def parse_bool(value: str) -> bool:
@@ -515,6 +533,267 @@ def profile_includes_certificate(plist: dict[str, Any], sha1_fingerprint: str) -
     return False
 
 
+def validate_release_profiles_for_signing(
+    config: ReleaseConfig,
+    signing_certificate_sha1: str,
+) -> list[str]:
+    failures = validate_profile(
+        config.ios_profile_name,
+        bundle_id=config.bundle_id,
+        team_id=config.team_id,
+        require_healthkit=config.require_healthkit_entitlement,
+        signing_certificate_sha1=signing_certificate_sha1,
+    )
+    failures.extend(
+        validate_profile(
+            config.watch_profile_name,
+            bundle_id=config.watch_bundle_id,
+            team_id=config.team_id,
+            require_healthkit=False,
+            signing_certificate_sha1=signing_certificate_sha1,
+        )
+    )
+    return failures
+
+
+def validate_signing_repair_config(config: ReleaseConfig) -> list[str]:
+    failures = validate_keychain_unlock_config(config)
+    if config.signing_p12_path is None:
+        failures.append("SETMARK_RELEASE_SIGNING_P12_PATH is required for signing repair")
+    if config.signing_p12_password_path is None:
+        failures.append("SETMARK_RELEASE_SIGNING_P12_PASSWORD_PATH is required for signing repair")
+    for label, path in {
+        "release signing p12": config.signing_p12_path,
+        "release signing p12 password": config.signing_p12_password_path,
+    }.items():
+        if path is None:
+            continue
+        if not path.exists():
+            failures.append(f"missing {label}: {path}")
+            continue
+        mode = path.stat().st_mode & 0o777
+        if mode & 0o077:
+            failures.append(f"{label} is too permissive: {path}")
+    for path in config.signing_chain_paths:
+        if not path.exists():
+            failures.append(f"missing release signing chain certificate: {path}")
+            continue
+        mode = path.stat().st_mode & 0o777
+        if mode & 0o077:
+            failures.append(f"release signing chain certificate is too permissive: {path}")
+    return failures
+
+
+def validate_keychain_unlock_config(config: ReleaseConfig) -> list[str]:
+    failures: list[str] = []
+    if config.keychain_password_path is None:
+        failures.append("SETMARK_RELEASE_KEYCHAIN_PASSWORD_PATH is required for release preflight")
+    for label, path in {
+        "release keychain password": config.keychain_password_path,
+    }.items():
+        if path is None:
+            continue
+        if not path.exists():
+            failures.append(f"missing {label}: {path}")
+            continue
+        mode = path.stat().st_mode & 0o777
+        if mode & 0o077:
+            failures.append(f"{label} is too permissive: {path}")
+    return failures
+
+
+def prepare_release_keychain(config: ReleaseConfig) -> list[str]:
+    failures = validate_keychain_unlock_config(config)
+    if failures:
+        return failures
+    if any(hint in config.keychain_path.name for hint in LOGIN_KEYCHAIN_HINTS):
+        return [f"release keychain must not be the login keychain: {config.keychain_path}"]
+    try:
+        unlock_release_keychain(config)
+    except (OSError, ReleaseError, subprocess.SubprocessError) as error:
+        return [f"could not unlock release keychain: {error}"]
+    return []
+
+
+def read_keychain_password(config: ReleaseConfig) -> str:
+    if config.keychain_password_path is None:
+        raise ReleaseError("SETMARK_RELEASE_KEYCHAIN_PASSWORD_PATH is required")
+    return config.keychain_password_path.read_text().strip()
+
+
+def read_signing_p12_password(config: ReleaseConfig) -> str:
+    if config.signing_p12_password_path is None:
+        raise ReleaseError("SETMARK_RELEASE_SIGNING_P12_PASSWORD_PATH is required")
+    return config.signing_p12_password_path.read_text().strip()
+
+
+def security_quiet(args: list[str], *, check: bool = True) -> subprocess.CompletedProcess[str]:
+    result = subprocess.run(args, check=False, text=True, capture_output=True, timeout=60)
+    if check and result.returncode != 0:
+        detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+        redacted_command = " ".join(redact_security_args(args))
+        raise ReleaseError(f"security command failed: {redacted_command}: {detail}")
+    return result
+
+
+def redact_security_args(args: list[str]) -> list[str]:
+    redacted: list[str] = []
+    redact_next = False
+    for arg in args:
+        if redact_next:
+            redacted.append("<redacted>")
+            redact_next = False
+            continue
+        redacted.append(arg)
+        if arg in {"-p", "-P", "-k"}:
+            redact_next = True
+    return redacted
+
+
+def logical_keychain_path(path: Path) -> Path:
+    if path.name.endswith(".keychain-db"):
+        return path.with_name(path.name.removesuffix("-db"))
+    return path
+
+
+def physical_keychain_path(path: Path) -> Path:
+    if path.name.endswith(".keychain-db"):
+        return path
+    if path.name.endswith(".keychain"):
+        return path.with_name(f"{path.name}-db")
+    return path
+
+
+def unlock_release_keychain(config: ReleaseConfig) -> None:
+    if not config.keychain_path.exists():
+        return
+    password = read_keychain_password(config)
+    keychain_path = logical_keychain_path(config.keychain_path)
+    security_quiet(["security", "unlock-keychain", "-p", password, str(keychain_path)])
+    security_quiet(["security", "set-keychain-settings", "-lut", "21600", str(keychain_path)])
+
+
+def rebuild_release_keychain(config: ReleaseConfig) -> None:
+    if config.signing_p12_path is None:
+        raise ReleaseError("SETMARK_RELEASE_SIGNING_P12_PATH is required")
+    keychain_password = read_keychain_password(config)
+    p12_password = read_signing_p12_password(config)
+    timestamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d%H%M%S")
+    release_keychain_path = logical_keychain_path(config.keychain_path)
+    candidate_path = release_keychain_path.with_name(
+        f"{release_keychain_path.stem}.candidate-{timestamp}.keychain"
+    )
+    candidate_config = dataclasses.replace(config, keychain_path=candidate_path)
+    security_quiet(["security", "create-keychain", "-p", keychain_password, str(candidate_path)])
+    security_quiet(["security", "unlock-keychain", "-p", keychain_password, str(candidate_path)])
+    security_quiet(["security", "set-keychain-settings", "-lut", "21600", str(candidate_path)])
+    for chain_path in config.signing_chain_paths:
+        security_quiet(
+            [
+                "security",
+                "import",
+                str(chain_path),
+                "-k",
+                str(candidate_path),
+            ]
+        )
+    security_quiet(
+        [
+            "security",
+            "import",
+            str(config.signing_p12_path),
+            "-k",
+            str(candidate_path),
+            "-P",
+            p12_password,
+            "-T",
+            "/usr/bin/codesign",
+            "-T",
+            "/usr/bin/security",
+            "-T",
+            str(config.developer_dir / "usr/bin/xcodebuild"),
+            "-T",
+            "/usr/bin/xcrun",
+        ]
+    )
+    security_quiet(
+        [
+            "security",
+            "set-key-partition-list",
+            "-S",
+            "apple-tool:,apple:,codesign:",
+            "-s",
+            "-k",
+            keychain_password,
+            str(candidate_path),
+        ]
+    )
+    with temporary_keychain_search_list(candidate_path):
+        failures, fingerprint = codesign_preflight(candidate_config)
+        if failures:
+            delete_keychain(candidate_path)
+            raise ReleaseError("; ".join(failures))
+        assert fingerprint is not None
+        profile_failures = validate_release_profiles_for_signing(config, fingerprint)
+        if profile_failures:
+            delete_keychain(candidate_path)
+            raise ReleaseError("; ".join(profile_failures))
+    replace_release_keychain(config.keychain_path, candidate_path)
+
+
+def delete_keychain(path: Path) -> None:
+    security_quiet(["security", "delete-keychain", str(logical_keychain_path(path))], check=False)
+    physical_keychain_path(path).unlink(missing_ok=True)
+
+
+@contextlib.contextmanager
+def temporary_keychain_search_list(path: Path) -> Iterator[None]:
+    original_paths = user_keychain_search_list()
+    candidate = logical_keychain_path(path)
+    updated_paths = [
+        candidate,
+        *(original_path for original_path in original_paths if original_path != candidate),
+    ]
+    set_user_keychain_search_list(updated_paths)
+    try:
+        yield
+    finally:
+        set_user_keychain_search_list(original_paths)
+
+
+def user_keychain_search_list() -> list[Path]:
+    result = security_quiet(["security", "list-keychains", "-d", "user"])
+    paths: list[Path] = []
+    for line in result.stdout.splitlines():
+        text = line.strip()
+        if text:
+            paths.append(Path(text.strip('"')))
+    return paths
+
+
+def set_user_keychain_search_list(paths: list[Path]) -> None:
+    security_quiet(
+        ["security", "list-keychains", "-d", "user", "-s", *(str(path) for path in paths)]
+    )
+
+
+def replace_release_keychain(path: Path, candidate_path: Path) -> None:
+    physical_path = physical_keychain_path(path)
+    physical_candidate_path = physical_keychain_path(candidate_path)
+    if not physical_path.exists() and not physical_path.is_symlink():
+        physical_candidate_path.rename(physical_path)
+        return
+    timestamp = dt.datetime.now(dt.UTC).strftime("%Y%m%d%H%M%S")
+    backup_path = physical_path.with_name(f"{physical_path.name}.bak-{timestamp}")
+    physical_path.rename(backup_path)
+    try:
+        physical_candidate_path.rename(physical_path)
+    except OSError:
+        backup_path.rename(physical_path)
+        raise
+    backup_path.unlink(missing_ok=True)
+
+
 def preflight_local(
     config: ReleaseConfig,
     *,
@@ -528,12 +807,15 @@ def preflight_local(
         ((repo_root / "app/project.yml").exists(), f"missing project.yml under {repo_root}/app"),
         (xcodebuild.exists(), f"missing xcodebuild under {config.developer_dir}"),
         (XCRUN_PATH.exists(), f"missing xcrun at {XCRUN_PATH}"),
-        (config.keychain_path.exists(), f"missing release keychain: {config.keychain_path}"),
         (config.asc_key_path.exists(), f"missing App Store Connect key: {config.asc_key_path}"),
     ]
     failures.extend(message for ok, message in checks if not ok)
 
     failures.extend(validate_secret_paths(config))
+    failures.extend(prepare_release_keychain(config))
+
+    if not config.keychain_path.exists():
+        failures.append(f"missing release keychain: {config.keychain_path}")
 
     if config.asc_key_path.exists():
         mode = config.asc_key_path.stat().st_mode & 0o777
@@ -584,41 +866,51 @@ def validate_secret_paths(config: ReleaseConfig) -> list[str]:
     for label, path in {
         "App Store Connect private key": config.asc_key_path,
         "release keychain": config.keychain_path,
+        "release keychain password": config.keychain_password_path,
+        "release signing p12": config.signing_p12_path,
+        "release signing p12 password": config.signing_p12_password_path,
     }.items():
+        if path is None:
+            continue
         try:
             resolved = path.resolve()
         except FileNotFoundError:
             resolved = path.expanduser().absolute()
         if resolved == repo_root or repo_root in resolved.parents:
             failures.append(f"{label} must not live inside the repo: {path}")
+    for path in config.signing_chain_paths:
+        try:
+            resolved = path.resolve()
+        except FileNotFoundError:
+            resolved = path.expanduser().absolute()
+        if resolved == repo_root or repo_root in resolved.parents:
+            failures.append(
+                f"release signing chain certificate must not live inside the repo: {path}"
+            )
     return failures
 
 
 def codesign_preflight(config: ReleaseConfig) -> tuple[list[str], str | None]:
-    result = subprocess.run(
-        [
-            "security",
-            "find-identity",
-            "-v",
-            "-p",
-            "codesigning",
-            str(config.keychain_path),
-        ],
-        capture_output=True,
-        text=True,
-        check=False,
-        timeout=15,
-    )
-    if result.returncode != 0:
+    valid_result = find_codesigning_identities(config, valid_only=True)
+    if valid_result.returncode != 0:
         return (
             [
                 "release keychain is locked or unavailable to security find-identity: "
-                + (result.stderr.strip() or result.stdout.strip())
+                + (valid_result.stderr.strip() or valid_result.stdout.strip())
             ],
             None,
         )
-    identities = [line for line in result.stdout.splitlines() if config.sign_identity in line]
+    identities = [line for line in valid_result.stdout.splitlines() if config.sign_identity in line]
     if not identities:
+        matching_result = find_codesigning_identities(config, valid_only=False)
+        matching_identities = [
+            line for line in matching_result.stdout.splitlines() if config.sign_identity in line
+        ]
+        if matching_identities:
+            return [
+                "signing identity is present but not valid for code signing: "
+                + config.sign_identity
+            ], None
         return [f"signing identity not found in release keychain: {config.sign_identity}"], None
     if len(identities) > 1:
         return [
@@ -627,7 +919,60 @@ def codesign_preflight(config: ReleaseConfig) -> tuple[list[str], str | None]:
     match = re.search(r"\b([0-9A-Fa-f]{40})\b", identities[0])
     if match is None:
         return [f"could not parse signing identity fingerprint: {identities[0]}"], None
-    return [], match.group(1).upper()
+    fingerprint = match.group(1).upper()
+    codesign_failure = codesign_dryrun_failure(config, fingerprint)
+    if codesign_failure is not None:
+        return [codesign_failure], None
+    return [], fingerprint
+
+
+def find_codesigning_identities(
+    config: ReleaseConfig,
+    *,
+    valid_only: bool,
+) -> subprocess.CompletedProcess[str]:
+    command = ["security", "find-identity"]
+    if valid_only:
+        command.append("-v")
+    command.extend(["-p", "codesigning", str(logical_keychain_path(config.keychain_path))])
+    return subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=15,
+    )
+
+
+def codesign_dryrun_failure(config: ReleaseConfig, fingerprint: str) -> str | None:
+    try:
+        with tempfile.TemporaryDirectory(prefix="setmark-codesign-") as temp_dir:
+            probe_path = Path(temp_dir) / "codesign-smoke"
+            shutil.copyfile("/usr/bin/true", probe_path)
+            probe_path.chmod(0o755)
+            result = subprocess.run(
+                [
+                    "/usr/bin/codesign",
+                    "--force",
+                    "--dryrun",
+                    "--timestamp=none",
+                    "--sign",
+                    fingerprint,
+                    "--keychain",
+                    str(logical_keychain_path(config.keychain_path)),
+                    str(probe_path),
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=15,
+            )
+    except subprocess.TimeoutExpired:
+        return "signing identity cannot codesign noninteractively: codesign dry-run timed out"
+    if result.returncode == 0:
+        return None
+    detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
+    return f"signing identity cannot codesign noninteractively: {detail}"
 
 
 def b64url(data: bytes) -> str:
@@ -1098,6 +1443,20 @@ def command_preflight(config: ReleaseConfig, *, skip_remote: bool, release_ref: 
     print(f"release preflight passed for {version.marketing} ({version.build}) at {source_sha}")
 
 
+def command_repair_signing(config: ReleaseConfig) -> None:
+    failures = validate_secret_paths(config)
+    failures.extend(validate_signing_repair_config(config))
+    if any(hint in config.keychain_path.name for hint in LOGIN_KEYCHAIN_HINTS):
+        failures.append(f"release keychain must not be the login keychain: {config.keychain_path}")
+    if failures:
+        raise ReleaseError("release signing repair failed:\n- " + "\n- ".join(failures))
+    rebuild_release_keychain(config)
+    signing_failures, fingerprint = codesign_preflight(config)
+    if signing_failures or fingerprint is None:
+        raise ReleaseError("release signing repair failed:\n- " + "\n- ".join(signing_failures))
+    print(f"release signing repaired: {fingerprint}")
+
+
 def command_status(
     config: ReleaseConfig,
     *,
@@ -1241,6 +1600,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     preflight.add_argument("--release-ref", default="HEAD")
 
+    subparsers.add_parser("repair-signing")
+
     bump = subparsers.add_parser("bump-build")
     bump.add_argument("--to", dest="new_build")
 
@@ -1271,6 +1632,8 @@ def main(argv: list[str]) -> int:
         assert config is not None
         if args.command == "preflight":
             command_preflight(config, skip_remote=args.skip_remote, release_ref=args.release_ref)
+        elif args.command == "repair-signing":
+            command_repair_signing(config)
         elif args.command == "status":
             command_status(config, version=args.version, build_number_value=args.build)
         elif args.command == "release":

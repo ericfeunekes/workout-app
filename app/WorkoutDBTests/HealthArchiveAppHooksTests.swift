@@ -82,6 +82,85 @@ final class HealthArchiveAppHooksTests: XCTestCase {
         ])
     }
 
+    func testManualSettingsExportQueuesFailureTelemetryThroughPreparedPersistenceEmitter()
+        async throws {
+        struct SyntheticExportError: Error {}
+        let persistence = try PersistenceFactory.makeInMemory()
+        let controller = FakeHealthArchiveController()
+        controller.error = SyntheticExportError()
+
+        let result = await HealthArchiveAppHooks.manualExportFromSettings(
+            controllerProvider: { controller },
+            tokenStore: FakeTokenStore(url: URL(string: "http://localhost:8000")!),
+            telemetry: persistence.telemetryEmitter(),
+            prepareTelemetry: {
+                await persistence.prepareTelemetry()
+            }
+        )
+
+        XCTAssertEqual(result, .failed("SyntheticExportError"))
+        let events = try await waitForQueuedTelemetryEvents(
+            in: persistence.pushQueueStore,
+            count: 2
+        )
+        XCTAssertEqual(events.map(\.name), [
+            "health_archive.manual_export_requested",
+            "health_archive.export_failed",
+        ])
+        assertPayload(events[1], contains: #""failureClass":"SyntheticExportError""#)
+    }
+
+    func testManualSettingsExportQueuesTokenRejectedTelemetryThroughPreparedPersistenceEmitter()
+        async throws {
+        let persistence = try PersistenceFactory.makeInMemory()
+        let controller = FakeHealthArchiveController()
+        controller.error = SyncError.tokenRejected
+
+        let result = await HealthArchiveAppHooks.manualExportFromSettings(
+            controllerProvider: { controller },
+            tokenStore: FakeTokenStore(url: URL(string: "http://localhost:8000")!),
+            telemetry: persistence.telemetryEmitter(),
+            prepareTelemetry: {
+                await persistence.prepareTelemetry()
+            }
+        )
+
+        XCTAssertEqual(result, .tokenRejected)
+        let events = try await waitForQueuedTelemetryEvents(
+            in: persistence.pushQueueStore,
+            count: 2
+        )
+        XCTAssertEqual(events.map(\.name), [
+            "health_archive.manual_export_requested",
+            "health_archive.export_token_rejected",
+        ])
+    }
+
+    func testManualSettingsExportQueuesSkippedTelemetryThroughPreparedPersistenceEmitter()
+        async throws {
+        let persistence = try PersistenceFactory.makeInMemory()
+
+        let result = await HealthArchiveAppHooks.manualExportFromSettings(
+            controllerProvider: { FakeHealthArchiveController() },
+            tokenStore: FakeTokenStore(url: nil),
+            telemetry: persistence.telemetryEmitter(),
+            prepareTelemetry: {
+                await persistence.prepareTelemetry()
+            }
+        )
+
+        XCTAssertEqual(result, .skipped(.missingConnection))
+        let events = try await waitForQueuedTelemetryEvents(
+            in: persistence.pushQueueStore,
+            count: 2
+        )
+        XCTAssertEqual(events.map(\.name), [
+            "health_archive.manual_export_requested",
+            "health_archive.export_skipped",
+        ])
+        assertPayload(events[1], contains: #""skipReason":"MissingConnection""#)
+    }
+
     func testManualSettingsExportEmitsSkippedTelemetryWithoutConnection() async {
         let controller = FakeHealthArchiveController()
         let telemetry = RecordingTelemetryEmitter()
@@ -191,6 +270,66 @@ final class HealthArchiveAppHooksTests: XCTestCase {
         XCTAssertEqual(Set(events.map(\.name)), [
             "health_archive.background_export_requested",
             "health_archive.export_succeeded",
+        ])
+    }
+
+    func testBackgroundExportQueuesFailureTelemetryThroughPreparedPersistenceEmitter()
+        async throws {
+        struct SyntheticBackgroundExportError: Error {}
+        let persistence = try PersistenceFactory.makeInMemory()
+        let controller = FakeHealthArchiveController()
+        controller.error = SyntheticBackgroundExportError()
+
+        let result = await HealthArchiveBackgroundExport.run(
+            makeController: { _, _ in controller },
+            tokenStore: FakeTokenStore(url: URL(string: "http://localhost:8000")!),
+            telemetry: persistence.telemetryEmitter(),
+            prepareTelemetry: {
+                await persistence.prepareTelemetry()
+            }
+        )
+
+        XCTAssertEqual(result, .failed("SyntheticBackgroundExportError"))
+        let events = try await waitForQueuedTelemetryEvents(
+            in: persistence.pushQueueStore,
+            count: 2
+        )
+        XCTAssertEqual(events.map(\.name), [
+            "health_archive.background_export_requested",
+            "health_archive.export_failed",
+        ])
+        assertPayload(events[1], contains: #""failureClass":"SyntheticBackgroundExportError""#)
+    }
+
+    func testBackgroundExportQueuesTokenRejectedTelemetryThroughPreparedPersistenceEmitter()
+        async throws {
+        let persistence = try PersistenceFactory.makeInMemory()
+        let controller = FakeHealthArchiveController()
+        controller.error = SyncError.tokenRejected
+        let authRecovery = AuthRecoveryStoreImpl(
+            key: "HealthArchiveAppHooksTests.queuedTokenRejected.\(UUID().uuidString)",
+            defaults: .standard
+        )
+
+        let result = await HealthArchiveBackgroundExport.run(
+            makeController: { _, _ in controller },
+            tokenStore: FakeTokenStore(url: URL(string: "http://localhost:8000")!),
+            authRecoveryStore: authRecovery,
+            telemetry: persistence.telemetryEmitter(),
+            prepareTelemetry: {
+                await persistence.prepareTelemetry()
+            }
+        )
+
+        XCTAssertEqual(result, .tokenRejected)
+        XCTAssertTrue(authRecovery.isTokenRejected())
+        let events = try await waitForQueuedTelemetryEvents(
+            in: persistence.pushQueueStore,
+            count: 2
+        )
+        XCTAssertEqual(events.map(\.name), [
+            "health_archive.background_export_requested",
+            "health_archive.export_token_rejected",
         ])
     }
 
@@ -338,6 +477,38 @@ final class HealthArchiveAppHooksTests: XCTestCase {
         ])
     }
 
+    func testBackgroundSchedulerQueuesSubmittedTelemetryThroughPreparedPersistenceEmitter()
+        async throws {
+        let persistence = try PersistenceFactory.makeInMemory()
+        let scheduler = FakeBackgroundTaskScheduler()
+        let stateStore = FakeHealthArchiveExportStateStore(snapshot: HealthArchiveExportSnapshot(
+            serverNamespace: "http://localhost:8000",
+            automaticEnabled: true,
+            nextAttemptAt: Date(timeIntervalSince1970: 100)
+        ))
+        let background = HealthArchiveBackgroundExportScheduler(
+            scheduler: scheduler,
+            tokenStore: FakeTokenStore(url: URL(string: "http://localhost:8000")!),
+            stateStore: stateStore,
+            telemetry: persistence.telemetryEmitter(),
+            prepareTelemetry: {
+                await persistence.prepareTelemetry()
+            },
+            now: { Date(timeIntervalSince1970: 50) },
+            makeController: { _, _ in FakeHealthArchiveController() }
+        )
+
+        await background.scheduleIfAutomaticEnabled()
+
+        let events = try await waitForQueuedTelemetryEvents(
+            in: persistence.pushQueueStore,
+            count: 1
+        )
+        XCTAssertEqual(events.map(\.name), [
+            "health_archive.bg_schedule_submitted",
+        ])
+    }
+
     func testBackgroundSchedulerEmitsScheduleFailureTelemetry() async {
         struct SyntheticScheduleError: Error {}
         let scheduler = FakeBackgroundTaskScheduler()
@@ -362,6 +533,39 @@ final class HealthArchiveAppHooksTests: XCTestCase {
         ])
         XCTAssertTrue(telemetry.events[0].dataJSON?.contains(#""failureClass":"SyntheticScheduleError""#)
             == true)
+    }
+
+    func testBackgroundSchedulerQueuesScheduleFailureTelemetryThroughPreparedPersistenceEmitter()
+        async throws {
+        struct SyntheticScheduleError: Error {}
+        let persistence = try PersistenceFactory.makeInMemory()
+        let scheduler = FakeBackgroundTaskScheduler()
+        scheduler.submitError = SyntheticScheduleError()
+        let stateStore = FakeHealthArchiveExportStateStore(snapshot: HealthArchiveExportSnapshot(
+            serverNamespace: "http://localhost:8000",
+            automaticEnabled: true
+        ))
+        let background = HealthArchiveBackgroundExportScheduler(
+            scheduler: scheduler,
+            tokenStore: FakeTokenStore(url: URL(string: "http://localhost:8000")!),
+            stateStore: stateStore,
+            telemetry: persistence.telemetryEmitter(),
+            prepareTelemetry: {
+                await persistence.prepareTelemetry()
+            },
+            makeController: { _, _ in FakeHealthArchiveController() }
+        )
+
+        await background.scheduleIfAutomaticEnabled()
+
+        let events = try await waitForQueuedTelemetryEvents(
+            in: persistence.pushQueueStore,
+            count: 1
+        )
+        XCTAssertEqual(events.map(\.name), [
+            "health_archive.bg_schedule_failed",
+        ])
+        assertPayload(events[0], contains: #""failureClass":"SyntheticScheduleError""#)
     }
 
     func testBackgroundSchedulerRegisterIsIdempotent() {
@@ -400,6 +604,60 @@ final class HealthArchiveAppHooksTests: XCTestCase {
         XCTAssertEqual(scheduler.cancelledIdentifiers, [
             HealthArchiveBackgroundExport.taskIdentifier,
         ])
+    }
+
+    func testBackgroundSchedulerQueuesSkipReasonsThroughPreparedPersistenceEmitter()
+        async throws {
+        let scenarios: [(String, any TokenStore, any AuthRecoveryStore, HealthArchiveExportSnapshot)] = [
+            (
+                "MissingConnection",
+                FakeTokenStore(url: nil),
+                AuthRecoveryStoreImpl(
+                    key: "HealthArchiveAppHooksTests.skip.missing.\(UUID().uuidString)",
+                    defaults: .standard
+                ),
+                HealthArchiveExportSnapshot(automaticEnabled: true)
+            ),
+            (
+                "AutomaticDisabled",
+                FakeTokenStore(url: URL(string: "http://localhost:8000")!),
+                AuthRecoveryStoreImpl(
+                    key: "HealthArchiveAppHooksTests.skip.disabled.\(UUID().uuidString)",
+                    defaults: .standard
+                ),
+                HealthArchiveExportSnapshot(
+                    serverNamespace: "http://localhost:8000",
+                    automaticEnabled: false
+                )
+            ),
+        ]
+
+        for (reason, tokenStore, authRecovery, snapshot) in scenarios {
+            let persistence = try PersistenceFactory.makeInMemory()
+            let scheduler = FakeBackgroundTaskScheduler()
+            let background = HealthArchiveBackgroundExportScheduler(
+                scheduler: scheduler,
+                tokenStore: tokenStore,
+                authRecoveryStore: authRecovery,
+                stateStore: FakeHealthArchiveExportStateStore(snapshot: snapshot),
+                telemetry: persistence.telemetryEmitter(),
+                prepareTelemetry: {
+                    await persistence.prepareTelemetry()
+                },
+                makeController: { _, _ in FakeHealthArchiveController() }
+            )
+
+            await background.scheduleIfAutomaticEnabled()
+
+            let events = try await waitForQueuedTelemetryEvents(
+                in: persistence.pushQueueStore,
+                count: 1
+            )
+            XCTAssertEqual(events.map(\.name), [
+                "health_archive.bg_schedule_skipped",
+            ])
+            assertPayload(events[0], contains: #""skipReason":"\#(reason)""#)
+        }
     }
 
     func testBackgroundSchedulerCancelsWhenTokenRejectedRecoveryIsActive() async {
@@ -483,6 +741,45 @@ final class HealthArchiveAppHooksTests: XCTestCase {
 
         XCTAssertEqual(task.completions, [false])
         XCTAssertEqual(scheduler.submissions, [])
+    }
+
+    func testBackgroundTaskExpirationQueuesTelemetryThroughPreparedPersistenceEmitter()
+        async throws {
+        let persistence = try PersistenceFactory.makeInMemory()
+        let scheduler = FakeBackgroundTaskScheduler()
+        let controller = BlockingHealthArchiveController()
+        let stateStore = FakeHealthArchiveExportStateStore(snapshot: HealthArchiveExportSnapshot(
+            serverNamespace: "http://localhost:8000",
+            automaticEnabled: true
+        ))
+        let background = HealthArchiveBackgroundExportScheduler(
+            scheduler: scheduler,
+            tokenStore: FakeTokenStore(url: URL(string: "http://localhost:8000")!),
+            stateStore: stateStore,
+            telemetry: persistence.telemetryEmitter(),
+            prepareTelemetry: {
+                await persistence.prepareTelemetry()
+            },
+            makeController: { _, _ in controller }
+        )
+
+        XCTAssertTrue(background.register())
+        let task = FakeBackgroundTaskHandle()
+        scheduler.launch(task)
+        await controller.waitForExportStart()
+
+        task.expirationHandler?()
+        await task.waitForCompletion()
+        await controller.waitForRetire()
+
+        let events = try await waitForQueuedTelemetryEvents(
+            in: persistence.pushQueueStore,
+            count: 2
+        )
+        XCTAssertEqual(events.map(\.name), [
+            "health_archive.background_export_requested",
+            "health_archive.bg_expired",
+        ])
     }
 }
 
@@ -763,4 +1060,18 @@ private func queuedTelemetryEvents(in store: any PushQueueStore) async throws ->
         guard case .events(let events) = item.payload else { return [] }
         return events
     }
+}
+
+private func assertPayload(
+    _ event: Event,
+    contains expected: String,
+    file: StaticString = #filePath,
+    line: UInt = #line
+) {
+    XCTAssertTrue(
+        event.dataJSON?.contains(expected) == true,
+        "payload \(event.dataJSON ?? "nil") did not contain \(expected)",
+        file: file,
+        line: line
+    )
 }

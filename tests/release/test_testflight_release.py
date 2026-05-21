@@ -41,8 +41,44 @@ def test_release_config_requires_non_repo_secret_paths(tmp_path: Path) -> None:
 
     assert config.asc_key_path == tmp_path / "AuthKey_TEST.p8"
     assert config.keychain_path == tmp_path / "release.keychain-db"
+    assert config.keychain_password_path is None
+    assert config.signing_p12_path is None
+    assert config.signing_p12_password_path is None
+    assert config.signing_chain_paths == ()
     assert config.sign_identity == "Apple Distribution"
     assert config.uses_non_exempt_encryption is False
+
+
+def test_release_config_reads_signing_repair_paths(tmp_path: Path) -> None:
+    env = valid_env(tmp_path)
+    password = tmp_path / "keychain.password"
+    p12 = tmp_path / "signing.p12"
+    password.write_text("password")
+    p12.write_text("p12")
+    password.chmod(0o600)
+    p12.chmod(0o600)
+    env["SETMARK_RELEASE_KEYCHAIN_PASSWORD_PATH"] = str(password)
+    env["SETMARK_RELEASE_SIGNING_P12_PATH"] = str(p12)
+    env["SETMARK_RELEASE_SIGNING_P12_PASSWORD_PATH"] = str(password)
+
+    config = testflight.ReleaseConfig.from_env(env)
+
+    assert config.keychain_password_path == password
+    assert config.signing_p12_path == p12
+    assert config.signing_p12_password_path == password
+
+
+def test_release_config_reads_signing_chain_paths(tmp_path: Path) -> None:
+    env = valid_env(tmp_path)
+    first = tmp_path / "AppleWWDRCAG3.cer"
+    second = tmp_path / "AppleRootCA.cer"
+    first.write_text("cert")
+    second.write_text("cert")
+    env["SETMARK_RELEASE_SIGNING_CHAIN_PATHS"] = f"{first}:{second}"
+
+    config = testflight.ReleaseConfig.from_env(env)
+
+    assert config.signing_chain_paths == (first, second)
 
 
 def test_release_config_fails_when_required_value_missing(tmp_path: Path) -> None:
@@ -330,6 +366,310 @@ def test_preflight_rejects_repo_local_secret_paths(tmp_path: Path) -> None:
     failures = testflight.validate_secret_paths(config)
 
     assert any("must not live inside the repo" in failure for failure in failures)
+
+
+def test_signing_repair_requires_complete_non_repo_secret_paths(tmp_path: Path) -> None:
+    config = testflight.ReleaseConfig.from_env(valid_env(tmp_path))
+
+    failures = testflight.prepare_release_keychain(config)
+
+    assert failures == [
+        "SETMARK_RELEASE_KEYCHAIN_PASSWORD_PATH is required for release preflight",
+    ]
+
+
+def test_signing_repair_requires_complete_repair_secret_paths(tmp_path: Path) -> None:
+    config = testflight.ReleaseConfig.from_env(valid_env(tmp_path))
+
+    failures = testflight.validate_signing_repair_config(config)
+
+    assert failures == [
+        "SETMARK_RELEASE_KEYCHAIN_PASSWORD_PATH is required for release preflight",
+        "SETMARK_RELEASE_SIGNING_P12_PATH is required for signing repair",
+        "SETMARK_RELEASE_SIGNING_P12_PASSWORD_PATH is required for signing repair",
+    ]
+
+
+def test_signing_repair_reports_partial_secret_paths(tmp_path: Path) -> None:
+    env = valid_env(tmp_path)
+    password = tmp_path / "keychain.password"
+    password.write_text("password")
+    password.chmod(0o600)
+    env["SETMARK_RELEASE_KEYCHAIN_PASSWORD_PATH"] = str(password)
+    config = testflight.ReleaseConfig.from_env(env)
+
+    failures = testflight.validate_signing_repair_config(config)
+
+    assert failures == [
+        "SETMARK_RELEASE_SIGNING_P12_PATH is required for signing repair",
+        "SETMARK_RELEASE_SIGNING_P12_PASSWORD_PATH is required for signing repair",
+    ]
+
+
+def test_preflight_unlocks_but_does_not_rebuild_when_identity_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = valid_env(tmp_path)
+    password = tmp_path / "keychain.password"
+    password.write_text("password")
+    password.chmod(0o600)
+    env["SETMARK_RELEASE_KEYCHAIN_PASSWORD_PATH"] = str(password)
+    config = testflight.ReleaseConfig.from_env(env)
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        testflight,
+        "unlock_release_keychain",
+        lambda _config: calls.append("unlock"),
+    )
+    monkeypatch.setattr(
+        testflight,
+        "rebuild_release_keychain",
+        lambda _config: calls.append("rebuild"),
+    )
+
+    failures = testflight.prepare_release_keychain(config)
+
+    assert failures == []
+    assert calls == ["unlock"]
+
+
+def test_command_preflight_fails_without_repairing_missing_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = valid_env(tmp_path)
+    password = tmp_path / "keychain.password"
+    password.write_text("password")
+    password.chmod(0o600)
+    env["SETMARK_RELEASE_KEYCHAIN_PASSWORD_PATH"] = str(password)
+    config = testflight.ReleaseConfig.from_env(env)
+    calls: list[str] = []
+
+    monkeypatch.setattr(testflight, "git_sha", lambda _ref: "abc123")
+    monkeypatch.setattr(
+        testflight,
+        "read_project_version_at_ref",
+        lambda _ref: testflight.BuildVersion(marketing="0.0.1", build="3"),
+    )
+    monkeypatch.setattr(testflight, "unlock_release_keychain", lambda _config: None)
+    monkeypatch.setattr(
+        testflight,
+        "rebuild_release_keychain",
+        lambda _config: calls.append("rebuild"),
+    )
+    monkeypatch.setattr(
+        testflight,
+        "codesign_preflight",
+        lambda _config: (["signing identity not found in release keychain"], None),
+    )
+    monkeypatch.setattr(testflight, "validate_profile", lambda *args, **kwargs: [])
+
+    with pytest.raises(testflight.ReleaseError, match="release preflight failed"):
+        testflight.command_preflight(config, skip_remote=True, release_ref="ecaff57")
+
+    assert calls == []
+
+
+def test_signing_repair_keeps_existing_keychain_when_candidate_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = valid_env(tmp_path)
+    password = tmp_path / "keychain.password"
+    p12 = tmp_path / "signing.p12"
+    password.write_text("password")
+    p12.write_text("p12")
+    password.chmod(0o600)
+    p12.chmod(0o600)
+    env["SETMARK_RELEASE_KEYCHAIN_PASSWORD_PATH"] = str(password)
+    env["SETMARK_RELEASE_SIGNING_P12_PATH"] = str(p12)
+    env["SETMARK_RELEASE_SIGNING_P12_PASSWORD_PATH"] = str(password)
+    config = testflight.ReleaseConfig.from_env(env)
+    config.keychain_path.write_text("original")
+    security_calls: list[list[str]] = []
+
+    def fake_security(args: list[str], *, check: bool = True) -> object:
+        del check
+        security_calls.append(args)
+        if args[1:4] == ["list-keychains", "-d", "user"] and "-s" not in args:
+            return type("Completed", (), {"stdout": f'"{config.keychain_path}"\n'})()
+        if args[1] == "create-keychain":
+            testflight.physical_keychain_path(Path(args[-1])).write_text("candidate")
+        return object()
+
+    monkeypatch.setattr(testflight, "security_quiet", fake_security)
+    monkeypatch.setattr(testflight, "codesign_preflight", lambda _config: (["not usable"], None))
+
+    with pytest.raises(testflight.ReleaseError, match="not usable"):
+        testflight.rebuild_release_keychain(config)
+
+    assert config.keychain_path.read_text() == "original"
+    assert any(call[1] == "delete-keychain" for call in security_calls)
+    assert not list(tmp_path.glob("release.candidate-*.keychain-db"))
+
+
+def test_command_repair_signing_rebuilds_explicitly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = valid_env(tmp_path)
+    password = tmp_path / "keychain.password"
+    p12 = tmp_path / "signing.p12"
+    password.write_text("password")
+    p12.write_text("p12")
+    password.chmod(0o600)
+    p12.chmod(0o600)
+    env["SETMARK_RELEASE_KEYCHAIN_PASSWORD_PATH"] = str(password)
+    env["SETMARK_RELEASE_SIGNING_P12_PATH"] = str(p12)
+    env["SETMARK_RELEASE_SIGNING_P12_PASSWORD_PATH"] = str(password)
+    config = testflight.ReleaseConfig.from_env(env)
+    calls: list[str] = []
+
+    monkeypatch.setattr(
+        testflight,
+        "rebuild_release_keychain",
+        lambda _config: calls.append("rebuild"),
+    )
+    monkeypatch.setattr(
+        testflight,
+        "codesign_preflight",
+        lambda _config: ([], "99EAB1BF5E2B37C62C465831AFC05427936039D2"),
+    )
+
+    testflight.command_repair_signing(config)
+
+    assert calls == ["rebuild"]
+
+
+def test_signing_repair_rejects_profile_incompatible_candidate(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = valid_env(tmp_path)
+    password = tmp_path / "keychain.password"
+    p12 = tmp_path / "signing.p12"
+    password.write_text("password")
+    p12.write_text("p12")
+    password.chmod(0o600)
+    p12.chmod(0o600)
+    env["SETMARK_RELEASE_KEYCHAIN_PASSWORD_PATH"] = str(password)
+    env["SETMARK_RELEASE_SIGNING_P12_PATH"] = str(p12)
+    env["SETMARK_RELEASE_SIGNING_P12_PASSWORD_PATH"] = str(password)
+    config = testflight.ReleaseConfig.from_env(env)
+    config.keychain_path.write_text("original")
+    security_calls: list[list[str]] = []
+
+    def fake_security(args: list[str], *, check: bool = True) -> object:
+        del check
+        security_calls.append(args)
+        if args[1:4] == ["list-keychains", "-d", "user"] and "-s" not in args:
+            return type("Completed", (), {"stdout": f'"{config.keychain_path}"\n'})()
+        if args[1] == "create-keychain":
+            testflight.physical_keychain_path(Path(args[-1])).write_text("candidate")
+        return object()
+
+    monkeypatch.setattr(testflight, "security_quiet", fake_security)
+    monkeypatch.setattr(
+        testflight,
+        "codesign_preflight",
+        lambda _config: ([], "99EAB1BF5E2B37C62C465831AFC05427936039D2"),
+    )
+    monkeypatch.setattr(
+        testflight,
+        "validate_release_profiles_for_signing",
+        lambda *_args: ["profile does not include signing certificate"],
+    )
+
+    with pytest.raises(testflight.ReleaseError, match="profile does not include"):
+        testflight.rebuild_release_keychain(config)
+
+    assert config.keychain_path.read_text() == "original"
+    assert any(call[1] == "delete-keychain" for call in security_calls)
+
+
+def test_replace_release_keychain_rolls_back_when_candidate_swap_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    keychain = tmp_path / "release.keychain-db"
+    candidate = tmp_path / "release.candidate.keychain"
+    physical_candidate = tmp_path / "release.candidate.keychain-db"
+    keychain.write_text("original")
+    physical_candidate.write_text("candidate")
+    original_rename = Path.rename
+
+    def fake_rename(self: Path, target: Path) -> Path:
+        if self == physical_candidate:
+            raise OSError("swap failed")
+        return original_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", fake_rename)
+
+    with pytest.raises(OSError, match="swap failed"):
+        testflight.replace_release_keychain(keychain, candidate)
+
+    assert keychain.read_text() == "original"
+    assert physical_candidate.read_text() == "candidate"
+    assert not list(tmp_path.glob("release.keychain-db.bak-*"))
+
+
+def test_rebuild_release_keychain_rolls_back_when_final_swap_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    env = valid_env(tmp_path)
+    password = tmp_path / "keychain.password"
+    p12 = tmp_path / "signing.p12"
+    password.write_text("password")
+    p12.write_text("p12")
+    password.chmod(0o600)
+    p12.chmod(0o600)
+    env["SETMARK_RELEASE_KEYCHAIN_PASSWORD_PATH"] = str(password)
+    env["SETMARK_RELEASE_SIGNING_P12_PATH"] = str(p12)
+    env["SETMARK_RELEASE_SIGNING_P12_PASSWORD_PATH"] = str(password)
+    config = testflight.ReleaseConfig.from_env(env)
+    config.keychain_path.write_text("original")
+
+    def fake_security(args: list[str], *, check: bool = True) -> object:
+        del check
+        if args[1:4] == ["list-keychains", "-d", "user"] and "-s" not in args:
+            return type("Completed", (), {"stdout": f'"{config.keychain_path}"\n'})()
+        if args[1] == "create-keychain":
+            testflight.physical_keychain_path(Path(args[-1])).write_text("candidate")
+        return object()
+
+    original_rename = Path.rename
+
+    def fake_rename(self: Path, target: Path) -> Path:
+        if ".candidate-" in self.name and self.name.endswith(".keychain-db"):
+            raise OSError("swap failed")
+        return original_rename(self, target)
+
+    monkeypatch.setattr(testflight, "security_quiet", fake_security)
+    monkeypatch.setattr(
+        testflight,
+        "codesign_preflight",
+        lambda _config: ([], "99EAB1BF5E2B37C62C465831AFC05427936039D2"),
+    )
+    monkeypatch.setattr(testflight, "validate_release_profiles_for_signing", lambda *_args: [])
+    monkeypatch.setattr(Path, "rename", fake_rename)
+
+    with pytest.raises(OSError, match="swap failed"):
+        testflight.rebuild_release_keychain(config)
+
+    assert config.keychain_path.read_text() == "original"
+
+
+def test_keychain_path_helpers_separate_logical_and_physical_paths(tmp_path: Path) -> None:
+    physical = tmp_path / "release.keychain-db"
+    logical = tmp_path / "release.keychain"
+
+    assert testflight.logical_keychain_path(physical) == logical
+    assert testflight.logical_keychain_path(logical) == logical
+    assert testflight.physical_keychain_path(logical) == physical
+    assert testflight.physical_keychain_path(physical) == physical
 
 
 def test_readiness_blocks_unknown_compliance(
@@ -671,11 +1011,137 @@ def test_codesign_preflight_returns_identity_fingerprint(
         return Completed()
 
     monkeypatch.setattr(testflight.subprocess, "run", fake_run)
+    monkeypatch.setattr(testflight, "codesign_dryrun_failure", lambda _config, _sha1: None)
 
     failures, fingerprint = testflight.codesign_preflight(config)
 
     assert failures == []
     assert fingerprint == "99EAB1BF5E2B37C62C465831AFC05427936039D2"
+
+
+def test_codesign_preflight_rejects_identity_without_noninteractive_key_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = testflight.ReleaseConfig.from_env(valid_env(tmp_path))
+
+    class Completed:
+        returncode = 0
+        stdout = (
+            "  1) 99EAB1BF5E2B37C62C465831AFC05427936039D2 "
+            '"Apple Distribution: Eric Feunekes (TVKR339CEB)"\n'
+            "     1 valid identities found\n"
+        )
+        stderr = ""
+
+    def fake_run(
+        args: list[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+        timeout: int,
+    ) -> Completed:
+        del args, capture_output, text, check, timeout
+        return Completed()
+
+    monkeypatch.setattr(testflight.subprocess, "run", fake_run)
+    monkeypatch.setattr(
+        testflight,
+        "codesign_dryrun_failure",
+        lambda _config, _sha1: "signing identity cannot codesign noninteractively: denied",
+    )
+
+    failures, fingerprint = testflight.codesign_preflight(config)
+
+    assert failures == ["signing identity cannot codesign noninteractively: denied"]
+    assert fingerprint is None
+
+
+def test_codesign_dryrun_uses_fingerprint_and_configured_keychain(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = testflight.ReleaseConfig.from_env(valid_env(tmp_path))
+    calls: list[list[str]] = []
+
+    class Completed:
+        returncode = 0
+        stderr = ""
+        stdout = ""
+
+    def fake_run(
+        args: list[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+        timeout: int,
+    ) -> Completed:
+        del capture_output, text, check, timeout
+        calls.append(args)
+        return Completed()
+
+    monkeypatch.setattr(testflight.subprocess, "run", fake_run)
+
+    failure = testflight.codesign_dryrun_failure(config, "ABCDEF1234")
+
+    assert failure is None
+    assert len(calls) == 1
+    assert calls[0][:6] == [
+        "/usr/bin/codesign",
+        "--force",
+        "--dryrun",
+        "--timestamp=none",
+        "--sign",
+        "ABCDEF1234",
+    ]
+    assert calls[0][6] == "--keychain"
+    assert calls[0][7] == str(testflight.logical_keychain_path(config.keychain_path))
+
+
+def test_codesign_preflight_distinguishes_matching_but_invalid_identity(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = testflight.ReleaseConfig.from_env(valid_env(tmp_path))
+
+    class Completed:
+        returncode = 0
+        stderr = ""
+
+        def __init__(self, stdout: str) -> None:
+            self.stdout = stdout
+
+    calls: list[list[str]] = []
+
+    def fake_run(
+        args: list[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+        timeout: int,
+    ) -> Completed:
+        del capture_output, text, check, timeout
+        calls.append(args)
+        if "-v" in args:
+            return Completed("     0 valid identities found\n")
+        return Completed(
+            "  1) 99EAB1BF5E2B37C62C465831AFC05427936039D2 "
+            '"Apple Distribution: Eric Feunekes (TVKR339CEB)"\n'
+            "     1 identities found\n"
+        )
+
+    monkeypatch.setattr(testflight.subprocess, "run", fake_run)
+
+    failures, fingerprint = testflight.codesign_preflight(config)
+
+    assert failures == [
+        "signing identity is present but not valid for code signing: Apple Distribution"
+    ]
+    assert fingerprint is None
+    assert len(calls) == 2
 
 
 def test_mobileprovision_decode_falls_back_to_openssl(

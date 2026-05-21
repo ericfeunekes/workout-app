@@ -723,6 +723,15 @@ struct RootView: View {
                 now: Date(),
                 telemetry: telemetry
             )
+        case "slowSuccess":
+            try? await Task.sleep(nanoseconds: 8_000_000_000)
+            return await saveDebugHealthArchiveExportSuccess(
+                connectionURL: connectionURL,
+                namespace: namespace,
+                snapshot: snapshot,
+                now: Date(),
+                telemetry: telemetry
+            )
         case "tokenRejected":
             HealthArchiveAppHooks.emitExportEvent(
                 telemetry,

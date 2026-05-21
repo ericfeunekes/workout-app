@@ -84,6 +84,8 @@ enum HealthArchiveBackgroundExport {
                 serverURL: connection.url
             )
             return .tokenRejected
+        } catch is CancellationError {
+            return .failed("CancellationError")
         } catch {
             let failureClass = String(describing: type(of: error))
             HealthArchiveAppHooks.emitExportEvent(
@@ -227,6 +229,12 @@ final class HealthArchiveBackgroundExportScheduler {
         await prepareTelemetry()
         guard !authRecoveryStore.isTokenRejected() else {
             scheduler.cancel(identifier: HealthArchiveBackgroundExport.taskIdentifier)
+            HealthArchiveAppHooks.emitExportEvent(
+                telemetry,
+                name: "health_archive.bg_schedule_skipped",
+                trigger: .backgroundScheduled,
+                skipReason: "TokenRejected"
+            )
             return
         }
         let connection: (url: URL, token: String)?
@@ -234,16 +242,35 @@ final class HealthArchiveBackgroundExportScheduler {
             connection = try tokenStore.loadConnection()
         } catch {
             scheduler.cancel(identifier: HealthArchiveBackgroundExport.taskIdentifier)
+            HealthArchiveAppHooks.emitExportEvent(
+                telemetry,
+                name: "health_archive.bg_schedule_skipped",
+                trigger: .backgroundScheduled,
+                skipReason: "ConnectionUnavailable"
+            )
             return
         }
         guard let connection else {
             scheduler.cancel(identifier: HealthArchiveBackgroundExport.taskIdentifier)
+            HealthArchiveAppHooks.emitExportEvent(
+                telemetry,
+                name: "health_archive.bg_schedule_skipped",
+                trigger: .backgroundScheduled,
+                skipReason: "MissingConnection"
+            )
             return
         }
         let serverNamespace = HealthArchiveServerNamespace.normalized(from: connection.url)
         let snapshot = await stateStore.loadSnapshot(serverNamespace: serverNamespace)
         guard snapshot.automaticEnabled else {
             scheduler.cancel(identifier: HealthArchiveBackgroundExport.taskIdentifier)
+            HealthArchiveAppHooks.emitExportEvent(
+                telemetry,
+                name: "health_archive.bg_schedule_skipped",
+                trigger: .backgroundScheduled,
+                serverURL: connection.url,
+                skipReason: "AutomaticDisabled"
+            )
             return
         }
         do {

@@ -334,14 +334,34 @@ Release outputs:
 
 Signing material is a release secret, not source control. Agents must not store
 certificates, provisioning profiles, private keys, keychain passwords, or App
-Store Connect API private keys in the repo. The normal release path must use a
-dedicated non-login release keychain that is already unlocked or unlockable by
-the release automation through a non-interactive secret source such as
-1Password. A temporary keychain is acceptable for a release run when it is
-created from non-interactively retrieved certificate material, passed explicitly
-to `xcodebuild`, and removed during cleanup. Interactive keychain prompts,
-`op signin` prompts, Apple ID prompts, and Xcode GUI prompts are release
-preflight failures.
+Store Connect API private keys in the repo. The normal release path uses a
+dedicated non-login release keychain plus
+`SETMARK_RELEASE_KEYCHAIN_PASSWORD_PATH` in `.release.env` so preflight can
+unlock and prove the configured keychain; it does not require raw `.p12` repair
+material and does not rebuild or replace signing state. If the valid
+codesigning identity is missing, run the explicit `make release-repair-signing`
+target. That repair path additionally requires `SETMARK_RELEASE_SIGNING_P12_PATH`
+and `SETMARK_RELEASE_SIGNING_P12_PASSWORD_PATH`, rebuilds through a candidate
+keychain first, and replaces the canonical keychain only after the candidate
+appears in `security find-identity -v -p codesigning`, passes a noninteractive
+`codesign --dryrun` probe, and matches the installed App Store provisioning
+profiles. A temporary keychain is acceptable for a release run when it is
+created from non-interactively retrieved certificate material, passed
+explicitly to `xcodebuild`, and removed during cleanup. Interactive keychain
+prompts, `op signin` prompts, Apple ID prompts, and Xcode GUI prompts are
+release preflight failures.
+
+Signing diagnosis must distinguish a matching certificate from a usable signing
+identity. `security find-identity -p codesigning <keychain>` can list a matching
+`Apple Distribution` candidate even when `security find-identity -v -p
+codesigning <keychain>` reports `0 valid identities found`; `codesign --dryrun`
+is the deciding smoke test. If `security find-key` sees no private key, the
+`.p12` import did not land. If the private key is present but `-v` and
+`codesign --dryrun` still fail, do not call the keychain repaired: the
+certificate/key material is still unusable to macOS and must be recreated or
+exported through an Apple/Xcode path that produces a valid identity. Keychain
+Access may display the private key above or below the certificate; that visual
+grouping is not proof either way.
 
 App Store Connect API keys should be scoped to the smallest role that can
 upload builds and manage TestFlight assignment. Admin-scoped keys are allowed

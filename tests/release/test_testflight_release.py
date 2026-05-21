@@ -42,6 +42,7 @@ def test_release_config_requires_non_repo_secret_paths(tmp_path: Path) -> None:
     assert config.asc_key_path == tmp_path / "AuthKey_TEST.p8"
     assert config.keychain_path == tmp_path / "release.keychain-db"
     assert config.sign_identity == "Apple Distribution"
+    assert config.uses_non_exempt_encryption is False
 
 
 def test_release_config_fails_when_required_value_missing(tmp_path: Path) -> None:
@@ -381,6 +382,111 @@ def test_readiness_enforces_expected_tester_count(
 
     assert state["verdict"] == "blocked"
     assert "tester_count_mismatch" in state["blockers"]
+
+
+def test_readiness_treats_all_build_access_group_as_assigned(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = testflight.ReleaseConfig.from_env(valid_env(tmp_path))
+    monkeypatch.setattr(testflight, "group_build_ids", lambda _config: set())
+    monkeypatch.setattr(
+        testflight,
+        "beta_group",
+        lambda _config: {
+            "data": {
+                "attributes": {
+                    "name": "Internal Testing",
+                    "isInternalGroup": True,
+                    "hasAccessToAllBuilds": True,
+                }
+            }
+        },
+    )
+
+    state = testflight.readiness(
+        config,
+        {
+            "id": "build-id",
+            "attributes": {
+                "processingState": "VALID",
+                "expired": False,
+                "usesNonExemptEncryption": False,
+            },
+        },
+    )
+
+    assert state["verdict"] == "ready"
+    assert state["assignedToInternalGroup"] is True
+    assert state["betaGroup"]["hasAccessToAllBuilds"] is True
+
+
+def test_assign_build_skips_all_build_access_groups(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = testflight.ReleaseConfig.from_env(valid_env(tmp_path))
+    assigned: list[str] = []
+    monkeypatch.setattr(
+        testflight,
+        "beta_group",
+        lambda _config: {"data": {"attributes": {"hasAccessToAllBuilds": True}}},
+    )
+    monkeypatch.setattr(
+        testflight,
+        "assign_build_to_group",
+        lambda _config, build_id: assigned.append(build_id),
+    )
+
+    testflight.assign_build_if_needed(config, {"id": "build-id", "attributes": {}})
+
+    assert assigned == []
+
+
+def test_ensure_build_encryption_compliance_patches_missing_value(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = testflight.ReleaseConfig.from_env(valid_env(tmp_path))
+    calls: list[tuple[str, str, dict[str, object] | None]] = []
+
+    def fake_asc_request(
+        _config: testflight.ReleaseConfig,
+        method: str,
+        path: str,
+        *,
+        query: dict[str, str] | None = None,
+        body: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        del query
+        calls.append((method, path, body))
+        return {
+            "data": {
+                "id": "build-id",
+                "attributes": {"usesNonExemptEncryption": False},
+            }
+        }
+
+    monkeypatch.setattr(testflight, "asc_request", fake_asc_request)
+
+    updated = testflight.ensure_build_encryption_compliance(
+        config,
+        {"id": "build-id", "attributes": {"usesNonExemptEncryption": None}},
+    )
+
+    assert updated["attributes"]["usesNonExemptEncryption"] is False
+    assert calls[0] == (
+        "PATCH",
+        "/builds/build-id",
+        {
+            "data": {
+                "type": "builds",
+                "id": "build-id",
+                "attributes": {"usesNonExemptEncryption": False},
+            }
+        },
+    )
+    assert calls[1] == ("GET", "/builds/build-id", None)
 
 
 def test_assert_ready_state_raises_on_blocked_readiness() -> None:

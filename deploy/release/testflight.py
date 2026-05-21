@@ -63,6 +63,7 @@ class ReleaseConfig:
     release_root: Path
     require_healthkit_entitlement: bool
     expected_internal_tester_count: int | None
+    uses_non_exempt_encryption: bool
 
     @classmethod
     def from_env(cls, env: dict[str, str]) -> ReleaseConfig:
@@ -98,6 +99,9 @@ class ReleaseConfig:
             ),
             expected_internal_tester_count=optional_int(
                 env.get("SETMARK_RELEASE_EXPECTED_INTERNAL_TESTER_COUNT")
+            ),
+            uses_non_exempt_encryption=parse_bool(
+                env.get("SETMARK_RELEASE_USES_NON_EXEMPT_ENCRYPTION", "false")
             ),
         )
 
@@ -804,6 +808,52 @@ def beta_group(config: ReleaseConfig) -> dict[str, Any] | None:
     return asc_request(config, "GET", f"/betaGroups/{config.beta_group_id}")
 
 
+def beta_group_attrs(group: dict[str, Any] | None) -> dict[str, Any]:
+    if group is None:
+        return {}
+    return group.get("data", {}).get("attributes", {})
+
+
+def beta_group_has_all_build_access(group: dict[str, Any] | None) -> bool:
+    return beta_group_attrs(group).get("hasAccessToAllBuilds") is True
+
+
+def assign_build_if_needed(config: ReleaseConfig, build: dict[str, Any]) -> None:
+    group = beta_group(config)
+    if beta_group_has_all_build_access(group):
+        return
+    if build["id"] not in group_build_ids(config):
+        assign_build_to_group(config, build["id"])
+
+
+def ensure_build_encryption_compliance(
+    config: ReleaseConfig,
+    build: dict[str, Any],
+) -> dict[str, Any]:
+    if build_attrs(build).get("usesNonExemptEncryption") is not None:
+        return build
+    asc_request(
+        config,
+        "PATCH",
+        f"/builds/{build['id']}",
+        body={
+            "data": {
+                "type": "builds",
+                "id": build["id"],
+                "attributes": {
+                    "usesNonExemptEncryption": config.uses_non_exempt_encryption,
+                },
+            }
+        },
+    )
+    updated = asc_request(config, "GET", f"/builds/{build['id']}")
+    if updated is None:
+        raise ReleaseError(
+            f"App Store Connect build disappeared after compliance update: {build['id']}"
+        )
+    return updated.get("data", updated)
+
+
 def assert_build_number_unused(config: ReleaseConfig, version: BuildVersion) -> None:
     if find_build(config, version) is not None:
         raise ReleaseError(
@@ -970,15 +1020,16 @@ def first_present(attrs: dict[str, Any], keys: tuple[str, ...]) -> Any:
 def readiness(config: ReleaseConfig, build: dict[str, Any]) -> dict[str, Any]:
     attrs = build_attrs(build)
     groups = group_build_ids(config)
-    group = beta_group(config) or {}
-    group_attrs = group.get("data", {}).get("attributes", {}) if group else {}
+    group = beta_group(config)
+    group_attrs = beta_group_attrs(group)
     beta_review_state = attrs.get("betaReviewState")
     compliance = (
         attrs.get("usesNonExemptEncryption")
         if "usesNonExemptEncryption" in attrs
         else attrs.get("appEncryptionDeclarationState")
     )
-    assigned = build["id"] in groups
+    group_has_all_builds = beta_group_has_all_build_access(group)
+    assigned = group_has_all_builds or build["id"] in groups
     tester_count = first_present(
         group_attrs,
         ("testerCount", "betaTesterCount", "betaTestersCount", "internalTesterCount"),
@@ -1017,6 +1068,8 @@ def readiness(config: ReleaseConfig, build: dict[str, Any]) -> dict[str, Any]:
         "betaGroup": {
             "id": config.beta_group_id,
             "name": group_attrs.get("name"),
+            "isInternalGroup": group_attrs.get("isInternalGroup"),
+            "hasAccessToAllBuilds": group_attrs.get("hasAccessToAllBuilds"),
             "publicLinkEnabled": group_attrs.get("publicLinkEnabled"),
             "testerCount": tester_count,
             "expectedTesterCount": expected_tester_count,
@@ -1117,9 +1170,9 @@ def command_release(
             return
         build = wait_for_build(config, version)
         run_state.asc_build_id = build["id"]
-        if build["id"] not in group_build_ids(config):
-            assign_build_to_group(config, build["id"])
-        build = find_build(config, version) or build
+        build = ensure_build_encryption_compliance(config, build)
+        assign_build_if_needed(config, build)
+        build = ensure_build_encryption_compliance(config, find_build(config, version) or build)
         run_state.readiness = readiness(config, build)
         run_state.write_manifest(config)
         assert_ready_state(run_state.readiness)
@@ -1137,9 +1190,10 @@ def command_resume(config: ReleaseConfig, manifest_path: Path, *, dry_run: bool)
     build = find_build(config, version)
     if build is None:
         raise ReleaseError(f"cannot resume; build not found in App Store Connect: {version}")
-    if not dry_run and build["id"] not in group_build_ids(config):
-        assign_build_to_group(config, build["id"])
-        build = find_build(config, version) or build
+    if not dry_run:
+        build = ensure_build_encryption_compliance(config, build)
+        assign_build_if_needed(config, build)
+        build = ensure_build_encryption_compliance(config, find_build(config, version) or build)
     manifest["app_store_connect"]["build_id"] = build["id"]
     manifest["readiness"] = readiness(config, build)
     if not dry_run:

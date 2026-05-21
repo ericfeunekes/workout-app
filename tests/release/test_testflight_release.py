@@ -407,6 +407,114 @@ def test_profile_validation_rejects_wrong_bundle(monkeypatch: pytest.MonkeyPatch
     assert any("bundle mismatch" in failure for failure in failures)
 
 
+def test_profile_validation_rejects_missing_signing_certificate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expiration = testflight.dt.datetime.now(testflight.dt.UTC) + testflight.dt.timedelta(days=30)
+    included_certificate = b"other certificate"
+    required_sha1 = testflight.hashlib.sha1(b"required certificate").hexdigest().upper()
+    monkeypatch.setattr(
+        testflight,
+        "installed_profiles",
+        lambda _name: [
+            (
+                Path("/tmp/profile.mobileprovision"),
+                {
+                    "Name": "iOS Profile",
+                    "TeamIdentifier": ["TEAMID1234"],
+                    "ExpirationDate": expiration,
+                    "DeveloperCertificates": [included_certificate],
+                    "Entitlements": {
+                        "application-identifier": "TEAMID1234.com.example.App",
+                        "com.apple.developer.healthkit": True,
+                    },
+                },
+            )
+        ],
+    )
+
+    failures = testflight.validate_profile(
+        "iOS Profile",
+        bundle_id="com.example.App",
+        team_id="TEAMID1234",
+        require_healthkit=True,
+        signing_certificate_sha1=required_sha1,
+    )
+
+    assert any("does not include signing certificate" in failure for failure in failures)
+
+
+def test_profile_validation_accepts_matching_signing_certificate(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expiration = testflight.dt.datetime.now(testflight.dt.UTC) + testflight.dt.timedelta(days=30)
+    included_certificate = b"required certificate"
+    required_sha1 = testflight.hashlib.sha1(included_certificate).hexdigest().upper()
+    monkeypatch.setattr(
+        testflight,
+        "installed_profiles",
+        lambda _name: [
+            (
+                Path("/tmp/profile.mobileprovision"),
+                {
+                    "Name": "iOS Profile",
+                    "TeamIdentifier": ["TEAMID1234"],
+                    "ExpirationDate": expiration,
+                    "DeveloperCertificates": [included_certificate],
+                    "Entitlements": {
+                        "application-identifier": "TEAMID1234.com.example.App",
+                        "com.apple.developer.healthkit": True,
+                    },
+                },
+            )
+        ],
+    )
+
+    failures = testflight.validate_profile(
+        "iOS Profile",
+        bundle_id="com.example.App",
+        team_id="TEAMID1234",
+        require_healthkit=True,
+        signing_certificate_sha1=required_sha1,
+    )
+
+    assert failures == []
+
+
+def test_codesign_preflight_returns_identity_fingerprint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = testflight.ReleaseConfig.from_env(valid_env(tmp_path))
+
+    class Completed:
+        returncode = 0
+        stdout = (
+            "  1) 99EAB1BF5E2B37C62C465831AFC05427936039D2 "
+            '"Apple Distribution: Eric Feunekes (TVKR339CEB)"\n'
+            "     1 valid identities found\n"
+        )
+        stderr = ""
+
+    def fake_run(
+        args: list[str],
+        *,
+        capture_output: bool,
+        text: bool,
+        check: bool,
+        timeout: int,
+    ) -> Completed:
+        del args, capture_output, text, check, timeout
+        return Completed()
+
+    monkeypatch.setattr(testflight.subprocess, "run", fake_run)
+
+    failures, fingerprint = testflight.codesign_preflight(config)
+
+    assert failures == []
+    assert fingerprint == "99EAB1BF5E2B37C62C465831AFC05427936039D2"
+
+
 def test_mobileprovision_decode_falls_back_to_openssl(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -459,6 +459,7 @@ def validate_profile(
     bundle_id: str,
     team_id: str,
     require_healthkit: bool,
+    signing_certificate_sha1: str | None = None,
 ) -> list[str]:
     matches = installed_profiles(profile_name)
     if not matches:
@@ -484,10 +485,29 @@ def validate_profile(
             profile_failures.append(f"missing profile expiration: {path}")
         if require_healthkit and entitlements.get("com.apple.developer.healthkit") is not True:
             profile_failures.append(f"missing HealthKit entitlement: {path}")
+        if signing_certificate_sha1 is not None and not profile_includes_certificate(
+            plist,
+            signing_certificate_sha1,
+        ):
+            profile_failures.append(
+                f"profile does not include signing certificate {signing_certificate_sha1}: {path}"
+            )
         if not profile_failures:
             return []
         failures.extend(profile_failures)
     return failures
+
+
+def profile_includes_certificate(plist: dict[str, Any], sha1_fingerprint: str) -> bool:
+    expected = sha1_fingerprint.upper().replace(":", "")
+    for certificate in plist.get("DeveloperCertificates", []):
+        try:
+            digest = hashlib.sha1(bytes(certificate)).hexdigest().upper()
+        except TypeError:
+            continue
+        if digest == expected:
+            return True
+    return False
 
 
 def preflight_local(
@@ -525,12 +545,18 @@ def preflight_local(
     if any(hint in config.keychain_path.name for hint in LOGIN_KEYCHAIN_HINTS):
         failures.append(f"release keychain must not be the login keychain: {config.keychain_path}")
 
+    signing_fingerprint: str | None = None
+    if not skip_codesign and config.keychain_path.exists():
+        signing_failures, signing_fingerprint = codesign_preflight(config)
+        failures.extend(signing_failures)
+
     failures.extend(
         validate_profile(
             config.ios_profile_name,
             bundle_id=config.bundle_id,
             team_id=config.team_id,
             require_healthkit=config.require_healthkit_entitlement,
+            signing_certificate_sha1=signing_fingerprint,
         )
     )
     failures.extend(
@@ -539,11 +565,9 @@ def preflight_local(
             bundle_id=config.watch_bundle_id,
             team_id=config.team_id,
             require_healthkit=False,
+            signing_certificate_sha1=signing_fingerprint,
         )
     )
-
-    if not skip_codesign and config.keychain_path.exists():
-        failures.extend(codesign_preflight(config))
 
     return failures
 
@@ -564,7 +588,7 @@ def validate_secret_paths(config: ReleaseConfig) -> list[str]:
     return failures
 
 
-def codesign_preflight(config: ReleaseConfig) -> list[str]:
+def codesign_preflight(config: ReleaseConfig) -> tuple[list[str], str | None]:
     result = subprocess.run(
         [
             "security",
@@ -580,16 +604,24 @@ def codesign_preflight(config: ReleaseConfig) -> list[str]:
         timeout=15,
     )
     if result.returncode != 0:
-        return [
-            "release keychain is locked or unavailable to security find-identity: "
-            + (result.stderr.strip() or result.stdout.strip())
-        ]
+        return (
+            [
+                "release keychain is locked or unavailable to security find-identity: "
+                + (result.stderr.strip() or result.stdout.strip())
+            ],
+            None,
+        )
     identities = [line for line in result.stdout.splitlines() if config.sign_identity in line]
     if not identities:
-        return [f"signing identity not found in release keychain: {config.sign_identity}"]
+        return [f"signing identity not found in release keychain: {config.sign_identity}"], None
     if len(identities) > 1:
-        return [f"multiple signing identities match in release keychain: {config.sign_identity}"]
-    return []
+        return [
+            f"multiple signing identities match in release keychain: {config.sign_identity}"
+        ], None
+    match = re.search(r"\b([0-9A-Fa-f]{40})\b", identities[0])
+    if match is None:
+        return [f"could not parse signing identity fingerprint: {identities[0]}"], None
+    return [], match.group(1).upper()
 
 
 def b64url(data: bytes) -> str:

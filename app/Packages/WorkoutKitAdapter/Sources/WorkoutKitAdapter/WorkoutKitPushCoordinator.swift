@@ -37,11 +37,19 @@ public struct WorkoutKitPushCoordinator: Sendable {
                 blockingReasons: [.deliveryPathUnavailable]
             ))
         }
-        let assessment = classifier.assessDelivery(
+        var assessment = classifier.assessDelivery(
             request.plan,
             path: request.path,
             proofs: request.proofs
         )
+        if request.proofMode == .proofCollection,
+           request.path == .scheduleOnPhone
+        {
+            assessment.blockingReasons.remove(.scheduleVisibilityProofRequired)
+            assessment.blockingReasons.remove(.duplicateUpdateProofRequired)
+            assessment.unmetProofRequirements.remove(.realDeviceScheduleVisibility)
+            assessment.unmetProofRequirements.remove(.duplicateUpdateBehavior)
+        }
         guard assessment.blockingReasons.isEmpty else {
             return .blocked(assessment)
         }

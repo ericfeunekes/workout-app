@@ -35,9 +35,15 @@ final class WorkoutKitHandoffCoordinatorTests: XCTestCase {
         let coordinator = WorkoutKitHandoffCoordinator(
             attemptStore: store,
             telemetry: telemetry,
-            proofSource: .proofOnly,
+            proofSource: .proofCollection,
             now: { Self.now },
             push: { request in
+                XCTAssertEqual(request.occurrence?.year, 2026)
+                XCTAssertEqual(request.occurrence?.month, 5)
+                XCTAssertEqual(request.occurrence?.day, 22)
+                XCTAssertNil(request.occurrence?.hour)
+                XCTAssertNil(request.occurrence?.minute)
+                XCTAssertNil(request.occurrence?.second)
                 let descriptor = try! request.plan.resolvedPlanDescriptor()
                 let fingerprint = try! WorkoutKitPayloadFingerprint.make(
                     plan: request.plan,
@@ -62,8 +68,9 @@ final class WorkoutKitHandoffCoordinatorTests: XCTestCase {
         )
 
         XCTAssertEqual(result.presentation.state, .scheduled)
+        XCTAssertTrue(result.presentation.message.contains("May 22, 2026"))
+        XCTAssertFalse(result.presentation.message.contains("12:00"))
         let receipts = await store.receipts()
-        XCTAssertEqual(receipts.count, 1)
         XCTAssertEqual(receipts[0].rowID, "paceTargetRun")
         XCTAssertEqual(receipts[0].outcome, "scheduled")
         XCTAssertTrue(telemetry.events.contains { $0.name == "workoutkit.schedule_succeeded" })
@@ -84,7 +91,7 @@ final class WorkoutKitHandoffCoordinatorTests: XCTestCase {
         let store = InMemoryAttemptStore()
         let coordinator = WorkoutKitHandoffCoordinator(
             attemptStore: store,
-            proofSource: .proofOnly,
+            proofSource: .proofCollection,
             now: { Self.now },
             push: { request in
                 let descriptor = try! request.plan.resolvedPlanDescriptor()
@@ -115,7 +122,9 @@ final class WorkoutKitHandoffCoordinatorTests: XCTestCase {
         )
 
         let receipts = await store.receipts()
-        XCTAssertEqual(receipts.count, 1)
+        XCTAssertEqual(receipts.count, 2)
+        XCTAssertEqual(receipts[1].outcome, "blocked")
+        XCTAssertEqual(receipts[1].failureClass, "same_payload_already_scheduled")
     }
 
     func testChangedPayloadAfterScheduledAttemptIsBlockedAsStale() async throws {
@@ -124,7 +133,7 @@ final class WorkoutKitHandoffCoordinatorTests: XCTestCase {
         let coordinator = WorkoutKitHandoffCoordinator(
             attemptStore: store,
             telemetry: telemetry,
-            proofSource: .proofOnly,
+            proofSource: .proofCollection,
             now: { Self.now },
             push: { _ in
                 XCTFail("changed payload must not call scheduler without update proof")
@@ -135,7 +144,7 @@ final class WorkoutKitHandoffCoordinatorTests: XCTestCase {
         calendar.timeZone = TimeZone(secondsFromGMT: 0)!
         let occurrenceKey = WorkoutKitHandoffCoordinator.occurrenceKey(
             for: calendar.dateComponents(
-                [.year, .month, .day, .hour, .minute, .second],
+                [.year, .month, .day],
                 from: Self.scheduledDate
             )
         )
@@ -241,6 +250,30 @@ private actor InMemoryAttemptStore: WorkoutKitHandoffAttemptStore {
         latestSnapshots["\(workoutID.uuidString)|\(occurrenceKey)|\(path)"]
     }
 
+    func latestSuccessfulSchedule(
+        workoutID: UUID,
+        occurrenceKey: String,
+        path: String
+    ) async -> WorkoutKitHandoffAttemptSnapshot? {
+        storedReceipts.reversed().first {
+            $0.workoutID == workoutID
+                && $0.occurrenceKey == occurrenceKey
+                && $0.path == path
+                && $0.outcome == "scheduled"
+        }.map { receipt in
+            WorkoutKitHandoffAttemptSnapshot(
+                workoutID: receipt.workoutID,
+                occurrenceKey: receipt.occurrenceKey,
+                path: receipt.path,
+                payloadFingerprint: receipt.payloadFingerprint,
+                lastAttemptAt: receipt.createdAt,
+                outcome: receipt.outcome,
+                workoutPlanID: receipt.workoutPlanID,
+                failureClass: receipt.failureClass
+            )
+        }
+    }
+
     func save(
         snapshot: WorkoutKitHandoffAttemptSnapshot,
         receipt: WorkoutKitHandoffReceipt
@@ -251,6 +284,11 @@ private actor InMemoryAttemptStore: WorkoutKitHandoffAttemptStore {
 
     func receipts() async -> [WorkoutKitHandoffReceipt] {
         storedReceipts
+    }
+
+    func clear() async {
+        latestSnapshots.removeAll()
+        storedReceipts.removeAll()
     }
 }
 

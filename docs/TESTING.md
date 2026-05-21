@@ -250,7 +250,12 @@ composes:
 - `make test-sync-real-http` for FastAPI + SQLite + Swift URLSession primitive
   sync, HealthKit archive upload, and server-persistence proof
 - `make check-app` for every wired app package test plus the generated iOS app
-  scheme compile/link smoke and code-signing-free execution UI proof
+  scheme compile/link smoke, code-signing-free execution UI proof, and the
+  WorkoutKit handoff UI proof that verifies the visible `Watch` affordance and
+  scheduled presentation copy for an eligible debug proof-collection run.
+  Adapter package tests separately prove that proof-collection mode reaches the
+  scheduler boundary while still failing closed for descriptor and terminal row
+  blockers.
 
 Entitlement-dependent or signed-boundary probes, such as
 `make test-tokenstore-keychain-ui` and `make test-healthkit-ui`, sit outside

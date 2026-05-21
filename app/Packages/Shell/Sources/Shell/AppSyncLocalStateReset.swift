@@ -31,6 +31,9 @@ public enum AppSyncLocalStateReset {
             clearWorkoutCache: { try await persistence.workoutCache.clear() },
             clearSession: { try await persistence.sessionStore.clear() },
             clearLastPerformed: { await persistence.lastPerformedStore.clear() },
+            clearWorkoutKitHandoffAttempts: {
+                await persistence.workoutKitHandoffAttemptStore.clear()
+            },
             clearPushQueue: { try await persistence.pushQueueStore.clear() },
             clearSyncCursor: { await persistence.syncMetadataStore.clearLastSyncAt() },
             clearTokenRejected: { persistence.authRecoveryStore.clearTokenRejected() },
@@ -46,6 +49,9 @@ public enum AppSyncLocalStateReset {
             clearWorkoutCache: { try await persistence.workoutCache.clear() },
             clearSession: { try await persistence.sessionStore.clear() },
             clearLastPerformed: { await persistence.lastPerformedStore.clear() },
+            clearWorkoutKitHandoffAttempts: {
+                await persistence.workoutKitHandoffAttemptStore.clear()
+            },
             clearPushQueue: { try await persistence.pushQueueStore.clear() },
             clearSyncCursor: { await persistence.syncMetadataStore.clearLastSyncAt() },
             clearTokenRejected: { persistence.authRecoveryStore.clearTokenRejected() },
@@ -66,6 +72,7 @@ public enum AppSyncLocalStateReset {
         clearWorkoutCache: () async throws -> Void,
         clearSession: () async throws -> Void,
         clearLastPerformed: () async -> Void,
+        clearWorkoutKitHandoffAttempts: () async -> Void,
         clearPushQueue: () async throws -> Void,
         clearSyncCursor: () async -> Void,
         clearTokenRejected: () async -> Void,
@@ -76,6 +83,7 @@ public enum AppSyncLocalStateReset {
             try await clearWorkoutCache()
             try await clearSession()
             await clearLastPerformed()
+            await clearWorkoutKitHandoffAttempts()
             try await clearPushQueue()
             try clearToken?()
         } catch {

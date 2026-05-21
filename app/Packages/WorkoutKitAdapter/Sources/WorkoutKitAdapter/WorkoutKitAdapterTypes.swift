@@ -6,18 +6,26 @@ public struct WorkoutKitPushRequest: Sendable, Hashable, Codable {
     public var path: WorkoutKitDeliveryPath
     public var occurrence: DateComponents?
     public var proofs: WorkoutKitDeliveryProofs
+    public var proofMode: WorkoutKitPushProofMode
 
     public init(
         plan: WorkoutKitExportPlan,
         path: WorkoutKitDeliveryPath,
         occurrence: DateComponents?,
-        proofs: WorkoutKitDeliveryProofs = WorkoutKitDeliveryProofs()
+        proofs: WorkoutKitDeliveryProofs = WorkoutKitDeliveryProofs(),
+        proofMode: WorkoutKitPushProofMode = .complete
     ) {
         self.plan = plan
         self.path = path
         self.occurrence = occurrence
         self.proofs = proofs
+        self.proofMode = proofMode
     }
+}
+
+public enum WorkoutKitPushProofMode: String, Sendable, Hashable, Codable {
+    case complete
+    case proofCollection
 }
 
 public enum WorkoutKitPushOutcome: Sendable, Hashable {

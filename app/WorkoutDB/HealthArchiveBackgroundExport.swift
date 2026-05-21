@@ -15,6 +15,7 @@ enum HealthArchiveBackgroundExport {
             _ token: String
         ) -> (any HealthArchiveExportControlling),
         tokenStore: any TokenStore,
+        authRecoveryStore: (any AuthRecoveryStore)? = nil,
         telemetry: TelemetryEmitter = NoopTelemetryEmitter(),
         prepareTelemetry: HealthArchiveAppHooks.PrepareTelemetry = {},
         activeController: @MainActor @Sendable (
@@ -75,6 +76,7 @@ enum HealthArchiveBackgroundExport {
             }
             return .succeeded(summary)
         } catch SyncError.tokenRejected {
+            authRecoveryStore?.markTokenRejected()
             HealthArchiveAppHooks.emitExportEvent(
                 telemetry,
                 name: "health_archive.export_token_rejected",
@@ -170,6 +172,7 @@ private final class LiveHealthArchiveBackgroundTaskHandle: HealthArchiveBackgrou
 final class HealthArchiveBackgroundExportScheduler {
     private let scheduler: any HealthArchiveBackgroundTaskScheduling
     private let tokenStore: any TokenStore
+    private let authRecoveryStore: any AuthRecoveryStore
     private let stateStore: any HealthArchiveExportStateStore
     private let telemetry: TelemetryEmitter
     private let prepareTelemetry: HealthArchiveAppHooks.PrepareTelemetry
@@ -188,6 +191,7 @@ final class HealthArchiveBackgroundExportScheduler {
         scheduler: any HealthArchiveBackgroundTaskScheduling =
             LiveHealthArchiveBackgroundTaskScheduler(),
         tokenStore: any TokenStore,
+        authRecoveryStore: any AuthRecoveryStore = AuthRecoveryStoreImpl(),
         stateStore: any HealthArchiveExportStateStore,
         telemetry: TelemetryEmitter = NoopTelemetryEmitter(),
         prepareTelemetry: @escaping HealthArchiveAppHooks.PrepareTelemetry = {},
@@ -199,6 +203,7 @@ final class HealthArchiveBackgroundExportScheduler {
     ) {
         self.scheduler = scheduler
         self.tokenStore = tokenStore
+        self.authRecoveryStore = authRecoveryStore
         self.stateStore = stateStore
         self.telemetry = telemetry
         self.prepareTelemetry = prepareTelemetry
@@ -220,6 +225,10 @@ final class HealthArchiveBackgroundExportScheduler {
 
     func scheduleIfAutomaticEnabled() async {
         await prepareTelemetry()
+        guard !authRecoveryStore.isTokenRejected() else {
+            scheduler.cancel(identifier: HealthArchiveBackgroundExport.taskIdentifier)
+            return
+        }
         let connection: (url: URL, token: String)?
         do {
             connection = try tokenStore.loadConnection()
@@ -291,6 +300,7 @@ final class HealthArchiveBackgroundExportScheduler {
             await HealthArchiveBackgroundExport.run(
                 makeController: makeController,
                 tokenStore: tokenStore,
+                authRecoveryStore: authRecoveryStore,
                 telemetry: telemetry,
                 prepareTelemetry: prepareTelemetry,
                 activeController: { [weak self] controller in

@@ -50,8 +50,11 @@ never treats the Apple result as a full Setmark execution log.
 Scheduling is bounded. Apple's WWDC23 guidance says scheduled workouts are
 locally synced into a dedicated app section in the Workout app, visible for the
 next seven days and previous seven days, with up to 15 workouts synced at a
-time. The local SDK exposes `WorkoutScheduler.maxAllowedScheduledWorkoutCount`;
-the adapter must use the live SDK value rather than hard-coding capacity.
+time. Setmark treats the authored workout date as a calendar day, not a
+time-of-day appointment; scheduled occurrence keys are `YYYY-MM-DD`, and the
+WorkoutKit handoff sends date-only components. The local SDK exposes
+`WorkoutScheduler.maxAllowedScheduledWorkoutCount`; the adapter must use the
+live SDK value rather than hard-coding capacity.
 
 HealthKit can launch or wake the companion watch app with an
 `HKWorkoutConfiguration`, but that path starts a HealthKit workout session for
@@ -200,7 +203,7 @@ Phase 1 mapping matrix:
 | Setmark archetype | Primitive axes / dominant metric | WorkoutKit candidate | Support state | Preserved for Apple | Omitted or collapsed | Apple-visible result | Setmark result claim | Planner state |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Continuous cardio | One concrete time or distance target; sequential traversal; source activity fact required | `SingleGoalWorkout` | Native when `activity_intent` is present and the resolved descriptor preserves the single target; otherwise `needsSourceChoice` or descriptor-incomplete | Authored activity family, concrete time/distance goal, and authored indoor/outdoor location when present | Setmark block/set hierarchy; unspecified location remains unknown | Workout completed with elapsed time, distance/energy when available | No Setmark result claim from push | Block until source activity fact, exact descriptor mapping, and real-device schedule/start proof |
-| Pace-target run | One scheduled running slot with distance completion and duration observation | `PacerWorkout` | Native for `paceTargetRun` | Running activity, authored scheduled date, distance, target time, derived Apple pacing model | Setmark hierarchy, multi-slot or multi-pace structure | Workout completed against Apple pacing model | No Setmark result claim from push | Hidden unless delivery proof source permits exposure; public/TestFlight enablement still waits on real-device proof |
+| Pace-target run | One scheduled running slot with distance completion and duration observation | `PacerWorkout` | Native for `paceTargetRun` | Running activity, authored scheduled date, distance, target time, derived Apple pacing model | Setmark hierarchy, multi-slot or multi-pace structure | Workout completed against Apple pacing model | No Setmark result claim from push | Exposed in proof-collection mode for TestFlight real-device evidence; still not marked complete until visibility/startability and duplicate/update behavior are proven |
 | Pace-target ride | Distance plus target time/pace; cycling domain | `PacerWorkout` where supported | Future candidate; not emitted by current classifier/adapter | None yet | Pacer payload construction and source activity | Workout completed against Apple pacing model | No Setmark result claim from push | Block until target mapper and real-device proof |
 | Simple cardio intervals | Time-bounded work/rest steps; sequential traversal; source activity fact required | `CustomWorkout` with interval blocks/steps | Native or degraded when `activity_intent` is present and the resolved descriptor preserves the authored work/rest metric; otherwise `needsSourceChoice` or descriptor-incomplete | Authored activity family, step order, concrete work/rest cadence, and repeat count | Step names on lower OS floors; detailed Setmark hierarchy | Interval workout completion | No Setmark result claim from push | Block until source activity fact, exact descriptor mapping, and real-device proof |
 | Segmented continuous workout | Sequential blocks in one modality; time/distance segments | `CustomWorkout` | Degraded | Segment order and broad goals | Rich segment intent, result roles below Apple step level | Custom workout completion | No Setmark result claim from push | Block until adapter proof |
@@ -248,9 +251,17 @@ The current product route is deliberately narrower than the full matrix:
 - The action is exposed in normal app composition for `paceTargetRun` so
   TestFlight can collect real device delivery evidence from the same button
   path users will exercise.
+- This exposure is **proof collection**, not completed delivery proof. The app
+  may show the compact `Watch` action for eligible scheduled runs, while
+  `realDeviceScheduleVisibility` and `duplicateUpdateBehavior` remain open
+  proof requirements for the phone scheduling route. Watch-side startability is
+  real-device QA evidence for the scheduled plan, but it is not a separate
+  adapter gate on `.scheduleOnPhone`; `realDeviceStartability` gates the
+  separate `.openOnWatch` path.
 - The coordinator writes a latest-attempt snapshot plus a structured receipt for
-  every attempted schedule and emits telemetry for presentation, exposure,
-  block, tap, scheduler check, success, failure, and repeat-block states.
+  every attempted schedule, including local blockers and repeat blocks, and
+  emits telemetry for presentation, exposure, block, tap, scheduler check,
+  success, failure, and repeat-block states.
 - Same-occurrence scheduling is one-shot after local success. Changed-payload
   replacement remains blocked until real-device duplicate/update behavior is
   proven.
@@ -289,20 +300,19 @@ The current product route is deliberately narrower than the full matrix:
 
 ## Current gaps
 
-- `WATCHKIT-GAP-002`: The vendor-neutral export profile and fake-backed
-  WorkoutKit classifier exist in `app/Packages/ExportProfile`, and
-  `app/Packages/WorkoutKitAdapter` now owns the production WorkoutKit push
-  entrypoint, platform gates, real schedule/open clients, and DEBUG/test
-  diagnostics. `ExportProfile` owns the SDK-free resolved descriptor contract;
-  the adapter translates only resolved descriptors to WorkoutKit SDK objects.
-  No user-facing export button or export tracking persistence exists yet, and
-  descriptor-incomplete rows remain blocked until the pure export profile can
-  provide exact target and step mapping. Cardio-like rows also remain blocked
-  until primitives carry source activity/location semantics; the adapter no
-  longer guesses cycling for generic cardio. DEBUG diagnostics use a separate
-  synthetic descriptor for evidence collection and do not imply product export
-  readiness. Product export must wait for exact target/step mapping plus the
-  real-device proof in `WATCHKIT-GAP-004`.
+- `WATCHKIT-GAP-002`: The vendor-neutral export profile and
+  `paceTargetRun` WorkoutKit classifier exist in
+  `app/Packages/ExportProfile`, and `app/Packages/WorkoutKitAdapter` owns the
+  production WorkoutKit push entrypoint, platform gates, real schedule/open
+  clients, payload fingerprints, and DEBUG/test diagnostic probes.
+  `WorkoutKitHandoff` exposes a compact `Watch` action in proof-collection mode
+  for eligible scheduled running workouts, writes latest-attempt snapshots and
+  receipts for schedule, block, and repeat outcomes, and emits handoff funnel
+  telemetry. Remaining proof: real-device schedule visibility, duplicate/update
+  behavior, QA evidence that the scheduled plan is startable on the paired
+  Watch, and closing proof-collection mode into completed delivery proof. Other
+  rows remain blocked until their exact descriptor mapping, source facts,
+  degradation disclosure, and path proof are complete.
 - `WATCHKIT-GAP-003`: Completion/reconciliation is a separate future lane, not
   a prerequisite for push-only WorkoutKit handoff.
 - `WATCHKIT-GAP-004`: Local watchOS simulator infrastructure exists and proves

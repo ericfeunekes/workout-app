@@ -2,7 +2,7 @@ import XCTest
 
 @MainActor
 final class WorkoutKitHandoffUITests: XCTestCase {
-    func testProofOnlyPreviewActionCapturesProductionReceipt() throws {
+    func testProofCollectionPreviewActionShowsScheduledPresentation() throws {
         let app = XCUIApplication()
         app.terminate()
         defer { app.terminate() }
@@ -10,7 +10,7 @@ final class WorkoutKitHandoffUITests: XCTestCase {
             "--debug-seed",
             "--debug-today-plan",
             "--debug-workoutkit-pacer-plan",
-            "--workoutkit-proof-only-exposure",
+            "--workoutkit-proof-collection-exposure",
         ]
         app.launch()
 

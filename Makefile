@@ -68,7 +68,7 @@ SETTINGS_UI_TESTS := \
 	testHealthArchiveControlsPersistThroughRelaunch
 
 WORKOUTKIT_UI_TESTS := \
-	testProofOnlyPreviewActionCapturesProductionReceipt
+	testProofCollectionPreviewActionShowsScheduledPresentation
 
 help:  ## Show this help
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*?##/ {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
@@ -225,7 +225,7 @@ test-healthkit-watch-sim:  ## Assert the latest XcodeBuildMCP watch HealthKit li
 test-sync-real-http:  ## Run FastAPI + SQLite + Swift URLSession primitive sync probe
 	uv run pytest app/Integration/sync_real_http/test_sync_real_http.py
 
-check-app: test-app-packages test-app-xcode test-execution-ui  ## Current local app pre-QA gate
+check-app: test-app-packages test-app-xcode test-execution-ui test-workoutkit-ui  ## Current local app pre-QA gate
 
 lint:  ## ruff check + import-linter
 	uv run ruff check .

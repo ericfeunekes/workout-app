@@ -75,11 +75,17 @@ public protocol WorkoutKitHandoffAttemptStore: Sendable {
         occurrenceKey: String,
         path: String
     ) async -> WorkoutKitHandoffAttemptSnapshot?
+    func latestSuccessfulSchedule(
+        workoutID: WorkoutID,
+        occurrenceKey: String,
+        path: String
+    ) async -> WorkoutKitHandoffAttemptSnapshot?
     func save(
         snapshot: WorkoutKitHandoffAttemptSnapshot,
         receipt: WorkoutKitHandoffReceipt
     ) async
     func receipts() async -> [WorkoutKitHandoffReceipt]
+    func clear() async
 }
 
 public actor UserDefaultsWorkoutKitHandoffAttemptStore: WorkoutKitHandoffAttemptStore {
@@ -103,6 +109,30 @@ public actor UserDefaultsWorkoutKitHandoffAttemptStore: WorkoutKitHandoffAttempt
         )]
     }
 
+    public func latestSuccessfulSchedule(
+        workoutID: WorkoutID,
+        occurrenceKey: String,
+        path: String
+    ) async -> WorkoutKitHandoffAttemptSnapshot? {
+        receiptsFromDefaults().reversed().first {
+            $0.workoutID == workoutID
+                && $0.occurrenceKey == occurrenceKey
+                && $0.path == path
+                && $0.outcome == "scheduled"
+        }.map { receipt in
+            WorkoutKitHandoffAttemptSnapshot(
+                workoutID: receipt.workoutID,
+                occurrenceKey: receipt.occurrenceKey,
+                path: receipt.path,
+                payloadFingerprint: receipt.payloadFingerprint,
+                lastAttemptAt: receipt.createdAt,
+                outcome: receipt.outcome,
+                workoutPlanID: receipt.workoutPlanID,
+                failureClass: receipt.failureClass
+            )
+        }
+    }
+
     public func save(
         snapshot: WorkoutKitHandoffAttemptSnapshot,
         receipt: WorkoutKitHandoffReceipt
@@ -122,6 +152,11 @@ public actor UserDefaultsWorkoutKitHandoffAttemptStore: WorkoutKitHandoffAttempt
 
     public func receipts() async -> [WorkoutKitHandoffReceipt] {
         receiptsFromDefaults()
+    }
+
+    public func clear() async {
+        defaults.removeObject(forKey: latestKey)
+        defaults.removeObject(forKey: receiptsKey)
     }
 
     private static func snapshotKey(

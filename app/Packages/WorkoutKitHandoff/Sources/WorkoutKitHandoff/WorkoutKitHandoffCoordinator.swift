@@ -8,7 +8,7 @@ import WorkoutKitExportProfile
 
 public enum WorkoutKitHandoffProofState: String, Sendable, Hashable, Codable {
     case incomplete
-    case proofOnly
+    case proofCollection
     case complete
 }
 
@@ -29,8 +29,18 @@ public struct WorkoutKitHandoffProofSource: Sendable {
         proofs: { WorkoutKitDeliveryProofs() }
     )
 
-    public static let proofOnly = WorkoutKitHandoffProofSource(
-        state: { .proofOnly },
+    public static let proofCollection = WorkoutKitHandoffProofSource(
+        state: { .proofCollection },
+        proofs: {
+            WorkoutKitDeliveryProofs(proven: [
+                .sdkCompile,
+                .simulatorConstruction,
+            ])
+        }
+    )
+
+    public static let complete = WorkoutKitHandoffProofSource(
+        state: { .complete },
         proofs: {
             WorkoutKitDeliveryProofs(proven: [
                 .sdkCompile,
@@ -153,23 +163,16 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
             return WorkoutKitHandoffScheduleResult(presentation: presentation, receipt: nil)
         }
         guard let occurrence = occurrence(for: scheduledDate) else {
-            let presentation = unavailable("This run needs a scheduled calendar date inside Apple's supported window.")
             emit(.blockedBeforeScheduling, workoutID: workout.id, plan: plan, extra: [
                 "blockerClass": "unsupported_scheduled_date",
             ])
-            return WorkoutKitHandoffScheduleResult(presentation: presentation, receipt: nil)
-        }
-
-        let proofs = proofSource.proofs()
-        let assessment = classifier.assessDelivery(plan, path: .scheduleOnPhone, proofs: proofs)
-        guard assessment.blockingReasons.isEmpty else {
-            let blocker = stableClass(assessment.blockingReasons)
-            emit(.blockedBeforeScheduling, workoutID: workout.id, plan: plan, extra: [
-                "blockerClass": blocker,
-            ])
-            return WorkoutKitHandoffScheduleResult(
-                presentation: unavailable("Apple Workout scheduling is blocked by \(blocker)."),
-                receipt: nil
+            return await persistBlocked(
+                plan: plan,
+                occurrenceKey: scheduledDate.map { Self.occurrenceKey(for: dateOnlyComponents(from: $0)) }
+                    ?? "missing_scheduled_date",
+                payloadFingerprint: "unavailable",
+                failureClass: "unsupported_scheduled_date",
+                message: "This run needs a scheduled calendar date inside Apple's supported window."
             )
         }
 
@@ -184,14 +187,33 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
             emit(.blockedBeforeScheduling, workoutID: workout.id, plan: plan, extra: [
                 "blockerClass": "descriptor_incomplete",
             ])
-            return WorkoutKitHandoffScheduleResult(
-                presentation: unavailable("Apple Workout scheduling is missing exact target values."),
-                receipt: nil
+            return await persistBlocked(
+                plan: plan,
+                occurrenceKey: Self.occurrenceKey(for: occurrence),
+                payloadFingerprint: "descriptor_incomplete",
+                failureClass: "descriptor_incomplete",
+                message: "Apple Workout scheduling is missing exact target values."
+            )
+        }
+
+        let proofs = proofSource.proofs()
+        let assessment = deliveryAssessment(plan: plan, proofs: proofs)
+        guard assessment.blockingReasons.isEmpty else {
+            let blocker = stableClass(assessment.blockingReasons)
+            emit(.blockedBeforeScheduling, workoutID: workout.id, plan: plan, extra: [
+                "blockerClass": blocker,
+            ])
+            return await persistBlocked(
+                plan: plan,
+                occurrenceKey: Self.occurrenceKey(for: occurrence),
+                payloadFingerprint: fingerprint.value,
+                failureClass: blocker,
+                message: "Apple Workout scheduling is blocked by \(blocker)."
             )
         }
 
         let occurrenceKey = Self.occurrenceKey(for: occurrence)
-        if let latest = await attemptStore.latest(
+        if let latest = await attemptStore.latestSuccessfulSchedule(
             workoutID: plan.workoutID,
             occurrenceKey: occurrenceKey,
             path: WorkoutKitDeliveryPath.scheduleOnPhone.rawValue
@@ -208,16 +230,21 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
                 "blockerClass": blockerClass,
             ])
             if latest.payloadFingerprint != fingerprint.value {
-                return WorkoutKitHandoffScheduleResult(
-                    presentation: unavailable(
-                        "This run changed after it was scheduled. Edit/update proof is not available yet."
-                    ),
-                    receipt: nil
+                return await persistBlocked(
+                    plan: plan,
+                    occurrenceKey: occurrenceKey,
+                    payloadFingerprint: fingerprint.value,
+                    failureClass: blockerClass,
+                    message: "This run changed after it was scheduled. Edit/update proof is not available yet."
                 )
             }
-            return WorkoutKitHandoffScheduleResult(
-                presentation: scheduledCopy(date: scheduledDate),
-                receipt: nil
+            return await persistBlocked(
+                plan: plan,
+                occurrenceKey: occurrenceKey,
+                payloadFingerprint: fingerprint.value,
+                failureClass: blockerClass,
+                message: scheduledCopy(date: scheduledDate).message,
+                state: .scheduled
             )
         }
 
@@ -231,7 +258,8 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
             plan: plan,
             path: .scheduleOnPhone,
             occurrence: occurrence,
-            proofs: proofs
+            proofs: proofs,
+            proofMode: proofSource.state() == .proofCollection ? .proofCollection : .complete
         ))
         return await persist(
             outcome: outcome,
@@ -260,11 +288,7 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
             return nil
         }
 
-        let assessment = classifier.assessDelivery(
-            plan,
-            path: .scheduleOnPhone,
-            proofs: proofSource.proofs()
-        )
+        let assessment = deliveryAssessment(plan: plan, proofs: proofSource.proofs())
         guard assessment.blockingReasons.isEmpty else {
             let blocker = stableClass(assessment.blockingReasons)
             emit(.actionBlocked, workoutID: plan.workoutID, plan: plan, extra: [
@@ -284,7 +308,7 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
             ])
             return unavailable("Apple Workout scheduling is missing exact target values.")
         }
-        if let latest = await attemptStore.latest(
+        if let latest = await attemptStore.latestSuccessfulSchedule(
             workoutID: plan.workoutID,
             occurrenceKey: occurrenceKey,
             path: WorkoutKitDeliveryPath.scheduleOnPhone.rawValue
@@ -309,6 +333,25 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
             "payloadFingerprint": fingerprint.value,
         ])
         return readyCopy(plan: plan, date: scheduledDate)
+    }
+
+    private func deliveryAssessment(
+        plan: WorkoutKitExportPlan,
+        proofs: WorkoutKitDeliveryProofs
+    ) -> WorkoutKitDeliveryAssessment {
+        var assessment = classifier.assessDelivery(
+            plan,
+            path: .scheduleOnPhone,
+            proofs: proofs
+        )
+        guard proofSource.state() == .proofCollection else {
+            return assessment
+        }
+        assessment.blockingReasons.remove(.scheduleVisibilityProofRequired)
+        assessment.blockingReasons.remove(.duplicateUpdateProofRequired)
+        assessment.unmetProofRequirements.remove(.realDeviceScheduleVisibility)
+        assessment.unmetProofRequirements.remove(.duplicateUpdateBehavior)
+        return assessment
     }
 
     private func persist(
@@ -366,8 +409,53 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
                 message: "Scheduling failed: \(resolved.failureClass ?? "unknown").",
                 actionTitle: "Watch",
                 isActionable: true
-            )
+        )
         return WorkoutKitHandoffScheduleResult(presentation: presentation, receipt: receipt)
+    }
+
+    private func persistBlocked(
+        plan: WorkoutKitExportPlan,
+        occurrenceKey: String,
+        payloadFingerprint: String,
+        failureClass: String,
+        message: String,
+        state: WorkoutKitHandoffPresentationState = .unavailable
+    ) async -> WorkoutKitHandoffScheduleResult {
+        let date = now()
+        let receipt = WorkoutKitHandoffReceipt(
+            createdAt: date,
+            workoutID: plan.workoutID,
+            rowID: plan.rowID.rawValue,
+            path: WorkoutKitDeliveryPath.scheduleOnPhone.rawValue,
+            occurrenceKey: occurrenceKey,
+            payloadFingerprint: payloadFingerprint,
+            workoutPlanID: nil,
+            outcome: "blocked",
+            failureClass: failureClass
+        )
+        await attemptStore.save(
+            snapshot: WorkoutKitHandoffAttemptSnapshot(
+                workoutID: plan.workoutID,
+                occurrenceKey: occurrenceKey,
+                path: WorkoutKitDeliveryPath.scheduleOnPhone.rawValue,
+                payloadFingerprint: payloadFingerprint,
+                lastAttemptAt: date,
+                outcome: "blocked",
+                workoutPlanID: nil,
+                failureClass: failureClass
+            ),
+            receipt: receipt
+        )
+        return WorkoutKitHandoffScheduleResult(
+            presentation: WorkoutKitHandoffPresentation(
+                state: state,
+                title: "Apple Workout",
+                message: message,
+                actionTitle: state == .scheduled ? nil : "Watch",
+                isActionable: state != .scheduled
+            ),
+            receipt: receipt
+        )
     }
 
     private func resolvedOutcome(
@@ -388,16 +476,32 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
 
     private func occurrence(for scheduledDate: Date?) -> DateComponents? {
         guard let scheduledDate,
-              let earliest = calendar.date(byAdding: .day, value: -7, to: now()),
-              let latest = calendar.date(byAdding: .day, value: 7, to: now()),
-              scheduledDate >= earliest,
-              scheduledDate <= latest
+              let earliest = calendar.date(
+                byAdding: .day,
+                value: -7,
+                to: calendar.startOfDay(for: now())
+              ),
+              let latest = calendar.date(
+                byAdding: .day,
+                value: 7,
+                to: calendar.startOfDay(for: now())
+              )
         else {
             return nil
         }
-        return calendar.dateComponents(
-            [.calendar, .timeZone, .era, .year, .month, .day, .hour, .minute, .second],
-            from: scheduledDate
+        let scheduledDay = calendar.startOfDay(for: scheduledDate)
+        guard scheduledDay >= earliest, scheduledDay <= latest else { return nil }
+        return dateOnlyComponents(from: scheduledDate)
+    }
+
+    private func dateOnlyComponents(from date: Date) -> DateComponents {
+        let components = calendar.dateComponents([.era, .year, .month, .day], from: date)
+        return DateComponents(
+            calendar: calendar,
+            era: components.era,
+            year: components.year,
+            month: components.month,
+            day: components.day
         )
     }
 
@@ -411,7 +515,7 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
         return WorkoutKitHandoffPresentation(
             state: .ready,
             title: "Apple Workout",
-            message: "Schedule \(date.map(Self.displayDate) ?? "this run") in Apple's Workout app\(summary).",
+            message: "Schedule \(date.map(Self.displayDateOnly) ?? "this run") in Apple's Workout app\(summary).",
             actionTitle: "Watch",
             isActionable: true
         )
@@ -429,17 +533,17 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
         WorkoutKitHandoffPresentation(
             state: .scheduled,
             title: "Apple Workout",
-            message: "Scheduled in Apple Workout from this phone for \(date.map(Self.displayDate) ?? "the authored date")."
+            message: "Scheduled in Apple Workout from this phone for \(date.map(Self.displayDateOnly) ?? "the authored date")."
         )
     }
 
-    private static func displayDate(_ date: Date) -> String {
+    private static func displayDateOnly(_ date: Date) -> String {
         let formatter = DateFormatter()
         formatter.calendar = defaultCalendar()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
         formatter.dateStyle = .medium
-        formatter.timeStyle = .short
+        formatter.timeStyle = .none
         return formatter.string(from: date)
     }
 
@@ -448,9 +552,6 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
             components.year,
             components.month,
             components.day,
-            components.hour,
-            components.minute,
-            components.second,
         ]
         .map { String(format: "%02d", $0 ?? 0) }
         .joined(separator: "-")

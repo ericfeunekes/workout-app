@@ -117,7 +117,7 @@ extension RootView {
             workouts: todayContexts
         )
         let todayVM = TodayViewModel(planContext: planContext, telemetry: telemetry)
-        if args.contains("--workoutkit-proof-only-exposure") {
+        if args.contains("--workoutkit-proof-collection-exposure") {
             Task { @MainActor in
                 await wireDebugWorkoutKitHandoff(
                     todayVM: todayVM,
@@ -367,7 +367,7 @@ extension RootView {
         let coordinator = WorkoutKitHandoffCoordinator(
             attemptStore: persistence.workoutKitHandoffAttemptStore,
             telemetry: persistence.telemetryEmitter(),
-            proofSource: .proofOnly,
+            proofSource: .proofCollection,
             now: { now },
             push: { request in
                 let descriptor = try! request.plan.resolvedPlanDescriptor()

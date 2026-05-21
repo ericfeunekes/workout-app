@@ -60,6 +60,88 @@ final class WorkoutKitPushCoordinatorTests: XCTestCase {
         XCTAssertEqual(scheduledCount, 0)
     }
 
+    func testProofCollectionSchedulePassesOnlyPathProofBlockers() async {
+        let client = FakeWorkoutKitSchedulingClient()
+        let coordinator = makeIOSCoordinator(client: client)
+        let date = occurrence()
+        let outcome = await coordinator.push(WorkoutKitPushRequest(
+            plan: plan(),
+            path: .scheduleOnPhone,
+            occurrence: date,
+            proofs: WorkoutKitDeliveryProofs(proven: [.sdkCompile, .simulatorConstruction]),
+            proofMode: .proofCollection
+        ))
+
+        guard case .scheduled(let record) = outcome else {
+            return XCTFail("expected scheduled, got \(outcome)")
+        }
+        XCTAssertEqual(record.occurrence.year, date.year)
+        let scheduledCount = await client.scheduledRequestCount()
+        XCTAssertEqual(scheduledCount, 1)
+    }
+
+    func testProofCollectionDoesNotBypassDescriptorOrTerminalRowBlockers() async {
+        let client = FakeWorkoutKitSchedulingClient()
+        let coordinator = makeIOSCoordinator(client: client)
+        let descriptorOutcome = await coordinator.push(WorkoutKitPushRequest(
+            plan: plan(payload: WorkoutKitPayloadBlueprint(
+                shape: .singleGoal,
+                activitySelection: .cardio,
+                goal: .time
+            ), descriptor: .incomplete([.exactTargetValuesUnavailable])),
+            path: .scheduleOnPhone,
+            occurrence: occurrence(),
+            proofs: WorkoutKitDeliveryProofs(proven: [.sdkCompile, .simulatorConstruction]),
+            proofMode: .proofCollection
+        ))
+
+        guard case .blocked(let descriptorAssessment) = descriptorOutcome else {
+            return XCTFail("expected blocked, got \(descriptorOutcome)")
+        }
+        XCTAssertTrue(descriptorAssessment.blockingReasons.contains(.exactTargetValuesUnavailable))
+
+        let representationalOutcome = await coordinator.push(WorkoutKitPushRequest(
+            plan: plan(
+                payload: WorkoutKitPayloadBlueprint(
+                    shape: .singleGoal,
+                    activitySelection: .cardio,
+                    goal: .time
+                ),
+                descriptor: .incomplete([.misleadingRepresentation]),
+                unresolvedRequirements: [.misleadingRepresentation]
+            ),
+            path: .scheduleOnPhone,
+            occurrence: occurrence(),
+            proofs: WorkoutKitDeliveryProofs(proven: [.sdkCompile, .simulatorConstruction]),
+            proofMode: .proofCollection
+        ))
+
+        guard case .blocked(let representationalAssessment) = representationalOutcome else {
+            return XCTFail("expected blocked, got \(representationalOutcome)")
+        }
+        XCTAssertTrue(representationalAssessment.blockingReasons.contains(.misleadingRepresentation))
+
+        let terminalOutcome = await coordinator.push(WorkoutKitPushRequest(
+            plan: plan(
+                supportState: .setmarkOnly,
+                rowID: .setmarkOnlyRest,
+                payload: .none,
+                unresolvedRequirements: [.setmarkOnly]
+            ),
+            path: .scheduleOnPhone,
+            occurrence: occurrence(),
+            proofs: WorkoutKitDeliveryProofs(proven: [.sdkCompile, .simulatorConstruction]),
+            proofMode: .proofCollection
+        ))
+
+        guard case .blocked(let terminalAssessment) = terminalOutcome else {
+            return XCTFail("expected blocked, got \(terminalOutcome)")
+        }
+        XCTAssertTrue(terminalAssessment.blockingReasons.contains(.setmarkOnly))
+        let scheduledCount = await client.scheduledRequestCount()
+        XCTAssertEqual(scheduledCount, 0)
+    }
+
     func testDegradedScheduleWithoutAcknowledgementIsBlocked() async {
         let client = FakeWorkoutKitSchedulingClient()
         let coordinator = makeIOSCoordinator(client: client)

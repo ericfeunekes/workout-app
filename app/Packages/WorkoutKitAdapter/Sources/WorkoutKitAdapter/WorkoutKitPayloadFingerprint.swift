@@ -19,8 +19,10 @@ public struct WorkoutKitPayloadFingerprint: Sendable, Hashable, Codable, CustomS
             workoutID: plan.workoutID.uuidString.lowercased(),
             rowID: plan.rowID,
             supportState: plan.supportState,
-            pushIdentity: plan.pushIdentity,
-            degradation: plan.degradation,
+            pushIdentityRequirements: plan.pushIdentity.requirements
+                .map(\.rawValue)
+                .sorted(),
+            degradation: plan.degradation.map(NormalizedDegradation.init),
             descriptor: descriptor,
             occurrence: occurrence.map(NormalizedOccurrence.init)
         )
@@ -35,10 +37,22 @@ private struct FingerprintPayload: Encodable {
     var workoutID: String
     var rowID: WorkoutKitMatrixRowID
     var supportState: WorkoutKitSupportState
-    var pushIdentity: WorkoutKitPushIdentity
-    var degradation: WorkoutKitDegradation?
+    var pushIdentityRequirements: [String]
+    var degradation: NormalizedDegradation?
     var descriptor: WorkoutKitPlanDescriptor
     var occurrence: NormalizedOccurrence?
+}
+
+private struct NormalizedDegradation: Encodable {
+    var preservedFacts: [String]
+    var omittedFacts: [String]
+    var visibleResult: WorkoutKitVisibleResult
+
+    init(_ degradation: WorkoutKitDegradation) {
+        self.preservedFacts = degradation.preservedFacts.map(\.rawValue).sorted()
+        self.omittedFacts = degradation.omittedFacts.map(\.rawValue).sorted()
+        self.visibleResult = degradation.visibleResult
+    }
 }
 
 private struct NormalizedOccurrence: Encodable {

@@ -38,6 +38,25 @@ final class AppSyncLocalStateResetTests: XCTestCase {
             payload: .events([Event(sessionID: UUID(), kind: "test", name: "queued")]),
             enqueuedAt: Date(timeIntervalSince1970: 1_100)
         ))
+        await factory.workoutKitHandoffAttemptStore.save(
+            snapshot: WorkoutKitHandoffAttemptSnapshot(
+                workoutID: fixture.domainWorkout.id,
+                occurrenceKey: "2026-05-22",
+                path: "scheduleOnPhone",
+                payloadFingerprint: "payload",
+                lastAttemptAt: Date(timeIntervalSince1970: 1_200),
+                outcome: "scheduled"
+            ),
+            receipt: WorkoutKitHandoffReceipt(
+                workoutID: fixture.domainWorkout.id,
+                rowID: "paceTargetRun",
+                path: "scheduleOnPhone",
+                occurrenceKey: "2026-05-22",
+                payloadFingerprint: "payload",
+                workoutPlanID: nil,
+                outcome: "scheduled"
+            )
+        )
         factory.authRecoveryStore.markTokenRejected()
         try await factory.workoutCache.save(PulledDataset(
             workouts: [fixture.domainWorkout],
@@ -69,6 +88,8 @@ final class AppSyncLocalStateResetTests: XCTestCase {
         XCTAssertTrue(lastPerformed.isEmpty)
         let queued = try await factory.pushQueueStore.peek(max: 10)
         XCTAssertTrue(queued.isEmpty)
+        let handoffReceipts = await factory.workoutKitHandoffAttemptStore.receipts()
+        XCTAssertTrue(handoffReceipts.isEmpty)
         let archiveRecords = try await factory.healthArchiveStore.loadRecords(descriptorID: nil)
         XCTAssertEqual(archiveRecords.count, 1)
         XCTAssertEqual(archiveRecords[0].externalID, "sample-1")
@@ -153,6 +174,9 @@ final class AppSyncLocalStateResetTests: XCTestCase {
             clearLastPerformed: {
                 operations.append("last-performed")
             },
+            clearWorkoutKitHandoffAttempts: {
+                operations.append("workoutkit-handoff")
+            },
             clearPushQueue: {
                 operations.append("queue")
             },
@@ -173,6 +197,7 @@ final class AppSyncLocalStateResetTests: XCTestCase {
             "cache",
             "session",
             "last-performed",
+            "workoutkit-handoff",
             "queue",
             "token",
             "token-rejected",
@@ -190,6 +215,7 @@ final class AppSyncLocalStateResetTests: XCTestCase {
             },
             clearSession: {},
             clearLastPerformed: {},
+            clearWorkoutKitHandoffAttempts: {},
             clearPushQueue: {},
             clearSyncCursor: {
                 clearedCursor = true
@@ -219,6 +245,7 @@ final class AppSyncLocalStateResetTests: XCTestCase {
                 throw FailingResetError()
             },
             clearLastPerformed: {},
+            clearWorkoutKitHandoffAttempts: {},
             clearPushQueue: {},
             clearSyncCursor: {
                 clearedCursor = true
@@ -306,6 +333,8 @@ private func assertServerOwnedLocalStateCleared(factory: PersistenceFactory) asy
     XCTAssertTrue(lastPerformed.isEmpty)
     let queued = try await factory.pushQueueStore.peek(max: 10)
     XCTAssertTrue(queued.isEmpty)
+    let handoffReceipts = await factory.workoutKitHandoffAttemptStore.receipts()
+    XCTAssertTrue(handoffReceipts.isEmpty)
     let lastSyncAt = await factory.syncMetadataStore.getLastSyncAt()
     XCTAssertNil(lastSyncAt)
 }

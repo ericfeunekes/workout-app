@@ -208,6 +208,7 @@ struct RootView: View {
     ) -> HealthArchiveBackgroundExportScheduler {
         HealthArchiveBackgroundExportScheduler(
             tokenStore: persistence.tokenStore,
+            authRecoveryStore: persistence.authRecoveryStore,
             stateStore: persistence.healthArchiveExportStateStore,
             telemetry: persistence.telemetryEmitter(),
             prepareTelemetry: {

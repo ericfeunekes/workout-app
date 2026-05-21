@@ -368,7 +368,7 @@ extension AppBootstrap {
         let coordinator = WorkoutKitHandoffCoordinator(
             attemptStore: persistence.workoutKitHandoffAttemptStore,
             telemetry: telemetry,
-            proofSource: .proofOnly
+            proofSource: .proofCollection
         )
         return TodayWorkoutKitHandoffWiring(coordinator: coordinator)
     }

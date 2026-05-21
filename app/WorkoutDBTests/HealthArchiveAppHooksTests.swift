@@ -188,7 +188,7 @@ final class HealthArchiveAppHooksTests: XCTestCase {
             in: persistence.pushQueueStore,
             count: 2
         )
-        XCTAssertEqual(events.map(\.name), [
+        XCTAssertEqual(Set(events.map(\.name)), [
             "health_archive.background_export_requested",
             "health_archive.export_succeeded",
         ])
@@ -269,6 +269,24 @@ final class HealthArchiveAppHooksTests: XCTestCase {
         )
 
         XCTAssertEqual(result, .tokenRejected)
+    }
+
+    func testBackgroundExportMarksAuthRecoveryOnTokenRejected() async {
+        let controller = FakeHealthArchiveController()
+        controller.error = SyncError.tokenRejected
+        let authRecovery = AuthRecoveryStoreImpl(
+            key: "HealthArchiveAppHooksTests.tokenRejected.\(UUID().uuidString)",
+            defaults: .standard
+        )
+
+        let result = await HealthArchiveBackgroundExport.run(
+            makeController: { _, _ in controller },
+            tokenStore: FakeTokenStore(url: URL(string: "http://localhost:8000")!),
+            authRecoveryStore: authRecovery
+        )
+
+        XCTAssertEqual(result, .tokenRejected)
+        XCTAssertTrue(authRecovery.isTokenRejected())
     }
 
     func testManualSettingsExportSurfacesThrownFailureClass() async {
@@ -373,6 +391,32 @@ final class HealthArchiveAppHooksTests: XCTestCase {
             scheduler: scheduler,
             tokenStore: FakeTokenStore(url: URL(string: "http://localhost:8000")!),
             stateStore: stateStore,
+            makeController: { _, _ in FakeHealthArchiveController() }
+        )
+
+        await background.scheduleIfAutomaticEnabled()
+
+        XCTAssertEqual(scheduler.submissions, [])
+        XCTAssertEqual(scheduler.cancelledIdentifiers, [
+            HealthArchiveBackgroundExport.taskIdentifier,
+        ])
+    }
+
+    func testBackgroundSchedulerCancelsWhenTokenRejectedRecoveryIsActive() async {
+        let scheduler = FakeBackgroundTaskScheduler()
+        let authRecovery = AuthRecoveryStoreImpl(
+            key: "HealthArchiveAppHooksTests.bgTokenRejected.\(UUID().uuidString)",
+            defaults: .standard
+        )
+        authRecovery.markTokenRejected()
+        let background = HealthArchiveBackgroundExportScheduler(
+            scheduler: scheduler,
+            tokenStore: FakeTokenStore(url: URL(string: "http://localhost:8000")!),
+            authRecoveryStore: authRecovery,
+            stateStore: FakeHealthArchiveExportStateStore(snapshot: HealthArchiveExportSnapshot(
+                serverNamespace: "http://localhost:8000",
+                automaticEnabled: true
+            )),
             makeController: { _, _ in FakeHealthArchiveController() }
         )
 

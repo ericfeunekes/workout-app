@@ -46,7 +46,7 @@ gym context where taps are imprecise.
   and layout. Today must not import `FeaturesExecution`, and preview must not
   re-derive primitive cursor/progress rules in a separate preview-only model.
 - **State transitions:** preview has no live timers. `Start` is the only route
-  from preview into Setmark execution. `Schedule in Apple Workout` is a separate
+  from preview into Setmark execution. `Watch` is a separate Apple Workout
   handoff route: it schedules the authored workout occurrence in Apple's
   Workout app, records local attempt/receipt state, emits telemetry, and does
   not imply Setmark result reconciliation.

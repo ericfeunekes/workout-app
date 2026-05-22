@@ -21,15 +21,25 @@ private struct FakeState {
     var sent: [WatchMessage] = []
     var continuations: [UUID: AsyncStream<WatchMessage>.Continuation] = [:]
     var reachable: Bool
+    var isPaired: Bool
+    var isWatchAppInstalled: Bool
 }
 
 public final class FakeWatchBridge: WatchBridge {
 
     private let state: OSAllocatedUnfairLock<FakeState>
 
-    public init(isReachable: Bool = true) {
+    public init(
+        isReachable: Bool = true,
+        isPaired: Bool = true,
+        isWatchAppInstalled: Bool = true
+    ) {
         self.state = OSAllocatedUnfairLock(
-            initialState: FakeState(reachable: isReachable)
+            initialState: FakeState(
+                reachable: isReachable,
+                isPaired: isPaired,
+                isWatchAppInstalled: isWatchAppInstalled
+            )
         )
     }
 
@@ -37,6 +47,17 @@ public final class FakeWatchBridge: WatchBridge {
 
     public var isReachable: Bool {
         get async { state.withLock { $0.reachable } }
+    }
+
+    public func deviceSnapshot() async -> WatchDeviceSnapshot {
+        state.withLock {
+            WatchDeviceSnapshot(
+                isSupported: true,
+                isPaired: $0.isPaired,
+                isWatchAppInstalled: $0.isWatchAppInstalled,
+                isReachable: $0.reachable
+            )
+        }
     }
 
     public func send(_ message: WatchMessage) async throws {
@@ -79,6 +100,18 @@ public final class FakeWatchBridge: WatchBridge {
     /// Flip reachability for tests that exercise fallback paths.
     public func setReachable(_ reachable: Bool) {
         state.withLock { $0.reachable = reachable }
+    }
+
+    public func setDeviceState(
+        isPaired: Bool,
+        isWatchAppInstalled: Bool,
+        isReachable: Bool
+    ) {
+        state.withLock {
+            $0.isPaired = isPaired
+            $0.isWatchAppInstalled = isWatchAppInstalled
+            $0.reachable = isReachable
+        }
     }
 
     /// Finish every open `messages()` stream. Useful when a test needs to

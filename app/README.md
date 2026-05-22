@@ -78,11 +78,23 @@ Run the generated app scheme compile/link smoke:
 make test-app-xcode
 ```
 
-The current pre-QA gate for app-facing work is:
+For fast app-facing or cross-stack iteration that does not need simulator UI
+proof:
+
+```bash
+make pre-qa-core
+```
+
+The full pre-QA gate before simulator/device QA is:
 
 ```bash
 make pre-qa
 ```
+
+`make pre-qa` runs the independent non-simulator legs in parallel, then runs the
+app-hosted and default UI smoke tests in one serialized Xcode pass. Keep
+simulator UI targets serialized unless each run has its own simulator and
+result root.
 
 HealthKit authorization/archive projection proof requires signing and is not
 part of `make pre-qa`:

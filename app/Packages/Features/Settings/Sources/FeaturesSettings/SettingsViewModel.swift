@@ -93,12 +93,13 @@ public final class SettingsViewModel {
     let healthArchiveExportState: any HealthArchiveExportStateStore
     let healthArchiveDescriptorOptions: [HealthArchiveDescriptorOption]
     let buildInfo: BuildInfo
-    let pairedWatchProvider: @MainActor () -> String?
+    let pairedWatchProvider: @Sendable @MainActor () async -> String?
     let onSyncNow: @Sendable () async -> Void
     let onResetCache: @Sendable () async -> Void
     let onChangeServer: @Sendable () async -> Void
     let onHealthArchiveExportNow: @Sendable () async -> HealthArchiveManualExportOutcome
     let onHealthArchiveAutomaticChanged: @Sendable (Bool) async -> Void
+    let healthArchiveExportTimeoutNanoseconds: UInt64?
     let now: @MainActor () -> Date
 
     // MARK: - Cached derived state (rebuilt on mutation)
@@ -112,6 +113,7 @@ public final class SettingsViewModel {
     /// placeholder.
     var cachedLastSyncAt: Date?
     var cachedHealthArchiveExport: HealthArchiveExportSnapshot
+    var cachedPairedWatch: String?
     var transientHealthArchiveStatus: String?
     private var healthArchiveControlMutationTail: Task<Void, Never>?
 
@@ -121,8 +123,8 @@ public final class SettingsViewModel {
     ///
     /// `syncMetadata` is the single source for the "last synced" row —
     /// the shell passes in `PersistenceFactory.syncMetadataStore`, tests
-    /// and previews inject an in-memory fake. `pairedWatchProvider` is
-    /// still a closure because WatchBridge runtime isn't wired yet.
+    /// and previews inject an in-memory fake. `pairedWatchProvider` stays as
+    /// a closure so the shell can keep WatchConnectivity inside WatchBridge.
     ///
     /// The three `on*` closures let the viewModel stay ignorant of the
     /// concrete `PullService` / `WorkoutCache` — the shell passes the
@@ -136,7 +138,7 @@ public final class SettingsViewModel {
             UserDefaultsHealthArchiveExportStateStore(),
         healthArchiveDescriptorOptions: [HealthArchiveDescriptorOption] = [],
         buildInfo: BuildInfo = .fromMainBundle(),
-        pairedWatchProvider: @escaping @MainActor () -> String? = { nil },
+        pairedWatchProvider: @escaping @Sendable @MainActor () async -> String? = { nil },
         onSyncNow: @escaping @Sendable () async -> Void = {},
         onResetCache: @escaping @Sendable () async -> Void = {},
         onChangeServer: @escaping @Sendable () async -> Void = {},
@@ -144,6 +146,7 @@ public final class SettingsViewModel {
             .completed
         },
         onHealthArchiveAutomaticChanged: @escaping @Sendable (Bool) async -> Void = { _ in },
+        healthArchiveExportTimeoutNanoseconds: UInt64? = 120_000_000_000,
         now: @escaping @MainActor () -> Date = { Date() }
     ) {
         self.tokenStore = tokenStore
@@ -159,11 +162,13 @@ public final class SettingsViewModel {
         self.onChangeServer = onChangeServer
         self.onHealthArchiveExportNow = onHealthArchiveExportNow
         self.onHealthArchiveAutomaticChanged = onHealthArchiveAutomaticChanged
+        self.healthArchiveExportTimeoutNanoseconds = healthArchiveExportTimeoutNanoseconds
         self.now = now
         self.cachedAutoregDefaults = autoregStore.load()
         self.cachedUnits = unitsStore.load()
         self.cachedLastSyncAt = nil
         self.cachedHealthArchiveExport = HealthArchiveExportSnapshot()
+        self.cachedPairedWatch = nil
         self.transientHealthArchiveStatus = nil
         rebuild()
     }
@@ -183,13 +188,16 @@ public final class SettingsViewModel {
     /// Read the async `SyncMetadataStore` and rebuild. Views should call
     /// this from a `.task` on appear so the "last synced" row reflects the
     /// latest pull.
-    public func refreshAsync() async {
+    public func refreshAsync(preserveTransientHealthArchiveStatus: Bool = false) async {
         cachedLastSyncAt = await syncMetadata.getLastSyncAt()
         let serverNamespace = currentServerNamespace()
         cachedHealthArchiveExport = await healthArchiveExportState.loadSnapshot(
             serverNamespace: serverNamespace
         )
-        transientHealthArchiveStatus = nil
+        cachedPairedWatch = await pairedWatchProvider() ?? "no watch paired"
+        if !preserveTransientHealthArchiveStatus {
+            transientHealthArchiveStatus = nil
+        }
         cachedAutoregDefaults = autoregStore.load()
         cachedUnits = unitsStore.load()
         rebuild()
@@ -271,10 +279,34 @@ public final class SettingsViewModel {
 
     @discardableResult
     func exportHealthArchiveNow() -> Task<Void, Never> {
-        enqueueHealthArchiveIntent { [self] in
+        let pendingMutation = healthArchiveControlMutationTail
+        return Task { @MainActor in
+            await pendingMutation?.value
             applyHealthArchiveTransientExporting()
-            let outcome = await self.onHealthArchiveExportNow()
+            let outcome = await runHealthArchiveExportWithTimeout()
             await self.handleHealthArchiveManualExportOutcome(outcome)
+        }
+    }
+
+    private func runHealthArchiveExportWithTimeout() async -> HealthArchiveManualExportOutcome {
+        guard let timeout = healthArchiveExportTimeoutNanoseconds else {
+            return await onHealthArchiveExportNow()
+        }
+        let gate = HealthArchiveExportTimeoutGate()
+        return await withCheckedContinuation { continuation in
+            let exportTask = Task {
+                let outcome = await onHealthArchiveExportNow()
+                if await gate.tryComplete() {
+                    continuation.resume(returning: outcome)
+                }
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: timeout)
+                if await gate.tryComplete() {
+                    exportTask.cancel()
+                    continuation.resume(returning: .failed("TimedOut"))
+                }
+            }
         }
     }
 
@@ -286,8 +318,8 @@ public final class SettingsViewModel {
             await refreshAsync()
         case .unavailable(let reason):
             applyHealthArchiveTransientUnavailable(reason)
-        case .failed(_):
-            await refreshAsync()
+        case .failed(let reason):
+            applyHealthArchiveTransientUnavailable(reason)
         case .tokenRejected:
             await refreshAsync()
         }
@@ -320,7 +352,7 @@ public final class SettingsViewModel {
                 healthArchiveDescriptorOptions.map(\.id).filter { ids.contains($0) }
             ))
         }
-        await refreshAsync()
+        await refreshAsync(preserveTransientHealthArchiveStatus: true)
     }
 
     @discardableResult
@@ -334,7 +366,7 @@ public final class SettingsViewModel {
         await reloadHealthArchiveExportSnapshot()
         await healthArchiveExportState.setAutomaticEnabled(enabled)
         await onHealthArchiveAutomaticChanged(enabled)
-        await refreshAsync()
+        await refreshAsync(preserveTransientHealthArchiveStatus: true)
     }
 
     @discardableResult
@@ -355,7 +387,7 @@ public final class SettingsViewModel {
         await healthArchiveExportState.setScope(.explicitDescriptorIDs(
             healthArchiveDescriptorOptions.map(\.id).filter { ids.contains($0) }
         ))
-        await refreshAsync()
+        await refreshAsync(preserveTransientHealthArchiveStatus: true)
     }
 
     @discardableResult
@@ -387,5 +419,15 @@ public final class SettingsViewModel {
             let filtered = ids.filter { optionIDs.contains($0) }
             return Set(filtered.isEmpty ? optionIDs : filtered)
         }
+    }
+}
+
+private actor HealthArchiveExportTimeoutGate {
+    private var completed = false
+
+    func tryComplete() -> Bool {
+        guard !completed else { return false }
+        completed = true
+        return true
     }
 }

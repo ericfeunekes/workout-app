@@ -388,17 +388,19 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
             receipt: receipt
         )
 
+        var telemetryFields = [
+            "occurrenceKey": occurrenceKey,
+            "payloadFingerprint": resolved.payloadFingerprint,
+            "workoutPlanID": resolved.workoutPlanID?.uuidString.lowercased() ?? "",
+            "failureClass": resolved.failureClass ?? "",
+            "receiptID": receipt.id.uuidString.lowercased(),
+        ]
+        telemetryFields.merge(readbackTelemetryFields(outcome)) { current, _ in current }
         emit(
             resolved.outcome == "scheduled" ? .scheduleSucceeded : .scheduleFailed,
             workoutID: plan.workoutID,
             plan: plan,
-            extra: [
-                "occurrenceKey": occurrenceKey,
-                "payloadFingerprint": resolved.payloadFingerprint,
-                "workoutPlanID": resolved.workoutPlanID?.uuidString.lowercased() ?? "",
-                "failureClass": resolved.failureClass ?? "",
-                "receiptID": receipt.id.uuidString.lowercased(),
-            ]
+            extra: telemetryFields
         )
 
         let presentation = resolved.outcome == "scheduled"
@@ -472,6 +474,22 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
         case .opened:
             return ("failed", nil, expectedFingerprint, "unexpected_opened_outcome")
         }
+    }
+
+    private func readbackTelemetryFields(_ outcome: WorkoutKitPushOutcome) -> [String: String] {
+        guard case .scheduled(let record) = outcome else {
+            return [:]
+        }
+        let matching = record.matchingScheduledWorkout
+        return [
+            "scheduledReadbackCount": "\(record.readback.count)",
+            "matchingScheduledWorkoutFound": matching == nil ? "false" : "true",
+            "matchingScheduledWorkoutComplete": matching.map { String($0.complete) } ?? "",
+            "scheduledWorkoutPlanIDs": record.readback
+                .map { $0.workoutPlanID.uuidString.lowercased() }
+                .sorted()
+                .joined(separator: ","),
+        ]
     }
 
     private func occurrence(for scheduledDate: Date?) -> DateComponents? {

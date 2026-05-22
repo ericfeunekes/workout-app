@@ -7,6 +7,32 @@
 
 import Foundation
 
+public struct WatchDeviceSnapshot: Sendable, Hashable, Codable {
+    public var isSupported: Bool
+    public var isPaired: Bool
+    public var isWatchAppInstalled: Bool
+    public var isReachable: Bool
+
+    public init(
+        isSupported: Bool,
+        isPaired: Bool,
+        isWatchAppInstalled: Bool,
+        isReachable: Bool
+    ) {
+        self.isSupported = isSupported
+        self.isPaired = isPaired
+        self.isWatchAppInstalled = isWatchAppInstalled
+        self.isReachable = isReachable
+    }
+
+    public var displayValue: String {
+        guard isSupported else { return "watch unavailable" }
+        guard isPaired else { return "no watch paired" }
+        guard isWatchAppInstalled else { return "paired, app not installed" }
+        return isReachable ? "paired, reachable" : "paired, not reachable"
+    }
+}
+
 /// Transport-agnostic IPC surface between the iPhone and the Watch.
 ///
 /// Both peers implement the same protocol; direction is encoded by the
@@ -19,6 +45,11 @@ public protocol WatchBridge: Sendable {
     /// bridge already handles internally. This is surfaced mainly for UI
     /// affordances (e.g. a "watch connected" indicator).
     var isReachable: Bool { get async }
+
+    /// Current device pairing/install/reachability state. `isReachable` alone
+    /// is not pairing state: a paired watch is often unreachable while asleep,
+    /// off-wrist, or while the companion app is not foregrounded.
+    func deviceSnapshot() async -> WatchDeviceSnapshot
 
     /// Send a message to the peer. Throws `WatchBridgeError` if the session
     /// is not activated or the payload cannot be encoded. Transient

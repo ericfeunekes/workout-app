@@ -13,8 +13,25 @@ public struct WorkoutKitScheduleSupport: Sendable, Hashable, Codable {
     }
 }
 
+public struct WorkoutKitScheduledWorkoutSnapshot: Sendable, Hashable, Codable {
+    public var workoutPlanID: UUID
+    public var occurrence: DateComponents
+    public var complete: Bool
+
+    public init(
+        workoutPlanID: UUID,
+        occurrence: DateComponents,
+        complete: Bool
+    ) {
+        self.workoutPlanID = workoutPlanID
+        self.occurrence = occurrence
+        self.complete = complete
+    }
+}
+
 protocol WorkoutKitSchedulingClient: Sendable {
     func support() async throws -> WorkoutKitScheduleSupport
+    func scheduledWorkouts() async throws -> [WorkoutKitScheduledWorkoutSnapshot]
     func schedule(_ descriptor: WorkoutKitPlanDescriptor, at occurrence: DateComponents) async throws
     func open(_ descriptor: WorkoutKitPlanDescriptor) async throws
 }
@@ -42,6 +59,16 @@ actor FakeWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
 
     func support() async throws -> WorkoutKitScheduleSupport {
         currentSupport
+    }
+
+    func scheduledWorkouts() async throws -> [WorkoutKitScheduledWorkoutSnapshot] {
+        scheduledRequests.map { descriptor, occurrence in
+            WorkoutKitScheduledWorkoutSnapshot(
+                workoutPlanID: descriptor.id,
+                occurrence: occurrence,
+                complete: false
+            )
+        }
     }
 
     func scheduledRequestCount() -> Int {

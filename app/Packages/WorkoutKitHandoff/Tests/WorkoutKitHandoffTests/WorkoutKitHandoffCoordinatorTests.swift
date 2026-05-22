@@ -57,7 +57,14 @@ final class WorkoutKitHandoffCoordinatorTests: XCTestCase {
                     payloadFingerprint: fingerprint,
                     rowID: request.plan.rowID,
                     supportState: request.plan.supportState,
-                    degradation: request.plan.degradation
+                    degradation: request.plan.degradation,
+                    readback: [
+                        WorkoutKitScheduledWorkoutSnapshot(
+                            workoutPlanID: descriptor.id,
+                            occurrence: request.occurrence!,
+                            complete: false
+                        ),
+                    ]
                 ))
             }
         )
@@ -85,6 +92,9 @@ final class WorkoutKitHandoffCoordinatorTests: XCTestCase {
         XCTAssertEqual(payload["distanceMeters"] as? String, "5000")
         XCTAssertEqual(payload["targetTimeSeconds"] as? String, "1500")
         XCTAssertEqual(payload["derivedPaceSecondsPerKilometer"] as? String, "300")
+        XCTAssertEqual(payload["scheduledReadbackCount"] as? String, "1")
+        XCTAssertEqual(payload["matchingScheduledWorkoutFound"] as? String, "true")
+        XCTAssertEqual(payload["matchingScheduledWorkoutComplete"] as? String, "false")
     }
 
     func testRepeatSamePayloadIsBlockedByLatestAttempt() async throws {

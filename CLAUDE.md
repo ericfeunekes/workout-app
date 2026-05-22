@@ -151,8 +151,10 @@ make test-core           # fast Core + Sync package subset
 make test-app-packages   # every wired app package test target
 make xcodegen            # regenerate app/WorkoutDB.xcodeproj from project.yml
 make test-app-xcode      # generated app compile/link smoke on simulator
+make test-app-preqa-xcode # app-hosted + default UI pre-QA smoke in one Xcode pass
 make test-execution-ui   # execution XCUITest proof; code-signing-free
 make test-healthkit-ui   # signed HealthKit authorization/projection UI proof
+make pre-qa-core         # fast parallel non-simulator pre-QA proof
 make pre-qa              # current local pre-QA gate before docs/QA.md
 make qa-ready            # verify XcodeBuildMCP before simulator/device QA
 ```

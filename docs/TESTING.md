@@ -242,20 +242,36 @@ boundary. It is wired into `make pre-qa`.
 
 ## Pre-QA Gate
 
-`make pre-qa` is the current local gate before entering `docs/QA.md` flows. It
+Use the smallest gate that proves the claim while iterating:
+
+- `make check` for server/schema-only work
+- `make test-app-packages` for app package logic with no simulator claim
+- `make pre-qa-core` for cross-stack or app-facing inner-loop proof that does
+  not need simulator execution
+- `make pre-qa` for closeout before entering `docs/QA.md` flows
+
+`make pre-qa-core` runs the independent non-simulator legs in parallel. It
 composes:
 
 - `make check` for Python lint/import contracts, Python tests, and schema
   package tests
 - `make test-sync-real-http` for FastAPI + SQLite + Swift URLSession primitive
   sync, HealthKit archive upload, and server-persistence proof
-- `make check-app` for every wired app package test plus the generated iOS app
-  scheme compile/link smoke, code-signing-free execution UI proof, and the
-  WorkoutKit handoff UI proof that verifies the visible `Watch` affordance and
-  scheduled presentation copy for an eligible debug proof-collection run.
-  Adapter package tests separately prove that proof-collection mode reaches the
-  scheduler boundary while still failing closed for descriptor and terminal row
-  blockers.
+- `make test-app-packages` for every wired app package test
+
+`make pre-qa` runs `make pre-qa-core`, then runs the generated app scheme and
+default code-signing-free UI smoke in one serialized Xcode pass through
+`make test-app-preqa-xcode`. That Xcode pass covers app compile/link, app-hosted
+smoke tests, the execution end-confirmation UI proof, and the WorkoutKit
+handoff UI proof that verifies the visible `Watch` affordance and scheduled
+presentation copy for an eligible debug proof-collection run. Adapter package
+tests separately prove that proof-collection mode reaches the scheduler
+boundary while still failing closed for descriptor and terminal row blockers.
+
+Simulator and Xcode UI targets should stay serialized unless a target uses a
+separate simulator and result root. Parallelize deterministic non-simulator
+legs; do not run default simulator UI smoke targets concurrently against the
+same simulator.
 
 Entitlement-dependent or signed-boundary probes, such as
 `make test-tokenstore-keychain-ui` and `make test-healthkit-ui`, sit outside

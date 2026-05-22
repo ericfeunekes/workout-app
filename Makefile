@@ -1,8 +1,8 @@
 # Common commands for local development. Every target is a thin wrapper over
 # uv / swift so the source of truth stays in pyproject.toml and Package.swift.
 
-.PHONY: help setup dev test test-python test-swift test-core test-app-packages test-app-xcode test-execution-ui test-settings-ui test-workoutkit-ui test-workout-type-ui test-workout-type-ui-repeat test-tokenstore-keychain-ui test-healthkit-ui test-healthkit-watch-sim assert-healthkit-watch-sim-log \
-        test-sync-real-http check-app pre-qa lint format check regen-schema xcodegen xcode-mcp-tools qa-ready qa-runtime-ready clean \
+.PHONY: help setup dev test test-python test-swift test-core test-app-packages test-app-xcode test-app-preqa-xcode test-execution-ui test-settings-ui test-workoutkit-ui test-workout-type-ui test-workout-type-ui-repeat test-tokenstore-keychain-ui test-healthkit-ui test-healthkit-watch-sim assert-healthkit-watch-sim-log \
+        test-sync-real-http check-app pre-qa-core pre-qa lint format check regen-schema xcodegen xcode-mcp-tools qa-ready qa-runtime-ready clean \
         release-bump-build release-preflight release-repair-signing release-testflight release-status release-resume db-backup db-restore deploy deploy-rollback server-status server-logs
 
 # Deploy / ops targets. Override HOST on the command line (e.g. `make deploy HOST=workoutdb.tail-xyz.ts.net`).
@@ -18,6 +18,7 @@ XCODE_MCP_PATH := /usr/local/bin:/opt/homebrew/bin:$(PATH)
 XCODEGEN_PATH := /usr/local/bin:/opt/homebrew/bin:$(PATH)
 IOS_SIMULATOR ?= iPhone 17
 XCODE_RESULT_ROOT ?= /tmp/workoutdb-xcresults-$(shell date +%Y%m%d%H%M%S)
+PRE_QA_JOBS ?= 3
 WORKOUT_TYPE_UI_REPEAT_COUNT ?= 3
 HEALTHKIT_PREFLIGHT_DERIVED_DATA ?= $(XCODE_RESULT_ROOT)/HealthKitEntitlementPreflight
 PROBE_LOG ?=
@@ -70,6 +71,11 @@ SETTINGS_UI_TESTS := \
 WORKOUTKIT_UI_TESTS := \
 	testProofCollectionPreviewActionShowsScheduledPresentation
 
+PRE_QA_XCODE_ONLY_TESTING := \
+	-only-testing:WorkoutDBTests \
+	-only-testing:WorkoutDBUITests/ExecutionEndConfirmationUITests/testEndConfirmationOpensFromRest \
+	-only-testing:WorkoutDBUITests/WorkoutKitHandoffUITests/testProofCollectionPreviewActionShowsScheduledPresentation
+
 help:  ## Show this help
 	@awk 'BEGIN {FS = ":.*##"} /^[a-zA-Z_-]+:.*?##/ {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
@@ -119,6 +125,18 @@ test-app-xcode: xcodegen  ## Build app target and run the generated iOS app comp
 	  -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' \
 	  -configuration Debug CODE_SIGNING_ALLOWED=NO \
 	  -only-testing:WorkoutDBTests
+
+test-app-preqa-xcode: xcodegen  ## Run app-hosted and default UI pre-QA Xcode smoke in one simulator pass
+	@mkdir -p "$(XCODE_RESULT_ROOT)"
+	xcrun simctl shutdown "$(IOS_SIMULATOR)" >/dev/null 2>&1 || true
+	xcrun simctl boot "$(IOS_SIMULATOR)" >/dev/null 2>&1 || true
+	xcrun simctl bootstatus "$(IOS_SIMULATOR)" -b
+	xcrun simctl terminate "$(IOS_SIMULATOR)" com.ericfeunekes.WorkoutDB >/dev/null 2>&1 || true
+	xcodebuild test -project app/WorkoutDB.xcodeproj -scheme WorkoutDB \
+	  -destination 'platform=iOS Simulator,name=$(IOS_SIMULATOR)' \
+	  -configuration Debug CODE_SIGNING_ALLOWED=NO \
+	  -resultBundlePath "$(XCODE_RESULT_ROOT)/PreQAXcode.xcresult" \
+	  $(PRE_QA_XCODE_ONLY_TESTING)
 
 test-execution-ui: xcodegen  ## Run execution-focused XCUITests on a simulator
 	mkdir -p "$(XCODE_RESULT_ROOT)"
@@ -225,7 +243,7 @@ test-healthkit-watch-sim:  ## Assert the latest XcodeBuildMCP watch HealthKit li
 test-sync-real-http:  ## Run FastAPI + SQLite + Swift URLSession primitive sync probe
 	uv run pytest app/Integration/sync_real_http/test_sync_real_http.py
 
-check-app: test-app-packages test-app-xcode test-execution-ui test-workoutkit-ui  ## Current local app pre-QA gate
+check-app: test-app-packages test-app-preqa-xcode  ## Current local app pre-QA gate
 
 lint:  ## ruff check + import-linter
 	uv run ruff check .
@@ -239,7 +257,12 @@ check: lint  ## Server/schema verification (ruff format --check + ruff check + l
 	uv run pytest
 	cd schema && swift test
 
-pre-qa: check test-sync-real-http check-app  ## Current behavior pre-QA proof gate before entering docs/QA.md flows
+pre-qa-core:  ## Fast non-simulator pre-QA proof; runs independent legs in parallel
+	$(MAKE) -j$(PRE_QA_JOBS) check test-sync-real-http test-app-packages
+
+pre-qa:  ## Full pre-QA proof gate; parallel non-simulator legs, then serialized Xcode smoke
+	$(MAKE) pre-qa-core PRE_QA_JOBS="$(PRE_QA_JOBS)"
+	$(MAKE) test-app-preqa-xcode IOS_SIMULATOR="$(IOS_SIMULATOR)" XCODE_RESULT_ROOT="$(XCODE_RESULT_ROOT)"
 
 regen-schema:  ## Regenerate schema/openapi.json from the live FastAPI app
 	WORKOUTDB_BEARER_TOKEN=dummy WORKOUTDB_DB_PATH=/tmp/dummy.db \

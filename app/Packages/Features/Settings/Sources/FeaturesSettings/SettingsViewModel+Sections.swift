@@ -49,7 +49,7 @@ extension SettingsViewModel {
 
     func buildDeviceSection() -> SettingsSection {
         let units = cachedUnits
-        let pairedWatch = pairedWatchProvider() ?? "no watch paired"
+        let pairedWatch = cachedPairedWatch ?? "checking..."
         return SettingsSection(
             id: "device",
             title: "DEVICE",

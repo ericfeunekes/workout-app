@@ -17,6 +17,16 @@ struct LiveWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
         )
     }
 
+    func scheduledWorkouts() async throws -> [WorkoutKitScheduledWorkoutSnapshot] {
+        await WorkoutScheduler.shared.scheduledWorkouts.map { scheduled in
+            WorkoutKitScheduledWorkoutSnapshot(
+                workoutPlanID: scheduled.plan.id,
+                occurrence: scheduled.date,
+                complete: scheduled.complete
+            )
+        }
+    }
+
     func schedule(
         _ descriptor: WorkoutKitPlanDescriptor,
         at occurrence: DateComponents
@@ -131,6 +141,10 @@ struct LiveWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
     init() {}
 
     func support() async throws -> WorkoutKitScheduleSupport {
+        throw WorkoutKitAdapterError.liveWorkoutKitUnavailable
+    }
+
+    func scheduledWorkouts() async throws -> [WorkoutKitScheduledWorkoutSnapshot] {
         throw WorkoutKitAdapterError.liveWorkoutKitUnavailable
     }
 

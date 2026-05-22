@@ -76,6 +76,7 @@ final class WorkoutKitPushCoordinatorTests: XCTestCase {
             return XCTFail("expected scheduled, got \(outcome)")
         }
         XCTAssertEqual(record.occurrence.year, date.year)
+        XCTAssertEqual(record.matchingScheduledWorkout?.workoutPlanID, stableWorkoutID)
         let scheduledCount = await client.scheduledRequestCount()
         XCTAssertEqual(scheduledCount, 1)
     }
@@ -181,6 +182,8 @@ final class WorkoutKitPushCoordinatorTests: XCTestCase {
         }
         XCTAssertEqual(record.workoutPlanID, stableWorkoutID)
         XCTAssertEqual(record.occurrence.year, date.year)
+        XCTAssertEqual(record.readback.count, 1)
+        XCTAssertEqual(record.matchingScheduledWorkout?.complete, false)
         let scheduledCount = await client.scheduledRequestCount()
         XCTAssertEqual(scheduledCount, 1)
     }
@@ -482,6 +485,9 @@ final class WorkoutKitPushCoordinatorTests: XCTestCase {
         )
 
         XCTAssertEqual(events.map(\.outcome), ["supported", "scheduled"])
+        XCTAssertEqual(events.last?.scheduledWorkoutPlanIDs, [
+            WorkoutKitDiagnosticProbeFixture.scheduleProbeDescriptor().id,
+        ])
         let scheduledCount = await client.scheduledRequestCount()
         XCTAssertEqual(scheduledCount, 1)
     }

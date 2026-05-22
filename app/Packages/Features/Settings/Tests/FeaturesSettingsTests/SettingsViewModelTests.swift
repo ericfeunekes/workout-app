@@ -50,13 +50,13 @@ final class SettingsViewModelTests: XCTestCase {
         XCTAssertTrue(actionDestructive(server.rows[3]))
     }
 
-    func testDeviceSectionHasPickerAndPairedWatchStub() {
+    func testDeviceSectionHasPickerAndPairedWatchSnapshot() async {
         let vm = makeViewModel()
+        await vm.refreshAsync()
         let device = vm.sections.first { $0.id == "device" }!
         XCTAssertEqual(device.rows.count, 2)
         XCTAssertTrue(isPicker(device.rows[0]))
         XCTAssertTrue(isInfo(device.rows[1]))
-        // Paired-watch stub value.
         if case .info(_, _, let value) = device.rows[1] {
             XCTAssertEqual(value, "no watch paired")
         } else {
@@ -350,6 +350,71 @@ final class SettingsViewModelTests: XCTestCase {
         await exportTask.value
 
         XCTAssertTrue(box.scopeCompletedAtExport)
+    }
+
+    func testHealthArchiveExportNowDoesNotBlockLaterScopeMutation() async {
+        final class Box: @unchecked Sendable {
+            var exportContinuation: CheckedContinuation<Void, Never>?
+            var startedContinuations: [CheckedContinuation<Void, Never>] = []
+
+            func markStarted() {
+                let continuations = startedContinuations
+                startedContinuations.removeAll()
+                for continuation in continuations {
+                    continuation.resume()
+                }
+            }
+
+            func waitForStart() async {
+                if exportContinuation != nil { return }
+                await withCheckedContinuation { continuation in
+                    startedContinuations.append(continuation)
+                }
+            }
+        }
+        let box = Box()
+        let store = FakeHealthArchiveExportStateStore()
+        let vm = makeViewModel(
+            healthArchiveStore: store,
+            healthArchiveDescriptorOptions: [
+                HealthArchiveDescriptorOption(id: "heart", label: "heart rate"),
+                HealthArchiveDescriptorOption(id: "steps", label: "steps"),
+            ],
+            onHealthArchiveExportNow: {
+                await withCheckedContinuation { continuation in
+                    box.exportContinuation = continuation
+                    box.markStarted()
+                }
+                return .completed
+            }
+        )
+
+        let exportTask = vm.exportHealthArchiveNow()
+        await box.waitForStart()
+
+        let scopeTask = vm.pickHealthArchiveScopeMode("custom")
+        await scopeTask.value
+
+        XCTAssertEqual(store.snapshot.scope, .explicitDescriptorIDs(["heart", "steps"]))
+        XCTAssertEqual(firstInfoValue(in: vm, rowID: "health-archive.status"), "exporting")
+
+        box.exportContinuation?.resume()
+        await exportTask.value
+    }
+
+    func testHealthArchiveExportNowTimesOutInsteadOfStayingExporting() async {
+        let vm = makeViewModel(
+            onHealthArchiveExportNow: {
+                try? await Task.sleep(nanoseconds: 5_000_000_000)
+                return .completed
+            },
+            healthArchiveExportTimeoutNanoseconds: 1_000_000
+        )
+
+        let exportTask = vm.exportHealthArchiveNow()
+        await exportTask.value
+
+        XCTAssertEqual(firstInfoValue(in: vm, rowID: "health-archive.status"), "failed · TimedOut")
     }
 
     func testHealthArchiveStatusRendersSucceededAndFailedSnapshots() async {
@@ -694,6 +759,7 @@ final class SettingsViewModelTests: XCTestCase {
             .completed
         },
         onHealthArchiveAutomaticChanged: @escaping @Sendable (Bool) async -> Void = { _ in },
+        healthArchiveExportTimeoutNanoseconds: UInt64? = 120_000_000_000,
         now: Date = Date(timeIntervalSince1970: 10_000)
     ) -> SettingsViewModel {
         // Tests can either pass in a prepared `syncStore` or supply the
@@ -713,6 +779,7 @@ final class SettingsViewModelTests: XCTestCase {
             onChangeServer: onChangeServer,
             onHealthArchiveExportNow: onHealthArchiveExportNow,
             onHealthArchiveAutomaticChanged: onHealthArchiveAutomaticChanged,
+            healthArchiveExportTimeoutNanoseconds: healthArchiveExportTimeoutNanoseconds,
             now: { now }
         )
     }

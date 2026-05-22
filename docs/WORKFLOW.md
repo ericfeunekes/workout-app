@@ -96,7 +96,9 @@ Before closeout:
 - `make check` for Python lint/import contracts, Python tests, and schema
   package tests
 - `make check-app` for app-facing work: every wired Swift package test plus the
-  generated iOS app scheme compile/link smoke
+  generated iOS app scheme compile/link and default UI smoke
+- `make pre-qa-core` for fast cross-stack or app-facing inner-loop proof when
+  simulator execution is not part of the claim
 - `make pre-qa` before entering `docs/QA.md` on any change that spans server,
   schema, app logic, or visible iOS behavior; if the needed realistic-local
   harness is missing, route that gap before relying on QA
@@ -222,9 +224,13 @@ Quality stays high via local hygiene, not via CI fan-out:
 
 - **Pre-commit hook**: ruff format + ruff check --fix on staged files.
 - **Pre-push hook**: import-linter + full `pytest` run.
-- **Manual current local gate**: `make pre-qa` for server/schema/app package
-  tests, app scheme compile/link smoke, and code-signing-free execution UI
-  smoke. Broader timing-mode UI matrix proof stays behind
+- **Manual inner-loop gate**: `make pre-qa-core` for server/schema/app package
+  tests and the real HTTP sync probe. It runs independent non-simulator legs in
+  parallel.
+- **Manual current local gate**: `make pre-qa` for the full pre-QA proof. It
+  runs `make pre-qa-core`, then one serialized Xcode pass for app scheme
+  compile/link, app-hosted smoke, code-signing-free execution UI smoke, and
+  WorkoutKit handoff UI smoke. Broader timing-mode UI matrix proof stays behind
   `make test-workout-type-ui`, and route-change alert dismissal stays opt-in
   until it has a deterministic route driver.
 - **Entitlement-dependent UI proof**: run named signed targets such as

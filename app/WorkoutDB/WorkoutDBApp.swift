@@ -346,6 +346,9 @@ struct RootView: View {
             syncMetadata: persistence.syncMetadataStore,
             healthArchiveExportState: persistence.healthArchiveExportStateStore,
             healthArchiveDescriptorOptions: healthArchiveDescriptorOptions(),
+            pairedWatchProvider: { @MainActor in
+                await watchBridge.deviceSnapshot().displayValue
+            },
             onSyncNow: { @MainActor in
                 await rerunBootstrapFromReady()
             },

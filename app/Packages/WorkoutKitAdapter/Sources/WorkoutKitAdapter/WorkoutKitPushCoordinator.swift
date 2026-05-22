@@ -77,6 +77,7 @@ public struct WorkoutKitPushCoordinator: Sendable {
                     return .failed(.capacityExceeded(maxAllowed: support.maxAllowedCount))
                 }
                 try await client.schedule(descriptor, at: occurrence)
+                let scheduledWorkouts = try await client.scheduledWorkouts()
                 return .scheduled(WorkoutKitScheduledRecord(
                     workoutID: request.plan.workoutID,
                     workoutPlanID: descriptor.id,
@@ -84,7 +85,8 @@ public struct WorkoutKitPushCoordinator: Sendable {
                     payloadFingerprint: fingerprint,
                     rowID: request.plan.rowID,
                     supportState: request.plan.supportState,
-                    degradation: request.plan.degradation
+                    degradation: request.plan.degradation,
+                    readback: scheduledWorkouts
                 ))
 
             case .openOnWatch:

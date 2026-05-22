@@ -44,6 +44,7 @@ public struct WorkoutKitScheduledRecord: Sendable, Hashable, Codable {
     public var rowID: WorkoutKitMatrixRowID
     public var supportState: WorkoutKitSupportState
     public var degradation: WorkoutKitDegradation?
+    public var readback: [WorkoutKitScheduledWorkoutSnapshot]
 
     public init(
         workoutID: UUID,
@@ -52,7 +53,8 @@ public struct WorkoutKitScheduledRecord: Sendable, Hashable, Codable {
         payloadFingerprint: WorkoutKitPayloadFingerprint,
         rowID: WorkoutKitMatrixRowID,
         supportState: WorkoutKitSupportState,
-        degradation: WorkoutKitDegradation?
+        degradation: WorkoutKitDegradation?,
+        readback: [WorkoutKitScheduledWorkoutSnapshot] = []
     ) {
         self.workoutID = workoutID
         self.workoutPlanID = workoutPlanID
@@ -61,6 +63,21 @@ public struct WorkoutKitScheduledRecord: Sendable, Hashable, Codable {
         self.rowID = rowID
         self.supportState = supportState
         self.degradation = degradation
+        self.readback = readback
+    }
+
+    public var matchingScheduledWorkout: WorkoutKitScheduledWorkoutSnapshot? {
+        readback.first {
+            $0.workoutPlanID == workoutPlanID
+                && Self.sameDay($0.occurrence, occurrence)
+        }
+    }
+
+    private static func sameDay(_ lhs: DateComponents, _ rhs: DateComponents) -> Bool {
+        lhs.era == rhs.era
+            && lhs.year == rhs.year
+            && lhs.month == rhs.month
+            && lhs.day == rhs.day
     }
 }
 

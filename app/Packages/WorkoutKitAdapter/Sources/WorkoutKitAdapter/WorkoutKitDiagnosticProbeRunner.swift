@@ -7,6 +7,7 @@ struct WorkoutKitDiagnosticProbeEvent: Sendable, Hashable, Codable {
     var workoutPlanID: UUID?
     var scheduledCount: Int?
     var maxAllowedCount: Int?
+    var scheduledWorkoutPlanIDs: [UUID]
     var errorDescription: String?
 
     init(
@@ -15,6 +16,7 @@ struct WorkoutKitDiagnosticProbeEvent: Sendable, Hashable, Codable {
         workoutPlanID: UUID? = nil,
         scheduledCount: Int? = nil,
         maxAllowedCount: Int? = nil,
+        scheduledWorkoutPlanIDs: [UUID] = [],
         errorDescription: String? = nil
     ) {
         self.label = label
@@ -22,6 +24,7 @@ struct WorkoutKitDiagnosticProbeEvent: Sendable, Hashable, Codable {
         self.workoutPlanID = workoutPlanID
         self.scheduledCount = scheduledCount
         self.maxAllowedCount = maxAllowedCount
+        self.scheduledWorkoutPlanIDs = scheduledWorkoutPlanIDs
         self.errorDescription = errorDescription
     }
 }
@@ -51,12 +54,14 @@ struct WorkoutKitDiagnosticProbeRunner: Sendable {
             ))
             try await client.schedule(descriptor, at: occurrence)
             let after = try await client.support()
+            let readback = try await client.scheduledWorkouts()
             events.append(WorkoutKitDiagnosticProbeEvent(
                 label: "after schedule",
                 outcome: "scheduled",
                 workoutPlanID: descriptor.id,
                 scheduledCount: after.scheduledCount,
-                maxAllowedCount: after.maxAllowedCount
+                maxAllowedCount: after.maxAllowedCount,
+                scheduledWorkoutPlanIDs: readback.map(\.workoutPlanID)
             ))
         } catch {
             events.append(WorkoutKitDiagnosticProbeEvent(

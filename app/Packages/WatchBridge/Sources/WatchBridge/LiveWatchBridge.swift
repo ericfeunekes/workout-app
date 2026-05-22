@@ -63,6 +63,40 @@ public final class LiveWatchBridge: WatchBridge, @unchecked Sendable {
         }
     }
 
+    public func deviceSnapshot() async -> WatchDeviceSnapshot {
+        guard WCSession.isSupported() else {
+            return WatchDeviceSnapshot(
+                isSupported: false,
+                isPaired: false,
+                isWatchAppInstalled: false,
+                isReachable: false
+            )
+        }
+        guard let session = delegate.session else {
+            return WatchDeviceSnapshot(
+                isSupported: true,
+                isPaired: false,
+                isWatchAppInstalled: false,
+                isReachable: false
+            )
+        }
+        #if os(iOS)
+        return WatchDeviceSnapshot(
+            isSupported: true,
+            isPaired: session.isPaired,
+            isWatchAppInstalled: session.isWatchAppInstalled,
+            isReachable: session.isReachable
+        )
+        #else
+        return WatchDeviceSnapshot(
+            isSupported: true,
+            isPaired: true,
+            isWatchAppInstalled: session.isCompanionAppInstalled,
+            isReachable: session.isReachable
+        )
+        #endif
+    }
+
     public func send(_ message: WatchMessage) async throws {
         guard let session = delegate.session, session.activationState == .activated else {
             throw WatchBridgeError.notActivated
@@ -178,6 +212,15 @@ public final class LiveWatchBridge: WatchBridge, @unchecked Sendable {
     public init() {}
 
     public var isReachable: Bool { get async { false } }
+
+    public func deviceSnapshot() async -> WatchDeviceSnapshot {
+        WatchDeviceSnapshot(
+            isSupported: false,
+            isPaired: false,
+            isWatchAppInstalled: false,
+            isReachable: false
+        )
+    }
 
     public func send(_ message: WatchMessage) async throws {
         throw WatchBridgeError.notActivated

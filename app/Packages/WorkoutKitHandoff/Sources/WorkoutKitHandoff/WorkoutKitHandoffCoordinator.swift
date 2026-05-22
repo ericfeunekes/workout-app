@@ -104,6 +104,8 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
     private let now: @Sendable () -> Date
     private let calendar: Calendar
     private let push: @Sendable (WorkoutKitPushRequest) async -> WorkoutKitPushOutcome
+    private let verifySchedule:
+        @Sendable (WorkoutKitPushRequest) async -> WorkoutKitScheduleVerificationOutcome
 
     public init(
         classifier: WorkoutKitExportClassifier = WorkoutKitExportClassifier(),
@@ -114,6 +116,10 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
         calendar: Calendar = WorkoutKitHandoffCoordinator.defaultCalendar(),
         push: @escaping @Sendable (WorkoutKitPushRequest) async -> WorkoutKitPushOutcome = {
             await WorkoutKitPushCoordinator.live().push($0)
+        },
+        verifySchedule: @escaping @Sendable (WorkoutKitPushRequest) async
+            -> WorkoutKitScheduleVerificationOutcome = {
+            await WorkoutKitPushCoordinator.live().verifySchedule($0)
         }
     ) {
         self.classifier = classifier
@@ -123,6 +129,7 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
         self.now = now
         self.calendar = calendar
         self.push = push
+        self.verifySchedule = verifySchedule
     }
 
     public static func defaultCalendar() -> Calendar {
@@ -238,13 +245,19 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
                     message: "This run changed after it was scheduled. Edit/update proof is not available yet."
                 )
             }
-            return await persistBlocked(
+            let outcome = await verifySchedule(WorkoutKitPushRequest(
+                plan: plan,
+                path: .scheduleOnPhone,
+                occurrence: occurrence,
+                proofs: proofs,
+                proofMode: proofSource.state() == .proofCollection ? .proofCollection : .complete
+            ))
+            return await persistVerification(
+                outcome: outcome,
                 plan: plan,
                 occurrenceKey: occurrenceKey,
                 payloadFingerprint: fingerprint.value,
-                failureClass: blockerClass,
-                message: scheduledCopy(date: scheduledDate).message,
-                state: .scheduled
+                scheduledDate: scheduledDate
             )
         }
 
@@ -415,6 +428,67 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
         return WorkoutKitHandoffScheduleResult(presentation: presentation, receipt: receipt)
     }
 
+    private func persistVerification(
+        outcome: WorkoutKitScheduleVerificationOutcome,
+        plan: WorkoutKitExportPlan,
+        occurrenceKey: String,
+        payloadFingerprint: String,
+        scheduledDate: Date?
+    ) async -> WorkoutKitHandoffScheduleResult {
+        let date = now()
+        let resolved = resolvedVerificationOutcome(outcome)
+        let receipt = WorkoutKitHandoffReceipt(
+            createdAt: date,
+            workoutID: plan.workoutID,
+            rowID: plan.rowID.rawValue,
+            path: WorkoutKitDeliveryPath.scheduleOnPhone.rawValue,
+            occurrenceKey: occurrenceKey,
+            payloadFingerprint: payloadFingerprint,
+            workoutPlanID: resolved.workoutPlanID,
+            outcome: resolved.outcome,
+            failureClass: resolved.failureClass
+        )
+        await attemptStore.save(
+            snapshot: WorkoutKitHandoffAttemptSnapshot(
+                workoutID: plan.workoutID,
+                occurrenceKey: occurrenceKey,
+                path: WorkoutKitDeliveryPath.scheduleOnPhone.rawValue,
+                payloadFingerprint: payloadFingerprint,
+                lastAttemptAt: date,
+                outcome: resolved.outcome,
+                workoutPlanID: resolved.workoutPlanID,
+                failureClass: resolved.failureClass
+            ),
+            receipt: receipt
+        )
+
+        var telemetryFields = [
+            "occurrenceKey": occurrenceKey,
+            "payloadFingerprint": payloadFingerprint,
+            "workoutPlanID": resolved.workoutPlanID?.uuidString.lowercased() ?? "",
+            "failureClass": resolved.failureClass ?? "",
+            "receiptID": receipt.id.uuidString.lowercased(),
+        ]
+        telemetryFields.merge(verificationTelemetryFields(outcome)) { current, _ in current }
+        emit(
+            resolved.outcome == "verified" ? .scheduleVerified : .scheduleVerificationFailed,
+            workoutID: plan.workoutID,
+            plan: plan,
+            extra: telemetryFields
+        )
+
+        let presentation = resolved.outcome == "verified"
+            ? scheduledCopy(date: scheduledDate)
+            : WorkoutKitHandoffPresentation(
+                state: .failed,
+                title: "Apple Workout",
+                message: "Could not find this scheduled workout on the phone: \(resolved.failureClass ?? "unknown").",
+                actionTitle: "Check",
+                isActionable: true
+        )
+        return WorkoutKitHandoffScheduleResult(presentation: presentation, receipt: receipt)
+    }
+
     private func persistBlocked(
         plan: WorkoutKitExportPlan,
         occurrenceKey: String,
@@ -476,6 +550,21 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
         }
     }
 
+    private func resolvedVerificationOutcome(
+        _ outcome: WorkoutKitScheduleVerificationOutcome
+    ) -> (outcome: String, workoutPlanID: UUID?, failureClass: String?) {
+        switch outcome {
+        case .found(let record):
+            return ("verified", record.workoutPlanID, nil)
+        case .missing(let record):
+            return ("missing", record.workoutPlanID, "scheduled_workout_missing")
+        case .blocked(let assessment):
+            return ("blocked", nil, stableClass(assessment.blockingReasons))
+        case .unsupportedPlatform(let error), .failed(let error):
+            return ("failed", nil, String(describing: error))
+        }
+    }
+
     private func readbackTelemetryFields(_ outcome: WorkoutKitPushOutcome) -> [String: String] {
         guard case .scheduled(let record) = outcome else {
             return [:]
@@ -490,6 +579,17 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
                 .sorted()
                 .joined(separator: ","),
         ]
+    }
+
+    private func verificationTelemetryFields(
+        _ outcome: WorkoutKitScheduleVerificationOutcome
+    ) -> [String: String] {
+        switch outcome {
+        case .found(let record), .missing(let record):
+            return readbackTelemetryFields(.scheduled(record))
+        case .blocked, .unsupportedPlatform, .failed:
+            return [:]
+        }
     }
 
     private func occurrence(for scheduledDate: Date?) -> DateComponents? {
@@ -551,7 +651,9 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
         WorkoutKitHandoffPresentation(
             state: .scheduled,
             title: "Apple Workout",
-            message: "Scheduled in Apple Workout from this phone for \(date.map(Self.displayDateOnly) ?? "the authored date")."
+            message: "Scheduled in Apple Workout from this phone for \(date.map(Self.displayDateOnly) ?? "the authored date").",
+            actionTitle: "Check",
+            isActionable: true
         )
     }
 
@@ -668,6 +770,8 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
         case schedulerSupportChecked = "workoutkit.scheduler_support_checked"
         case scheduleSucceeded = "workoutkit.schedule_succeeded"
         case scheduleFailed = "workoutkit.schedule_failed"
+        case scheduleVerified = "workoutkit.schedule_verified"
+        case scheduleVerificationFailed = "workoutkit.schedule_verification_failed"
         case repeatBlocked = "workoutkit.repeat_blocked"
     }
 }

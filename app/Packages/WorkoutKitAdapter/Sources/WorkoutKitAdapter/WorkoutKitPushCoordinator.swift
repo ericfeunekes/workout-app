@@ -110,6 +110,56 @@ public struct WorkoutKitPushCoordinator: Sendable {
         }
     }
 
+    public func verifySchedule(
+        _ request: WorkoutKitPushRequest
+    ) async -> WorkoutKitScheduleVerificationOutcome {
+        var assessment = classifier.assessDelivery(
+            request.plan,
+            path: .scheduleOnPhone,
+            proofs: request.proofs
+        )
+        if request.proofMode == .proofCollection {
+            assessment.blockingReasons.remove(.scheduleVisibilityProofRequired)
+            assessment.blockingReasons.remove(.duplicateUpdateProofRequired)
+            assessment.unmetProofRequirements.remove(.realDeviceScheduleVisibility)
+            assessment.unmetProofRequirements.remove(.duplicateUpdateBehavior)
+        }
+        guard assessment.blockingReasons.isEmpty else {
+            return .blocked(assessment)
+        }
+        if let platformError = unsupportedPlatformError(for: .scheduleOnPhone) {
+            return .unsupportedPlatform(platformError)
+        }
+
+        do {
+            guard let occurrence = request.occurrence else {
+                return .failed(.missingOccurrenceDate)
+            }
+            let descriptor = try WorkoutKitPlanFactory.descriptor(for: request.plan)
+            let fingerprint = try WorkoutKitPayloadFingerprint.make(
+                plan: request.plan,
+                descriptor: descriptor,
+                occurrence: occurrence
+            )
+            let scheduledWorkouts = try await client.scheduledWorkouts()
+            let record = WorkoutKitScheduledRecord(
+                workoutID: request.plan.workoutID,
+                workoutPlanID: descriptor.id,
+                occurrence: occurrence,
+                payloadFingerprint: fingerprint,
+                rowID: request.plan.rowID,
+                supportState: request.plan.supportState,
+                degradation: request.plan.degradation,
+                readback: scheduledWorkouts
+            )
+            return record.matchingScheduledWorkout == nil ? .missing(record) : .found(record)
+        } catch let error as WorkoutKitAdapterError {
+            return .failed(error)
+        } catch {
+            return .failed(.liveWorkoutKitFailure(String(describing: error)))
+        }
+    }
+
     private func unsupportedPlatformError(
         for path: WorkoutKitDeliveryPath
     ) -> WorkoutKitAdapterError? {

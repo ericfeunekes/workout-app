@@ -151,17 +151,17 @@ struct WorkoutPreviewView: View {
                     .foregroundStyle(DSColors.foregroundMuted)
 
                 if handoff.isActionable {
-                    workoutKitWatchButton
+                    workoutKitActionButton(handoff.actionTitle ?? "Watch")
                 }
             }
         }
     }
 
-    private var workoutKitWatchButton: some View {
+    private func workoutKitActionButton(_ title: String) -> some View {
         Button {
             onScheduleWorkoutKit()
         } label: {
-            Label("Watch", systemImage: "applewatch")
+            Label(title, systemImage: "applewatch")
                 .font(.system(size: 15, weight: .semibold))
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
@@ -176,7 +176,7 @@ struct WorkoutPreviewView: View {
                 .clipShape(RoundedRectangle(cornerRadius: DSRadius.button, style: .continuous))
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Schedule on Watch")
+        .accessibilityLabel(title == "Check" ? "Check Apple Workout" : "Schedule on Watch")
         .accessibilityIdentifier("today.preview.workoutkit.schedule.\(detail.id.uuidString)")
     }
 

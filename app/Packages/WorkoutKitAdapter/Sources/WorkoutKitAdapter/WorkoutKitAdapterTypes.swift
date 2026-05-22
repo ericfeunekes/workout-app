@@ -36,6 +36,14 @@ public enum WorkoutKitPushOutcome: Sendable, Hashable {
     case failed(WorkoutKitAdapterError)
 }
 
+public enum WorkoutKitScheduleVerificationOutcome: Sendable, Hashable {
+    case blocked(WorkoutKitDeliveryAssessment)
+    case found(WorkoutKitScheduledRecord)
+    case missing(WorkoutKitScheduledRecord)
+    case unsupportedPlatform(WorkoutKitAdapterError)
+    case failed(WorkoutKitAdapterError)
+}
+
 public struct WorkoutKitScheduledRecord: Sendable, Hashable, Codable {
     public var workoutID: UUID
     public var workoutPlanID: UUID

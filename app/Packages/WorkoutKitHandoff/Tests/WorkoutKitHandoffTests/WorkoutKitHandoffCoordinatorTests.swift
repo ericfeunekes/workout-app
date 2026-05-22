@@ -75,6 +75,8 @@ final class WorkoutKitHandoffCoordinatorTests: XCTestCase {
         )
 
         XCTAssertEqual(result.presentation.state, .scheduled)
+        XCTAssertEqual(result.presentation.actionTitle, "Check")
+        XCTAssertTrue(result.presentation.isActionable)
         XCTAssertTrue(result.presentation.message.contains("May 22, 2026"))
         XCTAssertFalse(result.presentation.message.contains("12:00"))
         let receipts = await store.receipts()
@@ -97,10 +99,12 @@ final class WorkoutKitHandoffCoordinatorTests: XCTestCase {
         XCTAssertEqual(payload["matchingScheduledWorkoutComplete"] as? String, "false")
     }
 
-    func testRepeatSamePayloadIsBlockedByLatestAttempt() async throws {
+    func testRepeatSamePayloadChecksExistingSchedule() async throws {
         let store = InMemoryAttemptStore()
+        let telemetry = CapturingTelemetryEmitter()
         let coordinator = WorkoutKitHandoffCoordinator(
             attemptStore: store,
+            telemetry: telemetry,
             proofSource: .proofCollection,
             now: { Self.now },
             push: { request in
@@ -119,6 +123,30 @@ final class WorkoutKitHandoffCoordinatorTests: XCTestCase {
                     supportState: request.plan.supportState,
                     degradation: request.plan.degradation
                 ))
+            },
+            verifySchedule: { request in
+                let descriptor = try! request.plan.resolvedPlanDescriptor()
+                let fingerprint = try! WorkoutKitPayloadFingerprint.make(
+                    plan: request.plan,
+                    descriptor: descriptor,
+                    occurrence: request.occurrence
+                )
+                return .found(WorkoutKitScheduledRecord(
+                    workoutID: request.plan.workoutID,
+                    workoutPlanID: descriptor.id,
+                    occurrence: request.occurrence!,
+                    payloadFingerprint: fingerprint,
+                    rowID: request.plan.rowID,
+                    supportState: request.plan.supportState,
+                    degradation: request.plan.degradation,
+                    readback: [
+                        WorkoutKitScheduledWorkoutSnapshot(
+                            workoutPlanID: descriptor.id,
+                            occurrence: request.occurrence!,
+                            complete: false
+                        ),
+                    ]
+                ))
             }
         )
 
@@ -126,15 +154,19 @@ final class WorkoutKitHandoffCoordinatorTests: XCTestCase {
             workout: Self.runningPacerWorkout,
             scheduledDate: Self.scheduledDate
         )
-        _ = await coordinator.schedule(
+        let repeatResult = await coordinator.schedule(
             workout: Self.runningPacerWorkout,
             scheduledDate: Self.scheduledDate
         )
 
+        XCTAssertEqual(repeatResult.presentation.state, .scheduled)
+        XCTAssertEqual(repeatResult.presentation.actionTitle, "Check")
+        XCTAssertTrue(repeatResult.presentation.isActionable)
         let receipts = await store.receipts()
         XCTAssertEqual(receipts.count, 2)
-        XCTAssertEqual(receipts[1].outcome, "blocked")
-        XCTAssertEqual(receipts[1].failureClass, "same_payload_already_scheduled")
+        XCTAssertEqual(receipts[1].outcome, "verified")
+        XCTAssertNil(receipts[1].failureClass)
+        XCTAssertTrue(telemetry.events.contains { $0.name == "workoutkit.schedule_verified" })
     }
 
     func testChangedPayloadAfterScheduledAttemptIsBlockedAsStale() async throws {

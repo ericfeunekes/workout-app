@@ -261,10 +261,11 @@ The current product route is deliberately narrower than the full matrix:
 - The coordinator writes a latest-attempt snapshot plus a structured receipt for
   every attempted schedule, including local blockers and repeat blocks, and
   emits telemetry for presentation, exposure, block, tap, scheduler check,
-  success, failure, and repeat-block states.
-- Same-occurrence scheduling is one-shot after local success. Changed-payload
-  replacement remains blocked until real-device duplicate/update behavior is
-  proven.
+  success, failure, repeat-block, and post-success verification states.
+- Same-occurrence scheduling is one-shot after local success. The visible action
+  remains present as `Check`; it re-reads Apple's scheduled workouts and reports
+  whether the expected plan/date is present. Changed-payload replacement remains
+  blocked until real-device duplicate/update behavior is proven.
 
 ## Non-goals
 
@@ -306,13 +307,16 @@ The current product route is deliberately narrower than the full matrix:
   production WorkoutKit push entrypoint, platform gates, real schedule/open
   clients, payload fingerprints, and DEBUG/test diagnostic probes.
   `WorkoutKitHandoff` exposes a compact `Watch` action in proof-collection mode
-  for eligible scheduled running workouts, writes latest-attempt snapshots and
-  receipts for schedule, block, and repeat outcomes, and emits handoff funnel
-  telemetry. Remaining proof: real-device schedule visibility, duplicate/update
-  behavior, QA evidence that the scheduled plan is startable on the paired
-  Watch, and closing proof-collection mode into completed delivery proof. Other
-  rows remain blocked until their exact descriptor mapping, source facts,
-  degradation disclosure, and path proof are complete.
+  for eligible scheduled running workouts. After local schedule success, the
+  same surface becomes `Check` and verifies the expected WorkoutKit plan/date
+  through scheduled-workout readback. The coordinator writes latest-attempt
+  snapshots and receipts for schedule, block, repeat, and verification outcomes,
+  and emits handoff funnel telemetry. Remaining proof: real-device schedule
+  visibility, duplicate/update behavior, QA evidence that the scheduled plan is
+  startable on the paired Watch, and closing proof-collection mode into
+  completed delivery proof. Other rows remain blocked until their exact
+  descriptor mapping, source facts, degradation disclosure, and path proof are
+  complete.
 - `WATCHKIT-GAP-003`: Completion/reconciliation is a separate future lane, not
   a prerequisite for push-only WorkoutKit handoff.
 - `WATCHKIT-GAP-004`: Local watchOS simulator infrastructure exists and proves

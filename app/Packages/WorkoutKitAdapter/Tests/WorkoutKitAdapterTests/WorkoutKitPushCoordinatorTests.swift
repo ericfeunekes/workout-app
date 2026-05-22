@@ -81,6 +81,52 @@ final class WorkoutKitPushCoordinatorTests: XCTestCase {
         XCTAssertEqual(scheduledCount, 1)
     }
 
+    func testVerifyScheduleReadsBackExistingScheduledWorkoutWithoutSchedulingAgain() async {
+        let client = FakeWorkoutKitSchedulingClient()
+        let coordinator = makeIOSCoordinator(client: client)
+        let date = occurrence()
+
+        _ = await coordinator.push(WorkoutKitPushRequest(
+            plan: plan(),
+            path: .scheduleOnPhone,
+            occurrence: date,
+            proofs: WorkoutKitDeliveryProofs(proven: [.sdkCompile, .simulatorConstruction]),
+            proofMode: .proofCollection
+        ))
+        let outcome = await coordinator.verifySchedule(WorkoutKitPushRequest(
+            plan: plan(),
+            path: .scheduleOnPhone,
+            occurrence: date,
+            proofs: WorkoutKitDeliveryProofs(proven: [.sdkCompile, .simulatorConstruction]),
+            proofMode: .proofCollection
+        ))
+
+        guard case .found(let record) = outcome else {
+            return XCTFail("expected found, got \(outcome)")
+        }
+        XCTAssertEqual(record.matchingScheduledWorkout?.workoutPlanID, stableWorkoutID)
+        let scheduledCount = await client.scheduledRequestCount()
+        XCTAssertEqual(scheduledCount, 1)
+    }
+
+    func testVerifyScheduleReportsMissingWhenReadbackDoesNotContainExpectedWorkout() async {
+        let client = FakeWorkoutKitSchedulingClient()
+        let coordinator = makeIOSCoordinator(client: client)
+        let outcome = await coordinator.verifySchedule(WorkoutKitPushRequest(
+            plan: plan(),
+            path: .scheduleOnPhone,
+            occurrence: occurrence(),
+            proofs: WorkoutKitDeliveryProofs(proven: [.sdkCompile, .simulatorConstruction]),
+            proofMode: .proofCollection
+        ))
+
+        guard case .missing(let record) = outcome else {
+            return XCTFail("expected missing, got \(outcome)")
+        }
+        XCTAssertNil(record.matchingScheduledWorkout)
+        XCTAssertEqual(record.readback, [])
+    }
+
     func testProofCollectionDoesNotBypassDescriptorOrTerminalRowBlockers() async {
         let client = FakeWorkoutKitSchedulingClient()
         let coordinator = makeIOSCoordinator(client: client)

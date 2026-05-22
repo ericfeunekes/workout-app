@@ -129,10 +129,16 @@ extension DTOMapping {
             return .straightSets
         case (.setBounded, .roundRobin):
             return .circuit
+        case (.timeBounded, _):
+            return .intervals
+        case (.targetBounded, .sequential), (.targetBounded, .roundRobin):
+            return .accumulate
         case (.capBounded, .amrap):
             return .amrap
         case (.capBounded, .sequential):
             return .forTime
+        case (.capBounded, .roundRobin):
+            return .circuit
         default:
             return .custom
         }
@@ -152,16 +158,57 @@ extension DTOMapping {
     ) -> String {
         guard let set else { return "{}" }
         var config: [String: Any] = [:]
-        if let intervalSec = set.timing.intervalSec {
-            config["interval_sec"] = intervalSec
-        }
-        if let capSec = set.timing.capSec {
-            config["time_cap_sec"] = capSec
-        }
-        if let rounds = set.timing.rounds {
-            config["rounds"] = rounds
+        switch timingMode(for: set) {
+        case .intervals:
+            config["work_sec"] = set.timing.intervalSec ?? 0
+            config["rest_sec"] = 0
+            config["interval_count"] = max(1, set.timing.rounds ?? set.repeatCount)
+        case .circuit:
+            config["rest_between_exercises_sec"] = 0
+            config["rest_between_rounds_sec"] = 0
+            config["logging_mode"] = "station_by_station"
+            if let capSec = set.timing.capSec {
+                config["time_cap_sec"] = capSec
+            }
+        case .amrap, .forTime:
+            if let capSec = set.timing.capSec {
+                config["time_cap_sec"] = capSec
+            }
+        case .accumulate:
+            config.merge(accumulateTargets(for: set)) { current, _ in current }
+        default:
+            if let intervalSec = set.timing.intervalSec {
+                config["interval_sec"] = intervalSec
+            }
+            if let capSec = set.timing.capSec {
+                config["time_cap_sec"] = capSec
+            }
+            if let rounds = set.timing.rounds {
+                config["rounds"] = rounds
+            }
         }
         return jsonString(config)
+    }
+
+    private static func accumulateTargets(for set: WorkoutDBSchema.PrimitiveSet) -> [String: Any] {
+        let targets = set.workTarget + set.slots.flatMap(\.workTarget)
+        var config: [String: Any] = [:]
+        if let duration = targets.first(where: {
+            $0.role == .completion && $0.metric == .duration
+        })?.value {
+            config["target_duration_sec"] = duration
+        }
+        if let reps = targets.first(where: {
+            $0.role == .completion && $0.metric == .reps
+        })?.value {
+            config["target_reps"] = Int(reps.rounded())
+        }
+        if let distance = targets.first(where: {
+            $0.role == .completion && $0.metric == .distance
+        })?.value {
+            config["target_distance_m"] = distance
+        }
+        return config
     }
 
     private static func prescriptionJSON(

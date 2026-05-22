@@ -1,4 +1,5 @@
 import Foundation
+import CoreTelemetry
 import HealthArchiveExport
 import HealthKitBridge
 import Persistence
@@ -173,7 +174,8 @@ private func makeCoordinator(
     permissions: FakeHealthPermissionBroker = FakeHealthPermissionBroker(),
     transport: any HTTPTransport,
     batch: any HealthBatchDataProvider,
-    store: PersistenceFactory
+    store: PersistenceFactory,
+    telemetry: TelemetryEmitter = NoopTelemetryEmitter()
 ) -> HealthArchiveExportCoordinator {
     let syncAPI = SyncAPI(
         transport: transport,
@@ -186,10 +188,25 @@ private func makeCoordinator(
         archiveStore: store.healthArchiveStore,
         stateStore: store.healthArchiveExportStateStore,
         syncAPI: syncAPI,
+        telemetry: telemetry,
         now: {
             ISO8601DateFormatter().date(from: "2026-05-18T12:00:00Z") ?? Date()
         }
     )
+}
+
+private final class CapturingTelemetryEmitter: TelemetryEmitter, @unchecked Sendable {
+    private let storage = CapturingTelemetryStorage()
+
+    var events: [Event] { storage.events }
+
+    func emit(_ event: Event) {
+        storage.events.append(event)
+    }
+}
+
+private final class CapturingTelemetryStorage: @unchecked Sendable {
+    nonisolated(unsafe) var events: [Event] = []
 }
 
 runAsyncCase("manual export advances cursor only after upload success") {
@@ -469,13 +486,22 @@ runAsyncCase("unsupported explicit descriptor fails before permission request") 
     try expectEqual(batch.queries.count, 0)
 }
 
-runAsyncCase("runtime reports already running for overlapping triggers") {
+runAsyncCase("runtime coalesces overlapping triggers onto active export") {
     let store = try PersistenceFactory.makeInMemory()
     let transport = FakeTransport(outcomes: [
         .archiveSuccess(cursor: "cursor-1")
     ])
     let batch = DelayedHealthBatchDataProvider(
-        result: HealthBatchResult(records: [], nextCursor: HealthBatchCursor("cursor-1")),
+        result: HealthBatchResult(
+            records: [
+                HealthDataRecord(
+                    id: "sample-1",
+                    type: HealthDataTypeRegistry.heartRate,
+                    value: .quantity(120, unit: "count/min")
+                ),
+            ],
+            nextCursor: HealthBatchCursor("cursor-1")
+        ),
         delayNanoseconds: 200_000_000
     )
     let coordinator = makeCoordinator(transport: transport, batch: batch, store: store)
@@ -490,9 +516,63 @@ runAsyncCase("runtime reports already running for overlapping triggers") {
     let firstSummary = try await first.value
 
     try expect(second.alreadyRunning, "second trigger reports already running")
-    try expectEqual(second.recordsFetched, 0)
+    try expectEqual(second.recordsFetched, 1)
+    try expectEqual(second.acknowledgedCursor, "cursor-1")
     try expectEqual(batch.queries.count, 1)
     try expect(!firstSummary.alreadyRunning, "first trigger still performs export")
+}
+
+runAsyncCase("manual export emits internal HealthKit stage telemetry") {
+    let store = try PersistenceFactory.makeInMemory()
+    let telemetry = CapturingTelemetryEmitter()
+    let transport = FakeTransport(outcomes: [
+        .archiveSuccess(cursor: "cursor-1")
+    ])
+    let batch = FakeHealthBatchDataProvider(result: HealthBatchResult(
+        records: [
+            HealthDataRecord(
+                id: "sample-1",
+                type: HealthDataTypeRegistry.heartRate,
+                value: .quantity(120, unit: "count/min")
+            ),
+        ],
+        nextCursor: HealthBatchCursor("cursor-1")
+    ))
+    let coordinator = makeCoordinator(
+        transport: transport,
+        batch: batch,
+        store: store,
+        telemetry: telemetry
+    )
+
+    _ = try await coordinator.exportNow(serverURL: URL(string: "http://localhost:8000")!)
+    let names = telemetry.events.map(\.name)
+
+    try expect(names.contains("health_archive.export_started"), "missing export start telemetry")
+    try expect(
+        names.contains("health_archive.authorization_requested"),
+        "missing authorization requested telemetry"
+    )
+    try expect(
+        names.contains("health_archive.authorization_completed"),
+        "missing authorization completed telemetry"
+    )
+    try expect(names.contains("health_archive.fetch_started"), "missing fetch start telemetry")
+    try expect(names.contains("health_archive.fetch_completed"), "missing fetch completed telemetry")
+    try expect(names.contains("health_archive.upload_started"), "missing upload start telemetry")
+    try expect(names.contains("health_archive.upload_completed"), "missing upload completed telemetry")
+    let fetchCompleted = try expect(
+        telemetry.events.first { $0.name == "health_archive.fetch_completed" },
+        "fetch telemetry event"
+    )
+    try expect(
+        fetchCompleted.dataJSON?.contains(#""recordsFetched":1"#) == true,
+        "fetch telemetry should include fetched record count"
+    )
+    try expect(
+        fetchCompleted.dataJSON?.contains("HKQuantityTypeIdentifierHeartRate") == true,
+        "fetch telemetry should include descriptor counts"
+    )
 }
 
 runAsyncCase("retired runtime suppresses stale export completion writes") {

@@ -87,11 +87,12 @@ public actor HealthArchiveExportRuntime: HealthArchiveExportControlling {
                 serverURL: serverURL,
                 isCurrent: { await self.isCurrent(currentRun.generation) }
             )
+            let summary = try await currentRun.task.value
             return HealthArchiveExportSummary(
                 trigger: trigger,
-                recordsFetched: 0,
-                tombstonesFetched: 0,
-                acknowledgedCursor: nil,
+                recordsFetched: summary.recordsFetched,
+                tombstonesFetched: summary.tombstonesFetched,
+                acknowledgedCursor: summary.acknowledgedCursor,
                 alreadyRunning: true
             )
         }
@@ -188,6 +189,7 @@ public struct HealthArchiveExportCoordinator: Sendable {
         let attemptedAt = now()
         let serverNamespace = normalizedServerNamespace(serverURL)
         let previousSnapshot = await stateStore.loadSnapshot(serverNamespace: serverNamespace)
+        var stage = "start"
         do {
             try await ensureCurrent(isCurrent)
             let descriptors = try effectiveDescriptors(for: previousSnapshot.scope)
@@ -195,6 +197,14 @@ public struct HealthArchiveExportCoordinator: Sendable {
             let scopeSlug = scopeSlug(previousSnapshot.scope)
             let requestSetKey = "\(serverNamespace)|\(scopeSlug)|\(fingerprint)"
             let storedCursor = try await archiveStore.loadCursor(requestSetKey: requestSetKey)
+            emitExportStage(
+                name: "health_archive.export_started",
+                trigger: trigger,
+                serverNamespace: serverNamespace,
+                descriptorCount: descriptors.count,
+                descriptorFingerprint: fingerprint,
+                cursorPresent: storedCursor != nil
+            )
             let runningSnapshot = HealthArchiveExportSnapshot(
                 scope: previousSnapshot.scope,
                 serverNamespace: serverNamespace,
@@ -216,7 +226,31 @@ public struct HealthArchiveExportCoordinator: Sendable {
             let requests = descriptors.map {
                 HealthDataRequest(type: $0, access: .read, delivery: .batch)
             }
+            stage = "authorization"
+            emitExportStage(
+                name: "health_archive.authorization_requested",
+                trigger: trigger,
+                serverNamespace: serverNamespace,
+                descriptorCount: descriptors.count,
+                descriptorFingerprint: fingerprint
+            )
             try await permissions.requestAuthorization(for: requests)
+            emitExportStage(
+                name: "health_archive.authorization_completed",
+                trigger: trigger,
+                serverNamespace: serverNamespace,
+                descriptorCount: descriptors.count,
+                descriptorFingerprint: fingerprint
+            )
+            stage = "fetch"
+            emitExportStage(
+                name: "health_archive.fetch_started",
+                trigger: trigger,
+                serverNamespace: serverNamespace,
+                descriptorCount: descriptors.count,
+                descriptorFingerprint: fingerprint,
+                cursorPresent: storedCursor != nil
+            )
             let result = try await batch.fetch(HealthBatchQuery(
                 requests: requests,
                 cursor: storedCursor.map { HealthBatchCursor($0.cursor) }
@@ -224,7 +258,29 @@ public struct HealthArchiveExportCoordinator: Sendable {
             let fetchedAt = now()
             let records = result.records.map(mapRecord)
             let deletions = result.deletedRecords.map { mapDeletion($0, observedAt: fetchedAt) }
+            emitExportStage(
+                name: "health_archive.fetch_completed",
+                trigger: trigger,
+                serverNamespace: serverNamespace,
+                descriptorCount: descriptors.count,
+                descriptorFingerprint: fingerprint,
+                cursorPresent: result.nextCursor != nil,
+                recordsFetched: records.count,
+                tombstonesFetched: deletions.count,
+                descriptorCounts: descriptorCounts(records)
+            )
             try await ensureCurrent(isCurrent)
+            stage = "upload"
+            emitExportStage(
+                name: "health_archive.upload_started",
+                trigger: trigger,
+                serverNamespace: serverNamespace,
+                descriptorCount: descriptors.count,
+                descriptorFingerprint: fingerprint,
+                cursorPresent: result.nextCursor != nil,
+                recordsFetched: records.count,
+                tombstonesFetched: deletions.count
+            )
             let uploadResult = try await syncAPI.uploadHealthArchive(HealthArchiveUploadRequest(
                 requestSetKey: requestSetKey,
                 serverNamespace: serverNamespace,
@@ -239,6 +295,16 @@ public struct HealthArchiveExportCoordinator: Sendable {
                     actual: uploadResult.requestSetKey
                 )
             }
+            emitExportStage(
+                name: "health_archive.upload_completed",
+                trigger: trigger,
+                serverNamespace: serverNamespace,
+                descriptorCount: descriptors.count,
+                descriptorFingerprint: fingerprint,
+                acknowledgedCursorPresent: uploadResult.acknowledgedCursor != nil,
+                recordsFetched: records.count,
+                tombstonesFetched: deletions.count
+            )
             let cursors = uploadResult.acknowledgedCursor.map {
                 [HealthArchiveCursor(
                     requestSetKey: requestSetKey,
@@ -278,6 +344,13 @@ public struct HealthArchiveExportCoordinator: Sendable {
                 acknowledgedCursor: uploadResult.acknowledgedCursor
             )
         } catch {
+            emitExportStage(
+                name: "health_archive.export_internal_failed",
+                trigger: trigger,
+                serverNamespace: serverNamespace,
+                failureClass: failureClass(for: error),
+                stage: stage
+            )
             if await isCurrent() {
                 await stateStore.saveSnapshot(HealthArchiveExportSnapshot(
                     scope: previousSnapshot.scope,
@@ -426,6 +499,50 @@ public struct HealthArchiveExportCoordinator: Sendable {
         descriptors.map(\.id).sorted().joined(separator: ",")
     }
 
+    private func descriptorCounts(_ records: [HealthArchiveRecord]) -> [String: Int] {
+        records.reduce(into: [:]) { counts, record in
+            counts[record.descriptorID, default: 0] += 1
+        }
+    }
+
+    private func emitExportStage(
+        name: String,
+        trigger: HealthArchiveExportTrigger,
+        serverNamespace: String,
+        descriptorCount: Int? = nil,
+        descriptorFingerprint: String? = nil,
+        cursorPresent: Bool? = nil,
+        acknowledgedCursorPresent: Bool? = nil,
+        recordsFetched: Int? = nil,
+        tombstonesFetched: Int? = nil,
+        descriptorCounts: [String: Int]? = nil,
+        failureClass: String? = nil,
+        stage: String? = nil
+    ) {
+        let payload = HealthArchiveCoordinatorTelemetryPayload(
+            trigger: trigger.rawValue,
+            serverNamespace: serverNamespace,
+            descriptorCount: descriptorCount,
+            descriptorFingerprint: descriptorFingerprint,
+            cursorPresent: cursorPresent,
+            acknowledgedCursorPresent: acknowledgedCursorPresent,
+            recordsFetched: recordsFetched,
+            tombstonesFetched: tombstonesFetched,
+            descriptorCounts: descriptorCounts,
+            failureClass: failureClass,
+            stage: stage
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try? encoder.encode(payload)
+        telemetry.emit(Event(
+            sessionID: TelemetrySession.id,
+            kind: "health_archive",
+            name: name,
+            dataJSON: data.flatMap { String(data: $0, encoding: .utf8) }
+        ))
+    }
+
     private func mapRecord(_ record: HealthDataRecord) -> HealthArchiveRecord {
         HealthArchiveRecord(
             externalID: record.id,
@@ -516,6 +633,20 @@ public struct HealthArchiveExportCoordinator: Sendable {
             return HealthArchiveUploadValue(kind: .unsupported, reason: reason)
         }
     }
+}
+
+private struct HealthArchiveCoordinatorTelemetryPayload: Encodable {
+    let trigger: String
+    let serverNamespace: String
+    let descriptorCount: Int?
+    let descriptorFingerprint: String?
+    let cursorPresent: Bool?
+    let acknowledgedCursorPresent: Bool?
+    let recordsFetched: Int?
+    let tombstonesFetched: Int?
+    let descriptorCounts: [String: Int]?
+    let failureClass: String?
+    let stage: String?
 }
 
 public enum HealthArchiveExportFactory {

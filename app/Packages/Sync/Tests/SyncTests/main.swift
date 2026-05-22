@@ -801,7 +801,7 @@ runCase("DTOMapping rejects zero-slot primitive sets at the execution bridge") {
     }
 }
 
-runCase("DTOMapping bridge support matrix fails closed for every unsupported primitive cell") {
+runCase("DTOMapping bridge support matrix accepts legal primitive cells") {
     let emptyWorkTarget = "[]"
     let roundsWorkTarget = """
     [
@@ -817,14 +817,14 @@ runCase("DTOMapping bridge support matrix fails closed for every unsupported pri
         (#""set_bounded""#, "sequential", emptyWorkTarget, true, "straight sets"),
         (#""set_bounded""#, "round_robin", emptyWorkTarget, true, "circuit"),
         (#""set_bounded""#, "amrap", emptyWorkTarget, false, "uncapped amrap"),
-        (#""time_bounded", "interval_sec": 60, "rounds": 3"#, "sequential", emptyWorkTarget, false, "emom sequential"),
-        (#""time_bounded", "interval_sec": 60, "rounds": 3"#, "round_robin", emptyWorkTarget, false, "emom alternating"),
-        (#""time_bounded", "interval_sec": 60, "rounds": 3"#, "amrap", roundsWorkTarget, false, "emom amrap"),
+        (#""time_bounded", "interval_sec": 60, "rounds": 3"#, "sequential", emptyWorkTarget, true, "interval sequential"),
+        (#""time_bounded", "interval_sec": 60, "rounds": 3"#, "round_robin", emptyWorkTarget, true, "interval alternating"),
+        (#""time_bounded", "interval_sec": 60, "rounds": 3"#, "amrap", roundsWorkTarget, true, "interval amrap"),
         (#""cap_bounded", "cap_sec": 300"#, "sequential", durationWorkTarget, true, "for time"),
-        (#""cap_bounded", "cap_sec": 300"#, "round_robin", durationWorkTarget, false, "capped circuit"),
+        (#""cap_bounded", "cap_sec": 300"#, "round_robin", durationWorkTarget, true, "capped circuit"),
         (#""cap_bounded", "cap_sec": 300"#, "amrap", roundsWorkTarget, true, "amrap"),
-        (#""target_bounded""#, "sequential", emptyWorkTarget, false, "target bounded sequential"),
-        (#""target_bounded""#, "round_robin", emptyWorkTarget, false, "target bounded round robin"),
+        (#""target_bounded""#, "sequential", durationWorkTarget, true, "target bounded sequential"),
+        (#""target_bounded""#, "round_robin", durationWorkTarget, true, "target bounded round robin"),
         (#""target_bounded""#, "amrap", emptyWorkTarget, false, "target bounded amrap"),
     ]
 

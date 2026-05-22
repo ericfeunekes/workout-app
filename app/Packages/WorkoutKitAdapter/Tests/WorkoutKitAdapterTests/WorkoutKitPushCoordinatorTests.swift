@@ -97,6 +97,62 @@ final class WorkoutKitPushCoordinatorTests: XCTestCase {
         XCTAssertEqual(scheduledCount, 1)
     }
 
+    func testScheduleRequestsAuthorizationBeforeScheduling() async {
+        let client = FakeWorkoutKitSchedulingClient(authorization: .notDetermined)
+        let coordinator = makeIOSCoordinator(client: client)
+        let outcome = await coordinator.push(WorkoutKitPushRequest(
+            plan: plan(),
+            path: .scheduleOnPhone,
+            occurrence: occurrence(),
+            proofs: WorkoutKitDeliveryProofs(proven: [.sdkCompile, .simulatorConstruction]),
+            proofMode: .proofCollection
+        ))
+
+        guard case .scheduled = outcome else {
+            return XCTFail("expected scheduled after authorization prompt, got \(outcome)")
+        }
+        let scheduledCount = await client.scheduledRequestCount()
+        XCTAssertEqual(scheduledCount, 1)
+    }
+
+    func testScheduleDoesNotCallSchedulerWhenAuthorizationDenied() async {
+        let client = FakeWorkoutKitSchedulingClient(
+            authorization: .notDetermined,
+            requestedAuthorization: .denied
+        )
+        let coordinator = makeIOSCoordinator(client: client)
+        let outcome = await coordinator.push(WorkoutKitPushRequest(
+            plan: plan(),
+            path: .scheduleOnPhone,
+            occurrence: occurrence(),
+            proofs: WorkoutKitDeliveryProofs(proven: [.sdkCompile, .simulatorConstruction]),
+            proofMode: .proofCollection
+        ))
+
+        XCTAssertEqual(outcome, .failed(.schedulerAuthorizationDenied(.denied)))
+        let scheduledCount = await client.scheduledRequestCount()
+        XCTAssertEqual(scheduledCount, 0)
+    }
+
+    func testSchedulePollsReadbackBeforeReportingMissingWorkout() async {
+        let client = FakeWorkoutKitSchedulingClient(hiddenReadbackCount: 2)
+        let coordinator = makeIOSCoordinator(client: client)
+        let outcome = await coordinator.push(WorkoutKitPushRequest(
+            plan: plan(),
+            path: .scheduleOnPhone,
+            occurrence: occurrence(),
+            proofs: WorkoutKitDeliveryProofs(proven: [.sdkCompile, .simulatorConstruction]),
+            proofMode: .proofCollection
+        ))
+
+        guard case .scheduled(let record) = outcome else {
+            return XCTFail("expected scheduled after delayed readback, got \(outcome)")
+        }
+        XCTAssertEqual(record.readback.count, 1)
+        let scheduledCount = await client.scheduledRequestCount()
+        XCTAssertEqual(scheduledCount, 1)
+    }
+
     func testVerifyScheduleReadsBackExistingScheduledWorkoutWithoutSchedulingAgain() async {
         let client = FakeWorkoutKitSchedulingClient()
         let coordinator = makeIOSCoordinator(client: client)
@@ -574,7 +630,11 @@ private let stableWorkoutID = UUID(uuidString: "10000000-0000-4000-8000-00000000
 private func makeIOSCoordinator(
     client: any WorkoutKitSchedulingClient
 ) -> WorkoutKitPushCoordinator {
-    WorkoutKitPushCoordinator(client: client, runtimePlatform: .iOS)
+    WorkoutKitPushCoordinator(
+        client: client,
+        runtimePlatform: .iOS,
+        readbackDelayNanoseconds: 0
+    )
 }
 
 private func makeWatchCoordinator(

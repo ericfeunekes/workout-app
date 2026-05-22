@@ -246,4 +246,5 @@ For MCP tooling, keep one canonical command path per server. Do not add repo-loc
 
 For WorkoutKit handoff work, keep the push lane separate from results reconciliation. Pushing, scheduling, or opening WorkoutKit content is one slice; HealthKit or WorkoutKit completion readback, matching, import, and Setmark reconciliation belong to a later lane unless Eric explicitly asks to combine them.
 WorkoutKit handoff actions in the app should stay compact: use the `Watch` label with an Apple Watch icon instead of long full-width scheduling copy.
+WorkoutKit scheduling must request and verify `WorkoutScheduler` authorization before `schedule(_:at:)`, then prove delivery with bounded `scheduledWorkouts` readback. A non-throwing schedule call alone is not success.
 WorkoutKit schedule success must be backed by Apple scheduled-workout readback for the matching plan/date. If later verification reports the scheduled workout missing, invalidate that local scheduled receipt path so the `Watch` action can be shown again.

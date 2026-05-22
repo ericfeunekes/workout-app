@@ -241,6 +241,33 @@ final class WorkoutKitHandoffCoordinatorTests: XCTestCase {
         XCTAssertEqual(receipts[1].failureClass, "scheduled_workout_missing")
     }
 
+    func testScheduleFailureTelemetryIncludesMissingReadbackCount() async throws {
+        let store = InMemoryAttemptStore()
+        let telemetry = CapturingTelemetryEmitter()
+        let coordinator = WorkoutKitHandoffCoordinator(
+            attemptStore: store,
+            telemetry: telemetry,
+            proofSource: .proofCollection,
+            now: { Self.now },
+            push: { _ in
+                .failed(.scheduledWorkoutMissingAfterSchedule(readbackCount: 0))
+            }
+        )
+
+        let result = await coordinator.schedule(
+            workout: Self.runningPacerWorkout,
+            scheduledDate: Self.scheduledDate
+        )
+
+        XCTAssertEqual(result.presentation.state, .failed)
+        let failureEvent = try XCTUnwrap(telemetry.events.first {
+            $0.name == "workoutkit.schedule_failed"
+        })
+        let payload = try Self.telemetryPayload(failureEvent)
+        XCTAssertEqual(payload["scheduledReadbackCount"] as? String, "0")
+        XCTAssertEqual(payload["matchingScheduledWorkoutFound"] as? String, "false")
+    }
+
     func testChangedPayloadAfterScheduledAttemptIsBlockedAsStale() async throws {
         let store = InMemoryAttemptStore()
         let telemetry = CapturingTelemetryEmitter()

@@ -567,6 +567,14 @@ public struct WorkoutKitHandoffCoordinator: Sendable {
 
     private func readbackTelemetryFields(_ outcome: WorkoutKitPushOutcome) -> [String: String] {
         guard case .scheduled(let record) = outcome else {
+            if case .failed(.scheduledWorkoutMissingAfterSchedule(let readbackCount)) = outcome {
+                return [
+                    "scheduledReadbackCount": "\(readbackCount)",
+                    "matchingScheduledWorkoutFound": "false",
+                    "matchingScheduledWorkoutComplete": "",
+                    "scheduledWorkoutPlanIDs": "",
+                ]
+            }
             return [:]
         }
         let matching = record.matchingScheduledWorkout

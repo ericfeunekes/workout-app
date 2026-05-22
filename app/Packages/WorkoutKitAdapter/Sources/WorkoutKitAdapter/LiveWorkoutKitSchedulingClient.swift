@@ -9,6 +9,14 @@ import WorkoutKit
 struct LiveWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
     init() {}
 
+    func authorizationState() async throws -> WorkoutKitSchedulerAuthorizationState {
+        await mapAuthorization(WorkoutScheduler.shared.authorizationState)
+    }
+
+    func requestAuthorization() async throws -> WorkoutKitSchedulerAuthorizationState {
+        await mapAuthorization(WorkoutScheduler.shared.requestAuthorization())
+    }
+
     func support() async throws -> WorkoutKitScheduleSupport {
         WorkoutKitScheduleSupport(
             isSupported: WorkoutScheduler.isSupported,
@@ -135,10 +143,35 @@ struct LiveWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
             .outdoor
         }
     }
+
+    private func mapAuthorization(
+        _ state: WorkoutScheduler.AuthorizationState
+    ) -> WorkoutKitSchedulerAuthorizationState {
+        switch state {
+        case .notDetermined:
+            .notDetermined
+        case .restricted:
+            .restricted
+        case .denied:
+            .denied
+        case .authorized:
+            .authorized
+        @unknown default:
+            .unknown
+        }
+    }
 }
 #else
 struct LiveWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
     init() {}
+
+    func authorizationState() async throws -> WorkoutKitSchedulerAuthorizationState {
+        throw WorkoutKitAdapterError.liveWorkoutKitUnavailable
+    }
+
+    func requestAuthorization() async throws -> WorkoutKitSchedulerAuthorizationState {
+        throw WorkoutKitAdapterError.liveWorkoutKitUnavailable
+    }
 
     func support() async throws -> WorkoutKitScheduleSupport {
         throw WorkoutKitAdapterError.liveWorkoutKitUnavailable

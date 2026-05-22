@@ -44,6 +44,14 @@ public enum WorkoutKitScheduleVerificationOutcome: Sendable, Hashable {
     case failed(WorkoutKitAdapterError)
 }
 
+public enum WorkoutKitSchedulerAuthorizationState: String, Sendable, Hashable, Codable {
+    case notDetermined
+    case restricted
+    case denied
+    case authorized
+    case unknown
+}
+
 public struct WorkoutKitScheduledRecord: Sendable, Hashable, Codable {
     public var workoutID: UUID
     public var workoutPlanID: UUID
@@ -123,6 +131,7 @@ public enum WorkoutKitAdapterError: Error, Sendable, Hashable, Codable, CustomSt
     case unsupportedPlatform(String)
     case schedulerUnavailable
     case capacityExceeded(maxAllowed: Int)
+    case schedulerAuthorizationDenied(WorkoutKitSchedulerAuthorizationState)
     case scheduledWorkoutMissingAfterSchedule(readbackCount: Int)
     case liveWorkoutKitUnavailable
     case liveWorkoutKitFailure(String)
@@ -145,6 +154,8 @@ public enum WorkoutKitAdapterError: Error, Sendable, Hashable, Codable, CustomSt
             "WorkoutKit scheduler is unavailable on this platform or device."
         case .capacityExceeded(let maxAllowed):
             "WorkoutKit scheduled workout capacity is full; max allowed is \(maxAllowed)."
+        case .schedulerAuthorizationDenied(let state):
+            "WorkoutKit scheduling authorization is \(state.rawValue)."
         case .scheduledWorkoutMissingAfterSchedule(let readbackCount):
             "WorkoutKit accepted the schedule request but did not return the workout in scheduled readback; "
                 + "readback count is \(readbackCount)."

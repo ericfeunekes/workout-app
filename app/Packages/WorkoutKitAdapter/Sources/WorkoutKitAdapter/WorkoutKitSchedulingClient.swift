@@ -30,6 +30,8 @@ public struct WorkoutKitScheduledWorkoutSnapshot: Sendable, Hashable, Codable {
 }
 
 protocol WorkoutKitSchedulingClient: Sendable {
+    func authorizationState() async throws -> WorkoutKitSchedulerAuthorizationState
+    func requestAuthorization() async throws -> WorkoutKitSchedulerAuthorizationState
     func support() async throws -> WorkoutKitScheduleSupport
     func scheduledWorkouts() async throws -> [WorkoutKitScheduledWorkoutSnapshot]
     func schedule(_ descriptor: WorkoutKitPlanDescriptor, at occurrence: DateComponents) async throws
@@ -43,6 +45,9 @@ actor FakeWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
     private var scheduleError: WorkoutKitAdapterError?
     private var openError: WorkoutKitAdapterError?
     private var hidesScheduledReadback: Bool
+    private var authorization: WorkoutKitSchedulerAuthorizationState
+    private var requestedAuthorization: WorkoutKitSchedulerAuthorizationState
+    private var hiddenReadbackRemaining: Int
 
     init(
         support: WorkoutKitScheduleSupport = WorkoutKitScheduleSupport(
@@ -52,12 +57,27 @@ actor FakeWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
         ),
         scheduleError: WorkoutKitAdapterError? = nil,
         openError: WorkoutKitAdapterError? = nil,
-        hidesScheduledReadback: Bool = false
+        hidesScheduledReadback: Bool = false,
+        authorization: WorkoutKitSchedulerAuthorizationState = .authorized,
+        requestedAuthorization: WorkoutKitSchedulerAuthorizationState = .authorized,
+        hiddenReadbackCount: Int = 0
     ) {
         self.currentSupport = support
         self.scheduleError = scheduleError
         self.openError = openError
         self.hidesScheduledReadback = hidesScheduledReadback
+        self.authorization = authorization
+        self.requestedAuthorization = requestedAuthorization
+        self.hiddenReadbackRemaining = hiddenReadbackCount
+    }
+
+    func authorizationState() async throws -> WorkoutKitSchedulerAuthorizationState {
+        authorization
+    }
+
+    func requestAuthorization() async throws -> WorkoutKitSchedulerAuthorizationState {
+        authorization = requestedAuthorization
+        return authorization
     }
 
     func support() async throws -> WorkoutKitScheduleSupport {
@@ -65,6 +85,10 @@ actor FakeWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
     }
 
     func scheduledWorkouts() async throws -> [WorkoutKitScheduledWorkoutSnapshot] {
+        if hiddenReadbackRemaining > 0 {
+            hiddenReadbackRemaining -= 1
+            return []
+        }
         if hidesScheduledReadback {
             return []
         }

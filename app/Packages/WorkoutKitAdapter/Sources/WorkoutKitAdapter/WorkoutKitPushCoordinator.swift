@@ -5,6 +5,8 @@ public struct WorkoutKitPushCoordinator: Sendable {
     private let classifier: WorkoutKitExportClassifier
     private let client: any WorkoutKitSchedulingClient
     private let runtimePlatform: WorkoutKitRuntimePlatform
+    private let readbackMaxAttempts: Int
+    private let readbackDelayNanoseconds: UInt64
 
     public init() {
         self.init(
@@ -21,11 +23,15 @@ public struct WorkoutKitPushCoordinator: Sendable {
     init(
         classifier: WorkoutKitExportClassifier = WorkoutKitExportClassifier(),
         client: any WorkoutKitSchedulingClient,
-        runtimePlatform: WorkoutKitRuntimePlatform = .current
+        runtimePlatform: WorkoutKitRuntimePlatform = .current,
+        readbackMaxAttempts: Int = 4,
+        readbackDelayNanoseconds: UInt64 = 250_000_000
     ) {
         self.classifier = classifier
         self.client = client
         self.runtimePlatform = runtimePlatform
+        self.readbackMaxAttempts = max(1, readbackMaxAttempts)
+        self.readbackDelayNanoseconds = readbackDelayNanoseconds
     }
 
     public func push(_ request: WorkoutKitPushRequest) async -> WorkoutKitPushOutcome {
@@ -69,6 +75,10 @@ public struct WorkoutKitPushCoordinator: Sendable {
                 guard let occurrence = request.occurrence else {
                     return .failed(.missingOccurrenceDate)
                 }
+                let authorization = try await ensureSchedulingAuthorization()
+                guard authorization == .authorized else {
+                    return .failed(.schedulerAuthorizationDenied(authorization))
+                }
                 let support = try await client.support()
                 guard support.isSupported else {
                     return .failed(.schedulerUnavailable)
@@ -77,20 +87,18 @@ public struct WorkoutKitPushCoordinator: Sendable {
                     return .failed(.capacityExceeded(maxAllowed: support.maxAllowedCount))
                 }
                 try await client.schedule(descriptor, at: occurrence)
-                let scheduledWorkouts = try await client.scheduledWorkouts()
-                let record = WorkoutKitScheduledRecord(
+                let record = try await readScheduledRecord(
                     workoutID: request.plan.workoutID,
-                    workoutPlanID: descriptor.id,
+                    descriptorID: descriptor.id,
                     occurrence: occurrence,
                     payloadFingerprint: fingerprint,
                     rowID: request.plan.rowID,
                     supportState: request.plan.supportState,
-                    degradation: request.plan.degradation,
-                    readback: scheduledWorkouts
+                    degradation: request.plan.degradation
                 )
                 guard record.matchingScheduledWorkout != nil else {
                     return .failed(.scheduledWorkoutMissingAfterSchedule(
-                        readbackCount: scheduledWorkouts.count
+                        readbackCount: record.readback.count
                     ))
                 }
                 return .scheduled(record)
@@ -141,6 +149,10 @@ public struct WorkoutKitPushCoordinator: Sendable {
             guard let occurrence = request.occurrence else {
                 return .failed(.missingOccurrenceDate)
             }
+            let authorization = try await ensureSchedulingAuthorization()
+            guard authorization == .authorized else {
+                return .failed(.schedulerAuthorizationDenied(authorization))
+            }
             let descriptor = try WorkoutKitPlanFactory.descriptor(for: request.plan)
             let fingerprint = try WorkoutKitPayloadFingerprint.make(
                 plan: request.plan,
@@ -164,6 +176,55 @@ public struct WorkoutKitPushCoordinator: Sendable {
         } catch {
             return .failed(.liveWorkoutKitFailure(String(describing: error)))
         }
+    }
+
+    private func ensureSchedulingAuthorization() async throws -> WorkoutKitSchedulerAuthorizationState {
+        let current = try await client.authorizationState()
+        guard current == .notDetermined else {
+            return current
+        }
+        return try await client.requestAuthorization()
+    }
+
+    private func readScheduledRecord(
+        workoutID: UUID,
+        descriptorID: UUID,
+        occurrence: DateComponents,
+        payloadFingerprint: WorkoutKitPayloadFingerprint,
+        rowID: WorkoutKitMatrixRowID,
+        supportState: WorkoutKitSupportState,
+        degradation: WorkoutKitDegradation?
+    ) async throws -> WorkoutKitScheduledRecord {
+        var latest: [WorkoutKitScheduledWorkoutSnapshot] = []
+        for attempt in 0..<readbackMaxAttempts {
+            latest = try await client.scheduledWorkouts()
+            let record = WorkoutKitScheduledRecord(
+                workoutID: workoutID,
+                workoutPlanID: descriptorID,
+                occurrence: occurrence,
+                payloadFingerprint: payloadFingerprint,
+                rowID: rowID,
+                supportState: supportState,
+                degradation: degradation,
+                readback: latest
+            )
+            if record.matchingScheduledWorkout != nil || attempt == readbackMaxAttempts - 1 {
+                return record
+            }
+            if readbackDelayNanoseconds > 0 {
+                try await Task.sleep(nanoseconds: readbackDelayNanoseconds)
+            }
+        }
+        return WorkoutKitScheduledRecord(
+            workoutID: workoutID,
+            workoutPlanID: descriptorID,
+            occurrence: occurrence,
+            payloadFingerprint: payloadFingerprint,
+            rowID: rowID,
+            supportState: supportState,
+            degradation: degradation,
+            readback: latest
+        )
     }
 
     private func unsupportedPlatformError(

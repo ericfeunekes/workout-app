@@ -18,7 +18,6 @@ FORBIDDEN_HEALTHKIT_DATA_ACCESS_SYMBOLS = (
     "HKAnchoredObjectQuery",
     "HKLiveWorkoutBuilder",
     "HKWorkoutConfiguration",
-    "requestAuthorization",
     "authorizationStatus",
 )
 FORBIDDEN_TARGET_SPECIFIC_SOURCE_FACT_SYMBOLS = (

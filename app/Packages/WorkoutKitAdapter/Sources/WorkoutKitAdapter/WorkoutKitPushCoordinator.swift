@@ -78,7 +78,7 @@ public struct WorkoutKitPushCoordinator: Sendable {
                 }
                 try await client.schedule(descriptor, at: occurrence)
                 let scheduledWorkouts = try await client.scheduledWorkouts()
-                return .scheduled(WorkoutKitScheduledRecord(
+                let record = WorkoutKitScheduledRecord(
                     workoutID: request.plan.workoutID,
                     workoutPlanID: descriptor.id,
                     occurrence: occurrence,
@@ -87,7 +87,13 @@ public struct WorkoutKitPushCoordinator: Sendable {
                     supportState: request.plan.supportState,
                     degradation: request.plan.degradation,
                     readback: scheduledWorkouts
-                ))
+                )
+                guard record.matchingScheduledWorkout != nil else {
+                    return .failed(.scheduledWorkoutMissingAfterSchedule(
+                        readbackCount: scheduledWorkouts.count
+                    ))
+                }
+                return .scheduled(record)
 
             case .openOnWatch:
                 try await client.open(descriptor)

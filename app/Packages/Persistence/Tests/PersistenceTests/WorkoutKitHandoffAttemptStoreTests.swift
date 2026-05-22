@@ -118,4 +118,69 @@ final class WorkoutKitHandoffAttemptStoreTests: XCTestCase {
         XCTAssertEqual(latestScheduled?.outcome, "scheduled")
         XCTAssertEqual(latestScheduled?.workoutPlanID, workoutPlanID)
     }
+
+    func testLatestSuccessfulScheduleIsClearedByLaterMissingVerification() async throws {
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: "WorkoutKitHandoffAttemptStoreTests.\(UUID().uuidString)"))
+        let store = UserDefaultsWorkoutKitHandoffAttemptStore(defaults: defaults)
+        let workoutID = UUID()
+        let occurrenceKey = "2026-05-22"
+        let path = "scheduleOnPhone"
+        let workoutPlanID = UUID()
+        let scheduledSnapshot = WorkoutKitHandoffAttemptSnapshot(
+            workoutID: workoutID,
+            occurrenceKey: occurrenceKey,
+            path: path,
+            payloadFingerprint: "scheduled-fingerprint",
+            lastAttemptAt: Date(timeIntervalSince1970: 1_800_000_000),
+            outcome: "scheduled",
+            workoutPlanID: workoutPlanID
+        )
+        let scheduledReceipt = WorkoutKitHandoffReceipt(
+            createdAt: scheduledSnapshot.lastAttemptAt,
+            workoutID: workoutID,
+            rowID: "paceTargetRun",
+            path: path,
+            occurrenceKey: occurrenceKey,
+            payloadFingerprint: scheduledSnapshot.payloadFingerprint,
+            workoutPlanID: workoutPlanID,
+            outcome: "scheduled"
+        )
+        let missingSnapshot = WorkoutKitHandoffAttemptSnapshot(
+            workoutID: workoutID,
+            occurrenceKey: occurrenceKey,
+            path: path,
+            payloadFingerprint: "scheduled-fingerprint",
+            lastAttemptAt: Date(timeIntervalSince1970: 1_800_000_060),
+            outcome: "missing",
+            workoutPlanID: workoutPlanID,
+            failureClass: "scheduled_workout_missing"
+        )
+        let missingReceipt = WorkoutKitHandoffReceipt(
+            createdAt: missingSnapshot.lastAttemptAt,
+            workoutID: workoutID,
+            rowID: "paceTargetRun",
+            path: path,
+            occurrenceKey: occurrenceKey,
+            payloadFingerprint: missingSnapshot.payloadFingerprint,
+            workoutPlanID: workoutPlanID,
+            outcome: "missing",
+            failureClass: missingSnapshot.failureClass
+        )
+
+        await store.save(snapshot: scheduledSnapshot, receipt: scheduledReceipt)
+        await store.save(snapshot: missingSnapshot, receipt: missingReceipt)
+
+        let latest = await store.latest(
+            workoutID: workoutID,
+            occurrenceKey: occurrenceKey,
+            path: path
+        )
+        XCTAssertEqual(latest, missingSnapshot)
+        let latestScheduled = await store.latestSuccessfulSchedule(
+            workoutID: workoutID,
+            occurrenceKey: occurrenceKey,
+            path: path
+        )
+        XCTAssertNil(latestScheduled)
+    }
 }

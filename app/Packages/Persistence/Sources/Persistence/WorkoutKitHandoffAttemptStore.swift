@@ -114,7 +114,16 @@ public actor UserDefaultsWorkoutKitHandoffAttemptStore: WorkoutKitHandoffAttempt
         occurrenceKey: String,
         path: String
     ) async -> WorkoutKitHandoffAttemptSnapshot? {
-        receiptsFromDefaults().reversed().first {
+        let receipts = receiptsFromDefaults()
+        if Self.hasLaterMissingVerification(
+            receipts: receipts,
+            workoutID: workoutID,
+            occurrenceKey: occurrenceKey,
+            path: path
+        ) {
+            return nil
+        }
+        return receipts.reversed().first {
             $0.workoutID == workoutID
                 && $0.occurrenceKey == occurrenceKey
                 && $0.path == path
@@ -165,6 +174,22 @@ public actor UserDefaultsWorkoutKitHandoffAttemptStore: WorkoutKitHandoffAttempt
         path: String
     ) -> String {
         "\(workoutID.uuidString.lowercased())|\(occurrenceKey)|\(path)"
+    }
+
+    private static func hasLaterMissingVerification(
+        receipts: [WorkoutKitHandoffReceipt],
+        workoutID: WorkoutID,
+        occurrenceKey: String,
+        path: String
+    ) -> Bool {
+        guard let latest = receipts.reversed().first(where: {
+            $0.workoutID == workoutID
+                && $0.occurrenceKey == occurrenceKey
+                && $0.path == path
+        }) else {
+            return false
+        }
+        return latest.outcome == "missing"
     }
 
     private func latestSnapshots() -> [String: WorkoutKitHandoffAttemptSnapshot] {

@@ -169,6 +169,78 @@ final class WorkoutKitHandoffCoordinatorTests: XCTestCase {
         XCTAssertTrue(telemetry.events.contains { $0.name == "workoutkit.schedule_verified" })
     }
 
+    func testMissingVerificationClearsPriorScheduledPresentation() async throws {
+        let store = InMemoryAttemptStore()
+        let pushCount = LockedCounter()
+        let coordinator = WorkoutKitHandoffCoordinator(
+            attemptStore: store,
+            proofSource: .proofCollection,
+            now: { Self.now },
+            push: { request in
+                pushCount.increment()
+                let descriptor = try! request.plan.resolvedPlanDescriptor()
+                let fingerprint = try! WorkoutKitPayloadFingerprint.make(
+                    plan: request.plan,
+                    descriptor: descriptor,
+                    occurrence: request.occurrence
+                )
+                return .scheduled(WorkoutKitScheduledRecord(
+                    workoutID: request.plan.workoutID,
+                    workoutPlanID: descriptor.id,
+                    occurrence: request.occurrence!,
+                    payloadFingerprint: fingerprint,
+                    rowID: request.plan.rowID,
+                    supportState: request.plan.supportState,
+                    degradation: request.plan.degradation
+                ))
+            },
+            verifySchedule: { request in
+                let descriptor = try! request.plan.resolvedPlanDescriptor()
+                let fingerprint = try! WorkoutKitPayloadFingerprint.make(
+                    plan: request.plan,
+                    descriptor: descriptor,
+                    occurrence: request.occurrence
+                )
+                return .missing(WorkoutKitScheduledRecord(
+                    workoutID: request.plan.workoutID,
+                    workoutPlanID: descriptor.id,
+                    occurrence: request.occurrence!,
+                    payloadFingerprint: fingerprint,
+                    rowID: request.plan.rowID,
+                    supportState: request.plan.supportState,
+                    degradation: request.plan.degradation
+                ))
+            }
+        )
+
+        _ = await coordinator.schedule(
+            workout: Self.runningPacerWorkout,
+            scheduledDate: Self.scheduledDate
+        )
+        let missingResult = await coordinator.schedule(
+            workout: Self.runningPacerWorkout,
+            scheduledDate: Self.scheduledDate
+        )
+        let presentation = await coordinator.presentation(
+            workout: Self.runningPacerWorkout,
+            scheduledDate: Self.scheduledDate
+        )
+        let rescheduleResult = await coordinator.schedule(
+            workout: Self.runningPacerWorkout,
+            scheduledDate: Self.scheduledDate
+        )
+
+        XCTAssertEqual(missingResult.presentation.state, .failed)
+        XCTAssertEqual(missingResult.presentation.actionTitle, "Check")
+        XCTAssertEqual(presentation?.state, .ready)
+        XCTAssertEqual(presentation?.actionTitle, "Watch")
+        XCTAssertEqual(rescheduleResult.presentation.state, .scheduled)
+        XCTAssertEqual(pushCount.value, 2)
+        let receipts = await store.receipts()
+        XCTAssertEqual(receipts.map(\.outcome), ["scheduled", "missing", "scheduled"])
+        XCTAssertEqual(receipts[1].failureClass, "scheduled_workout_missing")
+    }
+
     func testChangedPayloadAfterScheduledAttemptIsBlockedAsStale() async throws {
         let store = InMemoryAttemptStore()
         let telemetry = CapturingTelemetryEmitter()
@@ -297,7 +369,15 @@ private actor InMemoryAttemptStore: WorkoutKitHandoffAttemptStore {
         occurrenceKey: String,
         path: String
     ) async -> WorkoutKitHandoffAttemptSnapshot? {
-        storedReceipts.reversed().first {
+        let latestMatchingReceipt = storedReceipts.reversed().first {
+            $0.workoutID == workoutID
+                && $0.occurrenceKey == occurrenceKey
+                && $0.path == path
+        }
+        if latestMatchingReceipt?.outcome == "missing" {
+            return nil
+        }
+        return storedReceipts.reversed().first {
             $0.workoutID == workoutID
                 && $0.occurrenceKey == occurrenceKey
                 && $0.path == path
@@ -345,6 +425,21 @@ private final class CapturingTelemetryEmitter: TelemetryEmitter, @unchecked Send
     func emit(_ event: Event) {
         lock.withLock {
             storedEvents.append(event)
+        }
+    }
+}
+
+private final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+
+    var value: Int {
+        lock.withLock { count }
+    }
+
+    func increment() {
+        lock.withLock {
+            count += 1
         }
     }
 }

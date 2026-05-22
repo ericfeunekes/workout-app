@@ -81,6 +81,22 @@ final class WorkoutKitPushCoordinatorTests: XCTestCase {
         XCTAssertEqual(scheduledCount, 1)
     }
 
+    func testScheduleFailsWhenAppleReadbackDoesNotContainScheduledWorkout() async {
+        let client = FakeWorkoutKitSchedulingClient(hidesScheduledReadback: true)
+        let coordinator = makeIOSCoordinator(client: client)
+        let outcome = await coordinator.push(WorkoutKitPushRequest(
+            plan: plan(),
+            path: .scheduleOnPhone,
+            occurrence: occurrence(),
+            proofs: WorkoutKitDeliveryProofs(proven: [.sdkCompile, .simulatorConstruction]),
+            proofMode: .proofCollection
+        ))
+
+        XCTAssertEqual(outcome, .failed(.scheduledWorkoutMissingAfterSchedule(readbackCount: 0)))
+        let scheduledCount = await client.scheduledRequestCount()
+        XCTAssertEqual(scheduledCount, 1)
+    }
+
     func testVerifyScheduleReadsBackExistingScheduledWorkoutWithoutSchedulingAgain() async {
         let client = FakeWorkoutKitSchedulingClient()
         let coordinator = makeIOSCoordinator(client: client)

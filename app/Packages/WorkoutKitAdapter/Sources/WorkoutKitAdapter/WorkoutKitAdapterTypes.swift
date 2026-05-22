@@ -123,6 +123,7 @@ public enum WorkoutKitAdapterError: Error, Sendable, Hashable, Codable, CustomSt
     case unsupportedPlatform(String)
     case schedulerUnavailable
     case capacityExceeded(maxAllowed: Int)
+    case scheduledWorkoutMissingAfterSchedule(readbackCount: Int)
     case liveWorkoutKitUnavailable
     case liveWorkoutKitFailure(String)
 
@@ -144,6 +145,9 @@ public enum WorkoutKitAdapterError: Error, Sendable, Hashable, Codable, CustomSt
             "WorkoutKit scheduler is unavailable on this platform or device."
         case .capacityExceeded(let maxAllowed):
             "WorkoutKit scheduled workout capacity is full; max allowed is \(maxAllowed)."
+        case .scheduledWorkoutMissingAfterSchedule(let readbackCount):
+            "WorkoutKit accepted the schedule request but did not return the workout in scheduled readback; "
+                + "readback count is \(readbackCount)."
         case .liveWorkoutKitUnavailable:
             "WorkoutKit is unavailable in this build."
         case .liveWorkoutKitFailure(let message):

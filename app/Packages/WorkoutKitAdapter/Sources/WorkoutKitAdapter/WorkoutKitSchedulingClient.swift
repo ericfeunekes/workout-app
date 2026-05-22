@@ -42,6 +42,7 @@ actor FakeWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
     private var currentSupport: WorkoutKitScheduleSupport
     private var scheduleError: WorkoutKitAdapterError?
     private var openError: WorkoutKitAdapterError?
+    private var hidesScheduledReadback: Bool
 
     init(
         support: WorkoutKitScheduleSupport = WorkoutKitScheduleSupport(
@@ -50,11 +51,13 @@ actor FakeWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
             maxAllowedCount: 15
         ),
         scheduleError: WorkoutKitAdapterError? = nil,
-        openError: WorkoutKitAdapterError? = nil
+        openError: WorkoutKitAdapterError? = nil,
+        hidesScheduledReadback: Bool = false
     ) {
         self.currentSupport = support
         self.scheduleError = scheduleError
         self.openError = openError
+        self.hidesScheduledReadback = hidesScheduledReadback
     }
 
     func support() async throws -> WorkoutKitScheduleSupport {
@@ -62,7 +65,10 @@ actor FakeWorkoutKitSchedulingClient: WorkoutKitSchedulingClient {
     }
 
     func scheduledWorkouts() async throws -> [WorkoutKitScheduledWorkoutSnapshot] {
-        scheduledRequests.map { descriptor, occurrence in
+        if hidesScheduledReadback {
+            return []
+        }
+        return scheduledRequests.map { descriptor, occurrence in
             WorkoutKitScheduledWorkoutSnapshot(
                 workoutPlanID: descriptor.id,
                 occurrence: occurrence,

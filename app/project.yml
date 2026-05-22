@@ -164,7 +164,7 @@ targets:
       properties:
         CFBundleDisplayName: Setmark
         CFBundleShortVersionString: "0.0.1"
-        CFBundleVersion: "7"
+        CFBundleVersion: "8"
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
           NSExceptionDomains:
@@ -195,7 +195,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.ericfeunekes.WorkoutDB
         TARGETED_DEVICE_FAMILY: "1,2"     # iPhone + iPad
         SUPPORTS_MACCATALYST: NO
-        CURRENT_PROJECT_VERSION: "7"
+        CURRENT_PROJECT_VERSION: "8"
         MARKETING_VERSION: "0.0.1"
         GENERATE_INFOPLIST_FILE: NO
 
@@ -239,7 +239,7 @@ targets:
       properties:
         CFBundleDisplayName: Setmark
         CFBundleShortVersionString: "0.0.1"
-        CFBundleVersion: "7"
+        CFBundleVersion: "8"
         CFBundleIconName: AppIcon
         WKApplication: true
         WKCompanionAppBundleIdentifier: com.ericfeunekes.WorkoutDB
@@ -255,7 +255,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.ericfeunekes.WorkoutDB.watchkitapp
         TARGETED_DEVICE_FAMILY: "4"     # watch
         WATCHOS_DEPLOYMENT_TARGET: "10.0"
-        CURRENT_PROJECT_VERSION: "7"
+        CURRENT_PROJECT_VERSION: "8"
 
   # -----------------------------------------------------------------------
   # DEBUG-only UI probe target for system HealthKit authorization sheets.

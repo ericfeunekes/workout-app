@@ -19,7 +19,7 @@ See also:
 
 ## Status
 
-Xcode project is generated from `app/project.yml` by [XcodeGen](https://github.com/yonaskolb/XcodeGen). The generated `app/WorkoutDB.xcodeproj/` is gitignored — `project.yml` is the source of truth. GitHub CI remains Linux-only; iOS proof is a local macOS/Xcode gate through `make test-app-packages`, `make test-app-xcode`, and `make pre-qa` (see `docs/WORKFLOW.md`). Signed entitlement-dependent proofs, such as HealthKit archive authorization/projection, run as separate named targets.
+Xcode project is generated from `app/project.yml` by [XcodeGen](https://github.com/yonaskolb/XcodeGen). The generated `app/WorkoutDB.xcodeproj/` is gitignored — `project.yml` is the source of truth. GitHub CI remains Linux-only; iOS proof is a local macOS/Xcode gate through focused package tests, `make pre-qa-core`, and the full `make pre-qa` gate (see `docs/WORKFLOW.md`). Signed entitlement-dependent proofs, such as HealthKit archive authorization/projection, run as separate named targets.
 
 The app is split into local SwiftPM packages under `app/Packages/`.
 `docs/architecture/swift-packages.md` is authoritative for package ownership

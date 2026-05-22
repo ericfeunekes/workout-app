@@ -95,8 +95,8 @@ Before closeout:
 
 - `make check` for Python lint/import contracts, Python tests, and schema
   package tests
-- `make check-app` for app-facing work: every wired Swift package test plus the
-  generated iOS app scheme compile/link and default UI smoke
+- `make check-app` for focused app-facing proof when server/schema checks and
+  the real HTTP sync probe are not part of the claim
 - `make pre-qa-core` for fast cross-stack or app-facing inner-loop proof when
   simulator execution is not part of the claim
 - `make pre-qa` before entering `docs/QA.md` on any change that spans server,

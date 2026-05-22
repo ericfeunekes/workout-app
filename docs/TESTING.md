@@ -192,8 +192,9 @@ make test-healthkit-ui
 UI proofs on named targets so the default smoke gate does not quietly become an
 entitlement-dependent test.
 
-`make test-execution-ui` is wired into `make pre-qa` through `make check-app`.
-It runs deterministic end-confirmation smoke coverage only. Route-change alert
+`make test-execution-ui` runs deterministic end-confirmation smoke coverage
+only. The same end-confirmation smoke is also included in the combined
+`make test-app-preqa-xcode` target used by `make pre-qa`. Route-change alert
 dismissal remains an opt-in XCUITest until it has a deterministic route driver
 instead of relying on wall-clock timer passage.
 
@@ -275,7 +276,7 @@ same simulator.
 
 Entitlement-dependent or signed-boundary probes, such as
 `make test-tokenstore-keychain-ui` and `make test-healthkit-ui`, sit outside
-`make pre-qa` because `test-app-xcode` intentionally runs with
+`make pre-qa` because `make test-app-preqa-xcode` intentionally runs with
 `CODE_SIGNING_ALLOWED=NO`. Run the signed target when the claim depends on real
 Keychain behavior, HealthKit authorization, batch/archive HealthKit reads, or
 local archive projection. These targets are narrow boundary proof, not live

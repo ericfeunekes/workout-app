@@ -48,6 +48,12 @@
       "sourceType": "github",
       "skillPath": "plugins/build-ios-apps/skills/swiftui-view-refactor/SKILL.md",
       "computedHash": "71e5e4409443aa9ccd845df6536822dde7df1a566aa4ce3ceb00f82f22731960"
+    },
+    "testing": {
+      "source": "ericfeunekes/ai-marketplace",
+      "sourceType": "github",
+      "skillPath": "skills/testing/SKILL.md",
+      "computedHash": "47834346b275f45f58bd5ed042f861b0bcf0a3c2bde26f0cea0e639037326cbf"
     }
   }
 }

@@ -9,3 +9,18 @@ args = ["mcp"]
 env = { PATH = "/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin", XCODEBUILDMCP_ENABLED_WORKFLOWS = "simulator,simulator-management,ui-automation,debugging,logging,project-discovery,xcode-ide,utilities,swift-package" }
 startup_timeout_sec = 30
 tool_timeout_sec = 300
+
+[plugins."software-development@ai-marketplace-plugins"]
+enabled = true
+
+[plugins."dev-planning@ai-marketplace-plugins"]
+enabled = true
+
+[plugins."codex-security@openai-curated-remote"]
+enabled = true
+
+[plugins."code-review@openai-bundled"]
+enabled = true
+
+[plugins."design-patterns@ai-marketplace-plugins"]
+enabled = true
